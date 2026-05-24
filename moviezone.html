@@ -1,0 +1,181 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MovieZone â€” Premium Cinema Experience</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>M</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com"> 
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700;900&family=Playfair+Display:ital,wght@0,700;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="moviezone.css">
+</head>
+<body>
+
+<!-- â”€â”€ NAVBAR â”€â”€ -->
+<nav id="navbar">
+  <a class="nav-logo" href="#">MOVIEZONE</a> 
+  <ul class="nav-links">
+    <li><a href="#" class="active">Home</a></li>
+    <li><a href="#movies-section">Movies</a></li>
+    <li><a href="#upcoming">Upcoming</a></li>
+    <li><a href="#" onclick="filterCat('bollywood')">Bollywood</a></li>
+    <li><a href="#" onclick="filterCat('hollywood')">Hollywood</a></li>
+    <li><a href="#" onclick="filterCat('south')">South</a></li>
+    <li><a href="#" onclick="filterCat('tollywood')">Tollywood</a></li>
+  </ul>
+  <div class="nav-search">
+    <span class="search-icon">Search</span>
+    <input type="text" id="searchInput" placeholder="Search movies, genres, actors..." autocomplete="off">
+    <div class="search-results-dropdown" id="searchDropdown"></div>
+  </div>
+
+</nav>
+
+<!-- â”€â”€ HERO CAROUSEL â”€â”€ -->
+<section id="hero">
+  <div class="carousel-track" id="carouselTrack"></div>
+  <div class="carousel-nav">
+    <div class="carousel-dots" id="carouselDots"></div>
+  </div>
+  <div class="carousel-thumbs" id="carouselThumbs"></div>
+</section>
+
+<!-- â”€â”€ MAIN MOVIES SECTION â”€â”€ -->
+<div class="main-content" id="movies-section">
+  <div class="section-header">
+    <div class="section-title">
+      <div class="title-line"></div>
+      <h2 id="sectionHeading">ALL MOVIES & SHOWS</h2>
+    </div>
+    <a href="#" class="see-all">Browse All -&gt;</a>
+  </div>
+  <div class="cat-tabs" id="catTabs">
+    <button class="cat-tab active" onclick="filterCat('all')">All</button>
+    <button class="cat-tab" onclick="filterCat('hollywood')">Hollywood</button>
+    <button class="cat-tab" onclick="filterCat('bollywood')">Bollywood</button>
+    <button class="cat-tab" onclick="filterCat('south')">South Indian</button>
+    <button class="cat-tab" onclick="filterCat('tollywood')">Tollywood</button>
+    <button class="cat-tab" onclick="filterCat('action')">Action</button>
+    <button class="cat-tab" onclick="filterCat('comedy')">Comedy</button>
+    <button class="cat-tab" onclick="filterCat('thriller')">Thriller</button>
+    <button class="cat-tab" onclick="filterCat('romance')">Romance</button>
+    <button class="cat-tab" onclick="filterCat('scifi')">Sci-Fi</button>
+    <button class="cat-tab" onclick="filterCat('animation')">Animation</button>
+  </div>
+  <div class="movie-grid" id="movieGrid">
+    <!-- Skeletons -->
+    <div class="skeleton skeleton-card"></div>
+    <div class="skeleton skeleton-card"></div>
+    <div class="skeleton skeleton-card"></div>
+    <div class="skeleton skeleton-card"></div>
+    <div class="skeleton skeleton-card"></div>
+    <div class="skeleton skeleton-card"></div>
+    <div class="skeleton skeleton-card"></div>
+    <div class="skeleton skeleton-card"></div>
+  </div>
+</div>
+
+<div class="section-sep"></div>
+
+<!-- â”€â”€ UPCOMING â”€â”€ -->
+<section id="upcoming">
+  <div class="section-header">
+    <div class="section-title">
+      <div class="title-line"></div>
+      <h2>UPCOMING RELEASES</h2>
+    </div>
+    <a href="#" class="see-all">View Calendar -&gt;</a>
+  </div>
+  <div class="upcoming-grid" id="upcomingGrid">
+    <div class="skeleton skeleton-card"></div>
+    <div class="skeleton skeleton-card"></div>
+    <div class="skeleton skeleton-card"></div>
+    <div class="skeleton skeleton-card"></div>
+  </div>
+</section>
+
+<!-- â”€â”€ FOOTER â”€â”€ -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-brand">
+      <span class="nav-logo">MOVIEZONE</span>
+      <p class="footer-desc">Your ultimate premium destination for movies and shows in HD, 4K quality. Watch in Hindi, English and all regional languages.</p>
+    </div>
+      <a href="#" class="see-all">View Calendar -&gt;</a>
+      <h4>Movies</h4>
+      <a href="#">Hollywood</a>
+      <a href="#">Bollywood</a>
+      <a href="#">South Indian</a>
+      <a href="#">Tollywood</a>
+      <a href="#">Animation</a>
+    </div>
+    <div class="footer-col">
+      <h4>Genres</h4>
+      <a href="#">Action</a>
+      <a href="#">Comedy</a>
+      <a href="#">Thriller</a>
+      <a href="#">Romance</a>
+      <a href="#">Sci-Fi</a>
+    </div>
+    <div class="footer-col">
+      <h4>Support</h4>
+      <a href="#">FAQ</a>
+      <a href="#">Contact Us</a>
+      <a href="#">Privacy Policy</a>
+      <a href="#">Terms of Use</a>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <p>Copyright 2025 MovieZone. All rights reserved.</p>
+    <p>Powered by TMDB API</p>
+  </div>
+</footer>
+
+<!-- â”€â”€ VIDEO MODAL â”€â”€ -->
+<div id="modal-overlay">
+  <div class="modal-box" id="modalBox">
+    <div class="modal-header" id="modalHeader">
+      <img id="modalBg" src="" alt="">
+      <div class="modal-header-overlay"></div>
+      <button class="modal-close" onclick="closeModal()">X</button>
+    </div>
+    <div class="modal-body">
+      <h2 class="modal-title" id="modalTitle"></h2>
+      <div class="modal-meta" id="modalMeta"></div>
+      <p class="modal-desc" id="modalDesc"></p>
+      <p>Copyright 2025 MovieZone. All rights reserved.</p>
+      <p>Powered by TMDB API</p>
+        <select class="lang-select" id="langSelect">
+          <option value="hi">Hindi</option>
+          <option value="en" selected>English</option>
+          <option value="ta">Tamil</option>
+          <option value="te">Telugu</option>
+          <option value="ml">Malayalam</option>
+          <option value="kn">Kannada</option>
+          <option value="mr">Marathi</option>
+          <option value="bn">Bengali</option>
+        <button class="modal-close" onclick="closeModal()">X</button>
+        <select class="quality-select" id="qualitySelect">
+          <option value="4k">4K Ultra HD</option>
+          <option value="fhd" selected>Full HD 1080p</option>
+          <option value="hd">HD 720p</option>
+          <option value="sd">SD 480p</option>
+        </select>
+          <button class="btn-play" onclick="playMovie()">Play Now</button>
+      <div class="video-embed" id="videoEmbed">
+            <option value="hi">Hindi</option>
+            <option value="en" selected>English</option>
+            <option value="ta">Tamil</option>
+            <option value="te">Telugu</option>
+            <option value="ml">Malayalam</option>
+            <option value="kn">Kannada</option>
+            <option value="mr">Marathi</option>
+            <option value="bn">Bengali</option>
+
+<!-- â”€â”€ TOAST â”€â”€ -->
+<div id="toast"></div>
+
+<script src="moviezone.js" defer></script>
+</body>
+</html>
+
