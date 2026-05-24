@@ -147,30 +147,22 @@
       <p>Powered by TMDB API</p>
         <select class="lang-select" id="langSelect">
           <option value="hi">Hindi</option>
-          <option value="en" selected>English</option>
+          <option value="en">English</option>
           <option value="ta">Tamil</option>
           <option value="te">Telugu</option>
           <option value="ml">Malayalam</option>
           <option value="kn">Kannada</option>
           <option value="mr">Marathi</option>
           <option value="bn">Bengali</option>
-        <button class="modal-close" onclick="closeModal()">X</button>
+        </select>
         <select class="quality-select" id="qualitySelect">
           <option value="4k">4K Ultra HD</option>
-          <option value="fhd" selected>Full HD 1080p</option>
+          <option value="fhd">Full HD 1080p</option>
           <option value="hd">HD 720p</option>
           <option value="sd">SD 480p</option>
         </select>
-          <button class="btn-play" onclick="playMovie()">Play Now</button>
-      <div class="video-embed" id="videoEmbed">
-            <option value="hi">Hindi</option>
-            <option value="en" selected>English</option>
-            <option value="ta">Tamil</option>
-            <option value="te">Telugu</option>
-            <option value="ml">Malayalam</option>
-            <option value="kn">Kannada</option>
-            <option value="mr">Marathi</option>
-            <option value="bn">Bengali</option>
+        <button class="btn-play" onclick="playMovie()">Play Now</button>
+      <div class="video-embed" id="videoEmbed"></div>
 
 <!-- â”€â”€ TOAST â”€â”€ -->
 <div id="toast"></div>

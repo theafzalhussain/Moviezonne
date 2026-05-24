@@ -377,6 +377,9 @@ async function openModal(id) {
     var pb = document.getElementById('playBigBtn');
     if (pb) pb.addEventListener('click', playMovie);
     overlay.classList.add('open');
+    // restore previously selected language/quality into the modal selects
+    try { setSelectedLang(getSelectedLang()); } catch(e) {}
+    try { setSelectedQuality(getSelectedQuality()); } catch(e) {}
     document.body.style.overflow = 'hidden';
   } catch(e) { console.warn('Modal error', e); }
 }
@@ -571,6 +574,14 @@ if (modalOverlay) {
     if (e.target === modalOverlay) closeModal();
   });
 }
+
+// bind select change handlers so user selections persist immediately
+document.addEventListener('DOMContentLoaded', function() {
+  var langSel = document.getElementById('langSelect');
+  if (langSel) langSel.addEventListener('change', function(e){ setSelectedLang(e.target.value); });
+  var qualSel = document.getElementById('qualitySelect');
+  if (qualSel) qualSel.addEventListener('change', function(e){ setSelectedQuality(e.target.value); });
+});
 
 // â”€â”€ NAVBAR scroll
 window.addEventListener('scroll', function() {
