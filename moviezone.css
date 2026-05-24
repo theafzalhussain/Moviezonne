@@ -927,31 +927,47 @@ body {
 }
 .modal-actions { display: flex; gap: 0.75rem; flex-wrap: wrap; }
 
-.lang-select {
-  padding: 0.6rem 1.2rem;
-  background: var(--card2);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  color: var(--text);
-  font-family: 'Outfit', sans-serif;
-  font-size: 0.88rem;
-  cursor: pointer;
-  outline: none;
-  transition: border-color 0.3s;
-}
-.lang-select:focus { border-color: var(--accent); }
 
+.modal-actions { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin-top: 0.6rem; }
+
+.lang-select,
 .quality-select {
-  padding: 0.6rem 1.2rem;
-  background: var(--card2);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  padding: 0.65rem 1.2rem;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)), rgba(18,18,24,0.6);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 14px;
   color: var(--text);
   font-family: 'Outfit', sans-serif;
-  font-size: 0.88rem;
+  font-size: 0.95rem;
   cursor: pointer;
   outline: none;
-  transition: border-color 0.3s;
+  transition: border-color 0.25s, box-shadow 0.25s, transform 0.12s;
+  min-width: 150px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.02);
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 14px 14px;
+}
+.lang-select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a8a0c8' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); }
+.quality-select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a8a0c8' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); }
+.lang-select:focus, .quality-select:focus { border-color: rgba(123,47,255,0.9); box-shadow: 0 6px 30px rgba(123,47,255,0.08); transform: translateY(-1px); }
+
+/* Modal play row tweaks */
+.modal-body .btn-play {
+  padding: 0.9rem 1.6rem;
+  border-radius: 12px;
+  font-size: 1rem;
+  box-shadow: 0 14px 40px rgba(167,85,247,0.10);
+}
+
+/* Responsive: stack controls on narrow screens */
+@media (max-width: 640px) {
+  .modal-actions { flex-direction: column; align-items: stretch; }
+  .lang-select, .quality-select { width: 100%; min-width: 0; }
+  .modal-body .btn-play { width: 100%; }
 }
 
 .video-embed {
@@ -968,6 +984,42 @@ body {
   justify-content: center;
   border: 1px solid var(--border);
 }
+
+/* Smooth scaling for player zoom */
+.video-embed {
+  transition: transform 220ms ease;
+  transform-origin: center center;
+}
+
+.player-chip--zoom {
+  padding: 6px 10px;
+  font-size: 14px;
+}
+
+/* Subtitle (CC) button overlay inside the player on the left */
+.video-embed .player-subtitle {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(0,0,0,0.45);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.9rem;
+  border: 1px solid rgba(255,255,255,0.06);
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.45);
+}
+.video-embed .player-subtitle.active {
+  background: linear-gradient(135deg, rgba(230,57,70,0.98), rgba(168,85,247,0.92));
+  color: #fff;
+  box-shadow: 0 14px 36px rgba(123,47,255,0.18);
+}
 .video-embed iframe {
   position: absolute;
   inset: 0;
@@ -976,14 +1028,36 @@ body {
   border: none;
 }
 .player-controls {
-  position: absolute;
-  bottom: 10px;
-  right: 10px;
-  display: flex;
+  /* Default: controls sit below the player (non-overlay) */
+  position: relative;
+  display: none;
   gap: 8px;
   z-index: 10;
   align-items: center;
+  justify-content: center;
   flex-wrap: wrap;
+  margin-top: 10px;
+  padding: 6px 8px;
+  border-radius: 14px;
+  background: transparent;
+  width: 100%;
+}
+
+/* Overlay variant when controls are direct children of the video embed */
+.video-embed > .player-controls {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 10px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(6,6,12,0.42);
+  backdrop-filter: blur(6px) saturate(140%);
+  box-shadow: 0 18px 50px rgba(0,0,0,0.6);
+  transition: opacity 220ms ease, transform 220ms ease;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px);
 }
 .player-chip {
   border: 1px solid rgba(255,255,255,0.16);
@@ -1010,10 +1084,7 @@ body {
   background: linear-gradient(135deg, rgba(245,197,24,0.96), rgba(255,175,64,0.92));
   color: #151515;
 }
-.player-chip--fs {
-  background: linear-gradient(135deg, rgba(123,47,255,0.95), rgba(168,85,247,0.92));
-  color: #fff;
-}
+.player-chip--fs { display: inline-flex; }
 .player-chip--cinema {
   background: linear-gradient(135deg, rgba(20,20,30,0.96), rgba(10,10,16,0.92));
   color: #fff;
@@ -1034,6 +1105,13 @@ body {
   right: 12px;
   bottom: 12px;
   justify-content: center;
+}
+.video-embed:hover > .player-controls,
+.video-embed.cinema-mode > .player-controls,
+.video-embed.fullscreen-mode > .player-controls {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 .video-embed.fullscreen-mode {
   position: fixed !important;
@@ -1067,6 +1145,30 @@ body {
   box-shadow: 0 0 40px var(--red-glow);
 }
 .video-placeholder .play-big:hover { transform: scale(1.08); }
+
+/* External source row (buttons placed outside the player to avoid overlay) */
+.external-sources {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.external-sources .player-chip--source {
+  padding: 8px 14px;
+  font-size: 13px;
+}
+.external-sources .player-chip--source.active {
+  transform: translateY(-2px);
+}
+/* Active look for external server buttons */
+.external-sources .player-chip--source.active {
+  background: linear-gradient(135deg, rgba(230,57,70,0.98), rgba(168,85,247,0.92));
+  color: #fff;
+  box-shadow: 0 12px 28px rgba(123,47,255,0.18), inset 0 1px 0 rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.06);
+}
 
 /* â”€â”€ FOOTER â”€â”€ */
 footer {
@@ -1224,6 +1326,26 @@ footer {
     left: 10px;
     right: 10px;
     bottom: 10px;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 640px) {
+  /* On small screens make controls non-overlaying: place under the player */
+  .player-controls {
+    position: static;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    transform: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 6px 0 0 0;
+    margin-top: 8px;
+    justify-content: flex-start;
+    gap: 10px;
+    flex-wrap: nowrap;
+    display: flex;
+    align-items: center;
     justify-content: center;
   }
 }
