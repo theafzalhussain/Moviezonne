@@ -395,10 +395,8 @@ function closeModal() {
   var embedEl = document.getElementById('videoEmbed');
   if (embedEl) {
     embedEl.innerHTML = '';
-    embedEl.classList.remove('cinema-mode');
     embedEl.classList.remove('fullscreen-mode');
   }
-  isCinemaMode = false;
   isPlayerFullscreen = false;
   currentModalMovie = null;
 }
@@ -409,25 +407,11 @@ var playerSources = [
     return 'https://vidsrc.cc/v2/embed/movie/' + id + '?lang=hi';
   }},
   { name: 'Server 2', url: function(id, lang) {
-    return 'https://multiembed.mov/?video_id=' + id + '&tmdb=1' + (lang === 'hi' ? '&ds_lang=hi' : '');
-  }},
-  { name: 'Server 3', url: function(id, lang) {
     return 'https://player.videasy.net/movie/' + id + (lang === 'hi' ? '?lang=hi' : '');
   }}
 ];
 var currentSourceIdx = 0;
 var isPlayerFullscreen = false;
-var isCinemaMode = false;
-
-// Remember if user has used the Cinema button (so we can show it inside player)
-function getUsedCinema() {
-  return localStorage.getItem('moviezone.usedCinema') === '1';
-}
-function setUsedCinema(v) {
-  localStorage.setItem('moviezone.usedCinema', v ? '1' : '0');
-}
-
-// NOTE: In-player CIN button removed — only external CIN remains
 
 function renderExternalSources(id, srcIdx, lang) {
   var ext = document.getElementById('externalSources');
@@ -436,9 +420,6 @@ function renderExternalSources(id, srcIdx, lang) {
   var html = playerSources.map(function(s, i){
     return '<button class="player-chip player-chip--source" data-srcidx="'+i+'">'+s.name+'</button>';
   }).join('');
-  html += '<button id="externalCinemaBtn" class="player-chip player-chip--cinema">CIN Cinema</button>';
-  // external fullscreen button (shows alongside servers)
-  html += '<button id="externalFsBtn" class="player-chip player-chip--fs">FS Full</button>';
   ext.innerHTML = html;
   var srcButtons = ext.querySelectorAll('.player-chip--source');
   srcButtons.forEach(function(btn){
@@ -455,19 +436,6 @@ function renderExternalSources(id, srcIdx, lang) {
     srcButtons.forEach(function(b){ b.classList.remove('active'); });
     var activeBtn = ext.querySelector('.player-chip--source[data-srcidx="'+srcIdx+'"]');
     if (activeBtn) activeBtn.classList.add('active');
-  }
-  var extCin = document.getElementById('externalCinemaBtn');
-  if (extCin) {
-    extCin.addEventListener('click', function(){
-      // mark used and toggle cinema mode; only external CIN button exists now
-      setUsedCinema(true);
-      toggleCinemaMode();
-    });
-  }
-  // external fullscreen button wiring
-  var extFs = document.getElementById('externalFsBtn');
-  if (extFs) {
-    extFs.addEventListener('click', function(){ togglePlayerFS(); });
   }
 }
 
@@ -525,14 +493,6 @@ function loadPlayer(id, srcIdx, lang, quality) {
   setSelectedQuality(quality);
   var src = playerSources[srcIdx].url(id, lang);
 
-
-  var btnBar = playerSources.map(function(s, i) {
-    return '<button class="player-chip player-chip--source" onclick="loadPlayer('+id+','+i+',\''+lang+'\')" style="' +
-      'background:'+(i===srcIdx?'linear-gradient(135deg, rgba(230,57,70,0.98), rgba(168,85,247,0.92))':'rgba(20,20,30,0.92)')+';'+
-      'box-shadow:'+(i===srcIdx?'0 12px 28px rgba(123,47,255,0.18), inset 0 1px 0 rgba(255,255,255,0.1)':'0 10px 24px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.1)')+'"' +
-    '>'+s.name+'</button>';
-  }).join('');
-
   // render iframe only inside the embed element
   embedEl.innerHTML =
     '<iframe ' +
@@ -546,9 +506,11 @@ function loadPlayer(id, srcIdx, lang, quality) {
   // build controls as a sibling element (so they sit outside the video player)
   // NOTE: source buttons are rendered in the external row only (not inside player)
   var controlsHtml = '<div id="playerControls" class="player-controls">';
-  // in-player CIN button intentionally omitted — only external CIN button is shown
   controlsHtml += '<button onclick="togglePlayerFS()" class="player-chip player-chip--fs" id="fsBtn">' +
-        '<span>FS</span><span>Full</span>' +
+        '<svg class="player-chip__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+          '<path d="M7 3H3v4h2V5h2V3zm10 0v2h2v2h2V3h-4zM5 17H3v4h4v-2H5v-2zm16 0h-2v2h-2v2h4v-4z"></path>' +
+        '</svg>' +
+        '<span>Fullscreen</span>' +
       '</button>' +
     '</div>';
 
@@ -571,22 +533,6 @@ function togglePlayerLang() {
   var nextLang = getSelectedLang() === 'hi' ? 'en' : 'hi';
   setSelectedLang(nextLang);
   loadPlayer(currentModalMovie.id, currentSourceIdx, nextLang, getSelectedQuality());
-}
-
-function toggleCinemaMode() {
-  var embedEl = document.getElementById('videoEmbed');
-  var btn = document.getElementById('cinemaBtn');
-  if (!embedEl) return;
-  isCinemaMode = !isCinemaMode;
-  embedEl.classList.toggle('cinema-mode', isCinemaMode);
-  if (btn) {
-    btn.innerHTML = '<span>CIN</span><span>' + (isCinemaMode ? 'Cinema On' : 'Cinema') + '</span>';
-  }
-  // if user enabled cinema, remember that they used it so we can show the control
-  if (isCinemaMode) setUsedCinema(true);
-  // ensure player control exists after external use
-  ensurePlayerCinemaButton();
-  showToast(isCinemaMode ? 'Cinema mode on' : 'Cinema mode off');
 }
 
 function togglePlayerFS() {
@@ -622,7 +568,6 @@ function togglePlayerFS() {
     
     isPlayerFullscreen = false;
     embedEl.classList.remove('fullscreen-mode');
-    embedEl.classList.remove('cinema-mode');
     if (btn) btn.textContent = 'Full';
     document.removeEventListener('keydown', exitFSOnEsc);
   }

@@ -1030,7 +1030,7 @@ body {
 .player-controls {
   /* Default: controls sit below the player (non-overlay) */
   position: relative;
-  display: none;
+  display: flex;
   gap: 8px;
   z-index: 10;
   align-items: center;
@@ -1062,32 +1062,60 @@ body {
 .player-chip {
   border: 1px solid rgba(255,255,255,0.16);
   border-radius: 999px;
-  padding: 7px 12px;
-  font-size: 12px;
+  padding: 8px 14px;
+  font-size: 13px;
   font-weight: 800;
   cursor: pointer;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.2px;
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
+  min-height: 42px;
   backdrop-filter: blur(14px) saturate(170%);
   box-shadow: 0 10px 24px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.1);
   transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+  white-space: nowrap;
 }
-.player-chip:hover { transform: translateY(-1px); filter: brightness(1.05); }
+.player-chip:hover { transform: translateY(-1px); filter: brightness(1.03); }
 .player-chip span { font-size: 13px; line-height: 1; }
+.player-chip__icon {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+  flex: 0 0 auto;
+}
 .player-chip--source {
   background: rgba(20,20,30,0.92);
   color: #fff;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.1);
 }
 .player-chip--lang {
   background: linear-gradient(135deg, rgba(245,197,24,0.96), rgba(255,175,64,0.92));
   color: #151515;
 }
-.player-chip--fs { display: inline-flex; }
-.player-chip--cinema {
-  background: linear-gradient(135deg, rgba(20,20,30,0.96), rgba(10,10,16,0.92));
+.player-chip--fs {
+  display: inline-flex;
+  background: rgba(20,20,30,0.92);
   color: #fff;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.1);
+}
+.player-chip--fs:hover {
+  filter: brightness(1.03);
+}
+.player-chip--source,
+.player-chip--fs {
+  position: relative;
+  overflow: hidden;
+}
+.player-chip--source { transition: transform 0.22s ease, box-shadow 0.22s ease, filter 0.22s ease; }
+.player-chip--source:hover {
+  filter: brightness(1.03);
+  transform: translateY(-2px) scale(1.01);
+}
+.player-chip--source.active {
+  background: linear-gradient(135deg, rgba(255,175,64,0.96), rgba(230,57,70,0.92));
+  color: #fff;
+  box-shadow: 0 12px 28px rgba(230,57,70,0.22), inset 0 1px 0 rgba(255,255,255,0.12);
 }
 .video-embed.cinema-mode {
   position: fixed !important;
@@ -1149,26 +1177,24 @@ body {
 /* External source row (buttons placed outside the player to avoid overlay) */
 .external-sources {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   margin-top: 12px;
   justify-content: center;
   align-items: center;
   flex-wrap: wrap;
 }
 .external-sources .player-chip--source {
-  padding: 8px 14px;
+  min-width: 120px;
+  justify-content: center;
+  text-align: center;
+  padding: 10px 14px;
   font-size: 13px;
+  border-color: rgba(255,255,255,0.12);
 }
 .external-sources .player-chip--source.active {
   transform: translateY(-2px);
 }
-/* Active look for external server buttons */
-.external-sources .player-chip--source.active {
-  background: linear-gradient(135deg, rgba(230,57,70,0.98), rgba(168,85,247,0.92));
-  color: #fff;
-  box-shadow: 0 12px 28px rgba(123,47,255,0.18), inset 0 1px 0 rgba(255,255,255,0.08);
-  border-color: rgba(255,255,255,0.06);
-}
+
 
 /* â”€â”€ FOOTER â”€â”€ */
 footer {
@@ -1328,14 +1354,16 @@ footer {
     bottom: 10px;
     justify-content: center;
   }
+  .external-sources .player-chip--source {
+    min-width: 132px;
+    flex: 1 1 132px;
+  }
 }
 
 @media (max-width: 640px) {
   /* On small screens make controls non-overlaying: place under the player */
   .player-controls {
     position: static;
-    opacity: 1 !important;
-    pointer-events: auto !important;
     transform: none !important;
     background: transparent !important;
     box-shadow: none !important;
@@ -1347,6 +1375,15 @@ footer {
     display: flex;
     align-items: center;
     justify-content: center;
+  }
+  .external-sources {
+    gap: 8px;
+    justify-content: stretch;
+  }
+  .external-sources .player-chip--source {
+    min-width: 0;
+    flex: 1 1 calc(50% - 8px);
+    padding: 10px 12px;
   }
 }
 
@@ -1388,6 +1425,18 @@ footer {
   .player-chip {
     padding: 6px 10px;
     font-size: 11px;
+  }
+  .player-chip__icon {
+    width: 16px;
+    height: 16px;
+  }
+  .player-controls {
+    gap: 8px;
+  }
+  .external-sources .player-chip--source {
+    flex: 1 1 100%;
+    justify-content: center;
+    min-height: 40px;
   }
 }
 
