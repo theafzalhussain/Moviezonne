@@ -153,6 +153,7 @@ async function loadMovies(cat) {
   let movies = [];
   try {
     if (cat === 'all') {
+      // Fetch trending, popular, Bollywood, Tamil, Telugu, and now playing to mix them
       const res = await Promise.all([
         tmdb('/trending/movie/week', { language: 'en-US', page: '1' }),
         tmdb('/movie/popular',      { language: 'en-US', page: '1' }),
@@ -161,7 +162,18 @@ async function loadMovies(cat) {
         tmdb('/discover/movie', { with_original_language: 'te', sort_by: 'popularity.desc', page: '1', language: 'en-US' }),
         tmdb('/movie/now_playing',  { language: 'en-US', page: '1' })
       ]);
-      res.forEach(function(r){ movies = movies.concat(r.results||[]); });
+      
+      // Interleave results so the first 24 cards contain a mix of all categories!
+      let maxLength = 0;
+      res.forEach(function(r) { if (r.results && r.results.length > maxLength) maxLength = r.results.length; });
+      for (let i = 0; i < maxLength; i++) {
+        res.forEach(function(r) {
+          if (r.results && i < r.results.length) {
+            movies.push(r.results[i]);
+          }
+        });
+      }
+      
       var seen = new Set();
       movies = movies.filter(function(m){ if(seen.has(m.id)) return false; seen.add(m.id); return true; });
     } else if (cat === 'hollywood') {
@@ -243,20 +255,45 @@ function filterCat(cat) {
   loadMovies(cat);
 }
 
-// â”€â”€ UPCOMING
+// ── UPCOMING
 async function loadUpcoming() {
   const grid = document.getElementById('upcomingGrid');
   if (!grid) return;
   try {
+    var d = new Date();
+    d.setDate(d.getDate() - 1); // 1 din pehle taaki timezone ka issue na ho aur aaj/kal ki movies na chhut jayein
+    var today = d.toISOString().split('T')[0];
+    d.setMonth(d.getMonth() + 3);
+    var future = d.toISOString().split('T')[0];
+
+    // Fetching more pages to make sure we get enough upcoming Hollywood & Bollywood movies
     const res = await Promise.all([
-      tmdb('/movie/upcoming', { language: 'en-US', page: '1' }),
-      tmdb('/movie/upcoming', { language: 'en-US', page: '2' })
+      tmdb('/discover/movie', { language: 'en-US', page: '1', sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'en' }),
+      tmdb('/discover/movie', { language: 'en-US', page: '2', sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'en' }),
+      tmdb('/discover/movie', { language: 'en-US', page: '1', sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'hi', region: 'IN' }),
+      tmdb('/discover/movie', { language: 'en-US', page: '2', sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'hi', region: 'IN' })
     ]);
     var movies = [];
     res.forEach(function(r){ movies = movies.concat(r.results||[]); });
-    movies = movies.filter(function(m){ return m.poster_path && m.backdrop_path; });
+    
+    // Filter strictly upcoming
+    var realToday = new Date().toISOString().split('T')[0];
+    movies = movies.filter(function(m){ return m.poster_path && m.backdrop_path && m.release_date && m.release_date >= realToday; });
+    
+    // Deduplicate movies just in case
+    var seen = new Set();
+    movies = movies.filter(function(m) {
+      if (seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    });
+
+    // Sort the discovered ones by release date ascending to show the closest upcoming first
+    movies.sort(function(a, b){ return a.release_date.localeCompare(b.release_date); });
+    
     grid.innerHTML = '';
-    movies.slice(0, 8).forEach(function(m) {
+    // Show 12 cards instead of 8
+    movies.slice(0, 12).forEach(function(m) {
       var dateStr = 'Coming Soon';
       if (m.release_date) {
         try { dateStr = new Date(m.release_date).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }); } catch(e){}
@@ -264,6 +301,7 @@ async function loadUpcoming() {
       var genres = (m.genre_ids||[]).slice(0,2).map(function(id){ return GENRE_MAP[id]; }).filter(Boolean);
       var card = document.createElement('div');
       card.className = 'upcoming-card';
+      card.style.animationDelay = (movies.indexOf(m) * 0.08) + 's';
       card.innerHTML =
         '<div class="upcoming-poster">' +
           '<img src="'+IMG+m.backdrop_path+'" alt="'+(m.title||'')+'">' +
@@ -384,6 +422,11 @@ async function openModal(id) {
     // restore previously selected language/quality into the modal selects
     try { setSelectedLang(getSelectedLang()); } catch(e) {}
     try { setSelectedQuality(getSelectedQuality()); } catch(e) {}
+    
+    // Add event listeners so changing dropdown reloads player if it is currently playing
+    var ls = document.getElementById('langSelect');
+    if (ls) ls.onchange = function() { if(embedEl.querySelector('iframe')) playMovie(); };
+    
     document.body.style.overflow = 'hidden';
   } catch(e) { console.warn('Modal error', e); }
 }
@@ -402,12 +445,22 @@ function closeModal() {
 }
 
 var playerSources = [
-  { name: 'Server 1', url: function(id, lang) {
-    // Specially Hindi-dubbed server
-    return 'https://vidsrc.cc/v2/embed/movie/' + id + '?lang=hi';
+  { name: 'Server 1 (Auto)', url: function(id, lang) {
+    // Vidsrc.cc often supports direct language query
+    var langParam = lang === 'en' ? '' : '?lang=hi'; 
+    return 'https://vidsrc.cc/v2/embed/movie/' + id + langParam;
   }},
-  { name: 'Server 2', url: function(id, lang) {
-    return 'https://player.videasy.net/movie/' + id + (lang === 'hi' ? '?lang=hi' : '');
+  { name: 'Server 2 (Dual Audio)', url: function(id, lang) {
+    // SmashyStream - very reliable and usually has dual audio in their player settings
+    return 'https://embed.smashystream.com/playere.php?tmdb=' + id;
+  }},
+  { name: 'Server 3 (Multi-Dub)', url: function(id, lang) {
+    // 2Embed - usually has multiple server choices internally
+    return 'https://www.2embed.cc/embed/' + id;
+  }},
+  { name: 'Server 4 (Backup)', url: function(id, lang) {
+    // Vidsrc.me (Check the "Audio" or "CC" button inside the player to switch to Hindi)
+    return 'https://vidsrc.me/embed/movie?tmdb=' + id;
   }}
 ];
 var currentSourceIdx = 0;
@@ -613,18 +666,21 @@ if (hamburgerBtn) {
   hamburgerBtn.addEventListener('click', function() {
     var navLinks = document.querySelector('.nav-links');
     navLinks.classList.toggle('open');
-    hamburgerBtn.textContent = navLinks.classList.contains('open') ? 'X' : 'Menu';
     hamburgerBtn.classList.toggle('open');
+    hamburgerBtn.setAttribute('aria-expanded', navLinks.classList.contains('open') ? 'true' : 'false');
+    document.body.style.overflow = navLinks.classList.contains('open') ? 'hidden' : '';
   });
 }
 // Menu ko close karein jab koi link click ho
 document.querySelectorAll('.nav-links a').forEach(function(link) {
   link.addEventListener('click', function() {
-    document.querySelector('.nav-links').classList.remove('open');
+    var navLinks = document.querySelector('.nav-links');
+    navLinks.classList.remove('open');
     if (hamburgerBtn) {
-      hamburgerBtn.textContent = 'Menu';
       hamburgerBtn.classList.remove('open');
+      hamburgerBtn.setAttribute('aria-expanded', 'false');
     }
+    document.body.style.overflow = '';
   });
 });
 

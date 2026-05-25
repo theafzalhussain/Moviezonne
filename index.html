@@ -13,8 +13,21 @@
 
 <!-- â”€â”€ NAVBAR â”€â”€ -->
 <nav id="navbar">
-  <a class="nav-logo" href="#">MOVIEZONE</a> 
-  <ul class="nav-links">
+  <div class="nav-brand">
+    <a class="nav-logo" href="#" aria-label="MovieZone home">
+      <span class="nav-logo-mark">MZ</span>
+      <span class="nav-logo-copy">
+        <span class="nav-logo-main">MOVIEZONE</span>
+        <span class="nav-logo-sub">Cinema Club</span>
+      </span>
+    </a>
+  </div>
+  <button class="hamburger-btn" id="hamburgerBtn" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="navLinks">
+    <span></span>
+    <span></span>
+    <span></span>
+  </button>
+  <ul class="nav-links" id="navLinks">
     <li><a href="#" class="active">Home</a></li>
     <li><a href="#movies-section">Movies</a></li>
     <li><a href="#upcoming">Upcoming</a></li>
@@ -95,13 +108,24 @@
 </section>
 
 <!-- â”€â”€ FOOTER â”€â”€ -->
-<footer>
+<footer class="site-footer">
   <div class="footer-inner">
     <div class="footer-brand">
-      <span class="nav-logo">MOVIEZONE</span>
+      <a class="nav-logo footer-logo" href="#" aria-label="MovieZone home">
+        <span class="nav-logo-mark">MZ</span>
+        <span class="nav-logo-copy">
+          <span class="nav-logo-main">MOVIEZONE</span>
+          <span class="nav-logo-sub">Cinema Club</span>
+        </span>
+      </a>
       <p class="footer-desc">Your ultimate premium destination for movies and shows in HD, 4K quality. Watch in Hindi, English and all regional languages.</p>
+      <div class="footer-pills">
+        <span>4K Ultra HD</span>
+        <span>Multi-language</span>
+        <span>Instant Search</span>
+      </div>
     </div>
-      <a href="#" class="see-all">View Calendar -&gt;</a>
+    <div class="footer-col">
       <h4>Movies</h4>
       <a href="#">Hollywood</a>
       <a href="#">Bollywood</a>
@@ -134,37 +158,48 @@
 <!-- â”€â”€ VIDEO MODAL â”€â”€ -->
 <div id="modal-overlay">
   <div class="modal-box" id="modalBox">
-    <div class="modal-header" id="modalHeader">
-      <img id="modalBg" src="" alt="">
-      <div class="modal-header-overlay"></div>
-      <button class="modal-close" onclick="closeModal()">X</button>
-    </div>
-    <div class="modal-body">
-      <h2 class="modal-title" id="modalTitle"></h2>
-      <div class="modal-meta" id="modalMeta"></div>
-      <p class="modal-desc" id="modalDesc"></p>
-      <div class="modal-actions">
-        <select class="lang-select" id="langSelect">
-          <option value="hi">Hindi</option>
-          <option value="en">English</option>
-          <option value="ta">Tamil</option>
-          <option value="te">Telugu</option>
-          <option value="ml">Malayalam</option>
-          <option value="kn">Kannada</option>
-          <option value="mr">Marathi</option>
-          <option value="bn">Bengali</option>
-        </select>
-        <select class="quality-select" id="qualitySelect">
-          <option value="4k">4K Ultra HD</option>
-          <option value="fhd">Full HD 1080p</option>
-          <option value="hd">HD 720p</option>
-          <option value="sd">SD 480p</option>
-        </select>
-        <button class="btn-play" onclick="playMovie()">Play Now</button>
+    <button class="modal-close" onclick="closeModal()" aria-label="Close">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+    </button>
+    <div class="modal-content-wrapper">
+      <div class="modal-top">
+        <div class="modal-image-wrapper">
+          <img id="modalBg" src="" alt="">
+          <div class="modal-gradient"></div>
+        </div>
+        <div class="modal-info">
+          <h2 class="modal-title" id="modalTitle"></h2>
+          <div class="modal-meta" id="modalMeta"></div>
+          <p class="modal-desc" id="modalDesc"></p>
+          <div class="modal-actions">
+             <button class="btn-play premium-play-btn" onclick="playMovie()">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              <span>Play Now</span>
+            </button>
+            <div class="select-group">
+              <select class="lang-select" id="langSelect">
+                <option value="hi">Hindi</option>
+                <option value="en">English</option>
+                <option value="ta">Tamil</option>
+                <option value="te">Telugu</option>
+              </select>
+              <select class="quality-select" id="qualitySelect">
+                <option value="4k">4K UHD</option>
+                <option value="fhd">1080p</option>
+                <option value="hd">720p</option>
+                <option value="sd">480p</option>
+              </select>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="video-embed" id="videoEmbed"></div>
-      <!-- External source buttons (S1, S2, S3) rendered here so they don't overlap the player -->
-      <div id="externalSources" class="external-sources" aria-hidden="false"></div>
+      <div class="modal-bottom">
+        <div class="video-embed" id="videoEmbed"></div>
+        <div id="externalSources" class="external-sources" aria-hidden="false"></div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- â”€â”€ TOAST â”€â”€ -->
 <div id="toast"></div>

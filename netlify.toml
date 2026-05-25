@@ -1,2 +1,14 @@
 [build]
   publish = "."
+
+[[redirects]]
+  from = "/tmdb/3/*"
+  to = "https://api.themoviedb.org/3/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/tmdb-image/*"
+  to = "https://image.tmdb.org/:splat"
+  status = 200
+  force = true
