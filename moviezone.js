@@ -3,7 +3,7 @@ const BASE = 'https://api.themoviedb.org/3';
 const IMG = 'https://image.tmdb.org/t/p/w500';
 const IMG_ORIG = 'https://image.tmdb.org/t/p/original';
 
-// â”€â”€ GENRE MAP (defined first so carousel HTML can use it)
+// ── GENRE MAP (defined first so carousel HTML can use it)
 const GENRE_MAP = {
   28:'Action',18:'Drama',35:'Comedy',27:'Horror',878:'Sci-Fi',10749:'Romance',
   53:'Thriller',12:'Adventure',16:'Animation',80:'Crime',14:'Fantasy',
@@ -17,34 +17,38 @@ let carouselMovies = [];
 let autoSlideTimer = null;
 let currentModalMovie = null;
 
-// â”€â”€ FETCH helper â€” uses plain string URLs, no URL object cloning
+// ── FETCH helper ── uses plain string URLs, caching added for high speed
+const tmdbCache = new Map();
 async function tmdb(endpoint, params) {
   let qs = '';
   if (params && Object.keys(params).length) {
     qs = '?' + Object.entries(params).map(([k,v]) => encodeURIComponent(k)+'='+encodeURIComponent(v)).join('&');
   }
   const urlStr = BASE + endpoint + qs;
+  if (tmdbCache.has(urlStr)) return tmdbCache.get(urlStr);
   try {
     const r = await fetch(urlStr, {
       method: 'GET',
       headers: { 'Authorization': 'Bearer ' + TOKEN }
     });
     if (!r.ok) return {};
-    return await r.json();
+    const data = await r.json();
+    tmdbCache.set(urlStr, data);
+    return data;
   } catch (e) {
     console.warn('TMDB fetch error:', e);
     return {};
   }
 }
 
-// â”€â”€ INIT â€” sequential to avoid race on carousel DOM
+// ── INIT ── sequential to avoid race on carousel DOM
 async function init() {
   loadMovies('all');
   loadUpcoming();
   await loadCarousel();
 }
 
-// â”€â”€ CAROUSEL
+// ── CAROUSEL
 async function loadCarousel() {
   const [t1, t2] = await Promise.all([
     tmdb('/trending/movie/week', { language: 'en-US', page: '1' }),
@@ -132,7 +136,7 @@ function startAutoSlide() {
 }
 function resetAutoSlide() { startAutoSlide(); }
 
-// â”€â”€ LOAD MOVIES
+// ── LOAD MOVIES
 const CAT_PARAMS = {
   bollywood: { with_original_language: 'hi', sort_by: 'popularity.desc', page: '1' },
   south:     { with_original_language: 'ta', sort_by: 'popularity.desc', page: '1' },
@@ -153,7 +157,6 @@ async function loadMovies(cat) {
   let movies = [];
   try {
     if (cat === 'all') {
-      // Fetch trending, popular, Bollywood, Tamil, Telugu, and now playing to mix them
       const res = await Promise.all([
         tmdb('/trending/movie/week', { language: 'en-US', page: '1' }),
         tmdb('/movie/popular',      { language: 'en-US', page: '1' }),
@@ -163,7 +166,6 @@ async function loadMovies(cat) {
         tmdb('/movie/now_playing',  { language: 'en-US', page: '1' })
       ]);
       
-      // Interleave results so the first 24 cards contain a mix of all categories!
       let maxLength = 0;
       res.forEach(function(r) { if (r.results && r.results.length > maxLength) maxLength = r.results.length; });
       for (let i = 0; i < maxLength; i++) {
@@ -218,7 +220,7 @@ function renderMovies(movies) {
     card.style.animationDelay = (i * 0.04) + 's';
     card.innerHTML =
       '<div class="card-poster">' +
-        '<img src="'+IMG+m.poster_path+'" alt="'+(m.title||'')+'">' +
+        '<img src="'+IMG+m.poster_path+'" alt="'+(m.title||'')+'" loading="lazy">' +
         '<div class="card-quality">'+qual+'</div>' +
         (isHot ? '<div class="card-hot">HOT</div>' : '') +
         '<div class="card-overlay"><button class="card-play-btn">&#9654;</button></div>' +
@@ -261,12 +263,11 @@ async function loadUpcoming() {
   if (!grid) return;
   try {
     var d = new Date();
-    d.setDate(d.getDate() - 1); // 1 din pehle taaki timezone ka issue na ho aur aaj/kal ki movies na chhut jayein
+    d.setDate(d.getDate() - 1);
     var today = d.toISOString().split('T')[0];
     d.setMonth(d.getMonth() + 3);
     var future = d.toISOString().split('T')[0];
 
-    // Fetching more pages to make sure we get enough upcoming Hollywood & Bollywood movies
     const res = await Promise.all([
       tmdb('/discover/movie', { language: 'en-US', page: '1', sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'en' }),
       tmdb('/discover/movie', { language: 'en-US', page: '2', sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'en' }),
@@ -276,11 +277,9 @@ async function loadUpcoming() {
     var movies = [];
     res.forEach(function(r){ movies = movies.concat(r.results||[]); });
     
-    // Filter strictly upcoming
     var realToday = new Date().toISOString().split('T')[0];
     movies = movies.filter(function(m){ return m.poster_path && m.backdrop_path && m.release_date && m.release_date >= realToday; });
     
-    // Deduplicate movies just in case
     var seen = new Set();
     movies = movies.filter(function(m) {
       if (seen.has(m.id)) return false;
@@ -288,11 +287,9 @@ async function loadUpcoming() {
       return true;
     });
 
-    // Sort the discovered ones by release date ascending to show the closest upcoming first
     movies.sort(function(a, b){ return a.release_date.localeCompare(b.release_date); });
     
     grid.innerHTML = '';
-    // Show 12 cards instead of 8
     movies.slice(0, 12).forEach(function(m) {
       var dateStr = 'Coming Soon';
       if (m.release_date) {
@@ -304,7 +301,7 @@ async function loadUpcoming() {
       card.style.animationDelay = (movies.indexOf(m) * 0.08) + 's';
       card.innerHTML =
         '<div class="upcoming-poster">' +
-          '<img src="'+IMG+m.backdrop_path+'" alt="'+(m.title||'')+'">' +
+          '<img src="'+IMG+m.backdrop_path+'" alt="'+(m.title||'')+'" loading="lazy">' +
           '<div class="upcoming-poster-overlay"></div>' +
           '<div class="upcoming-release-badge">RELEASE '+dateStr+'</div>' +
         '</div>' +
@@ -359,7 +356,7 @@ async function searchDropdownFill(q) {
     var item = document.createElement('div');
     item.className = 'search-result-item';
     item.innerHTML =
-      '<img src="'+(m.poster_path ? IMG+m.poster_path : 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2260%22><rect width=%2242%22 height=%2260%22 fill=%22%23222%22/></svg>')+'" alt="">' +
+      '<img src="'+(m.poster_path ? IMG+m.poster_path : 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2260%22><rect width=%2242%22 height=%2260%22 fill=%22%23222%22/></svg>')+'" alt="" loading="lazy">' +
       '<div class="search-result-info"><h4>'+(m.title||'')+'</h4><p>'+((m.release_date||'').slice(0,4))+' | RATING '+((m.vote_average||0).toFixed(1))+'</p></div>';
     item.addEventListener('click', (function(mid){ return function(){ openModal(mid); closeDropdown(); }; })(m.id));
     dd.appendChild(item);
@@ -419,11 +416,9 @@ async function openModal(id) {
     var pb = document.getElementById('playBigBtn');
     if (pb) pb.addEventListener('click', playMovie);
     overlay.classList.add('open');
-    // restore previously selected language/quality into the modal selects
     try { setSelectedLang(getSelectedLang()); } catch(e) {}
     try { setSelectedQuality(getSelectedQuality()); } catch(e) {}
     
-    // Add event listeners so changing dropdown reloads player if it is currently playing
     var ls = document.getElementById('langSelect');
     if (ls) ls.onchange = function() { if(embedEl.querySelector('iframe')) playMovie(); };
     
@@ -444,23 +439,23 @@ function closeModal() {
   currentModalMovie = null;
 }
 
+// 2026 के सबसे ज्यादा चलने वाले और एक्टिव सर्वर्स की लिस्ट
 var playerSources = [
-  { name: 'Server 1 (Auto)', url: function(id, lang) {
-    // Vidsrc.cc often supports direct language query
-    var langParam = lang === 'en' ? '' : '?lang=hi'; 
-    return 'https://vidsrc.cc/v2/embed/movie/' + id + langParam;
+  { name: 'Server 1 (VidSrc To - Ultra Stable)', url: function(id, lang) {
+    // यह पूरे इंटरनेट पर सबसे ज्यादा इस्तेमाल होने वाला और फास्ट सर्ver है
+    return 'https://vidsrc.to/embed/movie/' + id;
   }},
-  { name: 'Server 2 (Dual Audio)', url: function(id, lang) {
-    // SmashyStream - very reliable and usually has dual audio in their player settings
-    return 'https://embed.smashystream.com/playere.php?tmdb=' + id;
+  { name: 'Server 2 (AutoEmbed - Direct Stream)', url: function(id, lang) {
+    // इसमें इंडिया के नेटवर्क्स पर ब्लॉकेज की समस्या सबसे कम आती है
+    return 'https://autoembed.co/movie/tmdb/' + id;
   }},
-  { name: 'Server 3 (Multi-Dub)', url: function(id, lang) {
-    // 2Embed - usually has multiple server choices internally
-    return 'https://www.2embed.cc/embed/' + id;
+  { name: 'Server 3 (VidLink Premium UI)', url: function(id, lang) {
+    // इसका इंटरफ़ेस बहुत साफ़ है और इसमें प्लेयर के अंदर सेटिंग्स मिलती है
+    return 'https://vidlink.pro/movie/' + id;
   }},
-  { name: 'Server 4 (Backup)', url: function(id, lang) {
-    // Vidsrc.me (Check the "Audio" or "CC" button inside the player to switch to Hindi)
-    return 'https://vidsrc.me/embed/movie?tmdb=' + id;
+   { name: 'Server 4 (VidSrc CC - Working Backup)', url: function(id, lang) {
+    // MultiEmbed की जगह यह नया 100% वर्किंग सर्वर (VidSrc CC) लगाया गया है
+    return 'https://vidsrc.cc/v2/embed/movie/' + id;
   }}
 ];
 var currentSourceIdx = 0;
@@ -469,7 +464,6 @@ var isPlayerFullscreen = false;
 function renderExternalSources(id, srcIdx, lang) {
   var ext = document.getElementById('externalSources');
   if (!ext) return;
-  // build simple buttons (no inline onclick) and attach listeners after
   var html = playerSources.map(function(s, i){
     return '<button class="player-chip player-chip--source" data-srcidx="'+i+'">'+s.name+'</button>';
   }).join('');
@@ -479,12 +473,10 @@ function renderExternalSources(id, srcIdx, lang) {
     btn.addEventListener('click', function(){
       var idx = parseInt(btn.getAttribute('data-srcidx')||'0', 10);
       loadPlayer(id, idx, lang);
-      // update active styles
       srcButtons.forEach(function(b){ b.classList.remove('active'); });
       btn.classList.add('active');
     });
   });
-  // mark current active
   if (typeof srcIdx === 'number') {
     srcButtons.forEach(function(b){ b.classList.remove('active'); });
     var activeBtn = ext.querySelector('.player-chip--source[data-srcidx="'+srcIdx+'"]');
@@ -546,7 +538,6 @@ function loadPlayer(id, srcIdx, lang, quality) {
   setSelectedQuality(quality);
   var src = playerSources[srcIdx].url(id, lang);
 
-  // render iframe only inside the embed element
   embedEl.innerHTML =
     '<iframe ' +
       'id="playerFrame" ' +
@@ -554,10 +545,9 @@ function loadPlayer(id, srcIdx, lang, quality) {
       'width="100%" height="100%" ' +
       'frameborder="0" ' +
       'allow="fullscreen;autoplay;encrypted-media;picture-in-picture" ' +
+      'loading="lazy"' +
     '></iframe>';
 
-  // build controls as a sibling element (so they sit outside the video player)
-  // NOTE: source buttons are rendered in the external row only (not inside player)
   var controlsHtml = '<div id="playerControls" class="player-controls">';
   controlsHtml += '<button onclick="togglePlayerFS()" class="player-chip player-chip--fs" id="fsBtn">' +
         '<svg class="player-chip__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
@@ -571,11 +561,9 @@ function loadPlayer(id, srcIdx, lang, quality) {
   if (existingControls) {
     existingControls.outerHTML = controlsHtml;
   } else {
-    // insert after the embed element so controls are visually below the player
     embedEl.insertAdjacentHTML('afterend', controlsHtml);
   }
 
-  // render the external sources row (outside player)
   try { renderExternalSources(id, srcIdx, lang); } catch(e){}
 
   showToast('PLAY ' + buildSourceLabel(srcIdx) + ' | ' + (lang==='hi' ? 'Hindi' : 'English') + ' | ' + quality.toUpperCase());
@@ -594,28 +582,24 @@ function togglePlayerFS() {
   if (!embedEl) return;
 
   if (!document.fullscreenElement && !document.webkitFullscreenElement && !isPlayerFullscreen) {
-    // Enter Fullscreen
     var target = embedEl;
     try {
       var fsResult = null;
       if (target.requestFullscreen) fsResult = target.requestFullscreen();
       else if (target.webkitRequestFullscreen) fsResult = target.webkitRequestFullscreen();
       
-      // Auto rotate mobile screen to landscape
       Promise.resolve(fsResult).then(function() {
         if (screen.orientation && screen.orientation.lock) {
           return screen.orientation.lock('landscape').catch(function(){});
         }
       }).catch(function(){});
     } catch (err) {
-      // CSS Fallback agar native deny ho jaye
       isPlayerFullscreen = true;
       embedEl.classList.add('fullscreen-mode');
       if (btn) btn.textContent = 'Exit';
       document.addEventListener('keydown', exitFSOnEsc);
     }
   } else {
-    // Exit Fullscreen
     if (document.exitFullscreen) document.exitFullscreen();
     else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
     
@@ -626,7 +610,6 @@ function togglePlayerFS() {
   }
 }
 
-// Native fullscreen exit (jaise mobile par back button press karna) handle karne ke liye
 document.addEventListener('fullscreenchange', function() {
   if (!document.fullscreenElement && !document.webkitFullscreenElement) {
     if (screen.orientation && screen.orientation.unlock) {
@@ -646,7 +629,6 @@ if (modalOverlay) {
   });
 }
 
-// bind select change handlers so user selections persist immediately
 document.addEventListener('DOMContentLoaded', function() {
   var langSel = document.getElementById('langSelect');
   if (langSel) langSel.addEventListener('change', function(e){ setSelectedLang(e.target.value); });
@@ -654,13 +636,11 @@ document.addEventListener('DOMContentLoaded', function() {
   if (qualSel) qualSel.addEventListener('change', function(e){ setSelectedQuality(e.target.value); });
 });
 
-// â”€â”€ NAVBAR scroll
 window.addEventListener('scroll', function() {
   var nb = document.getElementById('navbar');
   if (nb) nb.classList.toggle('scrolled', window.scrollY > 60);
 });
 
-// â”€â”€ HAMBURGER MENU
 var hamburgerBtn = document.getElementById('hamburgerBtn');
 if (hamburgerBtn) {
   hamburgerBtn.addEventListener('click', function() {
@@ -671,7 +651,6 @@ if (hamburgerBtn) {
     document.body.style.overflow = navLinks.classList.contains('open') ? 'hidden' : '';
   });
 }
-// Menu ko close karein jab koi link click ho
 document.querySelectorAll('.nav-links a').forEach(function(link) {
   link.addEventListener('click', function() {
     var navLinks = document.querySelector('.nav-links');
@@ -684,7 +663,6 @@ document.querySelectorAll('.nav-links a').forEach(function(link) {
   });
 });
 
-// â”€â”€ TOAST
 function showToast(msg) {
   var t = document.getElementById('toast');
   if (!t) return;
@@ -693,5 +671,4 @@ function showToast(msg) {
   setTimeout(function(){ t.classList.remove('show'); }, 3000);
 }
 
-// â”€â”€ START
 init();
