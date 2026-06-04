@@ -39,6 +39,14 @@ body {
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 10px; }
 
+/* ── TV SPATIAL NAVIGATION FOCUS ── */
+:focus-visible {
+  outline: 3px solid var(--gold) !important;
+  outline-offset: 3px !important;
+  box-shadow: 0 0 20px rgba(245, 197, 24, 0.4) !important;
+  border-radius: inherit;
+}
+
 /* â”€â”€ NAVBAR â”€â”€ */
 #navbar {
   position: fixed;
@@ -984,13 +992,18 @@ body {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   display: none;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: 1rem;
-  padding-top: max(1rem, env(safe-area-inset-top));
-  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  padding: 3rem 1rem;
+  padding-top: max(3rem, env(safe-area-inset-top));
+  padding-bottom: max(3rem, env(safe-area-inset-bottom));
+  overflow-y: auto;
 }
 #modal-overlay.open { display: flex; }
+
+#modal-overlay::-webkit-scrollbar { width: 8px; }
+#modal-overlay::-webkit-scrollbar-track { background: transparent; }
+#modal-overlay::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 10px; }
 
 .modal-box {
   background: var(--bg2);
@@ -998,7 +1011,6 @@ body {
   border-radius: 20px;
   width: 100%;
   max-width: 900px;
-  max-height: 90vh; /* Adjust for responsive */
   overflow: hidden; /* Hide main scroll here */
   display: flex;
   flex-direction: column;
@@ -1036,15 +1048,9 @@ body {
 }
 
 .modal-content-wrapper {
-  overflow-y: auto;
-  overflow-x: hidden;
-  height: 100%;
   display: flex;
   flex-direction: column;
 }
-.modal-content-wrapper::-webkit-scrollbar { width: 8px; }
-.modal-content-wrapper::-webkit-scrollbar-track { background: transparent; }
-.modal-content-wrapper::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
 
 /* Top Section with layout */
 .modal-top {

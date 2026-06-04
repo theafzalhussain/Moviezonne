@@ -1,4 +1,4 @@
-﻿const TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIwYmVlMmRkZWY4NzExZWU1YmQ4YWYzYzZlNzI1M2RlYiIsIm5iZiI6MTc3OTMwNDU2My41NTAwMDAyLCJzdWIiOiI2YTBlMDg3M2QxOTVhYTNkNmJiODFiZjciLCJzY29wZXMiOlsiYXBpX3JlYWQiXSwidmVyc2lvbiI6MX0.vzgUC1CM_C_b5ao824hr9DIO8HP-ibNAlO54BdxhyfI';
+﻿﻿const TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIwYmVlMmRkZWY4NzExZWU1YmQ4YWYzYzZlNzI1M2RlYiIsIm5iZiI6MTc3OTMwNDU2My41NTAwMDAyLCJzdWIiOiI2YTBlMDg3M2QxOTVhYTNkNmJiODFiZjciLCJzY29wZXMiOlsiYXBpX3JlYWQiXSwidmVyc2lvbiI6MX0.vzgUC1CM_C_b5ao824hr9DIO8HP-ibNAlO54BdxhyfI';
 const BASE = 'https://api.themoviedb.org/3';
 const IMG = 'https://image.tmdb.org/t/p/w500';
 const IMG_ORIG = 'https://image.tmdb.org/t/p/original';
@@ -74,6 +74,7 @@ function buildCarousel() {
   carouselMovies.forEach(function(m, i) {
     const genres = (m.genre_ids||[]).slice(0,3).map(function(id){ return '<span class="genre-tag">'+(GENRE_MAP[id]||'Movie')+'</span>'; }).join('');
     const slide = document.createElement('div');
+    const runtimeId = 'slide-runtime-' + m.id + '-' + i;
     slide.className = 'carousel-slide' + (i === 0 ? ' active' : '');
     slide.innerHTML =
       '<div class="slide-bg" style="background-image:url(\''+IMG_ORIG+m.backdrop_path+'\')"></div>' +
@@ -84,7 +85,7 @@ function buildCarousel() {
         '<div class="slide-meta">' +
           '<div class="slide-rating">RATING '+((m.vote_average||0).toFixed(1))+'</div>' +
           '<span class="slide-year">'+((m.release_date||'').slice(0,4))+'</span>' +
-          '<span class="slide-runtime">RUNTIME 2h 15m</span>' +
+          '<span class="slide-runtime" id="'+runtimeId+'">RUNTIME <span class="skeleton-text"></span></span>' +
         '</div>' +
         '<div class="slide-genres">'+genres+'</div>' +
         '<p class="slide-desc">'+(m.overview||'')+'</p>' +
@@ -98,13 +99,26 @@ function buildCarousel() {
     });
     track.appendChild(slide);
 
+    tmdb('/movie/'+m.id, { language: 'en-US' }).then(function(details) {
+      const rtEl = document.getElementById(runtimeId);
+      if (rtEl) {
+        if (details && details.runtime) {
+          rtEl.textContent = 'RUNTIME ' + Math.floor(details.runtime/60) + 'h ' + (details.runtime%60) + 'm';
+        } else {
+          rtEl.textContent = 'RUNTIME N/A';
+        }
+      }
+    });
+
     const dot = document.createElement('div');
     dot.className = 'dot' + (i === 0 ? ' active' : '');
+    dot.tabIndex = 0;
     (function(idx){ dot.addEventListener('click', function(){ goToSlide(idx); resetAutoSlide(); }); })(i);
     dots.appendChild(dot);
 
     const thumb = document.createElement('div');
     thumb.className = 'thumb' + (i === 0 ? ' active' : '');
+    thumb.tabIndex = 0;
     thumb.innerHTML = '<img src="'+IMG+m.poster_path+'" alt="">';
     (function(idx){ thumb.addEventListener('click', function(){ goToSlide(idx); resetAutoSlide(); }); })(i);
     thumbs.appendChild(thumb);
@@ -216,7 +230,9 @@ function renderMovies(movies) {
     var isHot  = m.popularity > 100;
     var qual   = m.vote_average >= 7.5 ? '4K' : m.vote_average >= 6 ? 'FHD' : 'HD';
     var card   = document.createElement('div');
+    var runtimeId = 'card-runtime-' + m.id + '-' + i;
     card.className = 'movie-card';
+    card.tabIndex = 0;
     card.style.animationDelay = (i * 0.04) + 's';
     card.innerHTML =
       '<div class="card-poster">' +
@@ -228,14 +244,25 @@ function renderMovies(movies) {
       '<div class="card-info">' +
         '<div class="card-title">'+(m.title||m.name||'')+'</div>' +
         '<div class="card-meta">' +
-          '<div class="card-rating">RATING '+votes+'</div>' +
+          '<div class="card-rating">RATING '+rating+'</div>' +
           '<div class="card-year">YEAR '+year+'</div>' +
         '</div>' +
-        '<div class="card-meta"><div class="card-runtime">RUNTIME 2h 15m</div></div>' +
+        '<div class="card-meta"><div class="card-runtime" id="'+runtimeId+'">RUNTIME <span class="skeleton-text"></span></div></div>' +
         '<div class="card-genres">'+genres.map(function(g){ return '<span class="card-genre">'+g+'</span>'; }).join('')+'</div>' +
       '</div>';
     card.addEventListener('click', (function(mid){ return function(){ openModal(mid); }; })(m.id));
     grid.appendChild(card);
+
+    tmdb('/movie/'+m.id, { language: 'en-US' }).then(function(details) {
+      var rtEl = document.getElementById(runtimeId);
+      if (rtEl) {
+        if (details && details.runtime) {
+          rtEl.textContent = 'RUNTIME ' + Math.floor(details.runtime/60) + 'h ' + (details.runtime%60) + 'm';
+        } else {
+          rtEl.textContent = 'RUNTIME N/A';
+        }
+      }
+    });
   });
 }
 
@@ -298,6 +325,7 @@ async function loadUpcoming() {
       var genres = (m.genre_ids||[]).slice(0,2).map(function(id){ return GENRE_MAP[id]; }).filter(Boolean);
       var card = document.createElement('div');
       card.className = 'upcoming-card';
+      card.tabIndex = 0;
       card.style.animationDelay = (movies.indexOf(m) * 0.08) + 's';
       card.innerHTML =
         '<div class="upcoming-poster">' +
@@ -355,6 +383,7 @@ async function searchDropdownFill(q) {
   movies.forEach(function(m) {
     var item = document.createElement('div');
     item.className = 'search-result-item';
+    item.tabIndex = 0;
     item.innerHTML =
       '<img src="'+(m.poster_path ? IMG+m.poster_path : 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2260%22><rect width=%2242%22 height=%2260%22 fill=%22%23222%22/></svg>')+'" alt="" loading="lazy">' +
       '<div class="search-result-info"><h4>'+(m.title||'')+'</h4><p>'+((m.release_date||'').slice(0,4))+' | RATING '+((m.vote_average||0).toFixed(1))+'</p></div>';
@@ -396,7 +425,7 @@ async function openModal(id) {
     if (titleEl) titleEl.textContent = details.title || details.name || '';
     var descEl = document.getElementById('modalDesc');
     if (descEl) descEl.textContent = details.overview || '';
-    var runtime = details.runtime ? (Math.floor(details.runtime/60)+'h '+(details.runtime%60)+'m') : '2h 15m';
+    var runtime = details.runtime ? (Math.floor(details.runtime/60)+'h '+(details.runtime%60)+'m') : 'N/A';
     var genres  = (details.genres||[]).slice(0,3).map(function(g){ return '<span class="genre-tag">'+g.name+'</span>'; }).join('');
     var metaEl  = document.getElementById('modalMeta');
     if (metaEl) metaEl.innerHTML =
@@ -453,9 +482,9 @@ var playerSources = [
     // इसका इंटरफ़ेस बहुत साफ़ है और इसमें प्लेयर के अंदर सेटिंग्स मिलती है
     return 'https://vidlink.pro/movie/' + id;
   }},
-   { name: 'Server 4 (VidSrc CC - Working Backup)', url: function(id, lang) {
-    // MultiEmbed की जगह यह नया 100% वर्किंग सर्वर (VidSrc CC) लगाया गया है
-    return 'https://vidsrc.cc/v2/embed/movie/' + id;
+  { name: 'Server 4 (VidSrc Pro - 4K/FHD)', url: function(id, lang) {
+    // Embed.su ब्लॉक होने पर यह नया सर्वर इस्तेमाल करें, इसमें भी हाई क्वालिटी (1080p/4K) सपोर्ट है
+    return 'https://vidsrc.pro/embed/movie/' + id;
   }}
 ];
 var currentSourceIdx = 0;
@@ -634,6 +663,9 @@ document.addEventListener('DOMContentLoaded', function() {
   if (langSel) langSel.addEventListener('change', function(e){ setSelectedLang(e.target.value); });
   var qualSel = document.getElementById('qualitySelect');
   if (qualSel) qualSel.addEventListener('change', function(e){ setSelectedQuality(e.target.value); });
+  
+  // Make HTML static category tabs focusable for TV
+  document.querySelectorAll('.cat-tab').forEach(function(t){ t.tabIndex = 0; });
 });
 
 window.addEventListener('scroll', function() {
@@ -670,5 +702,31 @@ function showToast(msg) {
   t.classList.add('show');
   setTimeout(function(){ t.classList.remove('show'); }, 3000);
 }
+
+// ── TV REMOTE NAVIGATION ──
+document.addEventListener('keydown', function(e) {
+  // TV Enter/OK key: Simulate click on custom focusable elements (cards, tabs, etc.)
+  if (e.key === 'Enter' && document.activeElement) {
+    var tag = document.activeElement.tagName;
+    if (tag !== 'BUTTON' && tag !== 'A' && tag !== 'INPUT') {
+      document.activeElement.click();
+      e.preventDefault();
+    }
+  }
+  
+  // TV Back keys: Android (Escape/Backspace), WebOS (461), Tizen (10009)
+  var isBackKey = e.key === 'Escape' || e.keyCode === 27 || e.keyCode === 10009 || e.keyCode === 461 || (e.key === 'Backspace' && document.activeElement.tagName !== 'INPUT');
+  
+  if (isBackKey) {
+    var overlay = document.getElementById('modal-overlay');
+    if (overlay && overlay.classList.contains('open')) {
+      closeModal();
+      e.preventDefault();
+    } else {
+      var dd = document.getElementById('searchDropdown');
+      if (dd && dd.classList.contains('open')) { closeDropdown(); e.preventDefault(); }
+    }
+  }
+});
 
 init();
