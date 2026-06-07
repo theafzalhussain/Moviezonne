@@ -42,16 +42,15 @@ app.use('/api/tmdb', async (req, res) => {
     }
 
     // Request path aur query parameters extract karna
-    // Vercel rewrites me req.originalUrl change ho jata hai, isliye hum req.url use karenge
-    const endpoint = req.url; 
+    // Bulletproof URL extraction (Handles all Vercel/Express rewrite behaviors)
+    const safeUrl = req.url.replace(/^\/api\/tmdb/, '');
+    const endpoint = safeUrl.startsWith('/') ? safeUrl : '/' + safeUrl;
     const url = `${TMDB_BASE_URL}${endpoint}`;
-
-    // CDN & Browser Caching (Netlify/Vercel is data ko apne duniya bhar ke servers par cache kar lenge)
-    res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=43200');
 
     // Check if data is already in node-cache
     const cachedData = apiCache.get(url);
     if (cachedData) {
+      res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=43200');
       return res.json(cachedData);
     }
 
@@ -60,13 +59,17 @@ app.use('/api/tmdb', async (req, res) => {
       headers: { 'Authorization': `Bearer ${TMDB_TOKEN}` }
     });
 
-    // Agar TMDB se error aaye (jaise 404 ya 401), toh usko frontend ko fail bhejo aur cache mat karo
+    // Agar TMDB se error aaye, toh error bhejo aur cache headers mat lagao (bura data cache nahi hoga)
     if (!response.ok) {
-      console.error(`TMDB API Error: ${response.status} for URL: ${url}`);
+      const errText = await response.text();
+      console.error(`TMDB API Error: ${response.status} - ${errText} for URL: ${url}`);
       return res.status(response.status).json({ error: 'Failed to fetch data from TMDB' });
     }
 
     const data = await response.json();
+
+    // CDN & Browser Caching (Only cache successful responses)
+    res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=43200');
 
     // Naya data memory me save karo (TTL is automatically handled by node-cache)
     apiCache.set(url, data);

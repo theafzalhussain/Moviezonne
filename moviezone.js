@@ -40,8 +40,11 @@ let allUpcoming = [];
 const tmdbCache = new Map();
 const inFlightRequests = new Map(); // Request deduplication
 async function tmdb(endpoint, params) {
+  params = params || {};
+  params.mz_cb = '1'; // Cache-buster to bypass poisoned browser cache from previous errors
+
   let qs = '';
-  if (params && Object.keys(params).length) {
+  if (Object.keys(params).length) {
     qs = '?' + Object.entries(params).map(([k,v]) => encodeURIComponent(k)+'='+encodeURIComponent(v)).join('&');
   }
   const urlStr = BASE + endpoint + qs;
@@ -65,20 +68,22 @@ async function tmdb(endpoint, params) {
 
   const fetchPromise = (async () => {
     try {
-    const r = await fetch(urlStr); // Token hat gaya kyunki wo ab backend sambhal raha hai
-    if (!r.ok) return {};
-    const data = await r.json();
-    tmdbCache.set(urlStr, data);
-    
-    try {
-      // Safe save to localStorage (ignores QuotaExceededError)
-      localStorage.setItem(cacheKey, JSON.stringify({ timestamp: Date.now(), data }));
-    } catch (err) {}
-    
-    return data;
-  } catch (e) {
-    console.warn('TMDB fetch error:', e);
-    return {};
+      const r = await fetch(urlStr); 
+      if (!r.ok) {
+        console.error(`Backend API Error: ${r.status} for ${urlStr}`);
+        return {};
+      }
+      const data = await r.json();
+      tmdbCache.set(urlStr, data);
+      
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify({ timestamp: Date.now(), data }));
+      } catch (err) {}
+      
+      return data;
+    } catch (e) {
+      console.error('Network/Fetch Error:', e);
+      return {};
     }
   })();
   
