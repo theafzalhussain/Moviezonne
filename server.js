@@ -33,6 +33,11 @@ const TMDB_TOKEN = process.env.TMDB_TOKEN;
 // Backend Advanced Cache: Initialize NodeCache with a standard TTL of 1 hour (3600 seconds)
 const apiCache = new NodeCache({ stdTTL: 3600 });
 
+// Health Check / Ping Endpoint: UptimeRobot ko server jagaye rakhne ke liye
+app.get('/ping', (req, res) => {
+  res.status(200).send('Pong! Server is awake.');
+});
+
 // Proxy Endpoint: Frontend yahan request bhejega
 app.use('/api/tmdb', async (req, res) => {
   try {

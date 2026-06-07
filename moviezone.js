@@ -765,6 +765,8 @@ function loadPlayer(id, srcIdx, lang, quality) {
       'src="' + src + '" ' +
       'width="100%" height="100%" ' +
       'frameborder="0" ' +
+      'scrolling="no" ' +
+      'allowfullscreen="true" ' +
       'allow="fullscreen;autoplay;encrypted-media;picture-in-picture" ' +
       'loading="lazy"' +
     '></iframe>';
