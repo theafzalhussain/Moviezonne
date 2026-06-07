@@ -38,10 +38,10 @@ app.use('/api/tmdb', async (req, res) => {
   }
 });
 
-// Vercel Serverless Function support and local testing
-if (process.env.NODE_ENV !== 'production') {
+// Server ko start karne ke liye (Local + Render support)
+if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`Proxy server is running on http://localhost:${PORT}`);
+    console.log(`Proxy server is running on port ${PORT}`);
   });
 }
 
