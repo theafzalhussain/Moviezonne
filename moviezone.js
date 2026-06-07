@@ -249,7 +249,8 @@ const CAT_PARAMS = {
   thriller:  { with_genres: '53',  sort_by: 'popularity.desc', page: '1' },
   romance:   { with_genres: '10749', sort_by: 'popularity.desc', page: '1' },
   scifi:     { with_genres: '878', sort_by: 'popularity.desc', page: '1' },
-  animation: { with_genres: '16',  sort_by: 'popularity.desc', page: '1' }
+  animation: { with_genres: '16',  sort_by: 'popularity.desc', page: '1' },
+  kids:      { with_genres: '16,10751', without_genres: '27,53,18', sort_by: 'popularity.desc', page: '1' }
 };
 
 async function loadMovies(cat, isLoadMore = false) {
@@ -413,7 +414,7 @@ const CAT_HEADINGS = {
   all:'ALL MOVIES & SHOWS', tv: 'TV SHOWS & WEB SERIES', hollywood:'HOLLYWOOD', bollywood:'BOLLYWOOD',
   south:'SOUTH INDIAN', tollywood:'TOLLYWOOD', action:'ACTION',
   comedy:'COMEDY', thriller:'THRILLER', romance:'ROMANCE',
-  scifi:'SCI-FI', animation:'ANIMATION'
+  scifi:'SCI-FI', animation:'ANIMATION', kids:'🧸 KIDS & CARTOONS'
 };
 function filterCat(cat) {
   document.querySelectorAll('.cat-tab').forEach(t => { t.classList.remove('active'); });
@@ -1146,6 +1147,17 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Make HTML static category tabs focusable for TV
   document.querySelectorAll('.cat-tab').forEach(t => { t.tabIndex = 0; });
+  
+  // ── DYNAMICALLY ADD KIDS TAB ──
+  const catTabs = document.querySelector('.cat-tabs');
+  if (catTabs && !document.querySelector('.cat-tab[onclick*="kids"]')) {
+    const kidsTab = document.createElement('button');
+    kidsTab.className = 'cat-tab';
+    kidsTab.tabIndex = 0;
+    kidsTab.setAttribute('onclick', "filterCat('kids')");
+    kidsTab.innerHTML = '🧸 Kids / Cartoon';
+    catTabs.appendChild(kidsTab);
+  }
 });
 
 window.addEventListener('scroll', () => {
