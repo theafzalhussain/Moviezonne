@@ -366,7 +366,21 @@ function renderMovies(movies, append = false) {
     const votes  = m.vote_count > 999 ? (m.vote_count/1000).toFixed(1)+'K' : (m.vote_count||0);
     const genres = (m.genre_ids||[]).slice(0,2).map(id => GENRE_MAP[id]).filter(Boolean);
     const isHot  = m.popularity > 100;
-    const qual   = m.vote_average >= 7.5 ? '4K' : m.vote_average >= 6 ? 'FHD' : 'HD';
+    
+    // ── DYNAMIC QUALITY BADGE LOGIC ──
+    let qual = 'HD';
+    const rDateStr = m.release_date || m.first_air_date;
+    if (rDateStr) {
+      const rDate = new Date(rDateStr);
+      const daysOld = (new Date() - rDate) / (1000 * 60 * 60 * 24);
+      if (type === 'movie' && daysOld >= 0 && daysOld <= 45) {
+        qual = 'CAM'; // Recently released movies in theaters are usually CAM/TS
+      } else if (m.vote_average >= 7.5) {
+        qual = '4K';
+      } else if (m.vote_average >= 6.5) {
+        qual = 'FHD';
+      }
+    }
     const card   = document.createElement('div');
     card.className = 'movie-card';
     card.tabIndex = 0;
@@ -666,11 +680,78 @@ async function openModal(id, type = 'movie') {
     if (qs) qs.onchange = () => { if(embedEl.querySelector('iframe')) playMovie(); };
     
     const tvGroup = document.getElementById('tvSelectGroup');
-    if (tvGroup) tvGroup.style.display = type === 'tv' ? 'flex' : 'none';
-    const sInput = document.getElementById('seasonInput');
-    if (sInput) { sInput.value = '1'; sInput.oninput = () => { if(embedEl.querySelector('iframe')) playMovie(); }; }
-    const eInput = document.getElementById('episodeInput');
-    if (eInput) { eInput.value = '1'; eInput.oninput = () => { if(embedEl.querySelector('iframe')) playMovie(); }; }
+    if (tvGroup) {
+      tvGroup.style.display = type === 'tv' ? 'block' : 'none';
+      if (type === 'tv') {
+        tvGroup.innerHTML = `
+          <div style="display:flex; width:100%; gap:12px; margin-bottom:12px;">
+            <select id="seasonInput" class="lang-select" style="flex:1; cursor:pointer;"></select>
+            <select id="episodeInput" class="lang-select" style="flex:2; cursor:pointer;"></select>
+          </div>
+          <div id="episodePreview" style="display:none; background: linear-gradient(180deg, rgba(30, 30, 42, 0.4) 0%, rgba(15, 15, 20, 0.6) 100%); border-radius:12px; overflow:hidden; border:1px solid rgba(255,255,255,0.18); border-bottom-color:rgba(255,255,255,0.05); box-shadow: 0 4px 15px rgba(0,0,0,0.5); backdrop-filter: blur(12px);"></div>
+        `;
+        const sInput = document.getElementById('seasonInput');
+        const eInput = document.getElementById('episodeInput');
+        const seasons = (details.seasons || []).filter(s => s.season_number > 0);
+        
+        if (seasons.length > 0) {
+          // ── CONTINUE WATCHING LOGIC ──
+          let lastS = seasons[0].season_number;
+          let lastE = 1;
+          try {
+            const progress = JSON.parse(localStorage.getItem('mz_progress_' + id));
+            if (progress && progress.season && seasons.find(sz => sz.season_number == progress.season)) {
+              lastS = progress.season;
+              lastE = progress.episode || 1;
+            }
+          } catch(e) {}
+
+          sInput.innerHTML = seasons.map(s => `<option value="${s.season_number}" ${s.season_number == lastS ? 'selected' : ''}>${s.name} (${s.episode_count} Eps)</option>`).join('');
+          
+          const fetchEpisodes = async (seasonNum, targetEp) => {
+            eInput.innerHTML = '<option>Loading Episodes...</option>';
+            try {
+              const sData = await tmdb('/tv/'+id+'/season/'+seasonNum, { language: 'en-US' });
+              const episodes = sData.episodes || [];
+              eInput.innerHTML = episodes.map(ep => `<option value="${ep.episode_number}">Ep ${ep.episode_number}: ${escapeHTML(ep.name)}</option>`).join('');
+              
+              if (targetEp && episodes.find(e => e.episode_number == targetEp)) {
+                eInput.value = targetEp;
+              }
+
+              const updatePreview = () => {
+                const epNum = eInput.value;
+                const ep = episodes.find(e => e.episode_number == epNum);
+                const previewDiv = document.getElementById('episodePreview');
+                if (ep && previewDiv) {
+                  previewDiv.style.display = 'flex';
+                  const imgSrc = ep.still_path ? IMG + ep.still_path : (details.backdrop_path ? IMG + details.backdrop_path : '');
+                  previewDiv.innerHTML = `
+                  <img src="${imgSrc}" style="width:160px; height:90px; object-fit:cover; flex-shrink:0; border-right:1px solid rgba(255,255,255,0.1);" alt="Ep Thumbnail" loading="lazy">
+                  <div style="padding:10px 14px; display:flex; flex-direction:column; justify-content:center;">
+                    <strong style="font-size:0.95rem; color:var(--gold); display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; text-shadow: 0 2px 4px rgba(0,0,0,0.5);">Ep ${ep.episode_number}: ${escapeHTML(ep.name)}</strong>
+                    <span style="font-size:0.8rem; color:rgba(255,255,255,0.7); margin-top:4px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; line-height:1.4;">${escapeHTML(ep.overview || 'No description available.')}</span>
+                    </div>
+                  `;
+                }
+              };
+
+              eInput.onchange = () => { 
+                updatePreview();
+                if(embedEl.querySelector('iframe')) playMovie(); 
+              };
+              updatePreview();
+
+              if(embedEl.querySelector('iframe')) playMovie(); 
+            } catch(err) { eInput.innerHTML = '<option value="1">Episode 1</option>'; }
+          };
+          
+          sInput.onchange = (e) => fetchEpisodes(e.target.value, 1); // Season change होने पर Episode 1
+          
+          fetchEpisodes(lastS, lastE); // लास्ट सेव किया हुआ या पहला एपिसोड लोड करें
+        }
+      }
+    }
     
     document.body.style.overflow = 'hidden';
     
@@ -693,21 +774,21 @@ function closeModal() {
 
 // 2026 के सबसे ज्यादा चलने वाले और एक्टिव सर्वर्स की लिस्ट
 const playerSources = [
-  { name: 'Server 1 (VidSrc To - Ultra Stable)', url: (id, lang) => {
-    // यह पूरे इंटरनेट पर सबसे ज्यादा इस्तेमाल होने वाला और फास्ट सर्ver है
-    return 'https://vidsrc.to/embed/movie/' + id;
+  { name: 'Server 1 (VidSrc To - Ultra Stable)', url: (id, lang, type, s, e) => {
+    // TV aur Movie dono properly support karega
+    return type === 'tv' ? `https://vidsrc.to/embed/tv/${id}/${s}/${e}` : 'https://vidsrc.to/embed/movie/' + id;
   }},
-  { name: 'Server 2 (AutoEmbed - Direct Stream)', url: (id, lang) => {
-    // इसमें इंडिया के नेटवर्क्स पर ब्लॉकेज की समस्या सबसे कम आती है
-    return 'https://autoembed.co/movie/tmdb/' + id;
+  { name: 'Server 2 (AutoEmbed - Direct Stream)', url: (id, lang, type, s, e) => {
+    // इंडिया के नेटवर्क्स पर ब्लॉकेज कम आती है
+    return type === 'tv' ? `https://autoembed.co/tv/tmdb/${id}-${s}-${e}` : 'https://autoembed.co/movie/tmdb/' + id;
   }},
-  { name: 'Server 3 (VidLink Premium UI)', url: (id, lang) => {
-    // इसका इंटरफ़ेस बहुत साफ़ है और इसमें प्लेयर के अंदर सेटिंग्स मिलती है
-    return 'https://vidlink.pro/movie/' + id;
+  { name: 'Server 3 (VidLink Premium UI)', url: (id, lang, type, s, e) => {
+    // इंटरफ़ेस बहुत साफ़ है और प्लेयर के अंदर सेटिंग्स
+    return type === 'tv' ? `https://vidlink.pro/tv/${id}/${s}/${e}` : 'https://vidlink.pro/movie/' + id;
   }},
-  { name: 'Server 4 (VidSrc Pro - 4K/FHD)', url: (id, lang) => {
-    // Embed.su ब्लॉक होने पर यह नया सर्वर इस्तेमाल करें, इसमें भी हाई क्वालिटी (1080p/4K) सपोर्ट है
-    return 'https://vidsrc.pro/embed/movie/' + id;
+  { name: 'Server 4 (MultiEmbed VIP - Advance Player)', url: (id, lang, type, s, e) => {
+    // Completely independent Premium Aggregator (Multiple internal servers + Gear Icon)
+    return type === 'tv' ? `https://multiembed.mov/?video_id=${id}&tmdb=1&s=${s}&e=${e}` : `https://multiembed.mov/?video_id=${id}&tmdb=1`;
   }}
 ];
 let currentSourceIdx = 0;
@@ -779,6 +860,35 @@ function playMovie() {
   loadPlayer(currentModalMovie.id, currentSourceIdx, lang, quality, currentModalMovie.media_type);
 }
 
+function playNextEpisode() {
+  if (!currentModalMovie || currentModalMovie.media_type !== 'tv') return;
+  
+  const sInput = document.getElementById('seasonInput');
+  const eInput = document.getElementById('episodeInput');
+  if (!sInput || !eInput) return;
+
+  const currentS = parseInt(sInput.value, 10);
+  const currentE = parseInt(eInput.value, 10);
+  
+  const nextEpOption = Array.from(eInput.options).find(opt => parseInt(opt.value) === currentE + 1);
+  
+  if (nextEpOption) {
+    // अगले एपिसोड पर जाएं
+    eInput.value = currentE + 1;
+    eInput.dispatchEvent(new Event('change'));
+  } else {
+    // अगर सीज़न खत्म हो गया है, तो अगला सीज़न प्ले करें
+    const seasons = (currentModalMovie.seasons || []).filter(s => s.season_number > 0);
+    const nextSeason = seasons.find(s => s.season_number === currentS + 1);
+    if (nextSeason) {
+      sInput.value = currentS + 1;
+      sInput.dispatchEvent(new Event('change'));
+    } else {
+      showToast("You have reached the latest episode!");
+    }
+  }
+}
+
 function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   const embedEl = document.getElementById('videoEmbed');
   if (!embedEl) return;
@@ -808,6 +918,12 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
     '></iframe>';
 
   let controlsHtml = '<div id="playerControls" class="player-controls">';
+  if (type === 'tv') {
+    controlsHtml += '<button onclick="playNextEpisode()" class="player-chip premium-play-btn" style="padding:0 14px; border-radius:999px; min-height:42px; border:none; display:inline-flex; align-items:center; gap:6px;">' +
+        '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>' +
+        '<span style="font-size:13px; font-weight:800; letter-spacing:0.3px;">Next Ep</span>' +
+      '</button>';
+  }
   controlsHtml += '<button onclick="togglePlayerFS()" class="player-chip player-chip--fs" id="fsBtn">' +
         '<svg class="player-chip__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
           '<path d="M7 3H3v4h2V5h2V3zm10 0v2h2v2h2V3h-4zM5 17H3v4h4v-2H5v-2zm16 0h-2v2h-2v2h4v-4z"></path>' +
@@ -834,7 +950,7 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
     if (ext) ext.parentNode.insertBefore(noticeEl, ext.nextSibling);
   }
 
-  noticeEl.innerHTML = '💡 Tip: Use <strong style="color:var(--red2)">Brave Browser</strong> or <strong style="color:var(--red2)">uBlock Origin</strong> to block ads.';
+  noticeEl.innerHTML = '💡 Tip: Use <strong style="color:var(--red2)">Brave Browser</strong> to block ads.<br><span style="color:var(--gold); display:inline-block; margin-top:6px; font-size:0.9rem; font-weight:500;">🗣️ <strong>Multi-Audio:</strong> Click the ⚙️ Settings or 🎧 Audio icon inside the player to switch to <strong>Hindi</strong>!</span>';
   noticeEl.style.display = 'block';
 
   showToast('PLAY ' + buildSourceLabel(srcIdx) + ' | ' + (lang==='hi' ? 'Hindi' : 'English') + ' | ' + quality.toUpperCase() + (type === 'tv' ? ` | S${s} E${e}` : ''));
@@ -845,6 +961,116 @@ function togglePlayerLang() {
   const nextLang = getSelectedLang() === 'hi' ? 'en' : 'hi';
   setSelectedLang(nextLang);
   loadPlayer(currentModalMovie.id, currentSourceIdx, nextLang, getSelectedQuality(), currentModalMovie.media_type);
+}
+
+async function downloadMovie() {
+  if (!currentModalMovie) return;
+  const title = currentModalMovie.title || currentModalMovie.name || '';
+  const isTV = currentModalMovie.media_type === 'tv';
+  
+  // Remove existing modal if any
+  const existingModal = document.getElementById('dlModal');
+  if (existingModal) existingModal.remove();
+  
+  // 1. Show Loading UI first
+  const dlModalHtml = `
+    <div id="dlModal" style="position:fixed; inset:0; z-index:999999; background:rgba(5,5,8,0.85); backdrop-filter:blur(12px); display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity 0.3s ease;">
+      <div style="background:var(--card); padding:2.5rem; border-radius:20px; border:1px solid rgba(255,255,255,0.1); width:90%; max-width:420px; text-align:center; box-shadow:0 25px 50px rgba(0,0,0,0.6); transform:scale(0.95); transition:transform 0.3s ease;" id="dlModalBox">
+        <div style="display:flex; justify-content:center; margin-bottom:1.5rem;">
+           <div style="width:40px; height:40px; border:3px solid rgba(245,197,24,0.2); border-top-color:var(--gold); border-radius:50%; animation:spin 1s linear infinite;"></div>
+        </div>
+        <h3 style="margin-bottom:0.5rem; font-family:'Bebas Neue', sans-serif; font-size:2rem; color:#fff; letter-spacing:1px;">Searching Torrents...</h3>
+        <p style="font-size:0.9rem; color:var(--text2); line-height:1.5;">Finding the best Magnet links for <strong>${escapeHTML(title)}</strong></p>
+      </div>
+    </div>
+    <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+  `;
+  
+  document.body.insertAdjacentHTML('beforeend', dlModalHtml);
+  
+  setTimeout(() => {
+    const dlModal = document.getElementById('dlModal');
+    const dlModalBox = document.getElementById('dlModalBox');
+    if (dlModal && dlModalBox) {
+      dlModal.style.opacity = '1';
+      dlModalBox.style.transform = 'scale(1)';
+    }
+  }, 10);
+
+  // 2. Fetch Torrents directly from YTS API
+  let torrentsHtml = '';
+  try {
+    if (!isTV) {
+      // Agar IMDB id hai to usse search karein, warna movie ke title se
+      const query = currentModalMovie.imdb_id || title;
+      let ytsData = null;
+      let fetchSuccess = false;
+      
+      // ISP Block Bypass: Multiple YTS Mirrors check karega
+      const mirrors = ['https://yts.mx', 'https://yts.rs', 'https://yts.do', 'https://yify.is'];
+      
+      for (const mirror of mirrors) {
+        try {
+          const ytsRes = await fetch(mirror + '/api/v2/list_movies.json?query_term=' + encodeURIComponent(query));
+          if (ytsRes.ok) {
+            ytsData = await ytsRes.json();
+            fetchSuccess = true;
+            break; // Success milte hi loop rok do
+          }
+        } catch(e) { console.warn("Mirror blocked or failed:", mirror); }
+      }
+      
+      if (!fetchSuccess) throw new Error("All Torrent mirrors blocked by ISP.");
+      
+      if (ytsData && ytsData.data && ytsData.data.movies && ytsData.data.movies.length > 0) {
+        const movie = ytsData.data.movies[0];
+        if (movie.torrents && movie.torrents.length > 0) {
+          torrentsHtml = movie.torrents.map(t => {
+            // Create Magnet URI
+            const magnet = `magnet:?xt=urn:btih:${t.hash}&dn=${encodeURIComponent(movie.title)}&tr=udp://open.demonii.com:1337/announce&tr=udp://tracker.openbittorrent.com:80`;
+            return `
+              <a href="${magnet}" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid var(--gold); margin-bottom:8px;">
+                <span style="display:flex; align-items:center; gap:10px;">
+                  <span style="font-size:1.2rem;">🧲</span>
+                  <strong style="color:#fff; font-size:1rem;">${t.quality} ${t.type.toUpperCase()}</strong>
+                </span>
+                <span style="font-size:0.85rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">${t.size}</span>
+              </a>
+            `;
+          }).join('');
+        }
+      }
+    }
+
+    if (!torrentsHtml) {
+      torrentsHtml = `
+        <div style="padding:15px; background:rgba(230,57,70,0.1); border:1px solid rgba(230,57,70,0.2); border-radius:10px; color:var(--text); font-size:0.9rem;">
+          No direct torrents found for <strong>${escapeHTML(title)}</strong>.<br>
+          <span style="font-size:0.8rem; color:var(--text3); display:block; margin-top:5px;">(TV Shows, Regional movies, or newly released CAM prints might not have open magnet links available).</span>
+        </div>
+      `;
+    }
+  } catch(err) {
+    torrentsHtml = `
+      <div style="padding:15px; background:rgba(230,57,70,0.1); border:1px solid rgba(230,57,70,0.2); border-radius:10px; color:var(--text); font-size:0.9rem;">
+        Error connecting to Torrent network. Your ISP might be blocking it.<br>
+        <a href="https://1337x.to/search/${encodeURIComponent(title)}/1/" target="_blank" style="color:var(--gold); font-weight:bold; display:inline-block; margin-top:8px; text-decoration:none;">👉 Click here to search manually</a>
+      </div>
+    `;
+  }
+
+  // 3. Update Modal UI with fetched Links
+  const box = document.getElementById('dlModalBox');
+  if (box) {
+    box.innerHTML = `
+      <h3 style="margin-bottom:0.5rem; font-family:'Bebas Neue', sans-serif; font-size:2.2rem; color:#fff; letter-spacing:1px;">Available Torrents</h3>
+      <p style="font-size:0.85rem; color:var(--text2); margin-bottom:1.5rem; line-height:1.5;">Make sure you have a Torrent client installed (e.g., uTorrent, BitTorrent, Flud) before clicking.</p>
+      <div style="display:flex; flex-direction:column; max-height:280px; overflow-y:auto; padding-right:5px; text-align:left;">
+        ${torrentsHtml}
+      </div>
+      <button onclick="const m=document.getElementById('dlModal'); m.style.opacity='0'; setTimeout(()=>m.remove(),300);" style="margin-top:1.5rem; width:100%; background:transparent; border:1px solid rgba(255,255,255,0.2); color:var(--text); padding:0.8rem; border-radius:12px; cursor:pointer; font-weight:600; transition:all 0.2s;">Close</button>
+    `;
+  }
 }
 
 function togglePlayerFS() {
@@ -899,6 +1125,18 @@ if (modalOverlay) {
     if (e.target === modalOverlay) closeModal();
   });
 }
+
+// ── ANTI-REDIRECT (FRAME-BUSTING BLOCKER) WITHOUT SANDBOX ──
+// यह कोड मोबाइल या छोटी स्क्रीन पर थर्ड-पार्टी सर्वर्स के ऑटो-रीडायरेक्ट को रोकेगा
+window.addEventListener('beforeunload', (e) => {
+  // अगर मोडल (मूवी प्लेयर) खुला हुआ है, तभी रीडायरेक्ट ब्लॉक करें
+  if (currentModalMovie) {
+    // रीडायरेक्ट रोकें और ब्राउज़र का डिफ़ॉल्ट वार्निंग अलर्ट दिखाएं
+    e.preventDefault();
+    e.returnValue = 'Ads are trying to redirect you. Stay on this page to continue watching.';
+    return e.returnValue;
+  }
+});
 
 document.addEventListener('DOMContentLoaded', () => {
   const langSel = document.getElementById('langSelect');
