@@ -1,10 +1,11 @@
-﻿<!DOCTYPE html>
+﻿﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MovieZone â€” Premium Cinema Experience</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>M</text></svg>">
+<link rel="preconnect" href="https://image.tmdb.org">
 <link rel="preconnect" href="https://fonts.googleapis.com"> 
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700;900&family=Playfair+Display:ital,wght@0,700;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="moviezone.css">
@@ -28,13 +29,14 @@
     <span></span>
   </button>
   <ul class="nav-links" id="navLinks">
-    <li><a href="#" class="active">Home</a></li>
-    <li><a href="#movies-section">Movies</a></li>
-    <li><a href="#upcoming">Upcoming</a></li>
+    <li><a href="#" class="active" onclick="goHome(event)">Home</a></li>
+    <li><a href="#movies-section" onclick="goHome(event)">Movies</a></li>
+    <li><a href="#upcoming" onclick="goHome(event)">Upcoming</a></li>
     <li><a href="#" onclick="filterCat('bollywood')">Bollywood</a></li>
     <li><a href="#" onclick="filterCat('hollywood')">Hollywood</a></li>
     <li><a href="#" onclick="filterCat('south')">South</a></li>
     <li><a href="#" onclick="filterCat('tollywood')">Tollywood</a></li>
+    <li><a href="#" onclick="showWatchlist(event)">Watchlist</a></li>
   </ul>
   <div class="nav-search">
     <span class="search-icon">Search</span>
@@ -60,10 +62,11 @@
       <div class="title-line"></div>
       <h2 id="sectionHeading">ALL MOVIES & SHOWS</h2>
     </div>
-    <a href="#" class="see-all">Browse All -&gt;</a>
+    <a href="#" class="see-all" onclick="viewAllMovies(event)">Browse All -&gt;</a>
   </div>
   <div class="cat-tabs" id="catTabs">
     <button class="cat-tab active" onclick="filterCat('all')">All</button>
+    <button class="cat-tab" onclick="showWatchlist(event)">Watchlist</button>
     <button class="cat-tab" onclick="filterCat('hollywood')">Hollywood</button>
     <button class="cat-tab" onclick="filterCat('bollywood')">Bollywood</button>
     <button class="cat-tab" onclick="filterCat('south')">South Indian</button>
@@ -86,6 +89,9 @@
     <div class="skeleton skeleton-card"></div>
     <div class="skeleton skeleton-card"></div>
   </div>
+  <div style="text-align: center; margin-top: 2.5rem;">
+    <button id="loadMoreMoviesBtn" class="load-more-btn" style="display: none;" onclick="loadMoreMoviesAction()">Load More Movies</button>
+  </div>
 </div>
 
 <div class="section-sep"></div>
@@ -97,13 +103,16 @@
       <div class="title-line"></div>
       <h2>UPCOMING RELEASES</h2>
     </div>
-    <a href="#" class="see-all">View Calendar -&gt;</a>
+    <a href="#" class="see-all" onclick="viewAllUpcoming(event)">View Calendar -&gt;</a>
   </div>
   <div class="upcoming-grid" id="upcomingGrid">
     <div class="skeleton skeleton-card"></div>
     <div class="skeleton skeleton-card"></div>
     <div class="skeleton skeleton-card"></div>
     <div class="skeleton skeleton-card"></div>
+  </div>
+  <div style="text-align: center; margin-top: 2.5rem;">
+    <button id="loadMoreUpcomingBtn" class="load-more-btn" style="display: none;" onclick="loadUpcoming(true)">Load More Upcoming</button>
   </div>
 </section>
 
@@ -176,6 +185,10 @@
               <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
               <span>Play Now</span>
             </button>
+            <button class="btn-watchlist" id="modalWatchlistBtn" onclick="handleWatchlistToggle()">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+              <span>Watchlist</span>
+            </button>
             <div class="select-group">
               <select class="lang-select" id="langSelect">
                 <option value="hi">Hindi</option>
@@ -207,4 +220,3 @@
 <script src="moviezone.js" defer></script>
 </body>
 </html>
-

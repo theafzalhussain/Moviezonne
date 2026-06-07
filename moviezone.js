@@ -1,7 +1,20 @@
-﻿﻿const TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIwYmVlMmRkZWY4NzExZWU1YmQ4YWYzYzZlNzI1M2RlYiIsIm5iZiI6MTc3OTMwNDU2My41NTAwMDAyLCJzdWIiOiI2YTBlMDg3M2QxOTVhYTNkNmJiODFiZjciLCJzY29wZXMiOlsiYXBpX3JlYWQiXSwidmVyc2lvbiI6MX0.vzgUC1CM_C_b5ao824hr9DIO8HP-ibNAlO54BdxhyfI';
-const BASE = 'https://api.themoviedb.org/3';
+﻿﻿const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+// Render par backend deploy karne ke baad jo URL mile, use yahan update karein:
+const LIVE_BACKEND_URL = 'https://apna-backend-name.onrender.com/api/tmdb';
+const BASE = isLocalhost ? 'http://localhost:3000/api/tmdb' : LIVE_BACKEND_URL;
 const IMG = 'https://image.tmdb.org/t/p/w500';
 const IMG_ORIG = 'https://image.tmdb.org/t/p/original';
+
+// ── SECURITY HELPER (XSS Protection) ──
+const escapeHTML = (str) => {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+};
 
 // ── GENRE MAP (defined first so carousel HTML can use it)
 const GENRE_MAP = {
@@ -16,36 +29,74 @@ let currentSlide = 0;
 let carouselMovies = [];
 let autoSlideTimer = null;
 let currentModalMovie = null;
+let watchlist = JSON.parse(localStorage.getItem('mz_watchlist') || '[]');
+let isFullViewMovies = false;
+let isFullViewUpcoming = false;
+let currentMoviePage = 1;
+let currentUpcomingPage = 1;
+let allUpcoming = [];
 
-// ── FETCH helper ── uses plain string URLs, caching added for high speed
+// ── FETCH helper ── Ultra-fast caching with Persistent LocalStorage
 const tmdbCache = new Map();
+const inFlightRequests = new Map(); // Request deduplication
 async function tmdb(endpoint, params) {
   let qs = '';
   if (params && Object.keys(params).length) {
     qs = '?' + Object.entries(params).map(([k,v]) => encodeURIComponent(k)+'='+encodeURIComponent(v)).join('&');
   }
   const urlStr = BASE + endpoint + qs;
-  if (tmdbCache.has(urlStr)) return tmdbCache.get(urlStr);
-  try {
-    const r = await fetch(urlStr, {
-      method: 'GET',
-      headers: { 'Authorization': 'Bearer ' + TOKEN }
-    });
+  
+  if (tmdbCache.has(urlStr)) return tmdbCache.get(urlStr); // Memory cache (instant)
+  
+  // LocalStorage check for instant loads across sessions (24hr expiry)
+  const cacheKey = 'mz_cache_' + urlStr;
+  const localDataStr = localStorage.getItem(cacheKey);
+  if (localDataStr) {
+    try {
+      const parsed = JSON.parse(localDataStr);
+      if (parsed.timestamp && (Date.now() - parsed.timestamp < 24 * 60 * 60 * 1000)) {
+        tmdbCache.set(urlStr, parsed.data);
+        return parsed.data; 
+      }
+    } catch(e) {}
+  }
+
+  if (inFlightRequests.has(urlStr)) return inFlightRequests.get(urlStr);
+
+  const fetchPromise = (async () => {
+    try {
+    const r = await fetch(urlStr); // Token hat gaya kyunki wo ab backend sambhal raha hai
     if (!r.ok) return {};
     const data = await r.json();
     tmdbCache.set(urlStr, data);
+    
+    try {
+      // Safe save to localStorage (ignores QuotaExceededError)
+      localStorage.setItem(cacheKey, JSON.stringify({ timestamp: Date.now(), data }));
+    } catch (err) {}
+    
     return data;
   } catch (e) {
     console.warn('TMDB fetch error:', e);
     return {};
-  }
+    }
+  })();
+  
+  inFlightRequests.set(urlStr, fetchPromise);
+  fetchPromise.finally(() => inFlightRequests.delete(urlStr));
+  return fetchPromise;
 }
 
-// ── INIT ── sequential to avoid race on carousel DOM
+// ── INIT ── Priority-based staggered loading for ultra-fast startup
 async function init() {
-  loadMovies('all');
-  loadUpcoming();
-  await loadCarousel();
+  await loadCarousel(); // 1. Priority: Hero section load karo
+  await loadMovies('all'); // 2. Priority: Initial grid load karo
+  
+  // 3. Delay upcoming fetching until browser is idle
+  setTimeout(() => {
+    if ('requestIdleCallback' in window) requestIdleCallback(() => loadUpcoming());
+    else loadUpcoming();
+  }, 800);
 }
 
 // ── CAROUSEL
@@ -71,58 +122,54 @@ function buildCarousel() {
   track.innerHTML = ''; dots.innerHTML = ''; thumbs.innerHTML = '';
   currentSlide = 0;
 
-  carouselMovies.forEach(function(m, i) {
-    const genres = (m.genre_ids||[]).slice(0,3).map(function(id){ return '<span class="genre-tag">'+(GENRE_MAP[id]||'Movie')+'</span>'; }).join('');
+  const trackFrag = document.createDocumentFragment();
+  const dotsFrag = document.createDocumentFragment();
+  const thumbsFrag = document.createDocumentFragment();
+
+  carouselMovies.forEach((m, i) => {
+    const genres = (m.genre_ids||[]).slice(0,3).map(id => '<span class="genre-tag">'+escapeHTML(GENRE_MAP[id]||'Movie')+'</span>').join('');
     const slide = document.createElement('div');
-    const runtimeId = 'slide-runtime-' + m.id + '-' + i;
     slide.className = 'carousel-slide' + (i === 0 ? ' active' : '');
     slide.innerHTML =
       '<div class="slide-bg" style="background-image:url(\''+IMG_ORIG+m.backdrop_path+'\')"></div>' +
       '<div class="slide-gradient"></div>' +
       '<div class="slide-content">' +
         '<div class="slide-badge">TRENDING NOW</div>' +
-        '<h1 class="slide-title">'+(m.title||m.name||'')+'</h1>' +
+        '<h1 class="slide-title">'+escapeHTML(m.title||m.name||'')+'</h1>' +
         '<div class="slide-meta">' +
           '<div class="slide-rating">RATING '+((m.vote_average||0).toFixed(1))+'</div>' +
           '<span class="slide-year">'+((m.release_date||'').slice(0,4))+'</span>' +
-          '<span class="slide-runtime" id="'+runtimeId+'">RUNTIME <span class="skeleton-text"></span></span>' +
+          '<span class="slide-runtime">LANG '+(m.original_language||'EN').toUpperCase()+'</span>' +
         '</div>' +
         '<div class="slide-genres">'+genres+'</div>' +
-        '<p class="slide-desc">'+(m.overview||'')+'</p>' +
+        '<p class="slide-desc">'+escapeHTML(m.overview||'')+'</p>' +
         '<div class="slide-actions">' +
           '<button class="btn-play" data-id="'+m.id+'">Watch Now</button>' +
           '<button class="btn-info" data-id="'+m.id+'">More Info</button>' +
         '</div>' +
       '</div>';
-    slide.querySelectorAll('[data-id]').forEach(function(btn){
-      btn.addEventListener('click', function(){ openModal(parseInt(btn.dataset.id)); });
+    slide.querySelectorAll('[data-id]').forEach(btn => {
+      btn.addEventListener('click', () => { openModal(parseInt(btn.dataset.id)); });
     });
-    track.appendChild(slide);
-
-    tmdb('/movie/'+m.id, { language: 'en-US' }).then(function(details) {
-      const rtEl = document.getElementById(runtimeId);
-      if (rtEl) {
-        if (details && details.runtime) {
-          rtEl.textContent = 'RUNTIME ' + Math.floor(details.runtime/60) + 'h ' + (details.runtime%60) + 'm';
-        } else {
-          rtEl.textContent = 'RUNTIME N/A';
-        }
-      }
-    });
+    trackFrag.appendChild(slide);
 
     const dot = document.createElement('div');
     dot.className = 'dot' + (i === 0 ? ' active' : '');
     dot.tabIndex = 0;
-    (function(idx){ dot.addEventListener('click', function(){ goToSlide(idx); resetAutoSlide(); }); })(i);
-    dots.appendChild(dot);
+    dot.addEventListener('click', () => { goToSlide(i); resetAutoSlide(); });
+    dotsFrag.appendChild(dot);
 
     const thumb = document.createElement('div');
     thumb.className = 'thumb' + (i === 0 ? ' active' : '');
     thumb.tabIndex = 0;
-    thumb.innerHTML = '<img src="'+IMG+m.poster_path+'" alt="">';
-    (function(idx){ thumb.addEventListener('click', function(){ goToSlide(idx); resetAutoSlide(); }); })(i);
-    thumbs.appendChild(thumb);
+    thumb.innerHTML = '<img src="'+IMG+m.poster_path+'" alt="" decoding="async">';
+    thumb.addEventListener('click', () => { goToSlide(i); resetAutoSlide(); });
+    thumbsFrag.appendChild(thumb);
   });
+
+  track.appendChild(trackFrag);
+  dots.appendChild(dotsFrag);
+  thumbs.appendChild(thumbsFrag);
 
   startAutoSlide();
 }
@@ -146,9 +193,42 @@ function goToSlide(n) {
 
 function startAutoSlide() {
   if (autoSlideTimer) clearInterval(autoSlideTimer);
-  autoSlideTimer = setInterval(function(){ goToSlide(currentSlide + 1); }, 5500);
+  autoSlideTimer = setInterval(() => { goToSlide(currentSlide + 1); }, 5500);
 }
 function resetAutoSlide() { startAutoSlide(); }
+
+// ── BACKGROUND PREFETCH HELPERS (For Instant "Load More") ──
+function prefetchMoviesPage(cat, pageNum) {
+  const pageStr = String(pageNum);
+  const p1 = String(pageNum * 2 - 1);
+  const p2 = String(pageNum * 2);
+  if (cat === 'all') {
+    tmdb('/trending/movie/week', { language: 'en-US', page: pageStr });
+    tmdb('/movie/popular', { language: 'en-US', page: pageStr });
+    tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
+    tmdb('/discover/movie', { with_original_language: 'ta', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
+    tmdb('/discover/movie', { with_original_language: 'te', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
+    tmdb('/movie/now_playing', { language: 'en-US', page: pageStr });
+  } else if (cat === 'hollywood') {
+    tmdb('/movie/popular', { language: 'en-US', page: p1 });
+    tmdb('/movie/popular', { language: 'en-US', page: p2 });
+  } else {
+    const base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: 'en-US' });
+    tmdb('/discover/movie', Object.assign({}, base, { page: p1 }));
+    tmdb('/discover/movie', Object.assign({}, base, { page: p2 }));
+  }
+}
+
+function prefetchUpcomingPage(pageNum) {
+  const p1 = String(pageNum * 2 - 1);
+  const p2 = String(pageNum * 2);
+  const d = new Date(); d.setDate(d.getDate() - 1); const today = d.toISOString().split('T')[0];
+  d.setMonth(d.getMonth() + 3); const future = d.toISOString().split('T')[0];
+  tmdb('/discover/movie', { language: 'en-US', page: p1, sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'en' });
+  tmdb('/discover/movie', { language: 'en-US', page: p2, sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'en' });
+  tmdb('/discover/movie', { language: 'en-US', page: p1, sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'hi', region: 'IN' });
+  tmdb('/discover/movie', { language: 'en-US', page: p2, sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'hi', region: 'IN' });
+}
 
 // ── LOAD MOVIES
 const CAT_PARAMS = {
@@ -163,276 +243,384 @@ const CAT_PARAMS = {
   animation: { with_genres: '16',  sort_by: 'popularity.desc', page: '1' }
 };
 
-async function loadMovies(cat) {
+async function loadMovies(cat, isLoadMore = false) {
   const grid = document.getElementById('movieGrid');
   if (!grid) return;
-  grid.innerHTML = Array(8).fill('<div class="skeleton skeleton-card"></div>').join('');
+  
+  if (!cat) cat = 'all';
+  
+  if (!isLoadMore) {
+    currentMoviePage = 1;
+    grid.innerHTML = Array(8).fill('<div class="skeleton skeleton-card"></div>').join('');
+    allMovies = [];
+  } else {
+    currentMoviePage++;
+    const btn = document.getElementById('loadMoreMoviesBtn');
+    if (btn) btn.innerHTML = 'Loading...';
+  }
 
   let movies = [];
+  const pageStr = String(currentMoviePage);
+  const p1 = String(currentMoviePage * 2 - 1);
+  const p2 = String(currentMoviePage * 2);
+  
   try {
     if (cat === 'all') {
       const res = await Promise.all([
-        tmdb('/trending/movie/week', { language: 'en-US', page: '1' }),
-        tmdb('/movie/popular',      { language: 'en-US', page: '1' }),
-        tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', page: '1', language: 'en-US' }),
-        tmdb('/discover/movie', { with_original_language: 'ta', sort_by: 'popularity.desc', page: '1', language: 'en-US' }),
-        tmdb('/discover/movie', { with_original_language: 'te', sort_by: 'popularity.desc', page: '1', language: 'en-US' }),
-        tmdb('/movie/now_playing',  { language: 'en-US', page: '1' })
+        tmdb('/trending/movie/week', { language: 'en-US', page: pageStr }),
+        tmdb('/movie/popular',      { language: 'en-US', page: pageStr }),
+        tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }),
+        tmdb('/discover/movie', { with_original_language: 'ta', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }),
+        tmdb('/discover/movie', { with_original_language: 'te', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }),
+        tmdb('/movie/now_playing',  { language: 'en-US', page: pageStr })
       ]);
       
       let maxLength = 0;
-      res.forEach(function(r) { if (r.results && r.results.length > maxLength) maxLength = r.results.length; });
+      res.forEach(r => { if (r.results && r.results.length > maxLength) maxLength = r.results.length; });
       for (let i = 0; i < maxLength; i++) {
-        res.forEach(function(r) {
+        res.forEach(r => {
           if (r.results && i < r.results.length) {
             movies.push(r.results[i]);
           }
         });
       }
-      
-      var seen = new Set();
-      movies = movies.filter(function(m){ if(seen.has(m.id)) return false; seen.add(m.id); return true; });
     } else if (cat === 'hollywood') {
       const res = await Promise.all([
-        tmdb('/movie/popular', { language: 'en-US', page: '1' }),
-        tmdb('/movie/popular', { language: 'en-US', page: '2' })
+        tmdb('/movie/popular', { language: 'en-US', page: p1 }),
+        tmdb('/movie/popular', { language: 'en-US', page: p2 })
       ]);
-      res.forEach(function(r){ movies = movies.concat(r.results||[]); });
+      res.forEach(r => { movies = movies.concat(r.results||[]); });
     } else {
-      var base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: 'en-US' });
-      var p1 = Object.assign({}, base, { page: '1' });
-      var p2 = Object.assign({}, base, { page: '2' });
+      const base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: 'en-US' });
       const res = await Promise.all([
-        tmdb('/discover/movie', p1),
-        tmdb('/discover/movie', p2)
+        tmdb('/discover/movie', Object.assign({}, base, { page: p1 })),
+        tmdb('/discover/movie', Object.assign({}, base, { page: p2 }))
       ]);
-      res.forEach(function(r){ movies = movies.concat(r.results||[]); });
+      res.forEach(r => { movies = movies.concat(r.results||[]); });
     }
   } catch(e) { console.warn(e); }
 
-  allMovies = movies.filter(function(m){ return !!m.poster_path; });
-  renderMovies(allMovies.slice(0, 24));
+  movies = movies.filter(m => !!m.poster_path);
+  
+  const existingIds = new Set(allMovies.map(m => m.id));
+  const newMovies = movies.filter(m => { if(existingIds.has(m.id)) return false; existingIds.add(m.id); return true; });
+  allMovies = allMovies.concat(newMovies);
+
+  renderMovies(isLoadMore ? newMovies : (isFullViewMovies ? allMovies : allMovies.slice(0, 24)), isLoadMore);
+  
+  const loadMoreBtn = document.getElementById('loadMoreMoviesBtn');
+  if (loadMoreBtn) {
+    const h = document.getElementById('sectionHeading');
+    if (h && h.textContent === 'MY WATCHLIST') loadMoreBtn.style.display = 'none';
+    else {
+      loadMoreBtn.style.display = (isFullViewMovies && newMovies.length > 0) ? 'inline-block' : 'none';
+      loadMoreBtn.innerHTML = 'Load More Movies';
+    }
+  }
+
+  // Har load ke baad agle page ko chupke se fetch karke ready rakho
+  if (isFullViewMovies) {
+    setTimeout(() => prefetchMoviesPage(cat, currentMoviePage + 1), 800);
+  }
 }
 
-function renderMovies(movies) {
+function renderMovies(movies, append = false) {
   const grid = document.getElementById('movieGrid');
   if (!grid) return;
-  if (!movies.length) {
-    grid.innerHTML = '<div class="no-results"><h3>No movies found</h3><p>Try a different search or category.</p></div>';
-    return;
+  if (!append) {
+    if (!movies.length) {
+      grid.innerHTML = '<div class="no-results"><h3>No movies found</h3><p>Try a different search or category.</p></div>';
+      return;
+    }
+    grid.innerHTML = '';
   }
-  grid.innerHTML = '';
-  movies.forEach(function(m, i) {
-    var rating = m.vote_average ? m.vote_average.toFixed(1) : 'N/A';
-    var year   = (m.release_date || '').slice(0, 4);
-    var votes  = m.vote_count > 999 ? (m.vote_count/1000).toFixed(1)+'K' : (m.vote_count||0);
-    var genres = (m.genre_ids||[]).slice(0,2).map(function(id){ return GENRE_MAP[id]; }).filter(Boolean);
-    var isHot  = m.popularity > 100;
-    var qual   = m.vote_average >= 7.5 ? '4K' : m.vote_average >= 6 ? 'FHD' : 'HD';
-    var card   = document.createElement('div');
-    var runtimeId = 'card-runtime-' + m.id + '-' + i;
+  
+  const fragment = document.createDocumentFragment();
+  const startIndex = append ? (allMovies.length - movies.length) : 0;
+  
+  movies.forEach((m, i) => {
+    const rating = m.vote_average ? m.vote_average.toFixed(1) : 'N/A';
+    const year   = (m.release_date || '').slice(0, 4);
+    const votes  = m.vote_count > 999 ? (m.vote_count/1000).toFixed(1)+'K' : (m.vote_count||0);
+    const genres = (m.genre_ids||[]).slice(0,2).map(id => GENRE_MAP[id]).filter(Boolean);
+    const isHot  = m.popularity > 100;
+    const qual   = m.vote_average >= 7.5 ? '4K' : m.vote_average >= 6 ? 'FHD' : 'HD';
+    const card   = document.createElement('div');
     card.className = 'movie-card';
     card.tabIndex = 0;
-    card.style.animationDelay = (i * 0.04) + 's';
+    card.style.animationDelay = ((i % 24) * 0.04) + 's';
     card.innerHTML =
       '<div class="card-poster">' +
-        '<img src="'+IMG+m.poster_path+'" alt="'+(m.title||'')+'" loading="lazy">' +
+        '<img src="'+IMG+m.poster_path+'" alt="'+escapeHTML(m.title||'')+'" loading="lazy" decoding="async">' +
         '<div class="card-quality">'+qual+'</div>' +
         (isHot ? '<div class="card-hot">HOT</div>' : '') +
         '<div class="card-overlay"><button class="card-play-btn">&#9654;</button></div>' +
       '</div>' +
       '<div class="card-info">' +
-        '<div class="card-title">'+(m.title||m.name||'')+'</div>' +
+        '<div class="card-title">'+escapeHTML(m.title||m.name||'')+'</div>' +
         '<div class="card-meta">' +
           '<div class="card-rating">RATING '+rating+'</div>' +
           '<div class="card-year">YEAR '+year+'</div>' +
         '</div>' +
-        '<div class="card-meta"><div class="card-runtime" id="'+runtimeId+'">RUNTIME <span class="skeleton-text"></span></div></div>' +
-        '<div class="card-genres">'+genres.map(function(g){ return '<span class="card-genre">'+g+'</span>'; }).join('')+'</div>' +
+        '<div class="card-meta"><div class="card-runtime">LANG '+(m.original_language||'EN').toUpperCase()+'</div></div>' +
+        '<div class="card-genres">'+genres.map(g => '<span class="card-genre">'+escapeHTML(g)+'</span>').join('')+'</div>' +
       '</div>';
-    card.addEventListener('click', (function(mid){ return function(){ openModal(mid); }; })(m.id));
-    grid.appendChild(card);
+    card.addEventListener('click', () => { openModal(m.id); });
+    fragment.appendChild(card);
 
-    tmdb('/movie/'+m.id, { language: 'en-US' }).then(function(details) {
-      var rtEl = document.getElementById(runtimeId);
-      if (rtEl) {
-        if (details && details.runtime) {
-          rtEl.textContent = 'RUNTIME ' + Math.floor(details.runtime/60) + 'h ' + (details.runtime%60) + 'm';
-        } else {
-          rtEl.textContent = 'RUNTIME N/A';
-        }
-      }
-    });
   });
+  grid.appendChild(fragment);
 }
 
 // CATEGORY FILTER
-var CAT_HEADINGS = {
+const CAT_HEADINGS = {
   all:'ALL MOVIES & SHOWS', hollywood:'HOLLYWOOD', bollywood:'BOLLYWOOD',
   south:'SOUTH INDIAN', tollywood:'TOLLYWOOD', action:'ACTION',
   comedy:'COMEDY', thriller:'THRILLER', romance:'ROMANCE',
   scifi:'SCI-FI', animation:'ANIMATION'
 };
 function filterCat(cat) {
-  document.querySelectorAll('.cat-tab').forEach(function(t){ t.classList.remove('active'); });
-  var tabs = document.querySelectorAll('.cat-tab');
-  tabs.forEach(function(t){ if ((t.getAttribute('onclick')||'').indexOf("'"+cat+"'") !== -1) t.classList.add('active'); });
-  var h = document.getElementById('sectionHeading');
+  document.querySelectorAll('.cat-tab').forEach(t => { t.classList.remove('active'); });
+  const tabs = document.querySelectorAll('.cat-tab');
+  tabs.forEach(t => { if ((t.getAttribute('onclick')||'').indexOf("'"+cat+"'") !== -1) t.classList.add('active'); });
+  const h = document.getElementById('sectionHeading');
   if (h) h.textContent = CAT_HEADINGS[cat] || 'MOVIES';
-  var sec = document.getElementById('movies-section');
+  const sec = document.getElementById('movies-section');
   if (sec) sec.scrollIntoView({ behavior: 'smooth' });
   loadMovies(cat);
 }
 
+function loadMoreMoviesAction() {
+  const activeTab = document.querySelector('.cat-tab.active');
+  let cat = 'all';
+  if (activeTab && activeTab.getAttribute('onclick')?.includes('filterCat')) {
+    const match = activeTab.getAttribute('onclick').match(/'([^']+)'/);
+    if (match) cat = match[1];
+  }
+  loadMovies(cat, true);
+}
+
+// ── WATCHLIST LOGIC ──
+function handleWatchlistToggle() {
+  if (!currentModalMovie) return;
+  const idx = watchlist.findIndex(m => m.id === currentModalMovie.id);
+  if (idx > -1) {
+    watchlist.splice(idx, 1);
+    showToast('Removed from Watchlist');
+  } else {
+    watchlist.push(currentModalMovie);
+    showToast('Added to Watchlist');
+  }
+  localStorage.setItem('mz_watchlist', JSON.stringify(watchlist));
+  updateModalWatchlistBtn(currentModalMovie.id);
+  
+  // Update UI immediately if user is viewing the Watchlist tab
+  const h = document.getElementById('sectionHeading');
+  if (h && h.textContent === 'MY WATCHLIST') {
+    renderMovies(watchlist);
+  }
+}
+function updateModalWatchlistBtn(id) {
+  const btn = document.getElementById('modalWatchlistBtn');
+  if (!btn) return;
+  const isSaved = watchlist.some(m => m.id === id);
+  btn.innerHTML = isSaved 
+    ? '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg><span>Saved</span>' 
+    : '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg><span>Watchlist</span>';
+  btn.classList.toggle('active', isSaved);
+}
+function showWatchlist(e) {
+  if (e) e.preventDefault();
+  document.querySelectorAll('.cat-tab').forEach(t => t.classList.remove('active'));
+  const tabs = document.querySelectorAll('.cat-tab');
+  tabs.forEach(t => { if ((t.getAttribute('onclick')||'').includes('showWatchlist')) t.classList.add('active'); });
+  const h = document.getElementById('sectionHeading');
+  if (h) h.textContent = 'MY WATCHLIST';
+  const sec = document.getElementById('movies-section');
+  if (sec) sec.scrollIntoView({ behavior: 'smooth' });
+  renderMovies(watchlist);
+  const loadMoreBtn = document.getElementById('loadMoreMoviesBtn');
+  if (loadMoreBtn) loadMoreBtn.style.display = 'none';
+}
+
 // ── UPCOMING
-async function loadUpcoming() {
+async function loadUpcoming(isLoadMore = false) {
   const grid = document.getElementById('upcomingGrid');
   if (!grid) return;
+  
+  if (!isLoadMore) {
+    currentUpcomingPage = 1;
+    grid.innerHTML = Array(4).fill('<div class="skeleton skeleton-card"></div>').join('');
+    allUpcoming = [];
+  } else {
+    currentUpcomingPage++;
+    const btn = document.getElementById('loadMoreUpcomingBtn');
+    if (btn) btn.innerHTML = 'Loading...';
+  }
+
+  const p1 = String(currentUpcomingPage * 2 - 1);
+  const p2 = String(currentUpcomingPage * 2);
+
   try {
-    var d = new Date();
+    const d = new Date();
     d.setDate(d.getDate() - 1);
-    var today = d.toISOString().split('T')[0];
+    const today = d.toISOString().split('T')[0];
     d.setMonth(d.getMonth() + 3);
-    var future = d.toISOString().split('T')[0];
+    const future = d.toISOString().split('T')[0];
 
     const res = await Promise.all([
-      tmdb('/discover/movie', { language: 'en-US', page: '1', sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'en' }),
-      tmdb('/discover/movie', { language: 'en-US', page: '2', sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'en' }),
-      tmdb('/discover/movie', { language: 'en-US', page: '1', sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'hi', region: 'IN' }),
-      tmdb('/discover/movie', { language: 'en-US', page: '2', sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'hi', region: 'IN' })
+      tmdb('/discover/movie', { language: 'en-US', page: p1, sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'en' }),
+      tmdb('/discover/movie', { language: 'en-US', page: p2, sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'en' }),
+      tmdb('/discover/movie', { language: 'en-US', page: p1, sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'hi', region: 'IN' }),
+      tmdb('/discover/movie', { language: 'en-US', page: p2, sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'hi', region: 'IN' })
     ]);
-    var movies = [];
-    res.forEach(function(r){ movies = movies.concat(r.results||[]); });
+    let movies = [];
+    res.forEach(r => { movies = movies.concat(r.results||[]); });
     
-    var realToday = new Date().toISOString().split('T')[0];
-    movies = movies.filter(function(m){ return m.poster_path && m.backdrop_path && m.release_date && m.release_date >= realToday; });
+    const realToday = new Date().toISOString().split('T')[0];
+    movies = movies.filter(m => m.poster_path && m.backdrop_path && m.release_date && m.release_date >= realToday);
     
-    var seen = new Set();
-    movies = movies.filter(function(m) {
-      if (seen.has(m.id)) return false;
-      seen.add(m.id);
-      return true;
-    });
+    const existingIds = new Set(allUpcoming.map(m => m.id));
+    const newMovies = movies.filter(m => { if(existingIds.has(m.id)) return false; existingIds.add(m.id); return true; });
+    newMovies.sort((a, b) => a.release_date.localeCompare(b.release_date));
+    
+    allUpcoming = allUpcoming.concat(newMovies);
 
-    movies.sort(function(a, b){ return a.release_date.localeCompare(b.release_date); });
-    
-    grid.innerHTML = '';
-    movies.slice(0, 12).forEach(function(m) {
-      var dateStr = 'Coming Soon';
+    if (!isLoadMore) grid.innerHTML = '';
+    const fragment = document.createDocumentFragment();
+
+    const moviesToRender = isLoadMore ? newMovies : (isFullViewUpcoming ? allUpcoming : allUpcoming.slice(0, 12));
+
+    moviesToRender.forEach((m, i) => {
+      let dateStr = 'Coming Soon';
       if (m.release_date) {
         try { dateStr = new Date(m.release_date).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }); } catch(e){}
       }
-      var genres = (m.genre_ids||[]).slice(0,2).map(function(id){ return GENRE_MAP[id]; }).filter(Boolean);
-      var card = document.createElement('div');
+      const genres = (m.genre_ids||[]).slice(0,2).map(id => GENRE_MAP[id]).filter(Boolean);
+      const card = document.createElement('div');
       card.className = 'upcoming-card';
       card.tabIndex = 0;
-      card.style.animationDelay = (movies.indexOf(m) * 0.08) + 's';
+      card.style.animationDelay = ((i % 12) * 0.08) + 's';
       card.innerHTML =
         '<div class="upcoming-poster">' +
-          '<img src="'+IMG+m.backdrop_path+'" alt="'+(m.title||'')+'" loading="lazy">' +
+          '<img src="'+IMG+m.backdrop_path+'" alt="'+escapeHTML(m.title||'')+'" loading="lazy" decoding="async">' +
           '<div class="upcoming-poster-overlay"></div>' +
           '<div class="upcoming-release-badge">RELEASE '+dateStr+'</div>' +
         '</div>' +
         '<div class="upcoming-info">' +
-          '<div class="upcoming-title">'+(m.title||'')+'</div>' +
+          '<div class="upcoming-title">'+escapeHTML(m.title||'')+'</div>' +
           '<div class="upcoming-meta">' +
             '<div class="card-rating" style="font-size:0.73rem">RATING '+((m.vote_average||0).toFixed(1))+'</div>' +
             '<div class="card-year" style="font-size:0.71rem">YEAR '+((m.release_date||'').slice(0,4))+'</div>' +
-            genres.map(function(g){ return '<span class="card-genre">'+g+'</span>'; }).join('') +
+            genres.map(g => '<span class="card-genre">'+escapeHTML(g)+'</span>').join('') +
           '</div>' +
-          '<p class="upcoming-desc">'+(m.overview||'')+'</p>' +
+          '<p class="upcoming-desc">'+escapeHTML(m.overview||'')+'</p>' +
         '</div>';
-      card.addEventListener('click', (function(mid){ return function(){ openModal(mid); }; })(m.id));
-      grid.appendChild(card);
+      card.addEventListener('click', () => { openModal(m.id); });
+      fragment.appendChild(card);
     });
+    grid.appendChild(fragment);
+    
+    const loadMoreBtn = document.getElementById('loadMoreUpcomingBtn');
+    if (loadMoreBtn) {
+      loadMoreBtn.style.display = (isFullViewUpcoming && newMovies.length > 0) ? 'inline-block' : 'none';
+      loadMoreBtn.innerHTML = 'Load More Upcoming';
+    }
   } catch(e) { console.warn(e); }
+
+  // Har load ke baad agle upcoming page ko chupke se fetch karke ready rakho
+  if (isFullViewUpcoming) {
+    setTimeout(() => prefetchUpcomingPage(currentUpcomingPage + 1), 800);
+  }
 }
 
 // SEARCH
-var searchTimer = null;
-var searchInput = document.getElementById('searchInput');
+let searchTimer = null;
+const searchInput = document.getElementById('searchInput');
 if (searchInput) {
-  searchInput.addEventListener('input', function(e) {
+  searchInput.addEventListener('input', (e) => {
     clearTimeout(searchTimer);
-    var q = e.target.value.trim();
+    const q = e.target.value.trim();
     if (!q) { closeDropdown(); return; }
-    searchTimer = setTimeout(function(){ searchDropdownFill(q); }, 380);
+    searchTimer = setTimeout(() => { searchDropdownFill(q); }, 380);
   });
-  searchInput.addEventListener('keydown', function(e) {
+  searchInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
-      var q = e.target.value.trim();
+      const q = e.target.value.trim();
       if (q) searchAndDisplay(q);
       closeDropdown();
     }
   });
 }
-document.addEventListener('click', function(e) {
+document.addEventListener('click', (e) => {
   if (!e.target.closest('.nav-search')) closeDropdown();
 });
 
 async function searchDropdownFill(q) {
-  var data = await tmdb('/search/movie', { query: q, language: 'en-US', page: '1' });
-  var movies = (data.results||[]).slice(0, 6);
-  var dd = document.getElementById('searchDropdown');
+  const data = await tmdb('/search/movie', { query: q, language: 'en-US', page: '1' });
+  const movies = (data.results||[]).slice(0, 6);
+  const dd = document.getElementById('searchDropdown');
   if (!dd) return;
   if (!movies.length) {
     dd.innerHTML = '<div class="search-result-item"><div class="search-result-info"><h4>No results</h4></div></div>';
     dd.classList.add('open'); return;
   }
   dd.innerHTML = '';
-  movies.forEach(function(m) {
-    var item = document.createElement('div');
+  movies.forEach(m => {
+    const item = document.createElement('div');
     item.className = 'search-result-item';
     item.tabIndex = 0;
     item.innerHTML =
-      '<img src="'+(m.poster_path ? IMG+m.poster_path : 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2260%22><rect width=%2242%22 height=%2260%22 fill=%22%23222%22/></svg>')+'" alt="" loading="lazy">' +
-      '<div class="search-result-info"><h4>'+(m.title||'')+'</h4><p>'+((m.release_date||'').slice(0,4))+' | RATING '+((m.vote_average||0).toFixed(1))+'</p></div>';
-    item.addEventListener('click', (function(mid){ return function(){ openModal(mid); closeDropdown(); }; })(m.id));
+      '<img src="'+(m.poster_path ? IMG+m.poster_path : 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2260%22><rect width=%2242%22 height=%2260%22 fill=%22%23222%22/></svg>')+'" alt="" loading="lazy" decoding="async">' +
+      '<div class="search-result-info"><h4>'+escapeHTML(m.title||'')+'</h4><p>'+((m.release_date||'').slice(0,4))+' | RATING '+((m.vote_average||0).toFixed(1))+'</p></div>';
+    item.addEventListener('click', () => { openModal(m.id); closeDropdown(); });
     dd.appendChild(item);
   });
   dd.classList.add('open');
 }
 
 async function searchAndDisplay(q) {
-  var grid = document.getElementById('movieGrid');
+  const grid = document.getElementById('movieGrid');
   if (!grid) return;
   grid.innerHTML = Array(8).fill('<div class="skeleton skeleton-card"></div>').join('');
-  var h = document.getElementById('sectionHeading');
-  if (h) h.textContent = 'RESULTS FOR "' + q.toUpperCase() + '"';
-  var sec = document.getElementById('movies-section');
+  const h = document.getElementById('sectionHeading');
+  if (h) h.textContent = 'RESULTS FOR "' + escapeHTML(q.toUpperCase()) + '"';
+  const sec = document.getElementById('movies-section');
   if (sec) sec.scrollIntoView({ behavior: 'smooth' });
-  var data = await tmdb('/search/movie', { query: q, language: 'en-US', page: '1', include_adult: 'false' });
-  var movies = (data.results||[]).filter(function(m){ return !!m.poster_path; });
+  const data = await tmdb('/search/movie', { query: q, language: 'en-US', page: '1', include_adult: 'false' });
+  const movies = (data.results||[]).filter(m => !!m.poster_path);
   allMovies = movies;
   renderMovies(movies);
+  const loadMoreBtn = document.getElementById('loadMoreMoviesBtn');
+  if (loadMoreBtn) loadMoreBtn.style.display = 'none';
 }
 
 function closeDropdown() {
-  var dd = document.getElementById('searchDropdown');
+  const dd = document.getElementById('searchDropdown');
   if (dd) dd.classList.remove('open');
 }
 
 // MODAL
 async function openModal(id) {
-  var overlay = document.getElementById('modal-overlay');
+  const overlay = document.getElementById('modal-overlay');
   if (!overlay) return;
   try {
-    var details = await tmdb('/movie/'+id, { language: 'en-US' });
+    const details = await tmdb('/movie/'+id, { language: 'en-US' });
     currentModalMovie = details;
-    var bgEl = document.getElementById('modalBg');
+    const bgEl = document.getElementById('modalBg');
     if (bgEl) bgEl.src = details.backdrop_path ? IMG_ORIG + details.backdrop_path : '';
-    var titleEl = document.getElementById('modalTitle');
+    const titleEl = document.getElementById('modalTitle');
     if (titleEl) titleEl.textContent = details.title || details.name || '';
-    var descEl = document.getElementById('modalDesc');
+    const descEl = document.getElementById('modalDesc');
     if (descEl) descEl.textContent = details.overview || '';
-    var runtime = details.runtime ? (Math.floor(details.runtime/60)+'h '+(details.runtime%60)+'m') : 'N/A';
-    var genres  = (details.genres||[]).slice(0,3).map(function(g){ return '<span class="genre-tag">'+g.name+'</span>'; }).join('');
-    var metaEl  = document.getElementById('modalMeta');
+    const runtime = details.runtime ? (Math.floor(details.runtime/60)+'h '+(details.runtime%60)+'m') : 'N/A';
+    const genres  = (details.genres||[]).slice(0,3).map(g => '<span class="genre-tag">'+escapeHTML(g.name)+'</span>').join('');
+    const metaEl  = document.getElementById('modalMeta');
     if (metaEl) metaEl.innerHTML =
       '<div class="card-rating" style="font-size:0.9rem">RATING '+((details.vote_average||0).toFixed(1))+' ('+(details.vote_count||0).toLocaleString()+')</div>' +
       '<div class="card-year" style="font-size:0.85rem">YEAR '+((details.release_date||'').slice(0,4))+'</div>' +
       '<div class="card-runtime" style="font-size:0.85rem">RUNTIME '+runtime+'</div>' + genres;
-    var embedEl = document.getElementById('videoEmbed');
+    const embedEl = document.getElementById('videoEmbed');
     if (embedEl) embedEl.innerHTML =
       '<div class="video-placeholder">' +
         '<button class="play-big" id="playBigBtn" aria-label="Play" title="Play">' +
@@ -442,24 +630,26 @@ async function openModal(id) {
         '</button>' +
         '<p>Select language & quality, then press play</p>' +
       '</div>';
-    var pb = document.getElementById('playBigBtn');
+    const pb = document.getElementById('playBigBtn');
     if (pb) pb.addEventListener('click', playMovie);
     overlay.classList.add('open');
     try { setSelectedLang(getSelectedLang()); } catch(e) {}
     try { setSelectedQuality(getSelectedQuality()); } catch(e) {}
     
-    var ls = document.getElementById('langSelect');
-    if (ls) ls.onchange = function() { if(embedEl.querySelector('iframe')) playMovie(); };
+    const ls = document.getElementById('langSelect');
+    if (ls) ls.onchange = () => { if(embedEl.querySelector('iframe')) playMovie(); };
     
     document.body.style.overflow = 'hidden';
+    
+    updateModalWatchlistBtn(id);
   } catch(e) { console.warn('Modal error', e); }
 }
 
 function closeModal() {
-  var overlay = document.getElementById('modal-overlay');
+  const overlay = document.getElementById('modal-overlay');
   if (overlay) overlay.classList.remove('open');
   document.body.style.overflow = '';
-  var embedEl = document.getElementById('videoEmbed');
+  const embedEl = document.getElementById('videoEmbed');
   if (embedEl) {
     embedEl.innerHTML = '';
     embedEl.classList.remove('fullscreen-mode');
@@ -469,74 +659,74 @@ function closeModal() {
 }
 
 // 2026 के सबसे ज्यादा चलने वाले और एक्टिव सर्वर्स की लिस्ट
-var playerSources = [
-  { name: 'Server 1 (VidSrc To - Ultra Stable)', url: function(id, lang) {
+const playerSources = [
+  { name: 'Server 1 (VidSrc To - Ultra Stable)', url: (id, lang) => {
     // यह पूरे इंटरनेट पर सबसे ज्यादा इस्तेमाल होने वाला और फास्ट सर्ver है
     return 'https://vidsrc.to/embed/movie/' + id;
   }},
-  { name: 'Server 2 (AutoEmbed - Direct Stream)', url: function(id, lang) {
+  { name: 'Server 2 (AutoEmbed - Direct Stream)', url: (id, lang) => {
     // इसमें इंडिया के नेटवर्क्स पर ब्लॉकेज की समस्या सबसे कम आती है
     return 'https://autoembed.co/movie/tmdb/' + id;
   }},
-  { name: 'Server 3 (VidLink Premium UI)', url: function(id, lang) {
+  { name: 'Server 3 (VidLink Premium UI)', url: (id, lang) => {
     // इसका इंटरफ़ेस बहुत साफ़ है और इसमें प्लेयर के अंदर सेटिंग्स मिलती है
     return 'https://vidlink.pro/movie/' + id;
   }},
-  { name: 'Server 4 (VidSrc Pro - 4K/FHD)', url: function(id, lang) {
+  { name: 'Server 4 (VidSrc Pro - 4K/FHD)', url: (id, lang) => {
     // Embed.su ब्लॉक होने पर यह नया सर्वर इस्तेमाल करें, इसमें भी हाई क्वालिटी (1080p/4K) सपोर्ट है
     return 'https://vidsrc.pro/embed/movie/' + id;
   }}
 ];
-var currentSourceIdx = 0;
-var isPlayerFullscreen = false;
+let currentSourceIdx = 0;
+let isPlayerFullscreen = false;
 
 function renderExternalSources(id, srcIdx, lang) {
-  var ext = document.getElementById('externalSources');
+  const ext = document.getElementById('externalSources');
   if (!ext) return;
-  var html = playerSources.map(function(s, i){
-    return '<button class="player-chip player-chip--source" data-srcidx="'+i+'">'+s.name+'</button>';
-  }).join('');
+  const html = playerSources.map((s, i) => 
+    '<button class="player-chip player-chip--source" data-srcidx="'+i+'">'+escapeHTML(s.name)+'</button>'
+  ).join('');
   ext.innerHTML = html;
-  var srcButtons = ext.querySelectorAll('.player-chip--source');
-  srcButtons.forEach(function(btn){
-    btn.addEventListener('click', function(){
-      var idx = parseInt(btn.getAttribute('data-srcidx')||'0', 10);
+  const srcButtons = ext.querySelectorAll('.player-chip--source');
+  srcButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.getAttribute('data-srcidx')||'0', 10);
       loadPlayer(id, idx, lang);
-      srcButtons.forEach(function(b){ b.classList.remove('active'); });
+      srcButtons.forEach(b => { b.classList.remove('active'); });
       btn.classList.add('active');
     });
   });
   if (typeof srcIdx === 'number') {
-    srcButtons.forEach(function(b){ b.classList.remove('active'); });
-    var activeBtn = ext.querySelector('.player-chip--source[data-srcidx="'+srcIdx+'"]');
+    srcButtons.forEach(b => { b.classList.remove('active'); });
+    const activeBtn = ext.querySelector('.player-chip--source[data-srcidx="'+srcIdx+'"]');
     if (activeBtn) activeBtn.classList.add('active');
   }
 }
 
 function getSelectedLang() {
-  var select = document.getElementById('langSelect');
+  const select = document.getElementById('langSelect');
   return select ? select.value : (localStorage.getItem('moviezone.playerLang') || 'en');
 }
 
 function setSelectedLang(lang) {
-  var select = document.getElementById('langSelect');
+  const select = document.getElementById('langSelect');
   if (select) select.value = lang;
   localStorage.setItem('moviezone.playerLang', lang);
 }
 
 function getSelectedQuality() {
-  var select = document.getElementById('qualitySelect');
+  const select = document.getElementById('qualitySelect');
   return select ? select.value : (localStorage.getItem('moviezone.playerQuality') || 'fhd');
 }
 
 function setSelectedQuality(quality) {
-  var select = document.getElementById('qualitySelect');
+  const select = document.getElementById('qualitySelect');
   if (select) select.value = quality;
   localStorage.setItem('moviezone.playerQuality', quality);
 }
 
 function getSelectedSourceIdx() {
-  var saved = parseInt(localStorage.getItem('moviezone.playerSourceIdx') || '0', 10);
+  const saved = parseInt(localStorage.getItem('moviezone.playerSourceIdx') || '0', 10);
   return isNaN(saved) ? 0 : Math.max(0, Math.min(saved, playerSources.length - 1));
 }
 
@@ -551,13 +741,13 @@ function buildSourceLabel(srcIdx) {
 function playMovie() {
   if (!currentModalMovie) return;
   currentSourceIdx = getSelectedSourceIdx();
-  var lang = getSelectedLang();
-  var quality = getSelectedQuality();
+  const lang = getSelectedLang();
+  const quality = getSelectedQuality();
   loadPlayer(currentModalMovie.id, currentSourceIdx, lang, quality);
 }
 
 function loadPlayer(id, srcIdx, lang, quality) {
-  var embedEl = document.getElementById('videoEmbed');
+  const embedEl = document.getElementById('videoEmbed');
   if (!embedEl) return;
   currentSourceIdx = srcIdx;
   setSelectedSourceIdx(srcIdx);
@@ -565,7 +755,7 @@ function loadPlayer(id, srcIdx, lang, quality) {
   setSelectedLang(lang);
   quality = quality || getSelectedQuality();
   setSelectedQuality(quality);
-  var src = playerSources[srcIdx].url(id, lang);
+  const src = playerSources[srcIdx].url(id, lang);
 
   embedEl.innerHTML =
     '<iframe ' +
@@ -577,7 +767,7 @@ function loadPlayer(id, srcIdx, lang, quality) {
       'loading="lazy"' +
     '></iframe>';
 
-  var controlsHtml = '<div id="playerControls" class="player-controls">';
+  let controlsHtml = '<div id="playerControls" class="player-controls">';
   controlsHtml += '<button onclick="togglePlayerFS()" class="player-chip player-chip--fs" id="fsBtn">' +
         '<svg class="player-chip__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
           '<path d="M7 3H3v4h2V5h2V3zm10 0v2h2v2h2V3h-4zM5 17H3v4h4v-2H5v-2zm16 0h-2v2h-2v2h4v-4z"></path>' +
@@ -586,7 +776,7 @@ function loadPlayer(id, srcIdx, lang, quality) {
       '</button>' +
     '</div>';
 
-  var existingControls = document.getElementById('playerControls');
+  const existingControls = document.getElementById('playerControls');
   if (existingControls) {
     existingControls.outerHTML = controlsHtml;
   } else {
@@ -600,28 +790,28 @@ function loadPlayer(id, srcIdx, lang, quality) {
 
 function togglePlayerLang() {
   if (!currentModalMovie) return;
-  var nextLang = getSelectedLang() === 'hi' ? 'en' : 'hi';
+  const nextLang = getSelectedLang() === 'hi' ? 'en' : 'hi';
   setSelectedLang(nextLang);
   loadPlayer(currentModalMovie.id, currentSourceIdx, nextLang, getSelectedQuality());
 }
 
 function togglePlayerFS() {
-  var embedEl = document.getElementById('videoEmbed');
-  var btn = document.getElementById('fsBtn');
+  const embedEl = document.getElementById('videoEmbed');
+  const btn = document.getElementById('fsBtn');
   if (!embedEl) return;
 
   if (!document.fullscreenElement && !document.webkitFullscreenElement && !isPlayerFullscreen) {
-    var target = embedEl;
+    const target = embedEl;
     try {
-      var fsResult = null;
+      let fsResult = null;
       if (target.requestFullscreen) fsResult = target.requestFullscreen();
       else if (target.webkitRequestFullscreen) fsResult = target.webkitRequestFullscreen();
       
-      Promise.resolve(fsResult).then(function() {
+      Promise.resolve(fsResult).then(() => {
         if (screen.orientation && screen.orientation.lock) {
-          return screen.orientation.lock('landscape').catch(function(){});
+          return screen.orientation.lock('landscape').catch(() => {});
         }
-      }).catch(function(){});
+      }).catch(() => {});
     } catch (err) {
       isPlayerFullscreen = true;
       embedEl.classList.add('fullscreen-mode');
@@ -639,7 +829,7 @@ function togglePlayerFS() {
   }
 }
 
-document.addEventListener('fullscreenchange', function() {
+document.addEventListener('fullscreenchange', () => {
   if (!document.fullscreenElement && !document.webkitFullscreenElement) {
     if (screen.orientation && screen.orientation.unlock) {
       try { screen.orientation.unlock(); } catch(e){}
@@ -651,41 +841,41 @@ function exitFSOnEsc(e) {
   if (e.key === 'Escape') togglePlayerFS();
 }
 
-var modalOverlay = document.getElementById('modal-overlay');
+const modalOverlay = document.getElementById('modal-overlay');
 if (modalOverlay) {
-  modalOverlay.addEventListener('click', function(e) {
+  modalOverlay.addEventListener('click', (e) => {
     if (e.target === modalOverlay) closeModal();
   });
 }
 
-document.addEventListener('DOMContentLoaded', function() {
-  var langSel = document.getElementById('langSelect');
-  if (langSel) langSel.addEventListener('change', function(e){ setSelectedLang(e.target.value); });
-  var qualSel = document.getElementById('qualitySelect');
-  if (qualSel) qualSel.addEventListener('change', function(e){ setSelectedQuality(e.target.value); });
+document.addEventListener('DOMContentLoaded', () => {
+  const langSel = document.getElementById('langSelect');
+  if (langSel) langSel.addEventListener('change', (e) => { setSelectedLang(e.target.value); });
+  const qualSel = document.getElementById('qualitySelect');
+  if (qualSel) qualSel.addEventListener('change', (e) => { setSelectedQuality(e.target.value); });
   
   // Make HTML static category tabs focusable for TV
-  document.querySelectorAll('.cat-tab').forEach(function(t){ t.tabIndex = 0; });
+  document.querySelectorAll('.cat-tab').forEach(t => { t.tabIndex = 0; });
 });
 
-window.addEventListener('scroll', function() {
-  var nb = document.getElementById('navbar');
+window.addEventListener('scroll', () => {
+  const nb = document.getElementById('navbar');
   if (nb) nb.classList.toggle('scrolled', window.scrollY > 60);
 });
 
-var hamburgerBtn = document.getElementById('hamburgerBtn');
+const hamburgerBtn = document.getElementById('hamburgerBtn');
 if (hamburgerBtn) {
-  hamburgerBtn.addEventListener('click', function() {
-    var navLinks = document.querySelector('.nav-links');
+  hamburgerBtn.addEventListener('click', () => {
+    const navLinks = document.querySelector('.nav-links');
     navLinks.classList.toggle('open');
     hamburgerBtn.classList.toggle('open');
     hamburgerBtn.setAttribute('aria-expanded', navLinks.classList.contains('open') ? 'true' : 'false');
     document.body.style.overflow = navLinks.classList.contains('open') ? 'hidden' : '';
   });
 }
-document.querySelectorAll('.nav-links a').forEach(function(link) {
-  link.addEventListener('click', function() {
-    var navLinks = document.querySelector('.nav-links');
+document.querySelectorAll('.nav-links a').forEach(link => {
+  link.addEventListener('click', () => {
+    const navLinks = document.querySelector('.nav-links');
     navLinks.classList.remove('open');
     if (hamburgerBtn) {
       hamburgerBtn.classList.remove('open');
@@ -696,18 +886,18 @@ document.querySelectorAll('.nav-links a').forEach(function(link) {
 });
 
 function showToast(msg) {
-  var t = document.getElementById('toast');
+  const t = document.getElementById('toast');
   if (!t) return;
   t.textContent = msg;
   t.classList.add('show');
-  setTimeout(function(){ t.classList.remove('show'); }, 3000);
+  setTimeout(() => { t.classList.remove('show'); }, 3000);
 }
 
 // ── TV REMOTE NAVIGATION ──
-document.addEventListener('keydown', function(e) {
+document.addEventListener('keydown', (e) => {
   // TV Enter/OK key: Simulate click on custom focusable elements (cards, tabs, etc.)
   if (e.key === 'Enter' && document.activeElement) {
-    var tag = document.activeElement.tagName;
+    const tag = document.activeElement.tagName;
     if (tag !== 'BUTTON' && tag !== 'A' && tag !== 'INPUT') {
       document.activeElement.click();
       e.preventDefault();
@@ -715,18 +905,117 @@ document.addEventListener('keydown', function(e) {
   }
   
   // TV Back keys: Android (Escape/Backspace), WebOS (461), Tizen (10009)
-  var isBackKey = e.key === 'Escape' || e.keyCode === 27 || e.keyCode === 10009 || e.keyCode === 461 || (e.key === 'Backspace' && document.activeElement.tagName !== 'INPUT');
+  const isBackKey = e.key === 'Escape' || e.keyCode === 27 || e.keyCode === 10009 || e.keyCode === 461 || (e.key === 'Backspace' && document.activeElement.tagName !== 'INPUT');
   
   if (isBackKey) {
-    var overlay = document.getElementById('modal-overlay');
+    const overlay = document.getElementById('modal-overlay');
     if (overlay && overlay.classList.contains('open')) {
       closeModal();
       e.preventDefault();
     } else {
-      var dd = document.getElementById('searchDropdown');
+      const dd = document.getElementById('searchDropdown');
       if (dd && dd.classList.contains('open')) { closeDropdown(); e.preventDefault(); }
     }
   }
 });
+
+// ── PAGE NAVIGATION (SPA) ──
+function viewAllMovies(e) {
+  if (e) e.preventDefault();
+  isFullViewMovies = true;
+  const hero = document.getElementById('hero');
+  const upcoming = document.getElementById('upcoming');
+  const sep = document.querySelector('.section-sep');
+  if (hero) hero.style.display = 'none';
+  if (upcoming) upcoming.style.display = 'none';
+  if (sep) sep.style.display = 'none';
+  
+  const btn = document.querySelector('#movies-section .see-all');
+  if (btn) {
+    btn.innerHTML = '&lt;- Back Home';
+    btn.onclick = goHome;
+  }
+  
+  const h = document.getElementById('sectionHeading');
+  if (h && h.textContent === 'MY WATCHLIST') {
+    renderMovies(watchlist);
+  } else {
+    const activeTab = document.querySelector('.cat-tab.active');
+    let currentCat = 'all';
+    if (activeTab && activeTab.getAttribute('onclick')?.includes('filterCat')) {
+      const match = activeTab.getAttribute('onclick').match(/'([^']+)'/);
+      if (match) currentCat = match[1];
+    }
+    loadMovies(currentCat);
+  }
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function viewAllUpcoming(e) {
+  if (e) e.preventDefault();
+  isFullViewUpcoming = true;
+  const hero = document.getElementById('hero');
+  const moviesSec = document.getElementById('movies-section');
+  const sep = document.querySelector('.section-sep');
+  if (hero) hero.style.display = 'none';
+  if (moviesSec) moviesSec.style.display = 'none';
+  if (sep) sep.style.display = 'none';
+  
+  const btn = document.querySelector('#upcoming .see-all');
+  if (btn) {
+    btn.innerHTML = '&lt;- Back Home';
+    btn.onclick = goHome;
+  }
+  
+  loadUpcoming();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function goHome(e) {
+  let isHash = false;
+  if (e && e.type === 'click' && e.currentTarget) {
+    const href = e.currentTarget.getAttribute('href');
+    if (href && href.startsWith('#') && href !== '#') isHash = true;
+    else e.preventDefault();
+  }
+  isFullViewMovies = false;
+  isFullViewUpcoming = false;
+  
+  const hero = document.getElementById('hero');
+  const moviesSec = document.getElementById('movies-section');
+  const upcoming = document.getElementById('upcoming');
+  const sep = document.querySelector('.section-sep');
+  if (hero) hero.style.display = 'block';
+  if (moviesSec) moviesSec.style.display = 'block';
+  if (upcoming) upcoming.style.display = 'block';
+  if (sep) sep.style.display = 'block';
+  
+  const mBtn = document.querySelector('#movies-section .see-all');
+  if (mBtn) { mBtn.innerHTML = 'Browse All -&gt;'; mBtn.onclick = viewAllMovies; }
+  
+  const uBtn = document.querySelector('#upcoming .see-all');
+  if (uBtn) { uBtn.innerHTML = 'View Calendar -&gt;'; uBtn.onclick = viewAllUpcoming; }
+  
+  const h = document.getElementById('sectionHeading');
+  if (h && h.textContent === 'MY WATCHLIST') {
+    renderMovies(watchlist);
+  } else {
+    const activeTab = document.querySelector('.cat-tab.active');
+    let currentCat = 'all';
+    if (activeTab && activeTab.getAttribute('onclick')?.includes('filterCat')) {
+      const match = activeTab.getAttribute('onclick').match(/'([^']+)'/);
+      if (match) currentCat = match[1];
+    }
+    loadMovies(currentCat);
+  }
+  loadUpcoming();
+  
+  const loadMoreBtnMovies = document.getElementById('loadMoreMoviesBtn');
+  if (loadMoreBtnMovies) loadMoreBtnMovies.style.display = 'none';
+  const loadMoreBtnUpcoming = document.getElementById('loadMoreUpcomingBtn');
+  if (loadMoreBtnUpcoming) loadMoreBtnUpcoming.style.display = 'none';
+  
+  if (!isHash) window.scrollTo({ top: 0, behavior: 'smooth' });
+}
 
 init();
