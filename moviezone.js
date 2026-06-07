@@ -763,8 +763,8 @@ function loadPlayer(id, srcIdx, lang, quality) {
     '<iframe ' +
       'id="playerFrame" ' +
       'src="' + src + '" ' +
-      'width="100%" height="100%" ' +
-      'frameborder="0" ' +
+      'style="width: 100%; height: 100%; border: none; overflow: hidden !important;" ' +
+      'frameborder="0" marginwidth="0" marginheight="0" vspace="0" hspace="0" ' +
       'scrolling="no" ' +
       'allowfullscreen="true" ' +
       'allow="fullscreen;autoplay;encrypted-media;picture-in-picture" ' +
@@ -788,6 +788,18 @@ function loadPlayer(id, srcIdx, lang, quality) {
   }
 
   try { renderExternalSources(id, srcIdx, lang); } catch(e){}
+
+  let noticeEl = document.getElementById('adBlockNotice');
+  if (!noticeEl) {
+    noticeEl = document.createElement('div');
+    noticeEl.id = 'adBlockNotice';
+    noticeEl.style.cssText = 'text-align: center; margin-top: 15px; font-size: 0.85rem; color: var(--text3);';
+    const ext = document.getElementById('externalSources');
+    if (ext) ext.parentNode.insertBefore(noticeEl, ext.nextSibling);
+  }
+
+  noticeEl.innerHTML = '💡 Tip: Use <strong style="color:var(--red2)">Brave Browser</strong> or <strong style="color:var(--red2)">uBlock Origin</strong> to block ads.';
+  noticeEl.style.display = 'block';
 
   showToast('PLAY ' + buildSourceLabel(srcIdx) + ' | ' + (lang==='hi' ? 'Hindi' : 'English') + ' | ' + quality.toUpperCase());
 }
