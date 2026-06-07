@@ -31,6 +31,7 @@
   <ul class="nav-links" id="navLinks">
     <li><a href="#" class="active" onclick="goHome(event)">Home</a></li>
     <li><a href="#movies-section" onclick="goHome(event)">Movies</a></li>
+    <li><a href="#" onclick="filterCat('tv')">TV Shows</a></li>
     <li><a href="#upcoming" onclick="goHome(event)">Upcoming</a></li>
     <li><a href="#" onclick="filterCat('bollywood')">Bollywood</a></li>
     <li><a href="#" onclick="filterCat('hollywood')">Hollywood</a></li>
@@ -66,6 +67,7 @@
   </div>
   <div class="cat-tabs" id="catTabs">
     <button class="cat-tab active" onclick="filterCat('all')">All</button>
+    <button class="cat-tab" onclick="filterCat('tv')">TV Shows</button>
     <button class="cat-tab" onclick="showWatchlist(event)">Watchlist</button>
     <button class="cat-tab" onclick="filterCat('hollywood')">Hollywood</button>
     <button class="cat-tab" onclick="filterCat('bollywood')">Bollywood</button>
@@ -202,6 +204,16 @@
                 <option value="hd">720p</option>
                 <option value="sd">480p</option>
               </select>
+            </div>
+            <div class="select-group" id="tvSelectGroup" style="display:none; margin-top: 10px;">
+              <div style="display:flex; align-items:center; gap: 0.5rem; background: rgba(30, 30, 42, 0.4); border: 1px solid rgba(255,255,255,0.18); border-radius: 12px; padding: 0.25rem 0.75rem;">
+                <span style="font-size: 0.85rem; font-weight: 600; color: var(--gold);">Season</span>
+                <input type="number" id="seasonInput" min="1" value="1" style="width: 40px; background: transparent; border: none; color: #fff; font-family: 'Outfit', sans-serif; font-size: 1rem; outline: none; text-align: center;">
+              </div>
+              <div style="display:flex; align-items:center; gap: 0.5rem; background: rgba(30, 30, 42, 0.4); border: 1px solid rgba(255,255,255,0.18); border-radius: 12px; padding: 0.25rem 0.75rem;">
+                <span style="font-size: 0.85rem; font-weight: 600; color: var(--gold);">Episode</span>
+                <input type="number" id="episodeInput" min="1" value="1" style="width: 40px; background: transparent; border: none; color: #fff; font-family: 'Outfit', sans-serif; font-size: 1rem; outline: none; text-align: center;">
+              </div>
             </div>
           </div>
         </div>

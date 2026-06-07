@@ -107,7 +107,7 @@ async function init() {
 // ── CAROUSEL
 async function loadCarousel() {
   const [t1, t2] = await Promise.all([
-    tmdb('/trending/movie/week', { language: 'en-US', page: '1' }),
+    tmdb('/trending/all/week', { language: 'en-US', page: '1' }), // Ab hero banner me Series bhi aayengi
     tmdb('/movie/top_rated',    { language: 'en-US', page: '1' })
   ]);
   const pool = [...(t1.results||[]), ...(t2.results||[])];
@@ -149,12 +149,12 @@ function buildCarousel() {
         '<div class="slide-genres">'+genres+'</div>' +
         '<p class="slide-desc">'+escapeHTML(m.overview||'')+'</p>' +
         '<div class="slide-actions">' +
-          '<button class="btn-play" data-id="'+m.id+'">Watch Now</button>' +
-          '<button class="btn-info" data-id="'+m.id+'">More Info</button>' +
+          '<button class="btn-play" data-id="'+m.id+'" data-type="'+(m.media_type||(m.title?'movie':'tv'))+'">Watch Now</button>' +
+          '<button class="btn-info" data-id="'+m.id+'" data-type="'+(m.media_type||(m.title?'movie':'tv'))+'">More Info</button>' +
         '</div>' +
       '</div>';
     slide.querySelectorAll('[data-id]').forEach(btn => {
-      btn.addEventListener('click', () => { openModal(parseInt(btn.dataset.id)); });
+      btn.addEventListener('click', () => { openModal(parseInt(btn.dataset.id), btn.dataset.type); });
     });
     trackFrag.appendChild(slide);
 
@@ -217,6 +217,10 @@ function prefetchMoviesPage(cat, pageNum) {
   } else if (cat === 'hollywood') {
     tmdb('/movie/popular', { language: 'en-US', page: p1 });
     tmdb('/movie/popular', { language: 'en-US', page: p2 });
+  } else if (cat === 'tv') {
+    tmdb('/trending/tv/week', { language: 'en-US', page: pageStr });
+    tmdb('/discover/tv', { language: 'en-US', sort_by: 'popularity.desc', page: pageStr });
+    tmdb('/discover/tv', { with_original_language: 'hi', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
   } else {
     const base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: 'en-US' });
     tmdb('/discover/movie', Object.assign({}, base, { page: p1 }));
@@ -286,6 +290,21 @@ async function loadMovies(cat, isLoadMore = false) {
           }
         });
       }
+    } else if (cat === 'tv') {
+      const res = await Promise.all([
+        tmdb('/trending/tv/week', { language: 'en-US', page: pageStr }),
+        tmdb('/discover/tv',      { language: 'en-US', sort_by: 'popularity.desc', page: pageStr }),
+        tmdb('/discover/tv', { with_original_language: 'hi', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' })
+      ]);
+      let maxLength = 0;
+      res.forEach(r => { if (r.results && r.results.length > maxLength) maxLength = r.results.length; });
+      for (let i = 0; i < maxLength; i++) {
+        res.forEach(r => {
+          if (r.results && i < r.results.length) {
+            movies.push(r.results[i]);
+          }
+        });
+      }
     } else if (cat === 'hollywood') {
       const res = await Promise.all([
         tmdb('/movie/popular', { language: 'en-US', page: p1 }),
@@ -341,8 +360,9 @@ function renderMovies(movies, append = false) {
   const startIndex = append ? (allMovies.length - movies.length) : 0;
   
   movies.forEach((m, i) => {
+    const type   = m.media_type || (m.name && !m.title ? 'tv' : 'movie');
     const rating = m.vote_average ? m.vote_average.toFixed(1) : 'N/A';
-    const year   = (m.release_date || '').slice(0, 4);
+    const year   = (m.release_date || m.first_air_date || '').slice(0, 4);
     const votes  = m.vote_count > 999 ? (m.vote_count/1000).toFixed(1)+'K' : (m.vote_count||0);
     const genres = (m.genre_ids||[]).slice(0,2).map(id => GENRE_MAP[id]).filter(Boolean);
     const isHot  = m.popularity > 100;
@@ -367,7 +387,7 @@ function renderMovies(movies, append = false) {
         '<div class="card-meta"><div class="card-runtime">LANG '+(m.original_language||'EN').toUpperCase()+'</div></div>' +
         '<div class="card-genres">'+genres.map(g => '<span class="card-genre">'+escapeHTML(g)+'</span>').join('')+'</div>' +
       '</div>';
-    card.addEventListener('click', () => { openModal(m.id); });
+    card.addEventListener('click', () => { openModal(m.id, type); });
     fragment.appendChild(card);
 
   });
@@ -376,7 +396,7 @@ function renderMovies(movies, append = false) {
 
 // CATEGORY FILTER
 const CAT_HEADINGS = {
-  all:'ALL MOVIES & SHOWS', hollywood:'HOLLYWOOD', bollywood:'BOLLYWOOD',
+  all:'ALL MOVIES & SHOWS', tv: 'TV SHOWS & WEB SERIES', hollywood:'HOLLYWOOD', bollywood:'BOLLYWOOD',
   south:'SOUTH INDIAN', tollywood:'TOLLYWOOD', action:'ACTION',
   comedy:'COMEDY', thriller:'THRILLER', romance:'ROMANCE',
   scifi:'SCI-FI', animation:'ANIMATION'
@@ -559,8 +579,8 @@ document.addEventListener('click', (e) => {
 });
 
 async function searchDropdownFill(q) {
-  const data = await tmdb('/search/movie', { query: q, language: 'en-US', page: '1' });
-  const movies = (data.results||[]).slice(0, 6);
+  const data = await tmdb('/search/multi', { query: q, language: 'en-US', page: '1' });
+  const movies = (data.results||[]).filter(m => m.media_type !== 'person').slice(0, 6);
   const dd = document.getElementById('searchDropdown');
   if (!dd) return;
   if (!movies.length) {
@@ -574,8 +594,8 @@ async function searchDropdownFill(q) {
     item.tabIndex = 0;
     item.innerHTML =
       '<img src="'+(m.poster_path ? IMG+m.poster_path : 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2260%22><rect width=%2242%22 height=%2260%22 fill=%22%23222%22/></svg>')+'" alt="" width="42" height="60" loading="lazy" decoding="async">' +
-      '<div class="search-result-info"><h4>'+escapeHTML(m.title||'')+'</h4><p>'+((m.release_date||'').slice(0,4))+' | RATING '+((m.vote_average||0).toFixed(1))+'</p></div>';
-    item.addEventListener('click', () => { openModal(m.id); closeDropdown(); });
+      '<div class="search-result-info"><h4>'+escapeHTML(m.title||m.name||'')+'</h4><p>'+((m.release_date||m.first_air_date||'').slice(0,4))+' | RATING '+((m.vote_average||0).toFixed(1))+'</p></div>';
+    item.addEventListener('click', () => { openModal(m.id, m.media_type || (m.name ? 'tv' : 'movie')); closeDropdown(); });
     dd.appendChild(item);
   });
   dd.classList.add('open');
@@ -589,8 +609,8 @@ async function searchAndDisplay(q) {
   if (h) h.textContent = 'RESULTS FOR "' + escapeHTML(q.toUpperCase()) + '"';
   const sec = document.getElementById('movies-section');
   if (sec) sec.scrollIntoView({ behavior: 'smooth' });
-  const data = await tmdb('/search/movie', { query: q, language: 'en-US', page: '1', include_adult: 'false' });
-  const movies = (data.results||[]).filter(m => !!m.poster_path);
+  const data = await tmdb('/search/multi', { query: q, language: 'en-US', page: '1', include_adult: 'false' });
+  const movies = (data.results||[]).filter(m => !!m.poster_path && m.media_type !== 'person');
   allMovies = movies;
   renderMovies(movies);
   const loadMoreBtn = document.getElementById('loadMoreMoviesBtn');
@@ -603,11 +623,12 @@ function closeDropdown() {
 }
 
 // MODAL
-async function openModal(id) {
+async function openModal(id, type = 'movie') {
   const overlay = document.getElementById('modal-overlay');
   if (!overlay) return;
   try {
-    const details = await tmdb('/movie/'+id, { language: 'en-US' });
+    const details = await tmdb('/'+type+'/'+id, { language: 'en-US' });
+    details.media_type = type;
     currentModalMovie = details;
     const bgEl = document.getElementById('modalBg');
     if (bgEl) bgEl.src = details.backdrop_path ? IMG_ORIG + details.backdrop_path : '';
@@ -620,7 +641,7 @@ async function openModal(id) {
     const metaEl  = document.getElementById('modalMeta');
     if (metaEl) metaEl.innerHTML =
       '<div class="card-rating" style="font-size:0.9rem">RATING '+((details.vote_average||0).toFixed(1))+' ('+(details.vote_count||0).toLocaleString()+')</div>' +
-      '<div class="card-year" style="font-size:0.85rem">YEAR '+((details.release_date||'').slice(0,4))+'</div>' +
+      '<div class="card-year" style="font-size:0.85rem">YEAR '+((details.release_date||details.first_air_date||'').slice(0,4))+'</div>' +
       '<div class="card-runtime" style="font-size:0.85rem">RUNTIME '+runtime+'</div>' + genres;
     const embedEl = document.getElementById('videoEmbed');
     if (embedEl) embedEl.innerHTML =
@@ -640,6 +661,16 @@ async function openModal(id) {
     
     const ls = document.getElementById('langSelect');
     if (ls) ls.onchange = () => { if(embedEl.querySelector('iframe')) playMovie(); };
+    
+    const qs = document.getElementById('qualitySelect');
+    if (qs) qs.onchange = () => { if(embedEl.querySelector('iframe')) playMovie(); };
+    
+    const tvGroup = document.getElementById('tvSelectGroup');
+    if (tvGroup) tvGroup.style.display = type === 'tv' ? 'flex' : 'none';
+    const sInput = document.getElementById('seasonInput');
+    if (sInput) { sInput.value = '1'; sInput.oninput = () => { if(embedEl.querySelector('iframe')) playMovie(); }; }
+    const eInput = document.getElementById('episodeInput');
+    if (eInput) { eInput.value = '1'; eInput.oninput = () => { if(embedEl.querySelector('iframe')) playMovie(); }; }
     
     document.body.style.overflow = 'hidden';
     
@@ -745,10 +776,10 @@ function playMovie() {
   currentSourceIdx = getSelectedSourceIdx();
   const lang = getSelectedLang();
   const quality = getSelectedQuality();
-  loadPlayer(currentModalMovie.id, currentSourceIdx, lang, quality);
+  loadPlayer(currentModalMovie.id, currentSourceIdx, lang, quality, currentModalMovie.media_type);
 }
 
-function loadPlayer(id, srcIdx, lang, quality) {
+function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   const embedEl = document.getElementById('videoEmbed');
   if (!embedEl) return;
   currentSourceIdx = srcIdx;
@@ -757,7 +788,12 @@ function loadPlayer(id, srcIdx, lang, quality) {
   setSelectedLang(lang);
   quality = quality || getSelectedQuality();
   setSelectedQuality(quality);
-  const src = playerSources[srcIdx].url(id, lang);
+  
+  const sInput = document.getElementById('seasonInput');
+  const eInput = document.getElementById('episodeInput');
+  const s = sInput ? sInput.value : '1';
+  const e = eInput ? eInput.value : '1';
+  const src = playerSources[srcIdx].url(id, lang, type, s, e);
 
   embedEl.innerHTML =
     '<iframe ' +
@@ -801,14 +837,14 @@ function loadPlayer(id, srcIdx, lang, quality) {
   noticeEl.innerHTML = '💡 Tip: Use <strong style="color:var(--red2)">Brave Browser</strong> or <strong style="color:var(--red2)">uBlock Origin</strong> to block ads.';
   noticeEl.style.display = 'block';
 
-  showToast('PLAY ' + buildSourceLabel(srcIdx) + ' | ' + (lang==='hi' ? 'Hindi' : 'English') + ' | ' + quality.toUpperCase());
+  showToast('PLAY ' + buildSourceLabel(srcIdx) + ' | ' + (lang==='hi' ? 'Hindi' : 'English') + ' | ' + quality.toUpperCase() + (type === 'tv' ? ` | S${s} E${e}` : ''));
 }
 
 function togglePlayerLang() {
   if (!currentModalMovie) return;
   const nextLang = getSelectedLang() === 'hi' ? 'en' : 'hi';
   setSelectedLang(nextLang);
-  loadPlayer(currentModalMovie.id, currentSourceIdx, nextLang, getSelectedQuality());
+  loadPlayer(currentModalMovie.id, currentSourceIdx, nextLang, getSelectedQuality(), currentModalMovie.media_type);
 }
 
 function togglePlayerFS() {
