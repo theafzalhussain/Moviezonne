@@ -1,26 +1,20 @@
 {
   "version": 2,
+  "regions": ["bom1"],
   "builds": [
     {
       "src": "server.js",
       "use": "@vercel/node"
     },
     {
-      "src": "public/**",
+      "src": "**/*.{html,css,js,svg,png,jpg,jpeg}",
       "use": "@vercel/static"
     }
   ],
-  "routes": [
+  "rewrites": [
     {
-      "src": "/api/(.*)",
-      "dest": "server.js"
-    },
-    {
-      "handle": "filesystem"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "public/index.html"
+      "source": "/api/(.*)",
+      "destination": "/server.js"
     }
   ]
 }
