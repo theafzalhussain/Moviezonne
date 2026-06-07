@@ -18,6 +18,9 @@ app.use(express.static(__dirname));
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const TMDB_TOKEN = process.env.TMDB_TOKEN;
 
+// Backend Memory Cache (TMDB api calls kam karne aur response fast karne ke liye)
+const apiCache = new Map();
+
 // Proxy Endpoint: Frontend yahan request bhejega
 app.use('/api/tmdb', async (req, res) => {
   try {
@@ -25,12 +28,25 @@ app.use('/api/tmdb', async (req, res) => {
     const endpoint = req.originalUrl.replace('/api/tmdb', '');
     const url = `${TMDB_BASE_URL}${endpoint}`;
 
+    // CDN & Browser Caching (Netlify/Vercel is data ko apne duniya bhar ke servers par cache kar lenge)
+    res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=43200');
+
+    // Agar Render server ki memory me pehle se data hai, toh TMDB ko call mat karo (Speed x100)
+    if (apiCache.has(url)) {
+      return res.json(apiCache.get(url));
+    }
+
     const response = await fetch(url, {
       method: 'GET',
       headers: { 'Authorization': `Bearer ${TMDB_TOKEN}` }
     });
 
     const data = await response.json();
+
+    // Naya data memory me save karo 1 ghante ke liye (3600000 ms) taaki agle user ko instantly mile
+    apiCache.set(url, data);
+    setTimeout(() => apiCache.delete(url), 3600000);
+
     res.json(data);
   } catch (error) {
     console.error('TMDB Proxy Error:', error);
