@@ -162,7 +162,7 @@ function buildCarousel() {
     const thumb = document.createElement('div');
     thumb.className = 'thumb' + (i === 0 ? ' active' : '');
     thumb.tabIndex = 0;
-    thumb.innerHTML = '<img src="'+IMG+m.poster_path+'" alt="" decoding="async">';
+    thumb.innerHTML = '<img src="'+IMG+m.poster_path+'" alt="" width="60" height="84" loading="lazy" decoding="async">';
     thumb.addEventListener('click', () => { goToSlide(i); resetAutoSlide(); });
     thumbsFrag.appendChild(thumb);
   });
@@ -269,10 +269,7 @@ async function loadMovies(cat, isLoadMore = false) {
       const res = await Promise.all([
         tmdb('/trending/movie/week', { language: 'en-US', page: pageStr }),
         tmdb('/movie/popular',      { language: 'en-US', page: pageStr }),
-        tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }),
-        tmdb('/discover/movie', { with_original_language: 'ta', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }),
-        tmdb('/discover/movie', { with_original_language: 'te', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }),
-        tmdb('/movie/now_playing',  { language: 'en-US', page: pageStr })
+        tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' })
       ]);
       
       let maxLength = 0;
@@ -351,7 +348,7 @@ function renderMovies(movies, append = false) {
     card.style.animationDelay = ((i % 24) * 0.04) + 's';
     card.innerHTML =
       '<div class="card-poster">' +
-        '<img src="'+IMG+m.poster_path+'" alt="'+escapeHTML(m.title||'')+'" loading="lazy" decoding="async">' +
+        '<img src="'+IMG+m.poster_path+'" alt="'+escapeHTML(m.title||'')+'" width="200" height="300" loading="lazy" decoding="async">' +
         '<div class="card-quality">'+qual+'</div>' +
         (isHot ? '<div class="card-hot">HOT</div>' : '') +
         '<div class="card-overlay"><button class="card-play-btn">&#9654;</button></div>' +
@@ -503,7 +500,7 @@ async function loadUpcoming(isLoadMore = false) {
       card.style.animationDelay = ((i % 12) * 0.08) + 's';
       card.innerHTML =
         '<div class="upcoming-poster">' +
-          '<img src="'+IMG+m.backdrop_path+'" alt="'+escapeHTML(m.title||'')+'" loading="lazy" decoding="async">' +
+          '<img src="'+IMG+m.backdrop_path+'" alt="'+escapeHTML(m.title||'')+'" width="280" height="157" loading="lazy" decoding="async">' +
           '<div class="upcoming-poster-overlay"></div>' +
           '<div class="upcoming-release-badge">RELEASE '+dateStr+'</div>' +
         '</div>' +
@@ -571,7 +568,7 @@ async function searchDropdownFill(q) {
     item.className = 'search-result-item';
     item.tabIndex = 0;
     item.innerHTML =
-      '<img src="'+(m.poster_path ? IMG+m.poster_path : 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2260%22><rect width=%2242%22 height=%2260%22 fill=%22%23222%22/></svg>')+'" alt="" loading="lazy" decoding="async">' +
+      '<img src="'+(m.poster_path ? IMG+m.poster_path : 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2260%22><rect width=%2242%22 height=%2260%22 fill=%22%23222%22/></svg>')+'" alt="" width="42" height="60" loading="lazy" decoding="async">' +
       '<div class="search-result-info"><h4>'+escapeHTML(m.title||'')+'</h4><p>'+((m.release_date||'').slice(0,4))+' | RATING '+((m.vote_average||0).toFixed(1))+'</p></div>';
     item.addEventListener('click', () => { openModal(m.id); closeDropdown(); });
     dd.appendChild(item);

@@ -1,9 +1,21 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet'); // 1. Security
+const compression = require('compression'); // 2. Gzip Compression
+const NodeCache = require('node-cache'); // 3. Advanced Caching
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Security Middleware: Secures Express apps by setting various HTTP headers
+app.use(helmet({
+  contentSecurityPolicy: false, // Disabled to allow images from TMDB and external video iframes
+  crossOriginEmbedderPolicy: false
+}));
+
+// Compression Middleware: Compresses all responses (Gzip) for faster load times and less bandwidth usage
+app.use(compression());
 
 // Frontend se aane wali requests allow karne ke liye CORS (Render par ye explicitly CORS error fix karega)
 app.use(cors({
@@ -18,8 +30,8 @@ app.use(express.static(__dirname));
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const TMDB_TOKEN = process.env.TMDB_TOKEN;
 
-// Backend Memory Cache (TMDB api calls kam karne aur response fast karne ke liye)
-const apiCache = new Map();
+// Backend Advanced Cache: Initialize NodeCache with a standard TTL of 1 hour (3600 seconds)
+const apiCache = new NodeCache({ stdTTL: 3600 });
 
 // Proxy Endpoint: Frontend yahan request bhejega
 app.use('/api/tmdb', async (req, res) => {
@@ -31,9 +43,10 @@ app.use('/api/tmdb', async (req, res) => {
     // CDN & Browser Caching (Netlify/Vercel is data ko apne duniya bhar ke servers par cache kar lenge)
     res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=43200');
 
-    // Agar Render server ki memory me pehle se data hai, toh TMDB ko call mat karo (Speed x100)
-    if (apiCache.has(url)) {
-      return res.json(apiCache.get(url));
+    // Check if data is already in node-cache
+    const cachedData = apiCache.get(url);
+    if (cachedData) {
+      return res.json(cachedData);
     }
 
     const response = await fetch(url, {
@@ -43,9 +56,8 @@ app.use('/api/tmdb', async (req, res) => {
 
     const data = await response.json();
 
-    // Naya data memory me save karo 1 ghante ke liye (3600000 ms) taaki agle user ko instantly mile
+    // Naya data memory me save karo (TTL is automatically handled by node-cache)
     apiCache.set(url, data);
-    setTimeout(() => apiCache.delete(url), 3600000);
 
     res.json(data);
   } catch (error) {

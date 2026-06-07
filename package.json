@@ -4,7 +4,7 @@
   "description": "",
   "main": "moviezone.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "cleancss -o moviezone.min.css moviezone.css && terser moviezone.js -o moviezone.min.js -c -m",
     "start": "node server.js"
   },
   "repository": {
