@@ -1,6 +1,6 @@
 ﻿﻿const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 // Render par backend deploy karne ke baad jo URL mile, use yahan update karein:
-const LIVE_BACKEND_URL = 'https://apna-backend-name.onrender.com/api/tmdb';
+const LIVE_BACKEND_URL = 'https://moviezonne.onrender.com/api/tmdb';
 const BASE = isLocalhost ? 'http://localhost:3000/api/tmdb' : LIVE_BACKEND_URL;
 const IMG = 'https://image.tmdb.org/t/p/w500';
 const IMG_ORIG = 'https://image.tmdb.org/t/p/original';
