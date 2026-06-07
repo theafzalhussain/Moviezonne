@@ -36,8 +36,14 @@ const apiCache = new NodeCache({ stdTTL: 3600 });
 // Proxy Endpoint: Frontend yahan request bhejega
 app.use('/api/tmdb', async (req, res) => {
   try {
+    if (!TMDB_TOKEN) {
+      console.error('CRITICAL ERROR: TMDB_TOKEN is missing in environment variables!');
+      return res.status(500).json({ error: 'API token not configured' });
+    }
+
     // Request path aur query parameters extract karna
-    const endpoint = req.originalUrl.replace('/api/tmdb', '');
+    // Vercel rewrites me req.originalUrl change ho jata hai, isliye hum req.url use karenge
+    const endpoint = req.url; 
     const url = `${TMDB_BASE_URL}${endpoint}`;
 
     // CDN & Browser Caching (Netlify/Vercel is data ko apne duniya bhar ke servers par cache kar lenge)
@@ -53,6 +59,12 @@ app.use('/api/tmdb', async (req, res) => {
       method: 'GET',
       headers: { 'Authorization': `Bearer ${TMDB_TOKEN}` }
     });
+
+    // Agar TMDB se error aaye (jaise 404 ya 401), toh usko frontend ko fail bhejo aur cache mat karo
+    if (!response.ok) {
+      console.error(`TMDB API Error: ${response.status} for URL: ${url}`);
+      return res.status(response.status).json({ error: 'Failed to fetch data from TMDB' });
+    }
 
     const data = await response.json();
 
