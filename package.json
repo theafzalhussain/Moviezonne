@@ -20,8 +20,11 @@
   },
   "homepage": "https://github.com/theafzalhussain/Moviezonne#readme",
   "dependencies": {
+    "compression": "^1.7.4",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "helmet": "^8.0.0",
+    "node-cache": "^5.1.2"
   }
 }
