@@ -782,15 +782,16 @@ body {
   opacity: 0.9;
   pointer-events: none;
 }
-.movie-card:hover {
+.movie-card:hover, .movie-card:focus-visible {
   transform: translateY(-10px) scale(1.03);
   border-color: rgba(245,197,24,0.28);
   box-shadow:
     0 28px 70px rgba(0,0,0,0.62),
     0 0 0 1px rgba(245,197,24,0.16),
     0 0 28px rgba(123,47,255,0.12);
+  z-index: 10;
 }
-.movie-card:hover::before { opacity: 1; }
+.movie-card:hover::before, .movie-card:focus-visible::before { opacity: 1; }
 
 .card-poster {
   position: relative;
@@ -805,7 +806,7 @@ body {
   transition: transform 0.7s ease, filter 0.5s ease;
   filter: saturate(1.02) contrast(1.05);
 }
-.movie-card:hover .card-poster img { transform: scale(1.08); filter: saturate(1.12) contrast(1.08); }
+.movie-card:hover .card-poster img, .movie-card:focus-visible .card-poster img { transform: scale(1.08); filter: saturate(1.12) contrast(1.08); }
 
 .card-quality {
   position: absolute;
@@ -849,7 +850,7 @@ body {
   transition: opacity 0.35s ease;
   backdrop-filter: blur(2px);
 }
-.movie-card:hover .card-overlay { opacity: 1; }
+.movie-card:hover .card-overlay, .movie-card:focus-visible .card-overlay { opacity: 1; }
 .card-play-btn {
   width: 46px;
   height: 46px;
@@ -867,8 +868,8 @@ body {
   transform: translateY(20px) scale(0.8) rotate(-20deg);
   transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.27), box-shadow 0.3s ease;
 }
-.movie-card:hover .card-play-btn { transform: translateY(0) scale(1) rotate(0); }
-.movie-card .card-play-btn:hover { transform: scale(1.18) translateY(-2px); box-shadow: 0 16px 35px rgba(230,57,70,0.55); }
+.movie-card:hover .card-play-btn, .movie-card:focus-visible .card-play-btn { transform: translateY(0) scale(1) rotate(0); }
+.movie-card .card-play-btn:hover, .movie-card .card-play-btn:focus-visible { transform: scale(1.18) translateY(-2px); box-shadow: 0 16px 35px rgba(230,57,70,0.55); }
 
 .card-info {
   padding: 0.95rem 0.95rem 1rem;
@@ -971,10 +972,11 @@ body {
   content-visibility: auto;
   contain-intrinsic-size: 280px 300px;
 }
-.upcoming-card:hover {
+.upcoming-card:hover, .upcoming-card:focus-visible {
   border-color: rgba(245,197,24,0.35);
   transform: translateY(-4px);
   box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+  z-index: 10;
 }
 .upcoming-poster {
   position: relative;
@@ -987,7 +989,7 @@ body {
   object-fit: cover;
   transition: transform 0.5s;
 }
-.upcoming-card:hover .upcoming-poster img { transform: scale(1.06); }
+.upcoming-card:hover .upcoming-poster img, .upcoming-card:focus-visible .upcoming-poster img { transform: scale(1.06); }
 .upcoming-poster-overlay {
   position: absolute;
   inset: 0;
@@ -2026,3 +2028,27 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 .movie-card { animation: fadeUp 0.5s both; }
+
+/* ── TV / ULTRA LARGE SCREENS (1080p to 4K+) ── */
+@media (min-width: 1800px) {
+  html { font-size: 115%; }
+  #navbar { width: min(1600px, calc(100% - 2rem)); }
+  .nav-logo { font-size: 2.2rem; }
+  .nav-links a { font-size: 0.95rem; }
+  .movie-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1.75rem; }
+  .movie-card { border-radius: 22px; }
+  .upcoming-grid { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1.75rem; }
+  .modal-info { max-width: 1600px; padding: 5rem 6%; }
+  .modal-title { font-size: 3.5rem; }
+  .slide-title { font-size: clamp(4rem, 6vw, 7.5rem); }
+}
+
+@media (min-width: 2500px) {
+  html { font-size: 140%; }
+  #navbar { width: min(2200px, calc(100% - 3rem)); }
+  .movie-grid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 2.5rem; }
+  .upcoming-grid { grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 2.5rem; }
+  .modal-info { max-width: 2000px; padding: 6rem 8%; }
+  .modal-title { font-size: 4.5rem; }
+  .slide-title { font-size: clamp(5rem, 6vw, 9rem); }
+}

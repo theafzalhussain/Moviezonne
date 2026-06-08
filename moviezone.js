@@ -163,8 +163,8 @@ function buildCarousel() {
         '<div class="slide-genres">'+genres+'</div>' +
         '<p class="slide-desc">'+escapeHTML(m.overview||'')+'</p>' +
         '<div class="slide-actions">' +
-          '<button class="btn-play" data-id="'+m.id+'" data-type="'+(m.media_type||(m.title?'movie':'tv'))+'"><svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Play Now</button>' +
-          '<button class="btn-info" data-id="'+m.id+'" data-type="'+(m.media_type||(m.title?'movie':'tv'))+'"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg> More Info</button>' +
+          '<button class="btn-play" tabindex="0" data-id="'+m.id+'" data-type="'+(m.media_type||(m.title?'movie':'tv'))+'"><svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Play Now</button>' +
+          '<button class="btn-info" tabindex="0" data-id="'+m.id+'" data-type="'+(m.media_type||(m.title?'movie':'tv'))+'"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg> More Info</button>' +
         '</div>' +
       '</div>';
     slide.querySelectorAll('[data-id]').forEach(btn => {
@@ -235,6 +235,14 @@ function prefetchMoviesPage(cat, pageNum) {
     tmdb('/trending/tv/week', { language: 'en-US', page: pageStr });
     tmdb('/discover/tv', { language: 'en-US', sort_by: 'popularity.desc', page: pageStr });
     tmdb('/discover/tv', { with_original_language: 'hi', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
+  } else if (cat === 'kids') {
+    tmdb('/discover/tv', { with_genres: '10762', with_original_language: 'hi', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/tv', { with_genres: '10762', with_original_language: 'ja', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/tv', { with_genres: '10762', with_original_language: 'en', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/movie', { with_genres: '16,10751', without_genres: '27,53,18', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+  } else if (cat === 'anime') {
+    tmdb('/discover/tv', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
   } else {
     const base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: 'en-US' });
     tmdb('/discover/movie', Object.assign({}, base, { page: p1 }));
@@ -326,6 +334,42 @@ async function loadMovies(cat, isLoadMore = false) {
         tmdb('/movie/popular', { language: 'en-US', page: p2 })
       ]);
       res.forEach(r => { movies = movies.concat(r.results||[]); });
+    } else if (cat === 'kids') {
+      const res = await Promise.all([
+        tmdb('/discover/tv', { with_genres: '10762', with_original_language: 'hi', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Indian (Motu Patlu, Chhota Bheem)
+        tmdb('/discover/tv', { with_genres: '10762', with_original_language: 'ja', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Japanese (Doraemon, Shinchan, Pokemon)
+        tmdb('/discover/tv', { with_genres: '10762', with_original_language: 'en', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // English (Ben 10, Tom & Jerry)
+        tmdb('/discover/movie', { with_genres: '16,10751', without_genres: '27,53,18', sort_by: 'popularity.desc', page: p1, language: 'en-US' }) // Animation Movies
+      ]);
+      let maxLength = 0;
+      res.forEach(r => { if (r.results && r.results.length > maxLength) maxLength = r.results.length; });
+      for (let i = 0; i < maxLength; i++) {
+        res.forEach((r, idx) => {
+          if (r.results && i < r.results.length) {
+            const item = r.results[i];
+            item.media_type = idx === 3 ? 'movie' : 'tv'; // Fix: Cartoon series ab 'tv' show hongi
+            movies.push(item);
+          }
+        });
+      }
+    } else if (cat === 'anime') {
+      const res = await Promise.all([
+        tmdb('/discover/tv', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Anime Series (Naruto, DBZ, etc.)
+        tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Anime Movies (Your Name, Demon Slayer Movie)
+        tmdb('/discover/tv', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: p2, language: 'en-US' }), // Series Page 2
+        tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: p2, language: 'en-US' }) // Movies Page 2
+      ]);
+      let maxLength = 0;
+      res.forEach(r => { if (r.results && r.results.length > maxLength) maxLength = r.results.length; });
+      for (let i = 0; i < maxLength; i++) {
+        res.forEach((r, idx) => {
+          if (r.results && i < r.results.length) {
+            const item = r.results[i];
+            item.media_type = (idx === 0 || idx === 2) ? 'tv' : 'movie'; // Anime series ke liye seasons support activate hoga
+            movies.push(item);
+          }
+        });
+      }
     } else {
       const base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: 'en-US' });
       const res = await Promise.all([
@@ -428,7 +472,7 @@ const CAT_HEADINGS = {
   all:'ALL MOVIES & SHOWS', tv: 'TV SHOWS & WEB SERIES', hollywood:'HOLLYWOOD', bollywood:'BOLLYWOOD',
   south:'SOUTH INDIAN', tollywood:'TOLLYWOOD', action:'ACTION',
   comedy:'COMEDY', thriller:'THRILLER', romance:'ROMANCE',
-  scifi:'SCI-FI', animation:'ANIMATION', kids:'🧸 KIDS & CARTOONS'
+  scifi:'SCI-FI', animation:'ANIMATION', kids:'🧸 KIDS & CARTOONS', anime:'⚔️ ANIME SERIES & MOVIES'
 };
 function filterCat(cat) {
   document.querySelectorAll('.cat-tab').forEach(t => { t.classList.remove('active'); });
@@ -927,6 +971,14 @@ async function openModal(id, type = 'movie') {
 
     // Page khulte hi chupke se background me related movies nikal lo
     loadRelatedMovies(id, type);
+
+    // TV ke liye Auto-Focus on Play button
+    if (isTV) {
+      setTimeout(() => {
+        const playBtn = document.querySelector('.premium-play-btn');
+        if (playBtn) playBtn.focus();
+      }, 300);
+    }
   } catch(e) { console.warn('Modal error', e); }
 }
 
@@ -1373,8 +1425,10 @@ document.addEventListener('fullscreenchange', () => {
       try { screen.orientation.unlock(); } catch(e){}
     }
   }
+});
 
-  // Direct link URL load handle karo (agar kisi ne URL bheji ho toh direct khul jaye)
+// Direct link URL load handle karo (agar kisi ne URL bheji ho toh direct khul jaye)
+window.addEventListener('DOMContentLoaded', () => {
   if (window.location.hash.startsWith('#watch-')) {
     const parts = window.location.hash.split('-');
     if (parts.length === 3) {
@@ -1423,8 +1477,16 @@ document.addEventListener('DOMContentLoaded', () => {
     kidsTab.className = 'cat-tab';
     kidsTab.tabIndex = 0;
     kidsTab.setAttribute('onclick', "filterCat('kids')");
-    kidsTab.innerHTML = '🧸 Kids / Cartoon';
+    kidsTab.innerHTML = 'Cartoons';
     catTabs.appendChild(kidsTab);
+  }
+  if (catTabs && !document.querySelector('.cat-tab[onclick*="anime"]')) {
+    const animeTab = document.createElement('button');
+    animeTab.className = 'cat-tab';
+    animeTab.tabIndex = 0;
+    animeTab.setAttribute('onclick', "filterCat('anime')");
+    animeTab.innerHTML = ' Anime';
+    catTabs.appendChild(animeTab);
   }
 });
 
