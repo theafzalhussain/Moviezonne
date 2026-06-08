@@ -723,12 +723,16 @@ async function openModal(id, type = 'movie') {
           trailerTimeout = setTimeout(() => {
             tc.style.display = 'block';
             setTimeout(() => { tc.style.opacity = '1'; }, 50);
+
+            // Helper function to build bulletproof YouTube URLs
+            const getYTUrl = (key) => `https://www.youtube-nocookie.com/embed/${key}?autoplay=1&mute=1&controls=0&modestbranding=1&playsinline=1&rel=0&loop=1&playlist=${key}&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}`;
+
             // enablejsapi=1 joda gaya hai taaki postMessage se mute/unmute control ho sake
             tc.innerHTML = `
               <div id="trailerLoader" style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:5; background:rgba(0,0,0,0.6); transition:opacity 0.4s ease; backdrop-filter:blur(4px);">
                 <div class="player-spinner" style="width:36px; height:36px; border-width:3px;"></div>
               </div>
-              <iframe id="ytHoverPlayer" src="https://www.youtube.com/embed/${trailerKey}?autoplay=1&mute=1&controls=0&modestbranding=1&playsinline=1&rel=0&loop=1&playlist=${trailerKey}&enablejsapi=1&widget_referrer=${encodeURIComponent(window.location.href)}" style="width:100%; height:100%; border:none; transform:scale(1.3); pointer-events:none;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+              <iframe id="ytHoverPlayer" src="${getYTUrl(trailerKey)}" style="width:100%; height:100%; border:none; transform:scale(1.3); pointer-events:none; opacity:0; transition:opacity 0.5s ease;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
               <button id="trailerMuteBtn" style="position:absolute; bottom:20px; right:20px; z-index:10; background:rgba(0,0,0,0.6); color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:50%; width:44px; height:44px; cursor:pointer; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px); transition:all 0.3s ease; box-shadow: 0 4px 12px rgba(0,0,0,0.4);">
                 <svg id="iconMuted" viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
                 <svg id="iconUnmuted" viewBox="0 0 24 24" width="22" height="22" fill="currentColor" style="display:none;"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
@@ -737,23 +741,38 @@ async function openModal(id, type = 'movie') {
 
             const ytFrame = tc.querySelector('#ytHoverPlayer');
             const ytLoader = tc.querySelector('#trailerLoader');
-            if (ytFrame && ytLoader) {
+
+            // Iframe load hone par backup loader hide logic (kyunki API hamesha message nahi bhejti)
+            if (ytFrame) {
               ytFrame.onload = () => {
-                ytLoader.style.opacity = '0';
-                setTimeout(() => { if (ytLoader.parentNode) ytLoader.remove(); }, 400);
+                setTimeout(() => {
+                  if (ytLoader) { ytLoader.style.opacity = '0'; setTimeout(() => { if (ytLoader.parentNode) ytLoader.remove(); }, 400); }
+                  if (ytFrame) ytFrame.style.opacity = '1';
+                }, 800); // Thoda delay taaki buffer hoke autoplay shuru ho jaye
               };
             }
 
             // Multi-Trailer Fallback: Agar ek video block ho jaye (Error 150/153), to agla video automatically chalaye
             ytErrHandler = (e) => {
               try {
+                if (e.origin && !e.origin.includes('youtube')) return;
                 let d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
-                if (d && (d.event === 'onError' || d.event === 'error' || d.info === 150 || d.info === 153 || d.info === 101)) {
+                if (!d) return;
+
+                // Success! Video started playing (info === 1 means playing)
+                if ((d.event === 'onStateChange' && d.info === 1) || (d.event === 'infoDelivery' && d.info && d.info.playerState === 1)) {
+                  if (ytLoader) { ytLoader.style.opacity = '0'; setTimeout(() => { if (ytLoader.parentNode) ytLoader.remove(); }, 400); }
+                  if (ytFrame) ytFrame.style.opacity = '1';
+                }
+
+                // Error! Blocked by owner (150, 153, 101)
+                if (d.event === 'onError' || d.event === 'error' || d.info === 150 || d.info === 153 || d.info === 101 || (d.info && d.info.playerState === -1 && d.info.videoData && d.info.videoData.errorCode)) {
                   currentVidIdx++;
                   if (currentVidIdx < bestVids.length) {
-                    const nextKey = bestVids[currentVidIdx].key;
-                    const frame = tc.querySelector('#ytHoverPlayer');
-                    if (frame) frame.src = `https://www.youtube.com/embed/${nextKey}?autoplay=1&mute=1&controls=0&modestbranding=1&playsinline=1&rel=0&loop=1&playlist=${nextKey}&enablejsapi=1&widget_referrer=${encodeURIComponent(window.location.href)}`;
+                    if (ytFrame) {
+                      ytFrame.style.opacity = '0'; // Puraana error wala frame chhipa do
+                      ytFrame.src = getYTUrl(bestVids[currentVidIdx].key);
+                    }
                   } else {
                     tc.style.opacity = '0';
                     setTimeout(() => { if (tc && tc.parentNode) tc.remove(); }, 400);
