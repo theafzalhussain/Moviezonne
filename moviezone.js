@@ -1073,19 +1073,19 @@ async function loadRelatedMovies(id, type) {
 
 // 2026 के सबसे ज्यादा चलने वाले और एक्टिव सर्वर्स की लिस्ट
 const playerSources = [
-  { name: 'Server 1 (VidSrc To - Ultra Stable)', url: (id, lang, type, s, e) => {
-    // TV aur Movie dono properly support karega
-    return type === 'tv' ? `https://vidsrc.to/embed/tv/${id}/${s}/${e}` : 'https://vidsrc.to/embed/movie/' + id;
-  }},
-  { name: 'Server 2 (AutoEmbed - Direct Stream)', url: (id, lang, type, s, e) => {
+  { name: 'Server 1', url: (id, lang, type, s, e) => {
     // इंडिया के नेटवर्क्स पर ब्लॉकेज कम आती है
     return type === 'tv' ? `https://autoembed.co/tv/tmdb/${id}-${s}-${e}` : 'https://autoembed.co/movie/tmdb/' + id;
   }},
-  { name: 'Server 3 (VidLink Premium UI)', url: (id, lang, type, s, e) => {
+  { name: 'Server 2', url: (id, lang, type, s, e) => {
     // इंटरफ़ेस बहुत साफ़ है और प्लेयर के अंदर सेटिंग्स
     return type === 'tv' ? `https://vidlink.pro/tv/${id}/${s}/${e}` : 'https://vidlink.pro/movie/' + id;
   }},
-  { name: 'Server 4 (VidSrc PM - Anti Block)', url: (id, lang, type, s, e) => {
+  { name: 'Server 3', url: (id, lang, type, s, e) => {
+    // TV aur Movie dono properly support karega
+    return type === 'tv' ? `https://vidsrc.to/embed/tv/${id}/${s}/${e}` : 'https://vidsrc.to/embed/movie/' + id;
+  }},
+  { name: 'Server 4 ', url: (id, lang, type, s, e) => {
     // Official proxy mirror to fix 'refused to connect' / iframe block issue
     return type === 'tv' ? `https://vidsrc.pm/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.pm/embed/movie?tmdb=${id}`;
   }}
