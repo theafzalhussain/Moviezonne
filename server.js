@@ -38,6 +38,9 @@ app.get('/ping', (req, res) => {
   res.status(200).send('Pong! Server is awake.');
 });
 
+// Ignore favicon requests to prevent 404 errors in the terminal/console
+app.get('/favicon.ico', (req, res) => res.status(204).end());
+
 // Proxy Endpoint: Frontend yahan request bhejega
 app.use('/api/tmdb', async (req, res) => {
   try {

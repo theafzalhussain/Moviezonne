@@ -1,9 +1,23 @@
 ﻿﻿const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const isTV = /SmartTV|WebOS|Tizen|NetCast|VIDAA|Roku|AppleTV|Android TV|BRAVIA|AFT/i.test(navigator.userAgent);
 // Vercel par frontend + backend ek sath deploy ke liye relative path use karein:
 const LIVE_BACKEND_URL = '/api/tmdb';
 const BASE = isLocalhost ? 'http://localhost:3000/api/tmdb' : LIVE_BACKEND_URL;
 const IMG = 'https://image.tmdb.org/t/p/w500';
 const IMG_ORIG = 'https://image.tmdb.org/t/p/original';
+
+// ── SERVER PRECONNECT (FAST STREAMING) ──
+// Background me sabhi servers se pehle se secure connection bana ke rakho jisse fetching instant ho
+(function preconnectServers() {
+  const servers = ['https://vidsrc.to', 'https://autoembed.co', 'https://vidlink.pro', 'https://vidsrc.in'];
+  servers.forEach(url => {
+    const link = document.createElement('link');
+    link.rel = 'preconnect';
+    link.href = url;
+    link.crossOrigin = 'anonymous';
+    document.head.appendChild(link);
+  });
+})();
 
 // ── SECURITY HELPER (XSS Protection) ──
 const escapeHTML = (str) => {
@@ -341,7 +355,7 @@ async function loadMovies(cat, isLoadMore = false) {
   }
 
   // Har load ke baad agle page ko chupke se fetch karke ready rakho
-  if (isFullViewMovies) {
+  if (isFullViewMovies && !isTV) {
     setTimeout(() => prefetchMoviesPage(cat, currentMoviePage + 1), 800);
   }
 }
@@ -566,7 +580,7 @@ async function loadUpcoming(isLoadMore = false) {
   } catch(e) { console.warn(e); }
 
   // Har load ke baad agle upcoming page ko chupke se fetch karke ready rakho
-  if (isFullViewUpcoming) {
+  if (isFullViewUpcoming && !isTV) {
     setTimeout(() => prefetchUpcomingPage(currentUpcomingPage + 1), 800);
   }
 }
@@ -639,14 +653,151 @@ function closeDropdown() {
 
 // MODAL
 async function openModal(id, type = 'movie') {
+  // Add hash to URL to behave like a separate page
+  window.history.pushState({ watchPage: true }, '', '#watch-' + type + '-' + id);
   const overlay = document.getElementById('modal-overlay');
   if (!overlay) return;
+
+  // 1. INSTANT UI OPEN (Bina backend wait kiye instantly page open karo)
+  overlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  overlay.scrollTop = 0;
+
+  const titleEl = document.getElementById('modalTitle');
+  const descEl = document.getElementById('modalDesc');
+  const bgEl = document.getElementById('modalBg');
+  const metaEl = document.getElementById('modalMeta');
+  const embedEl = document.getElementById('videoEmbed');
+  
+  if (titleEl) titleEl.textContent = 'Loading...';
+  if (descEl) descEl.textContent = 'Fetching high-speed servers...';
+  if (metaEl) metaEl.innerHTML = '<div class="player-spinner" style="width:28px; height:28px; border-width:3px; margin: 5px 0;"></div>';
+  if (bgEl) bgEl.src = '';
+  if (embedEl) embedEl.innerHTML =
+    '<div class="video-placeholder">' +
+      '<div class="player-spinner" style="width:55px; height:55px; border-color:rgba(255,255,255,0.1); border-left-color:var(--gold);"></div>' +
+      '<p style="color:var(--gold); margin-top:15px; font-weight:600;">Establishing secure connection...</p>' +
+    '</div>';
+
+  // Saare servers aur buttons instantly show karo taaki user immediately click kar sake
+  try { renderExternalSources(id, getSelectedSourceIdx(), getSelectedLang()); } catch(e){}
+
   try {
-    const details = await tmdb('/'+type+'/'+id, { language: 'en-US' });
+    const details = await tmdb('/'+type+'/'+id, { language: 'en-US', append_to_response: 'videos' });
     details.media_type = type;
     currentModalMovie = details;
     const bgEl = document.getElementById('modalBg');
     if (bgEl) bgEl.src = details.backdrop_path ? IMG_ORIG + details.backdrop_path : '';
+
+    // --- HOVER TRAILER LOGIC (Smart Auto-Fallback) ---
+    let bestVids = [];
+    if (details.videos && details.videos.results) {
+      const ytVids = details.videos.results.filter(v => v.site === 'YouTube');
+      const trailers = ytVids.filter(v => v.type === 'Trailer');
+      const teasers = ytVids.filter(v => v.type === 'Teaser');
+      // Queue banate hain: Unofficial pehle, fir official. Taki block hone par fallback kiya ja sake.
+      bestVids = [
+        ...trailers.filter(v => !v.official),
+        ...teasers.filter(v => !v.official),
+        ...trailers.filter(v => v.official),
+        ...teasers.filter(v => v.official)
+      ];
+      if (bestVids.length === 0 && ytVids.length > 0) bestVids = ytVids;
+    }
+    const imageWrapper = document.querySelector('.modal-image-wrapper');
+    if (imageWrapper) {
+      let tc = document.getElementById('trailerContainer');
+      if (tc) tc.remove();
+      if (bestVids.length > 0) {
+        let currentVidIdx = 0;
+        let trailerKey = bestVids[currentVidIdx].key;
+
+        tc = document.createElement('div');
+        tc.id = 'trailerContainer';
+        tc.style.cssText = 'position:absolute; inset:0; z-index:2; display:none; background:#000; transition:opacity 0.4s ease; opacity:0; overflow:hidden;';
+        imageWrapper.appendChild(tc);
+
+        let trailerTimeout;
+        let ytErrHandler = null;
+        imageWrapper.onmouseenter = () => {
+          trailerTimeout = setTimeout(() => {
+            tc.style.display = 'block';
+            setTimeout(() => { tc.style.opacity = '1'; }, 50);
+            // enablejsapi=1 joda gaya hai taaki postMessage se mute/unmute control ho sake
+            tc.innerHTML = `
+              <div id="trailerLoader" style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:5; background:rgba(0,0,0,0.6); transition:opacity 0.4s ease; backdrop-filter:blur(4px);">
+                <div class="player-spinner" style="width:36px; height:36px; border-width:3px;"></div>
+              </div>
+              <iframe id="ytHoverPlayer" src="https://www.youtube.com/embed/${trailerKey}?autoplay=1&mute=1&controls=0&modestbranding=1&playsinline=1&rel=0&loop=1&playlist=${trailerKey}&enablejsapi=1&widget_referrer=${encodeURIComponent(window.location.href)}" style="width:100%; height:100%; border:none; transform:scale(1.3); pointer-events:none;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+              <button id="trailerMuteBtn" style="position:absolute; bottom:20px; right:20px; z-index:10; background:rgba(0,0,0,0.6); color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:50%; width:44px; height:44px; cursor:pointer; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px); transition:all 0.3s ease; box-shadow: 0 4px 12px rgba(0,0,0,0.4);">
+                <svg id="iconMuted" viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+                <svg id="iconUnmuted" viewBox="0 0 24 24" width="22" height="22" fill="currentColor" style="display:none;"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+              </button>
+            `;
+
+            const ytFrame = tc.querySelector('#ytHoverPlayer');
+            const ytLoader = tc.querySelector('#trailerLoader');
+            if (ytFrame && ytLoader) {
+              ytFrame.onload = () => {
+                ytLoader.style.opacity = '0';
+                setTimeout(() => { if (ytLoader.parentNode) ytLoader.remove(); }, 400);
+              };
+            }
+
+            // Multi-Trailer Fallback: Agar ek video block ho jaye (Error 150/153), to agla video automatically chalaye
+            ytErrHandler = (e) => {
+              try {
+                let d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
+                if (d && (d.event === 'onError' || d.event === 'error' || d.info === 150 || d.info === 153 || d.info === 101)) {
+                  currentVidIdx++;
+                  if (currentVidIdx < bestVids.length) {
+                    const nextKey = bestVids[currentVidIdx].key;
+                    const frame = tc.querySelector('#ytHoverPlayer');
+                    if (frame) frame.src = `https://www.youtube.com/embed/${nextKey}?autoplay=1&mute=1&controls=0&modestbranding=1&playsinline=1&rel=0&loop=1&playlist=${nextKey}&enablejsapi=1&widget_referrer=${encodeURIComponent(window.location.href)}`;
+                  } else {
+                    tc.style.opacity = '0';
+                    setTimeout(() => { if (tc && tc.parentNode) tc.remove(); }, 400);
+                  }
+                }
+              } catch(err) {}
+            };
+            window.addEventListener('message', ytErrHandler);
+
+            const muteBtn = tc.querySelector('#trailerMuteBtn');
+            let isMuted = true;
+            
+            muteBtn.onmouseenter = () => { muteBtn.style.background = 'rgba(245,197,24,0.9)'; muteBtn.style.color = '#000'; muteBtn.style.transform = 'scale(1.1)'; };
+            muteBtn.onmouseleave = () => { muteBtn.style.background = 'rgba(0,0,0,0.6)'; muteBtn.style.color = '#fff'; muteBtn.style.transform = 'scale(1)'; };
+            
+            muteBtn.onclick = (e) => {
+              e.stopPropagation(); // Background clicks ko prevent karne ke liye
+              const frame = tc.querySelector('#ytHoverPlayer');
+              if (frame && frame.contentWindow) {
+                if (isMuted) {
+                  frame.contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*');
+                  tc.querySelector('#iconMuted').style.display = 'none';
+                  tc.querySelector('#iconUnmuted').style.display = 'block';
+                } else {
+                  frame.contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*');
+                  tc.querySelector('#iconUnmuted').style.display = 'none';
+                  tc.querySelector('#iconMuted').style.display = 'block';
+                }
+                isMuted = !isMuted;
+              }
+            };
+          }, 600); // 600ms hover delay so it doesn't accidentally trigger while moving mouse
+        };
+        imageWrapper.onmouseleave = () => {
+          clearTimeout(trailerTimeout);
+          if (ytErrHandler) window.removeEventListener('message', ytErrHandler);
+          tc.style.opacity = '0';
+          setTimeout(() => { tc.style.display = 'none'; tc.innerHTML = ''; }, 400);
+        };
+      } else {
+        imageWrapper.onmouseenter = null;
+        imageWrapper.onmouseleave = null;
+      }
+    }
     const titleEl = document.getElementById('modalTitle');
     if (titleEl) titleEl.textContent = details.title || details.name || '';
     const descEl = document.getElementById('modalDesc');
@@ -670,7 +821,6 @@ async function openModal(id, type = 'movie') {
       '</div>';
     const pb = document.getElementById('playBigBtn');
     if (pb) pb.addEventListener('click', playMovie);
-    overlay.classList.add('open');
     try { setSelectedLang(getSelectedLang()); } catch(e) {}
     try { setSelectedQuality(getSelectedQuality()); } catch(e) {}
     
@@ -754,13 +904,17 @@ async function openModal(id, type = 'movie') {
       }
     }
     
-    document.body.style.overflow = 'hidden';
-    
     updateModalWatchlistBtn(id);
+
+    // Page khulte hi chupke se background me related movies nikal lo
+    loadRelatedMovies(id, type);
   } catch(e) { console.warn('Modal error', e); }
 }
 
 function closeModal() {
+  if (window.location.hash.startsWith('#watch-')) {
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
   const overlay = document.getElementById('modal-overlay');
   if (overlay) overlay.classList.remove('open');
   document.body.style.overflow = '';
@@ -771,6 +925,79 @@ function closeModal() {
   }
   isPlayerFullscreen = false;
   currentModalMovie = null;
+  const relSec = document.getElementById('relatedMoviesSection');
+  if (relSec) relSec.style.display = 'none';
+}
+
+// TV / Phone Back Button Navigation for Watch Page
+window.addEventListener('popstate', (e) => {
+  const overlay = document.getElementById('modal-overlay');
+  if (window.location.hash.startsWith('#watch-')) {
+    const parts = window.location.hash.split('-');
+    if (parts.length === 3) openModal(parts[2], parts[1]);
+  } else if (overlay && overlay.classList.contains('open')) {
+    closeModal();
+  }
+});
+
+// ── RELATED MOVIES LOGIC ──
+async function loadRelatedMovies(id, type) {
+  const section = document.getElementById('relatedMoviesSection');
+  const grid = document.getElementById('relatedMoviesGrid');
+  if (!section || !grid) return;
+
+  section.style.display = 'block';
+  grid.innerHTML = Array(6).fill('<div class="skeleton skeleton-card"></div>').join('');
+
+  try {
+    // Pehle advance recommendations check karenge, varna similar movies
+    const res = await tmdb('/' + type + '/' + id + '/recommendations', { language: 'en-US', page: '1' });
+    let movies = res.results || [];
+    if (movies.length === 0) {
+      const fallback = await tmdb('/' + type + '/' + id + '/similar', { language: 'en-US', page: '1' });
+      movies = fallback.results || [];
+    }
+
+    movies = movies.filter(m => !!m.poster_path).slice(0, 12); // Top 12 similar items
+
+    if (movies.length > 0) {
+      grid.innerHTML = '';
+      const fragment = document.createDocumentFragment();
+      movies.forEach((m, i) => {
+        const rType = m.media_type || type;
+        const rating = m.vote_average ? m.vote_average.toFixed(1) : 'N/A';
+        const year = (m.release_date || m.first_air_date || '').slice(0, 4);
+        const isHot = m.popularity > 100;
+        const genres = (m.genre_ids||[]).slice(0,2).map(gId => GENRE_MAP[gId]).filter(Boolean);
+        let qual = 'HD';
+        if (m.vote_average >= 7.5) qual = '4K';
+        else if (m.vote_average >= 6.5) qual = 'FHD';
+
+        const card = document.createElement('div');
+        card.className = 'movie-card';
+        card.tabIndex = 0;
+        card.style.animationDelay = ((i % 12) * 0.04) + 's';
+        card.innerHTML =
+          '<div class="card-poster">' +
+            '<img src="'+IMG+m.poster_path+'" alt="'+escapeHTML(m.title||m.name||'')+'" width="200" height="300" loading="lazy" decoding="async">' +
+            '<div class="card-quality">'+qual+'</div>' +
+            (isHot ? '<div class="card-hot">HOT</div>' : '') +
+            '<div class="card-overlay"><button class="card-play-btn">&#9654;</button></div>' +
+          '</div>' +
+          '<div class="card-info">' +
+            '<div class="card-title">'+escapeHTML(m.title||m.name||'')+'</div>' +
+            '<div class="card-meta"><div class="card-rating">RATING '+rating+'</div><div class="card-year">YEAR '+year+'</div></div>' +
+            '<div class="card-meta"><div class="card-runtime">LANG '+(m.original_language||'EN').toUpperCase()+'</div></div>' +
+            '<div class="card-genres">'+genres.map(g => '<span class="card-genre">'+escapeHTML(g)+'</span>').join('')+'</div>' +
+          '</div>';
+        card.addEventListener('click', () => { openModal(m.id, rType); });
+        fragment.appendChild(card);
+      });
+      grid.appendChild(fragment);
+    } else {
+      section.style.display = 'none';
+    }
+  } catch(e) { section.style.display = 'none'; }
 }
 
 // 2026 के सबसे ज्यादा चलने वाले और एक्टिव सर्वर्स की लिस्ट
@@ -787,9 +1014,9 @@ const playerSources = [
     // इंटरफ़ेस बहुत साफ़ है और प्लेयर के अंदर सेटिंग्स
     return type === 'tv' ? `https://vidlink.pro/tv/${id}/${s}/${e}` : 'https://vidlink.pro/movie/' + id;
   }},
-  { name: 'Server 4 (MultiEmbed VIP - Advance Player)', url: (id, lang, type, s, e) => {
-    // Completely independent Premium Aggregator (Multiple internal servers + Gear Icon)
-    return type === 'tv' ? `https://multiembed.mov/?video_id=${id}&tmdb=1&s=${s}&e=${e}` : `https://multiembed.mov/?video_id=${id}&tmdb=1`;
+  { name: 'Server 4 (VidSrc IN - India Mirror)', url: (id, lang, type, s, e) => {
+    // Official Indian proxy domain specifically made to bypass Jio/Airtel DNS blocks
+    return type === 'tv' ? `https://vidsrc.in/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.in/embed/movie?tmdb=${id}`;
   }}
 ];
 let currentSourceIdx = 0;
@@ -906,17 +1133,32 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   const e = eInput ? eInput.value : '1';
   const src = playerSources[srcIdx].url(id, lang, type, s, e);
 
-  embedEl.innerHTML =
-    '<iframe ' +
-      'id="playerFrame" ' +
-      'src="' + src + '" ' +
-      'style="width: 100%; height: 100%; border: none; overflow: hidden !important;" ' +
-      'frameborder="0" marginwidth="0" marginheight="0" vspace="0" hspace="0" ' +
-      'scrolling="no" ' +
-      'allowfullscreen="true" ' +
-      'allow="fullscreen;autoplay;encrypted-media;picture-in-picture" ' +
-      'loading="lazy"' +
-    '></iframe>';
+  embedEl.innerHTML = '';
+
+  // Custom Loading Spinner add karo
+  const loader = document.createElement('div');
+  loader.className = 'player-loader';
+  loader.innerHTML = '<div class="player-spinner"></div>';
+  embedEl.appendChild(loader);
+
+  const iframe = document.createElement('iframe');
+  iframe.id = 'playerFrame';
+  iframe.src = src;
+  iframe.style.cssText = 'width: 100%; height: 100%; border: none; overflow: hidden !important; background: transparent; position: relative; z-index: 1;';
+  iframe.setAttribute('frameborder', '0');
+  iframe.setAttribute('scrolling', 'no');
+  iframe.setAttribute('allowfullscreen', 'true');
+  iframe.setAttribute('webkitallowfullscreen', 'true');
+  iframe.setAttribute('mozallowfullscreen', 'true');
+  iframe.setAttribute('allow', 'fullscreen;autoplay;encrypted-media;picture-in-picture');
+  iframe.setAttribute('fetchpriority', 'high'); // 🚀 Browser ko strict command for maximum loading speed
+  // Iframe load hone ke baad spinner hide kar do
+  iframe.onload = () => {
+    loader.style.opacity = '0';
+    setTimeout(() => { if (loader && loader.parentNode) loader.remove(); }, 400);
+  };
+
+  embedEl.appendChild(iframe);
 
   let controlsHtml = '<div id="playerControls" class="player-controls">';
   if (type === 'tv') {
@@ -942,19 +1184,12 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
 
   try { renderExternalSources(id, srcIdx, lang); } catch(e){}
 
-  let noticeEl = document.getElementById('adBlockNotice');
-  if (!noticeEl) {
-    noticeEl = document.createElement('div');
-    noticeEl.id = 'adBlockNotice';
-    noticeEl.style.cssText = 'text-align: center; margin-top: 15px; font-size: 0.85rem; color: var(--text3);';
-    const ext = document.getElementById('externalSources');
-    if (ext) ext.parentNode.insertBefore(noticeEl, ext.nextSibling);
-  }
-
-  noticeEl.innerHTML = '💡 Tip: Use <strong style="color:var(--red2)">Brave Browser</strong> to block ads.<br><span style="color:var(--gold); display:inline-block; margin-top:6px; font-size:0.9rem; font-weight:500;">🗣️ <strong>Multi-Audio:</strong> Click the ⚙️ Settings or 🎧 Audio icon inside the player to switch to <strong>Hindi</strong>!</span>';
-  noticeEl.style.display = 'block';
-
   showToast('PLAY ' + buildSourceLabel(srcIdx) + ' | ' + (lang==='hi' ? 'Hindi' : 'English') + ' | ' + quality.toUpperCase() + (type === 'tv' ? ` | S${s} E${e}` : ''));
+
+  // Server/Play par click karne pe smooth scroll karke video player area me chala jayega
+  setTimeout(() => {
+    embedEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 300);
 }
 
 function togglePlayerLang() {
@@ -969,34 +1204,20 @@ async function downloadMovie() {
   const title = currentModalMovie.title || currentModalMovie.name || '';
   const isTV = currentModalMovie.media_type === 'tv';
   
+  // Get download button reference
+  const dlBtn = document.querySelector('.btn-download');
+  let originalBtnHtml = '';
+  if (dlBtn) {
+    originalBtnHtml = dlBtn.innerHTML;
+    // Button me same spinner aur "Searching..." text show karo
+    dlBtn.innerHTML = '<div class="player-spinner" style="width:18px; height:18px; border-width:2px; border-color:rgba(16,185,129,0.2); border-left-color:#10b981;"></div><span style="color:#10b981;">Searching...</span>';
+    dlBtn.style.pointerEvents = 'none';
+    dlBtn.style.borderColor = '#10b981';
+  }
+
   // Remove existing modal if any
   const existingModal = document.getElementById('dlModal');
   if (existingModal) existingModal.remove();
-  
-  // 1. Show Loading UI first
-  const dlModalHtml = `
-    <div id="dlModal" style="position:fixed; inset:0; z-index:999999; background:rgba(5,5,8,0.85); backdrop-filter:blur(12px); display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity 0.3s ease;">
-      <div style="background:var(--card); padding:2.5rem; border-radius:20px; border:1px solid rgba(255,255,255,0.1); width:90%; max-width:420px; text-align:center; box-shadow:0 25px 50px rgba(0,0,0,0.6); transform:scale(0.95); transition:transform 0.3s ease;" id="dlModalBox">
-        <div style="display:flex; justify-content:center; margin-bottom:1.5rem;">
-           <div style="width:40px; height:40px; border:3px solid rgba(245,197,24,0.2); border-top-color:var(--gold); border-radius:50%; animation:spin 1s linear infinite;"></div>
-        </div>
-        <h3 style="margin-bottom:0.5rem; font-family:'Bebas Neue', sans-serif; font-size:2rem; color:#fff; letter-spacing:1px;">Searching Torrents...</h3>
-        <p style="font-size:0.9rem; color:var(--text2); line-height:1.5;">Finding the best Magnet links for <strong>${escapeHTML(title)}</strong></p>
-      </div>
-    </div>
-    <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
-  `;
-  
-  document.body.insertAdjacentHTML('beforeend', dlModalHtml);
-  
-  setTimeout(() => {
-    const dlModal = document.getElementById('dlModal');
-    const dlModalBox = document.getElementById('dlModalBox');
-    if (dlModal && dlModalBox) {
-      dlModal.style.opacity = '1';
-      dlModalBox.style.transform = 'scale(1)';
-    }
-  }, 10);
 
   // 2. Fetch Torrents directly from YTS API
   let torrentsHtml = '';
@@ -1060,18 +1281,37 @@ async function downloadMovie() {
     `;
   }
 
-  // 3. Update Modal UI with fetched Links
-  const box = document.getElementById('dlModalBox');
-  if (box) {
-    box.innerHTML = `
-      <h3 style="margin-bottom:0.5rem; font-family:'Bebas Neue', sans-serif; font-size:2.2rem; color:#fff; letter-spacing:1px;">Available Torrents</h3>
-      <p style="font-size:0.85rem; color:var(--text2); margin-bottom:1.5rem; line-height:1.5;">Make sure you have a Torrent client installed (e.g., uTorrent, BitTorrent, Flud) before clicking.</p>
-      <div style="display:flex; flex-direction:column; max-height:280px; overflow-y:auto; padding-right:5px; text-align:left;">
-        ${torrentsHtml}
-      </div>
-      <button onclick="const m=document.getElementById('dlModal'); m.style.opacity='0'; setTimeout(()=>m.remove(),300);" style="margin-top:1.5rem; width:100%; background:transparent; border:1px solid rgba(255,255,255,0.2); color:var(--text); padding:0.8rem; border-radius:12px; cursor:pointer; font-weight:600; transition:all 0.2s;">Close</button>
-    `;
+  // Restore button state
+  if (dlBtn) {
+    dlBtn.innerHTML = originalBtnHtml;
+    dlBtn.style.pointerEvents = 'auto';
+    dlBtn.style.borderColor = '';
   }
+
+  // 3. Update Modal UI with fetched Links
+  const dlModalHtml = `
+    <div id="dlModal" style="position:fixed; inset:0; z-index:999999; background:rgba(5,5,8,0.85); backdrop-filter:blur(12px); display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity 0.3s ease;">
+      <div style="background:var(--card); padding:2.5rem; border-radius:20px; border:1px solid rgba(255,255,255,0.1); width:90%; max-width:420px; text-align:center; box-shadow:0 25px 50px rgba(0,0,0,0.6); transform:scale(0.95); transition:transform 0.3s ease;" id="dlModalBox">
+        <h3 style="margin-bottom:0.5rem; font-family:'Bebas Neue', sans-serif; font-size:2.2rem; color:#fff; letter-spacing:1px;">Available Torrents</h3>
+        <p style="font-size:0.85rem; color:var(--text2); margin-bottom:1.5rem; line-height:1.5;">Make sure you have a Torrent client installed (e.g., uTorrent, BitTorrent, Flud) before clicking.</p>
+        <div style="display:flex; flex-direction:column; max-height:280px; overflow-y:auto; padding-right:5px; text-align:left;">
+          ${torrentsHtml}
+        </div>
+        <button onclick="const m=document.getElementById('dlModal'); m.style.opacity='0'; setTimeout(()=>m.remove(),300);" style="margin-top:1.5rem; width:100%; background:transparent; border:1px solid rgba(255,255,255,0.2); color:var(--text); padding:0.8rem; border-radius:12px; cursor:pointer; font-weight:600; transition:all 0.2s;">Close</button>
+      </div>
+    </div>
+  `;
+  
+  document.body.insertAdjacentHTML('beforeend', dlModalHtml);
+  
+  setTimeout(() => {
+    const dlModal = document.getElementById('dlModal');
+    const dlModalBox = document.getElementById('dlModalBox');
+    if (dlModal && dlModalBox) {
+      dlModal.style.opacity = '1';
+      dlModalBox.style.transform = 'scale(1)';
+    }
+  }, 10);
 }
 
 function togglePlayerFS() {
@@ -1114,6 +1354,14 @@ document.addEventListener('fullscreenchange', () => {
       try { screen.orientation.unlock(); } catch(e){}
     }
   }
+
+  // Direct link URL load handle karo (agar kisi ne URL bheji ho toh direct khul jaye)
+  if (window.location.hash.startsWith('#watch-')) {
+    const parts = window.location.hash.split('-');
+    if (parts.length === 3) {
+      setTimeout(() => { openModal(parts[2], parts[1]); }, 500);
+    }
+  }
 });
 
 function exitFSOnEsc(e) {
@@ -1129,15 +1377,16 @@ if (modalOverlay) {
 
 // ── ANTI-REDIRECT (FRAME-BUSTING BLOCKER) WITHOUT SANDBOX ──
 // यह कोड मोबाइल या छोटी स्क्रीन पर थर्ड-पार्टी सर्वर्स के ऑटो-रीडायरेक्ट को रोकेगा
-window.addEventListener('beforeunload', (e) => {
-  // अगर मोडल (मूवी प्लेयर) खुला हुआ है, तभी रीडायरेक्ट ब्लॉक करें
-  if (currentModalMovie) {
-    // रीडायरेक्ट रोकें और ब्राउज़र का डिफ़ॉल्ट वार्निंग अलर्ट दिखाएं
-    e.preventDefault();
-    e.returnValue = 'Ads are trying to redirect you. Stay on this page to continue watching.';
-    return e.returnValue;
-  }
-});
+// TVs par ye block issue create karta hai video iframes ke liye, isliye !isTV par lagaya
+if (!isTV) {
+  window.addEventListener('beforeunload', (e) => {
+    if (currentModalMovie) {
+      e.preventDefault();
+      e.returnValue = 'Ads are trying to redirect you. Stay on this page to continue watching.';
+      return e.returnValue;
+    }
+  });
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   const langSel = document.getElementById('langSelect');
