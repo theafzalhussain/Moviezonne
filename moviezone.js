@@ -9,7 +9,7 @@ const IMG_ORIG = 'https://image.tmdb.org/t/p/original';
 // ── SERVER PRECONNECT (FAST STREAMING) ──
 // Background me sabhi servers se pehle se secure connection bana ke rakho jisse fetching instant ho
 (function preconnectServers() {
-  const servers = ['https://vidsrc.to', 'https://autoembed.co', 'https://vidlink.pro', 'https://vidsrc.in'];
+  const servers = ['https://vidsrc.to', 'https://autoembed.co', 'https://vidlink.pro', 'https://vidsrc.pm'];
   servers.forEach(url => {
     const link = document.createElement('link');
     link.rel = 'preconnect';
@@ -163,8 +163,8 @@ function buildCarousel() {
         '<div class="slide-genres">'+genres+'</div>' +
         '<p class="slide-desc">'+escapeHTML(m.overview||'')+'</p>' +
         '<div class="slide-actions">' +
-          '<button class="btn-play" data-id="'+m.id+'" data-type="'+(m.media_type||(m.title?'movie':'tv'))+'">Watch Now</button>' +
-          '<button class="btn-info" data-id="'+m.id+'" data-type="'+(m.media_type||(m.title?'movie':'tv'))+'">More Info</button>' +
+          '<button class="btn-play" data-id="'+m.id+'" data-type="'+(m.media_type||(m.title?'movie':'tv'))+'"><svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Play Now</button>' +
+          '<button class="btn-info" data-id="'+m.id+'" data-type="'+(m.media_type||(m.title?'movie':'tv'))+'"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg> More Info</button>' +
         '</div>' +
       '</div>';
     slide.querySelectorAll('[data-id]').forEach(btn => {
@@ -1014,9 +1014,9 @@ const playerSources = [
     // इंटरफ़ेस बहुत साफ़ है और प्लेयर के अंदर सेटिंग्स
     return type === 'tv' ? `https://vidlink.pro/tv/${id}/${s}/${e}` : 'https://vidlink.pro/movie/' + id;
   }},
-  { name: 'Server 4 (VidSrc IN - India Mirror)', url: (id, lang, type, s, e) => {
-    // Official Indian proxy domain specifically made to bypass Jio/Airtel DNS blocks
-    return type === 'tv' ? `https://vidsrc.in/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.in/embed/movie?tmdb=${id}`;
+  { name: 'Server 4 (VidSrc PM - Anti Block)', url: (id, lang, type, s, e) => {
+    // Official proxy mirror to fix 'refused to connect' / iframe block issue
+    return type === 'tv' ? `https://vidsrc.pm/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.pm/embed/movie?tmdb=${id}`;
   }}
 ];
 let currentSourceIdx = 0;
