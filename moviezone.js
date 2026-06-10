@@ -243,6 +243,10 @@ function prefetchMoviesPage(cat, pageNum) {
   } else if (cat === 'anime') {
     tmdb('/discover/tv', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
     tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+  } else if (cat === 'adult') {
+    tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/tv', { include_adult: 'true', with_keywords: '9799', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/movie', { include_adult: 'true', certification_country: 'US', certification: 'NC-17', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
   } else {
     const base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: 'en-US' });
     tmdb('/discover/movie', Object.assign({}, base, { page: p1 }));
@@ -370,6 +374,24 @@ async function loadMovies(cat, isLoadMore = false) {
           }
         });
       }
+    } else if (cat === 'adult') {
+      const res = await Promise.all([
+        tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Erotic/Adult Movies
+        tmdb('/discover/tv', { include_adult: 'true', with_keywords: '9799', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // 18+ Web Series
+        tmdb('/discover/movie', { include_adult: 'true', certification_country: 'US', certification: 'NC-17', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // R/NC-17 Rated
+        tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799', with_original_language: 'hi', sort_by: 'popularity.desc', page: p1, language: 'en-US' }) // Indian 18+ Web Series/Movies
+      ]);
+      let maxLength = 0;
+      res.forEach(r => { if (r.results && r.results.length > maxLength) maxLength = r.results.length; });
+      for (let i = 0; i < maxLength; i++) {
+        res.forEach((r, idx) => {
+          if (r.results && i < r.results.length) {
+            const item = r.results[i];
+            item.media_type = idx === 1 ? 'tv' : 'movie';
+            movies.push(item);
+          }
+        });
+      }
     } else {
       const base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: 'en-US' });
       const res = await Promise.all([
@@ -472,7 +494,8 @@ const CAT_HEADINGS = {
   all:'ALL MOVIES & SHOWS', tv: 'TV SHOWS & WEB SERIES', hollywood:'HOLLYWOOD', bollywood:'BOLLYWOOD',
   south:'SOUTH INDIAN', tollywood:'TOLLYWOOD', action:'ACTION',
   comedy:'COMEDY', thriller:'THRILLER', romance:'ROMANCE',
-  scifi:'SCI-FI', animation:'ANIMATION', kids:'🧸 KIDS & CARTOONS', anime:'⚔️ ANIME SERIES & MOVIES'
+  scifi:'SCI-FI', animation:'ANIMATION', kids:'🧸 KIDS & CARTOONS', anime:'⚔️ ANIME SERIES & MOVIES',
+  adult:'🔞 18+ ADULT MOVIES & WEB SERIES'
 };
 function filterCat(cat) {
   document.querySelectorAll('.cat-tab').forEach(t => { t.classList.remove('active'); });
@@ -1500,6 +1523,16 @@ document.addEventListener('DOMContentLoaded', () => {
     animeTab.innerHTML = ' Anime';
     catTabs.appendChild(animeTab);
   }
+      
+      // ── DYNAMICALLY ADD 18+ ADULT TAB ──
+      if (catTabs && !document.querySelector('.cat-tab[onclick*="adult"]')) {
+        const adultTab = document.createElement('button');
+        adultTab.className = 'cat-tab';
+        adultTab.tabIndex = 0;
+        adultTab.setAttribute('onclick', "filterCat('adult')");
+        adultTab.innerHTML = '🔞 18+';
+        catTabs.appendChild(adultTab);
+      }
 });
 
 window.addEventListener('scroll', () => {
