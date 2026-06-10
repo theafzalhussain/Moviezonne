@@ -4,6 +4,7 @@ const cors = require('cors');
 const helmet = require('helmet'); // 1. Security
 const compression = require('compression'); // 2. Gzip Compression
 const NodeCache = require('node-cache'); // 3. Advanced Caching
+const mongoose = require('mongoose'); // 4. MongoDB Database
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -29,6 +30,27 @@ app.use(express.static(__dirname));
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const TMDB_TOKEN = process.env.TMDB_TOKEN;
+
+// ── MONGODB CONNECTION & SCHEMA ──
+if (process.env.MONGODB_URI) {
+  mongoose.connect(process.env.MONGODB_URI)
+    .then(() => console.log('✅ MongoDB Connected Successfully'))
+    .catch(err => console.error('❌ MongoDB connection error:', err));
+} else {
+  console.warn('⚠️ MONGODB_URI is missing in .env file. Database features will be disabled.');
+}
+
+// Stream Schema (Kis movie ki kaunsi quality/language ka link hai)
+const streamSchema = new mongoose.Schema({
+  tmdbId: { type: String, required: true, index: true },
+  type: { type: String, enum: ['movie', 'tv'], required: true },
+  season: { type: String, default: '1' },
+  episode: { type: String, default: '1' },
+  language: { type: String, default: 'en' }, // 'hi', 'en'
+  quality: { type: String, default: 'fhd' }, // 'hd', 'fhd', '4k'
+  streamUrl: { type: String, required: true } // .mp4, .m3u8, iframe url
+});
+const StreamModel = mongoose.model('Stream', streamSchema);
 
 // Backend Advanced Cache: Initialize NodeCache with a standard TTL of 1 hour (3600 seconds)
 const apiCache = new NodeCache({ stdTTL: 3600 });
@@ -86,6 +108,32 @@ app.use('/api/tmdb', async (req, res) => {
   } catch (error) {
     console.error('TMDB Proxy Error:', error);
     res.status(500).json({ error: 'Failed to fetch data' });
+  }
+});
+
+// ── CUSTOM MOVIE STREAM API (Fetch from DB) ──
+app.get('/api/stream', async (req, res) => {
+  try {
+    if (!process.env.MONGODB_URI) return res.status(503).json({ error: 'Database not connected' });
+    
+    const { id, type, s, e, lang, quality } = req.query;
+    
+    const query = { tmdbId: id, type, language: lang, quality };
+    if (type === 'tv') {
+      query.season = s;
+      query.episode = e;
+    }
+
+    const stream = await StreamModel.findOne(query);
+    
+    if (stream) {
+      res.json({ streamUrl: stream.streamUrl });
+    } else {
+      res.status(404).json({ error: 'Stream not found in custom database' });
+    }
+  } catch (error) {
+    console.error('Database Fetch Error:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 

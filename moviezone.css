@@ -1441,7 +1441,6 @@ body {
 .player-controls {
   /* Default: controls sit below the player (non-overlay) */
   position: relative;
-  display: none;
   display: flex;
   gap: 8px;
   z-index: 10;
@@ -1504,6 +1503,11 @@ body {
 .player-chip--lang {
   background: linear-gradient(135deg, rgba(245,197,24,0.96), rgba(255,175,64,0.92));
   color: #151515;
+}
+.player-chip--quality {
+  background: linear-gradient(135deg, rgba(168,85,247,0.96), rgba(123,47,255,0.92));
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(123,47,255,0.28), inset 0 1px 0 rgba(255,255,255,0.1);
 }
 .player-chip--fs {
   display: inline-flex;
@@ -2051,12 +2055,17 @@ body {
     grid-template-columns: 1fr 220px;
     grid-template-areas:
       "video servers"
+      "controls servers"
       "related related";
     gap: 1.5rem 2.5rem;
     align-items: start;
   }
   .video-embed {
     grid-area: video;
+  }
+  .player-controls {
+    grid-area: controls;
+    margin-top: -0.5rem; /* Video player ke paas attach rakhne ke liye */
   }
   .external-sources {
     grid-area: servers;

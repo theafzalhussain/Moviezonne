@@ -1,4 +1,4 @@
-﻿﻿﻿﻿const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+﻿﻿const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 const isTV = /SmartTV|WebOS|Tizen|NetCast|VIDAA|Roku|AppleTV|Android TV|BRAVIA|AFT/i.test(navigator.userAgent);
 // Vercel par frontend + backend ek sath deploy ke liye relative path use karein:
 const LIVE_BACKEND_URL = '/api/tmdb';
