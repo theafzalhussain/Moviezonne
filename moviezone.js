@@ -1,4 +1,4 @@
-﻿﻿const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+﻿﻿﻿﻿const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 const isTV = /SmartTV|WebOS|Tizen|NetCast|VIDAA|Roku|AppleTV|Android TV|BRAVIA|AFT/i.test(navigator.userAgent);
 // Vercel par frontend + backend ek sath deploy ke liye relative path use karein:
 const LIVE_BACKEND_URL = '/api/tmdb';
@@ -1075,19 +1075,19 @@ async function loadRelatedMovies(id, type) {
 const playerSources = [
   { name: 'Server 1', url: (id, lang, type, s, e) => {
     // इंडिया के नेटवर्क्स पर ब्लॉकेज कम आती है
-    return type === 'tv' ? `https://autoembed.co/tv/tmdb/${id}-${s}-${e}` : 'https://autoembed.co/movie/tmdb/' + id;
+    return (type === 'tv' ? `https://autoembed.co/tv/tmdb/${id}-${s}-${e}` : 'https://autoembed.co/movie/tmdb/' + id) + `?lang=${lang}`;
   }},
   { name: 'Server 2', url: (id, lang, type, s, e) => {
     // इंटरफ़ेस बहुत साफ़ है और प्लेयर के अंदर सेटिंग्स
-    return type === 'tv' ? `https://vidlink.pro/tv/${id}/${s}/${e}` : 'https://vidlink.pro/movie/' + id;
+    return (type === 'tv' ? `https://vidlink.pro/tv/${id}/${s}/${e}` : 'https://vidlink.pro/movie/' + id) + `?lang=${lang}`;
   }},
   { name: 'Server 3', url: (id, lang, type, s, e) => {
     // TV aur Movie dono properly support karega
-    return type === 'tv' ? `https://vidsrc.to/embed/tv/${id}/${s}/${e}` : 'https://vidsrc.to/embed/movie/' + id;
+    return (type === 'tv' ? `https://vidsrc.to/embed/tv/${id}/${s}/${e}` : 'https://vidsrc.to/embed/movie/' + id) + `?lang=${lang}`;
   }},
   { name: 'Server 4 ', url: (id, lang, type, s, e) => {
     // Official proxy mirror to fix 'refused to connect' / iframe block issue
-    return type === 'tv' ? `https://vidsrc.pm/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.pm/embed/movie?tmdb=${id}`;
+    return (type === 'tv' ? `https://vidsrc.pm/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.pm/embed/movie?tmdb=${id}`) + `&lang=${lang}`;
   }}
 ];
 let currentSourceIdx = 0;
@@ -1419,13 +1419,25 @@ function togglePlayerFS() {
   }
 }
 
-document.addEventListener('fullscreenchange', () => {
-  if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+const handleFullscreenChange = () => {
+  const isFS = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+  if (!isFS) {
+    // Jab fullscreen se bahar aaye, to rotation lock hata do
     if (screen.orientation && screen.orientation.unlock) {
       try { screen.orientation.unlock(); } catch(e){}
     }
+  } else {
+    // Jab bhi fullscreen mode me jaye, automatically Landscape me ghuma do (Mobile ke liye)
+    if (screen.orientation && screen.orientation.lock) {
+      try { screen.orientation.lock('landscape').catch(() => {}); } catch(e){}
+    }
   }
-});
+};
+
+document.addEventListener('fullscreenchange', handleFullscreenChange);
+document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+document.addEventListener('MSFullscreenChange', handleFullscreenChange);
 
 // Direct link URL load handle karo (agar kisi ne URL bheji ho toh direct khul jaye)
 window.addEventListener('DOMContentLoaded', () => {

@@ -1529,6 +1529,23 @@ body {
   color: #fff;
   box-shadow: 0 12px 28px rgba(230,57,70,0.22), inset 0 1px 0 rgba(255,255,255,0.12);
 }
+
+/* ── TV REMOTE FOCUS ANIMATION FOR SERVER BUTTONS ── */
+@keyframes serverFocusPulse {
+  0% { transform: scale(1.02); box-shadow: 0 0 15px rgba(245,197,24,0.4); }
+  100% { transform: scale(1.08); box-shadow: 0 0 30px rgba(245,197,24,0.9); }
+}
+.player-chip--source:focus,
+.player-chip--source:focus-visible {
+  font-weight: 900 !important;
+  color: #000 !important;
+  background: linear-gradient(135deg, var(--gold), #ffaf40) !important;
+  outline: 3px solid #fff !important;
+  outline-offset: 3px !important;
+  animation: serverFocusPulse 0.6s infinite alternate ease-in-out !important;
+  z-index: 10;
+}
+
 .video-embed.cinema-mode {
   position: fixed !important;
   inset: 0 !important;
@@ -2026,6 +2043,37 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 .movie-card { animation: fadeUp 0.5s both; }
+
+/* ── LARGE DESKTOP & TV LAYOUT (Side-by-Side Player & Servers) ── */
+@media (min-width: 1025px) {
+  .modal-bottom {
+    display: grid;
+    grid-template-columns: 1fr 220px;
+    grid-template-areas:
+      "video servers"
+      "related related";
+    gap: 1.5rem 2.5rem;
+    align-items: start;
+  }
+  .video-embed {
+    grid-area: video;
+  }
+  .external-sources {
+    grid-area: servers;
+    flex-direction: column;
+    justify-content: flex-start;
+    margin-top: 0;
+  }
+  .external-sources .player-chip--source {
+    width: 100%;
+    justify-content: center;
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+  .related-section {
+    grid-area: related;
+  }
+}
 
 /* ── TV / ULTRA LARGE SCREENS (1080p to 4K+) ── */
 @media (min-width: 1800px) {
