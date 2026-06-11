@@ -5,7 +5,7 @@ const LIVE_BACKEND_URL = '/api/tmdb';
 const BASE = isLocalhost ? 'http://localhost:3000/api/tmdb' : LIVE_BACKEND_URL;
 const IMG = 'https://image.tmdb.org/t/p/w500';
 const IMG_ORIG = 'https://image.tmdb.org/t/p/original';
-
+ 
 // ── SERVER PRECONNECT (FAST STREAMING) ──
 // Background me sabhi servers se pehle se secure connection bana ke rakho jisse fetching instant ho
 (function preconnectServers() {
@@ -18,7 +18,7 @@ const IMG_ORIG = 'https://image.tmdb.org/t/p/original';
     document.head.appendChild(link);
   });
 })();
-
+ 
 // ── SECURITY HELPER (XSS Protection) ──
 const escapeHTML = (str) => {
   if (!str) return '';
@@ -29,7 +29,7 @@ const escapeHTML = (str) => {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 };
-
+ 
 // ── GENRE MAP (defined first so carousel HTML can use it)
 const GENRE_MAP = {
   28:'Action',18:'Drama',35:'Comedy',27:'Horror',878:'Sci-Fi',10749:'Romance',
@@ -37,7 +37,7 @@ const GENRE_MAP = {
   36:'History',10402:'Music',9648:'Mystery',10752:'War',37:'Western',
   99:'Documentary',10770:'TV Movie'
 };
-
+ 
 let allMovies = [];
 let currentSlide = 0;
 let carouselMovies = [];
@@ -49,14 +49,14 @@ let isFullViewUpcoming = false;
 let currentMoviePage = 1;
 let currentUpcomingPage = 1;
 let allUpcoming = [];
-
+ 
 // ── FETCH helper ── Ultra-fast caching with Persistent LocalStorage
 const tmdbCache = new Map();
 const inFlightRequests = new Map(); // Request deduplication
 async function tmdb(endpoint, params) {
   params = params || {};
   params.mz_cb = '1'; // Cache-buster to bypass poisoned browser cache from previous errors
-
+ 
   let qs = '';
   if (Object.keys(params).length) {
     qs = '?' + Object.entries(params).map(([k,v]) => encodeURIComponent(k)+'='+encodeURIComponent(v)).join('&');
@@ -77,9 +77,9 @@ async function tmdb(endpoint, params) {
       }
     } catch(e) {}
   }
-
+ 
   if (inFlightRequests.has(urlStr)) return inFlightRequests.get(urlStr);
-
+ 
   const fetchPromise = (async () => {
     try {
       const r = await fetch(urlStr); 
@@ -105,7 +105,7 @@ async function tmdb(endpoint, params) {
   fetchPromise.finally(() => inFlightRequests.delete(urlStr));
   return fetchPromise;
 }
-
+ 
 // ── INIT ── Priority-based staggered loading for ultra-fast startup
 async function init() {
   await loadCarousel(); // 1. Priority: Hero section load karo
@@ -117,7 +117,7 @@ async function init() {
     else loadUpcoming();
   }, 800);
 }
-
+ 
 // ── CAROUSEL
 async function loadCarousel() {
   const [t1, t2] = await Promise.all([
@@ -132,7 +132,7 @@ async function loadCarousel() {
   }).slice(0, 6);
   if (carouselMovies.length) buildCarousel();
 }
-
+ 
 function buildCarousel() {
   const track = document.getElementById('carouselTrack');
   const dots  = document.getElementById('carouselDots');
@@ -140,11 +140,11 @@ function buildCarousel() {
   if (!track || !dots || !thumbs) return;
   track.innerHTML = ''; dots.innerHTML = ''; thumbs.innerHTML = '';
   currentSlide = 0;
-
+ 
   const trackFrag = document.createDocumentFragment();
   const dotsFrag = document.createDocumentFragment();
   const thumbsFrag = document.createDocumentFragment();
-
+ 
   carouselMovies.forEach((m, i) => {
     const genres = (m.genre_ids||[]).slice(0,3).map(id => '<span class="genre-tag">'+escapeHTML(GENRE_MAP[id]||'Movie')+'</span>').join('');
     const slide = document.createElement('div');
@@ -171,13 +171,13 @@ function buildCarousel() {
       btn.addEventListener('click', () => { openModal(parseInt(btn.dataset.id), btn.dataset.type); });
     });
     trackFrag.appendChild(slide);
-
+ 
     const dot = document.createElement('div');
     dot.className = 'dot' + (i === 0 ? ' active' : '');
     dot.tabIndex = 0;
     dot.addEventListener('click', () => { goToSlide(i); resetAutoSlide(); });
     dotsFrag.appendChild(dot);
-
+ 
     const thumb = document.createElement('div');
     thumb.className = 'thumb' + (i === 0 ? ' active' : '');
     thumb.tabIndex = 0;
@@ -185,14 +185,14 @@ function buildCarousel() {
     thumb.addEventListener('click', () => { goToSlide(i); resetAutoSlide(); });
     thumbsFrag.appendChild(thumb);
   });
-
+ 
   track.appendChild(trackFrag);
   dots.appendChild(dotsFrag);
   thumbs.appendChild(thumbsFrag);
-
+ 
   startAutoSlide();
 }
-
+ 
 function goToSlide(n) {
   const slides = document.querySelectorAll('.carousel-slide');
   const dots   = document.querySelectorAll('.dot');
@@ -209,13 +209,13 @@ function goToSlide(n) {
   const t = document.getElementById('carouselTrack');
   if (t) t.style.transform = 'translateX(-'+(currentSlide * 100)+'%)';
 }
-
+ 
 function startAutoSlide() {
   if (autoSlideTimer) clearInterval(autoSlideTimer);
   autoSlideTimer = setInterval(() => { goToSlide(currentSlide + 1); }, 5500);
 }
 function resetAutoSlide() { startAutoSlide(); }
-
+ 
 // ── BACKGROUND PREFETCH HELPERS (For Instant "Load More") ──
 function prefetchMoviesPage(cat, pageNum) {
   const pageStr = String(pageNum);
@@ -253,7 +253,7 @@ function prefetchMoviesPage(cat, pageNum) {
     tmdb('/discover/movie', Object.assign({}, base, { page: p2 }));
   }
 }
-
+ 
 function prefetchUpcomingPage(pageNum) {
   const p1 = String(pageNum * 2 - 1);
   const p2 = String(pageNum * 2);
@@ -264,7 +264,7 @@ function prefetchUpcomingPage(pageNum) {
   tmdb('/discover/movie', { language: 'en-US', page: p1, sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'hi', region: 'IN' });
   tmdb('/discover/movie', { language: 'en-US', page: p2, sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'hi', region: 'IN' });
 }
-
+ 
 // ── LOAD MOVIES
 const CAT_PARAMS = {
   bollywood: { with_original_language: 'hi', sort_by: 'popularity.desc', page: '1' },
@@ -278,7 +278,7 @@ const CAT_PARAMS = {
   animation: { with_genres: '16',  sort_by: 'popularity.desc', page: '1' },
   kids:      { with_genres: '16,10751', without_genres: '27,53,18', sort_by: 'popularity.desc', page: '1' }
 };
-
+ 
 async function loadMovies(cat, isLoadMore = false) {
   const grid = document.getElementById('movieGrid');
   if (!grid) return;
@@ -294,7 +294,7 @@ async function loadMovies(cat, isLoadMore = false) {
     const btn = document.getElementById('loadMoreMoviesBtn');
     if (btn) btn.innerHTML = 'Loading...';
   }
-
+ 
   let movies = [];
   const pageStr = String(currentMoviePage);
   const p1 = String(currentMoviePage * 2 - 1);
@@ -401,13 +401,13 @@ async function loadMovies(cat, isLoadMore = false) {
       res.forEach(r => { movies = movies.concat(r.results||[]); });
     }
   } catch(e) { console.warn(e); }
-
+ 
   movies = movies.filter(m => !!m.poster_path);
   
   const existingIds = new Set(allMovies.map(m => m.id));
   const newMovies = movies.filter(m => { if(existingIds.has(m.id)) return false; existingIds.add(m.id); return true; });
   allMovies = allMovies.concat(newMovies);
-
+ 
   renderMovies(isLoadMore ? newMovies : (isFullViewMovies ? allMovies : allMovies.slice(0, 24)), isLoadMore);
   
   const loadMoreBtn = document.getElementById('loadMoreMoviesBtn');
@@ -419,13 +419,13 @@ async function loadMovies(cat, isLoadMore = false) {
       loadMoreBtn.innerHTML = 'Load More Movies';
     }
   }
-
+ 
   // Har load ke baad agle page ko chupke se fetch karke ready rakho
   if (isFullViewMovies && !isTV) {
     setTimeout(() => prefetchMoviesPage(cat, currentMoviePage + 1), 800);
   }
 }
-
+ 
 function renderMovies(movies, append = false) {
   const grid = document.getElementById('movieGrid');
   if (!grid) return;
@@ -484,11 +484,11 @@ function renderMovies(movies, append = false) {
       '</div>';
     card.addEventListener('click', () => { openModal(m.id, type); });
     fragment.appendChild(card);
-
+ 
   });
   grid.appendChild(fragment);
 }
-
+ 
 // CATEGORY FILTER
 const CAT_HEADINGS = {
   all:'ALL MOVIES & SHOWS', tv: 'TV SHOWS & WEB SERIES', hollywood:'HOLLYWOOD', bollywood:'BOLLYWOOD',
@@ -507,7 +507,7 @@ function filterCat(cat) {
   if (sec) sec.scrollIntoView({ behavior: 'smooth' });
   loadMovies(cat);
 }
-
+ 
 function loadMoreMoviesAction() {
   const activeTab = document.querySelector('.cat-tab.active');
   let cat = 'all';
@@ -517,7 +517,7 @@ function loadMoreMoviesAction() {
   }
   loadMovies(cat, true);
 }
-
+ 
 // ── WATCHLIST LOGIC ──
 function handleWatchlistToggle() {
   if (!currentModalMovie) return;
@@ -560,7 +560,7 @@ function showWatchlist(e) {
   const loadMoreBtn = document.getElementById('loadMoreMoviesBtn');
   if (loadMoreBtn) loadMoreBtn.style.display = 'none';
 }
-
+ 
 // ── UPCOMING
 async function loadUpcoming(isLoadMore = false) {
   const grid = document.getElementById('upcomingGrid');
@@ -575,17 +575,17 @@ async function loadUpcoming(isLoadMore = false) {
     const btn = document.getElementById('loadMoreUpcomingBtn');
     if (btn) btn.innerHTML = 'Loading...';
   }
-
+ 
   const p1 = String(currentUpcomingPage * 2 - 1);
   const p2 = String(currentUpcomingPage * 2);
-
+ 
   try {
     const d = new Date();
     d.setDate(d.getDate() - 1);
     const today = d.toISOString().split('T')[0];
     d.setMonth(d.getMonth() + 3);
     const future = d.toISOString().split('T')[0];
-
+ 
     const res = await Promise.all([
       tmdb('/discover/movie', { language: 'en-US', page: p1, sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'en' }),
       tmdb('/discover/movie', { language: 'en-US', page: p2, sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'en' }),
@@ -603,12 +603,12 @@ async function loadUpcoming(isLoadMore = false) {
     newMovies.sort((a, b) => a.release_date.localeCompare(b.release_date));
     
     allUpcoming = allUpcoming.concat(newMovies);
-
+ 
     if (!isLoadMore) grid.innerHTML = '';
     const fragment = document.createDocumentFragment();
-
+ 
     const moviesToRender = isLoadMore ? newMovies : (isFullViewUpcoming ? allUpcoming : allUpcoming.slice(0, 12));
-
+ 
     moviesToRender.forEach((m, i) => {
       let dateStr = 'Coming Soon';
       if (m.release_date) {
@@ -645,13 +645,13 @@ async function loadUpcoming(isLoadMore = false) {
       loadMoreBtn.innerHTML = 'Load More Upcoming';
     }
   } catch(e) { console.warn(e); }
-
+ 
   // Har load ke baad agle upcoming page ko chupke se fetch karke ready rakho
   if (isFullViewUpcoming && !isTV) {
     setTimeout(() => prefetchUpcomingPage(currentUpcomingPage + 1), 800);
   }
 }
-
+ 
 // SEARCH
 let searchTimer = null;
 const searchInput = document.getElementById('searchInput');
@@ -673,7 +673,7 @@ if (searchInput) {
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.nav-search')) closeDropdown();
 });
-
+ 
 async function searchDropdownFill(q) {
   const data = await tmdb('/search/multi', { query: q, language: 'en-US', page: '1' });
   const movies = (data.results||[]).filter(m => m.media_type !== 'person').slice(0, 6);
@@ -696,7 +696,7 @@ async function searchDropdownFill(q) {
   });
   dd.classList.add('open');
 }
-
+ 
 async function searchAndDisplay(q) {
   const grid = document.getElementById('movieGrid');
   if (!grid) return;
@@ -712,24 +712,24 @@ async function searchAndDisplay(q) {
   const loadMoreBtn = document.getElementById('loadMoreMoviesBtn');
   if (loadMoreBtn) loadMoreBtn.style.display = 'none';
 }
-
+ 
 function closeDropdown() {
   const dd = document.getElementById('searchDropdown');
   if (dd) dd.classList.remove('open');
 }
-
+ 
 // MODAL
 async function openModal(id, type = 'movie') {
   // Add hash to URL to behave like a separate page
   window.history.pushState({ watchPage: true }, '', '#watch-' + type + '-' + id);
   const overlay = document.getElementById('modal-overlay');
   if (!overlay) return;
-
+ 
   // 1. INSTANT UI OPEN (Bina backend wait kiye instantly page open karo)
   overlay.classList.add('open');
   document.body.style.overflow = 'hidden';
   overlay.scrollTop = 0;
-
+ 
   const titleEl = document.getElementById('modalTitle');
   const descEl = document.getElementById('modalDesc');
   const bgEl = document.getElementById('modalBg');
@@ -745,17 +745,17 @@ async function openModal(id, type = 'movie') {
       '<div class="player-spinner" style="width:55px; height:55px; border-color:rgba(255,255,255,0.1); border-left-color:var(--gold);"></div>' +
       '<p style="color:var(--gold); margin-top:15px; font-weight:600;">Establishing secure connection...</p>' +
     '</div>';
-
+ 
   // Saare servers aur buttons instantly show karo taaki user immediately click kar sake
   try { renderExternalSources(id, getSelectedSourceIdx(), getSelectedLang()); } catch(e){}
-
+ 
   try {
     const details = await tmdb('/'+type+'/'+id, { language: 'en-US', append_to_response: 'videos' });
     details.media_type = type;
     currentModalMovie = details;
     const bgEl = document.getElementById('modalBg');
     if (bgEl) bgEl.src = details.backdrop_path ? IMG_ORIG + details.backdrop_path : '';
-
+ 
     // --- HOVER TRAILER LOGIC (Smart Auto-Fallback) ---
     let bestVids = [];
     if (details.videos && details.videos.results) {
@@ -778,22 +778,22 @@ async function openModal(id, type = 'movie') {
       if (bestVids.length > 0) {
         let currentVidIdx = 0;
         let trailerKey = bestVids[currentVidIdx].key;
-
+ 
         tc = document.createElement('div');
         tc.id = 'trailerContainer';
         tc.style.cssText = 'position:absolute; inset:0; z-index:2; display:none; background:#000; transition:opacity 0.4s ease; opacity:0; overflow:hidden;';
         imageWrapper.appendChild(tc);
-
+ 
         let trailerTimeout;
         let ytErrHandler = null;
         imageWrapper.onmouseenter = () => {
           trailerTimeout = setTimeout(() => {
             tc.style.display = 'block';
             setTimeout(() => { tc.style.opacity = '1'; }, 50);
-
+ 
             // Helper function to build bulletproof YouTube URLs
             const getYTUrl = (key) => `https://www.youtube-nocookie.com/embed/${key}?autoplay=1&mute=1&controls=0&modestbranding=1&playsinline=1&rel=0&loop=1&playlist=${key}&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}`;
-
+ 
             // enablejsapi=1 joda gaya hai taaki postMessage se mute/unmute control ho sake
             tc.innerHTML = `
               <div id="trailerLoader" style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:5; background:rgba(0,0,0,0.6); transition:opacity 0.4s ease; backdrop-filter:blur(4px);">
@@ -805,10 +805,10 @@ async function openModal(id, type = 'movie') {
                 <svg id="iconUnmuted" viewBox="0 0 24 24" width="22" height="22" fill="currentColor" style="display:none;"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
               </button>
             `;
-
+ 
             const ytFrame = tc.querySelector('#ytHoverPlayer');
             const ytLoader = tc.querySelector('#trailerLoader');
-
+ 
             // Iframe load hone par backup loader hide logic (kyunki API hamesha message nahi bhejti)
             if (ytFrame) {
               ytFrame.onload = () => {
@@ -818,20 +818,20 @@ async function openModal(id, type = 'movie') {
                 }, 800); // Thoda delay taaki buffer hoke autoplay shuru ho jaye
               };
             }
-
+ 
             // Multi-Trailer Fallback: Agar ek video block ho jaye (Error 150/153), to agla video automatically chalaye
             ytErrHandler = (e) => {
               try {
                 if (e.origin && !e.origin.includes('youtube')) return;
                 let d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
                 if (!d) return;
-
+ 
                 // Success! Video started playing (info === 1 means playing)
                 if ((d.event === 'onStateChange' && d.info === 1) || (d.event === 'infoDelivery' && d.info && d.info.playerState === 1)) {
                   if (ytLoader) { ytLoader.style.opacity = '0'; setTimeout(() => { if (ytLoader.parentNode) ytLoader.remove(); }, 400); }
                   if (ytFrame) ytFrame.style.opacity = '1';
                 }
-
+ 
                 // Error! Blocked by owner (150, 153, 101)
                 if (d.event === 'onError' || d.event === 'error' || d.info === 150 || d.info === 153 || d.info === 101 || (d.info && d.info.playerState === -1 && d.info.videoData && d.info.videoData.errorCode)) {
                   currentVidIdx++;
@@ -848,7 +848,7 @@ async function openModal(id, type = 'movie') {
               } catch(err) {}
             };
             window.addEventListener('message', ytErrHandler);
-
+ 
             const muteBtn = tc.querySelector('#trailerMuteBtn');
             let isMuted = true;
             
@@ -942,7 +942,7 @@ async function openModal(id, type = 'movie') {
               lastE = progress.episode || 1;
             }
           } catch(e) {}
-
+ 
           sInput.innerHTML = seasons.map(s => `<option value="${s.season_number}" ${s.season_number == lastS ? 'selected' : ''}>${s.name} (${s.episode_count} Eps)</option>`).join('');
           
           const fetchEpisodes = async (seasonNum, targetEp) => {
@@ -955,7 +955,7 @@ async function openModal(id, type = 'movie') {
               if (targetEp && episodes.find(e => e.episode_number == targetEp)) {
                 eInput.value = targetEp;
               }
-
+ 
               const updatePreview = () => {
                 const epNum = eInput.value;
                 const ep = episodes.find(e => e.episode_number == epNum);
@@ -972,13 +972,13 @@ async function openModal(id, type = 'movie') {
                   `;
                 }
               };
-
+ 
               eInput.onchange = () => { 
                 updatePreview();
                 if(embedEl.querySelector('iframe')) playMovie(); 
               };
               updatePreview();
-
+ 
               if(embedEl.querySelector('iframe')) playMovie(); 
             } catch(err) { eInput.innerHTML = '<option value="1">Episode 1</option>'; }
           };
@@ -991,10 +991,10 @@ async function openModal(id, type = 'movie') {
     }
     
     updateModalWatchlistBtn(id);
-
+ 
     // Page khulte hi chupke se background me related movies nikal lo
     loadRelatedMovies(id, type);
-
+ 
     // TV ke liye Auto-Focus on Play button
     if (isTV) {
       setTimeout(() => {
@@ -1004,7 +1004,7 @@ async function openModal(id, type = 'movie') {
     }
   } catch(e) { console.warn('Modal error', e); }
 }
-
+ 
 function closeModal() {
   if (window.location.hash.startsWith('#watch-')) {
     window.history.replaceState(null, '', window.location.pathname + window.location.search);
@@ -1022,7 +1022,7 @@ function closeModal() {
   const relSec = document.getElementById('relatedMoviesSection');
   if (relSec) relSec.style.display = 'none';
 }
-
+ 
 // TV / Phone Back Button Navigation for Watch Page
 window.addEventListener('popstate', (e) => {
   const overlay = document.getElementById('modal-overlay');
@@ -1033,16 +1033,16 @@ window.addEventListener('popstate', (e) => {
     closeModal();
   }
 });
-
+ 
 // ── RELATED MOVIES LOGIC ──
 async function loadRelatedMovies(id, type) {
   const section = document.getElementById('relatedMoviesSection');
   const grid = document.getElementById('relatedMoviesGrid');
   if (!section || !grid) return;
-
+ 
   section.style.display = 'block';
   grid.innerHTML = Array(6).fill('<div class="skeleton skeleton-card"></div>').join('');
-
+ 
   try {
     // Pehle advance recommendations check karenge, varna similar movies
     const res = await tmdb('/' + type + '/' + id + '/recommendations', { language: 'en-US', page: '1' });
@@ -1051,9 +1051,9 @@ async function loadRelatedMovies(id, type) {
       const fallback = await tmdb('/' + type + '/' + id + '/similar', { language: 'en-US', page: '1' });
       movies = fallback.results || [];
     }
-
+ 
     movies = movies.filter(m => !!m.poster_path).slice(0, 12); // Top 12 similar items
-
+ 
     if (movies.length > 0) {
       grid.innerHTML = '';
       const fragment = document.createDocumentFragment();
@@ -1066,7 +1066,7 @@ async function loadRelatedMovies(id, type) {
         let qual = 'HD';
         if (m.vote_average >= 7.5) qual = '4K';
         else if (m.vote_average >= 6.5) qual = 'FHD';
-
+ 
         const card = document.createElement('div');
         card.className = 'movie-card';
         card.tabIndex = 0;
@@ -1093,7 +1093,7 @@ async function loadRelatedMovies(id, type) {
     }
   } catch(e) { section.style.display = 'none'; }
 }
-
+ 
 // 2026 के सबसे ज्यादा चलने वाले और एक्टिव सर्वर्स की लिस्ट
 const playerSources = [
   { name: 'Server 1', url: (id, lang, type, s, e) => {
@@ -1115,7 +1115,7 @@ const playerSources = [
 ];
 let currentSourceIdx = 0;
 let isPlayerFullscreen = false;
-
+ 
 function renderExternalSources(id, srcIdx, lang) {
   const ext = document.getElementById('externalSources');
   if (!ext) return;
@@ -1127,7 +1127,9 @@ function renderExternalSources(id, srcIdx, lang) {
   srcButtons.forEach(btn => {
     btn.addEventListener('click', () => {
       const idx = parseInt(btn.getAttribute('data-srcidx')||'0', 10);
-      loadPlayer(id, idx, lang);
+      const type = currentModalMovie ? currentModalMovie.media_type : 'movie';
+      const quality = getSelectedQuality();
+      loadPlayer(id, idx, lang, quality, type);
       srcButtons.forEach(b => { b.classList.remove('active'); });
       btn.classList.add('active');
     });
@@ -1138,42 +1140,42 @@ function renderExternalSources(id, srcIdx, lang) {
     if (activeBtn) activeBtn.classList.add('active');
   }
 }
-
+ 
 function getSelectedLang() {
   const select = document.getElementById('langSelect');
   return select ? select.value : (localStorage.getItem('moviezone.playerLang') || 'en');
 }
-
+ 
 function setSelectedLang(lang) {
   const select = document.getElementById('langSelect');
   if (select) select.value = lang;
   localStorage.setItem('moviezone.playerLang', lang);
 }
-
+ 
 function getSelectedQuality() {
   const select = document.getElementById('qualitySelect');
   return select ? select.value : (localStorage.getItem('moviezone.playerQuality') || 'fhd');
 }
-
+ 
 function setSelectedQuality(quality) {
   const select = document.getElementById('qualitySelect');
   if (select) select.value = quality;
   localStorage.setItem('moviezone.playerQuality', quality);
 }
-
+ 
 function getSelectedSourceIdx() {
   const saved = parseInt(localStorage.getItem('moviezone.playerSourceIdx') || '0', 10);
   return isNaN(saved) ? 0 : Math.max(0, Math.min(saved, playerSources.length - 1));
 }
-
+ 
 function setSelectedSourceIdx(idx) {
   localStorage.setItem('moviezone.playerSourceIdx', String(idx));
 }
-
+ 
 function buildSourceLabel(srcIdx) {
   return playerSources[srcIdx] ? playerSources[srcIdx].name : (playerSources[0] ? playerSources[0].name : 'Source');
 }
-
+ 
 function playMovie() {
   if (!currentModalMovie) return;
   currentSourceIdx = getSelectedSourceIdx();
@@ -1181,14 +1183,14 @@ function playMovie() {
   const quality = getSelectedQuality();
   loadPlayer(currentModalMovie.id, currentSourceIdx, lang, quality, currentModalMovie.media_type);
 }
-
+ 
 function playNextEpisode() {
   if (!currentModalMovie || currentModalMovie.media_type !== 'tv') return;
   
   const sInput = document.getElementById('seasonInput');
   const eInput = document.getElementById('episodeInput');
   if (!sInput || !eInput) return;
-
+ 
   const currentS = parseInt(sInput.value, 10);
   const currentE = parseInt(eInput.value, 10);
   
@@ -1210,7 +1212,7 @@ function playNextEpisode() {
     }
   }
 }
-
+ 
 function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   const embedEl = document.getElementById('videoEmbed');
   if (!embedEl) return;
@@ -1226,15 +1228,15 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   const s = sInput ? sInput.value : '1';
   const e = eInput ? eInput.value : '1';
   const src = playerSources[srcIdx].url(id, lang, type, s, e);
-
+ 
   embedEl.innerHTML = '';
-
+ 
   // Custom Loading Spinner add karo
   const loader = document.createElement('div');
   loader.className = 'player-loader';
   loader.innerHTML = '<div class="player-spinner"></div>';
   embedEl.appendChild(loader);
-
+ 
   const iframe = document.createElement('iframe');
   iframe.id = 'playerFrame';
   iframe.src = src;
@@ -1251,9 +1253,9 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
     loader.style.opacity = '0';
     setTimeout(() => { if (loader && loader.parentNode) loader.remove(); }, 400);
   };
-
+ 
   embedEl.appendChild(iframe);
-
+ 
   let controlsHtml = '<div id="playerControls" class="player-controls">';
   if (type === 'tv') {
     controlsHtml += '<button onclick="playNextEpisode()" class="player-chip premium-play-btn" style="padding:0 14px; border-radius:999px; min-height:42px; border:none; display:inline-flex; align-items:center; gap:6px;">' +
@@ -1268,31 +1270,31 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
         '<span>Fullscreen</span>' +
       '</button>' +
     '</div>';
-
+ 
   const existingControls = document.getElementById('playerControls');
   if (existingControls) {
     existingControls.outerHTML = controlsHtml;
   } else {
     embedEl.insertAdjacentHTML('afterend', controlsHtml);
   }
-
+ 
   try { renderExternalSources(id, srcIdx, lang); } catch(e){}
-
+ 
   showToast('PLAY ' + buildSourceLabel(srcIdx) + ' | ' + (lang==='hi' ? 'Hindi' : 'English') + ' | ' + quality.toUpperCase() + (type === 'tv' ? ` | S${s} E${e}` : ''));
-
+ 
   // Server/Play par click karne pe smooth scroll karke video player area me chala jayega
   setTimeout(() => {
     embedEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, 300);
 }
-
+ 
 function togglePlayerLang() {
   if (!currentModalMovie) return;
   const nextLang = getSelectedLang() === 'hi' ? 'en' : 'hi';
   setSelectedLang(nextLang);
   loadPlayer(currentModalMovie.id, currentSourceIdx, nextLang, getSelectedQuality(), currentModalMovie.media_type);
 }
-
+ 
 async function downloadMovie() {
   if (!currentModalMovie) return;
   const title = currentModalMovie.title || currentModalMovie.name || '';
@@ -1308,11 +1310,11 @@ async function downloadMovie() {
     dlBtn.style.pointerEvents = 'none';
     dlBtn.style.borderColor = '#10b981';
   }
-
+ 
   // Remove existing modal if any
   const existingModal = document.getElementById('dlModal');
   if (existingModal) existingModal.remove();
-
+ 
   // 2. Fetch Torrents directly from YTS API
   let torrentsHtml = '';
   try {
@@ -1357,7 +1359,7 @@ async function downloadMovie() {
         }
       }
     }
-
+ 
     if (!torrentsHtml) {
       torrentsHtml = `
         <div style="padding:15px; background:rgba(230,57,70,0.1); border:1px solid rgba(230,57,70,0.2); border-radius:10px; color:var(--text); font-size:0.9rem;">
@@ -1374,14 +1376,14 @@ async function downloadMovie() {
       </div>
     `;
   }
-
+ 
   // Restore button state
   if (dlBtn) {
     dlBtn.innerHTML = originalBtnHtml;
     dlBtn.style.pointerEvents = 'auto';
     dlBtn.style.borderColor = '';
   }
-
+ 
   // 3. Update Modal UI with fetched Links
   const dlModalHtml = `
     <div id="dlModal" style="position:fixed; inset:0; z-index:999999; background:rgba(5,5,8,0.85); backdrop-filter:blur(12px); display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity 0.3s ease;">
@@ -1407,12 +1409,12 @@ async function downloadMovie() {
     }
   }, 10);
 }
-
+ 
 function togglePlayerFS() {
   const embedEl = document.getElementById('videoEmbed');
   const btn = document.getElementById('fsBtn');
   if (!embedEl) return;
-
+ 
   if (!document.fullscreenElement && !document.webkitFullscreenElement && !isPlayerFullscreen) {
     const target = embedEl;
     try {
@@ -1441,7 +1443,7 @@ function togglePlayerFS() {
     document.removeEventListener('keydown', exitFSOnEsc);
   }
 }
-
+ 
 const handleFullscreenChange = () => {
   const isFS = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
   if (!isFS) {
@@ -1456,12 +1458,12 @@ const handleFullscreenChange = () => {
     }
   }
 };
-
+ 
 document.addEventListener('fullscreenchange', handleFullscreenChange);
 document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
 document.addEventListener('mozfullscreenchange', handleFullscreenChange);
 document.addEventListener('MSFullscreenChange', handleFullscreenChange);
-
+ 
 // Direct link URL load handle karo (agar kisi ne URL bheji ho toh direct khul jaye)
 window.addEventListener('DOMContentLoaded', () => {
   if (window.location.hash.startsWith('#watch-')) {
@@ -1471,18 +1473,18 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   }
 });
-
+ 
 function exitFSOnEsc(e) {
   if (e.key === 'Escape') togglePlayerFS();
 }
-
+ 
 const modalOverlay = document.getElementById('modal-overlay');
 if (modalOverlay) {
   modalOverlay.addEventListener('click', (e) => {
     if (e.target === modalOverlay) closeModal();
   });
 }
-
+ 
 // ── ANTI-REDIRECT (FRAME-BUSTING BLOCKER) WITHOUT SANDBOX ──
 // यह कोड मोबाइल या छोटी स्क्रीन पर थर्ड-पार्टी सर्वर्स के ऑटो-रीडायरेक्ट को रोकेगा
 // TVs par ye block issue create karta hai video iframes ke liye, isliye !isTV par lagaya
@@ -1495,7 +1497,7 @@ if (!isTV) {
     }
   });
 }
-
+ 
 document.addEventListener('DOMContentLoaded', () => {
   const langSel = document.getElementById('langSelect');
   if (langSel) langSel.addEventListener('change', (e) => { setSelectedLang(e.target.value); });
@@ -1534,12 +1536,12 @@ document.addEventListener('DOMContentLoaded', () => {
         catTabs.appendChild(adultTab);
       }
 });
-
+ 
 window.addEventListener('scroll', () => {
   const nb = document.getElementById('navbar');
   if (nb) nb.classList.toggle('scrolled', window.scrollY > 60);
 });
-
+ 
 const hamburgerBtn = document.getElementById('hamburgerBtn');
 if (hamburgerBtn) {
   hamburgerBtn.addEventListener('click', () => {
@@ -1561,7 +1563,7 @@ document.querySelectorAll('.nav-links a').forEach(link => {
     document.body.style.overflow = '';
   });
 });
-
+ 
 function showToast(msg) {
   const t = document.getElementById('toast');
   if (!t) return;
@@ -1569,7 +1571,7 @@ function showToast(msg) {
   t.classList.add('show');
   setTimeout(() => { t.classList.remove('show'); }, 3000);
 }
-
+ 
 // ── TV REMOTE NAVIGATION ──
 document.addEventListener('keydown', (e) => {
   // TV Enter/OK key: Simulate click on custom focusable elements (cards, tabs, etc.)
@@ -1595,7 +1597,7 @@ document.addEventListener('keydown', (e) => {
     }
   }
 });
-
+ 
 // ── PAGE NAVIGATION (SPA) ──
 function viewAllMovies(e) {
   if (e) e.preventDefault();
@@ -1627,7 +1629,7 @@ function viewAllMovies(e) {
   }
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
-
+ 
 function viewAllUpcoming(e) {
   if (e) e.preventDefault();
   isFullViewUpcoming = true;
@@ -1647,7 +1649,7 @@ function viewAllUpcoming(e) {
   loadUpcoming();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
-
+ 
 function goHome(e) {
   let isHash = false;
   if (e && e.type === 'click' && e.currentTarget) {
@@ -1694,5 +1696,5 @@ function goHome(e) {
   
   if (!isHash) window.scrollTo({ top: 0, behavior: 'smooth' });
 }
-
+ 
 init();
