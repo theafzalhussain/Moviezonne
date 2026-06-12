@@ -336,8 +336,8 @@ function prefetchMoviesPage(cat, pageNum) {
     tmdb('/discover/movie', { with_original_language: 'te', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
     tmdb('/movie/now_playing', { language: 'en-US', page: pageStr });
   } else if (cat === 'hollywood') {
-    tmdb('/movie/popular', { language: 'en-US', page: p1 });
-    tmdb('/movie/popular', { language: 'en-US', page: p2 });
+    tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p1 });
+    tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p2 });
   } else if (cat === 'tv') {
     tmdb('/trending/tv/week', { language: 'en-US', page: pageStr });
     tmdb('/discover/tv', { language: 'en-US', sort_by: 'popularity.desc', page: pageStr });
@@ -441,8 +441,8 @@ async function loadMovies(cat, isLoadMore = false) {
       }
     } else if (cat === 'hollywood') {
       const res = await Promise.all([
-        tmdb('/movie/popular', { language: 'en-US', page: p1 }),
-        tmdb('/movie/popular', { language: 'en-US', page: p2 })
+        tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p1 }),
+        tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p2 })
       ]);
       res.forEach(r => { movies = movies.concat(r.results||[]); });
     } else if (cat === 'kids') {
