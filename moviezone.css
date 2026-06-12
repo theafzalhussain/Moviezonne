@@ -601,12 +601,15 @@ body {
   opacity: 0.5;
 }
 
-/* Vignette */
+/* Vignette + premium cinematic frame */
 #hero::after {
   content: '';
   position: absolute;
   inset: 0;
   background: radial-gradient(ellipse at center, transparent 50%, rgba(3,3,10,0.55) 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(245,197,24,0.05),
+    inset 0 -140px 180px -90px rgba(0,0,0,0.75);
   pointer-events: none;
   z-index: 4;
 }
@@ -631,7 +634,7 @@ body {
   background-size: cover;
   background-position: center top;
   transform: scale(1.12);
-  transition: transform 10s ease, filter 1s ease;
+  transition: transform 12s cubic-bezier(0.25, 0.46, 0.45, 0.94), filter 1s ease;
   filter: brightness(0.48) saturate(1.1);
   will-change: transform;
 }
@@ -704,6 +707,18 @@ body {
   animation: titleGlow 4s ease-in-out infinite;
   margin-bottom: 1.1rem;
   text-shadow: 0 8px 40px rgba(0,0,0,0.7), 0 2px 10px rgba(0,0,0,0.5);
+  position: relative;
+}
+
+.slide-title::after {
+  content: '';
+  display: block;
+  width: 68px;
+  height: 4px;
+  margin-top: 1rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--gold), transparent);
+  box-shadow: 0 0 14px rgba(245,197,24,0.55);
 }
 
 .slide-meta {
@@ -829,9 +844,9 @@ body {
   left: 50%;
   transform: translateX(-50%);
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 1rem;
+  gap: 0.65rem;
   z-index: 10;
 }
 
@@ -855,6 +870,72 @@ body {
   background: linear-gradient(90deg, var(--gold), var(--red));
   border-color: rgba(245,197,24,0.3);
   box-shadow: 0 2px 12px rgba(245,197,24,0.35);
+  animation: dotGlow 2.6s ease-in-out infinite;
+}
+
+@keyframes dotGlow {
+  0%, 100% { box-shadow: 0 2px 12px rgba(245,197,24,0.35); }
+  50% { box-shadow: 0 2px 22px rgba(245,197,24,0.65); }
+}
+
+/* Autoplay progress indicator — premium "now playing" feel */
+.carousel-progress-track {
+  width: 130px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.14);
+  overflow: hidden;
+}
+
+.carousel-progress-fill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--gold), var(--red));
+  box-shadow: 0 0 10px rgba(245,197,24,0.5);
+}
+
+@keyframes carouselProgressFill {
+  from { width: 0%; }
+  to   { width: 100%; }
+}
+
+/* Prev / Next arrow controls — glassmorphism, premium */
+.carousel-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(10,10,22,0.35);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 12;
+  opacity: 0;
+  transition: opacity 0.35s ease, background 0.3s ease, border-color 0.3s ease, transform 0.3s var(--ease-spring), box-shadow 0.3s ease;
+}
+
+.carousel-arrow--prev { left: 2.2%; }
+.carousel-arrow--next { right: 2.2%; }
+
+#hero:hover .carousel-arrow { opacity: 1; }
+
+.carousel-arrow:hover,
+.carousel-arrow:focus-visible {
+  background: rgba(245,197,24,0.18);
+  border-color: var(--gold);
+  color: var(--gold);
+  transform: translateY(-50%) scale(1.08);
+  box-shadow: 0 8px 26px rgba(245,197,24,0.28);
+  opacity: 1;
 }
 
 /* Thumbnail rail */
@@ -866,6 +947,13 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
+  padding: 0.7rem;
+  background: rgba(8,8,18,0.32);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 18px;
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  box-shadow: 0 16px 40px rgba(0,0,0,0.4);
   z-index: 10;
 }
 
@@ -2480,6 +2568,7 @@ body {
   .slide-actions { flex-direction: column; }
   .slide-actions .btn-play, .slide-actions .btn-info { width: 100%; justify-content: center; }
   .carousel-thumbs { display: none; }
+  .carousel-arrow { display: none; }
   .carousel-nav { bottom: 4.5%; }
   .main-content, #upcoming { padding-left: 5%; padding-right: 5%; }
 
@@ -2659,11 +2748,61 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   TV MODE — Smart TV performance optimizations
+   Smart TV browsers (WebOS, Tizen, Android TV, etc.) have weak GPUs.
+   Heavy backdrop-filter blur, film grain, Ken-Burns zoom and big
+   layered shadows cause visible stutter/lag while scrolling or
+   navigating with the remote. Strip / simplify those here so
+   everything stays butter-smooth.
+   ═══════════════════════════════════════════════════════════════ */
+
+.tv-mode * {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Film grain noise filter is GPU-expensive — remove on TV */
+.tv-mode #hero::before { display: none !important; }
+
+/* Ken-Burns zoom causes continuous repaint of a huge image — freeze it */
+.tv-mode .slide-bg,
+.tv-mode .carousel-slide.active .slide-bg {
+  transform: scale(1) !important;
+  transition: filter 0.6s ease !important;
+}
+
+/* Simplify movie-card hover/focus (remote navigation) — lighter shadow, no big blurs */
+.tv-mode .movie-card:hover,
+.tv-mode .movie-card:focus-visible {
+  transform: scale(1.035);
+  box-shadow: 0 0 0 3px var(--gold), 0 12px 28px rgba(0,0,0,0.5);
+}
+
+.tv-mode .movie-card:hover .card-poster img,
+.tv-mode .movie-card:focus-visible .card-poster img {
+  transform: scale(1.04);
+}
+
+/* Skip staggered entrance animations — render instantly */
+.tv-mode .movie-card,
+.tv-mode .upcoming-card {
+  animation: none !important;
+  opacity: 1 !important;
+  transform: none !important;
+}
+
+/* Carousel arrows: TV has no hover, so keep them visible for remote focus */
+.tv-mode .carousel-arrow { opacity: 1; background: rgba(10,10,22,0.55); }
+
+/* Progress bar / dot glow are tiny — keep, but drop the pulsing glow animation */
+.tv-mode .dot.active { animation: none; }
+
+/* ═══════════════════════════════════════════════════════════════
    REDUCED MOTION — Accessibility
    ═══════════════════════════════════════════════════════════════ */
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *, *::before, *::as {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

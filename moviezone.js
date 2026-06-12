@@ -4,7 +4,14 @@ const isTV = /SmartTV|WebOS|Tizen|NetCast|VIDAA|Roku|AppleTV|Android TV|BRAVIA|A
 const LIVE_BACKEND_URL = '/api/tmdb';
 const BASE = isLocalhost ? 'http://localhost:3000/api/tmdb' : LIVE_BACKEND_URL;
 const IMG = 'https://image.tmdb.org/t/p/w500';
-const IMG_ORIG = 'https://image.tmdb.org/t/p/original';
+// Hero / Modal backdrops: w1280 looks essentially identical to "original" on screen
+// but is 70-90% smaller in file size -> much faster first paint + no TV lag from huge images
+const IMG_BACKDROP = 'https://image.tmdb.org/t/p/w1280';
+ 
+// ── TV MODE (Performance) ──
+// Smart TV browsers have weak CPUs/GPUs: heavy blur/animation cause visible lag.
+// Tag <html> early so CSS can strip expensive effects (backdrop-filter, film grain, Ken Burns, etc.)
+if (isTV) document.documentElement.classList.add('tv-mode');
  
 // ── SERVER PRECONNECT (FAST STREAMING) ──
 // Background me sabhi servers se pehle se secure connection bana ke rakho jisse fetching instant ho
@@ -108,8 +115,15 @@ async function tmdb(endpoint, params) {
  
 // ── INIT ── Priority-based staggered loading for ultra-fast startup
 async function init() {
-  await loadCarousel(); // 1. Priority: Hero section load karo
-  await loadMovies('all'); // 2. Priority: Initial grid load karo
+  // Inject Multi-Language UI styles
+  if (!document.getElementById('mz-multilang-css')) {
+    const _s = document.createElement('style');
+    _s.id = 'mz-multilang-css';
+    _s.textContent = `.mz-lang-btn{display:inline-flex!important;align-items:center;gap:5px;background:rgba(255,255,255,0.05)!important;border:1px solid rgba(255,255,255,0.1)!important;color:rgba(255,255,255,0.65)!important;font-size:0.78rem!important;font-weight:600!important;padding:7px 13px!important;border-radius:999px!important;cursor:pointer!important;transition:all .2s ease!important;letter-spacing:.2px!important;position:relative!important}.mz-lang-btn:hover{background:rgba(245,197,24,.12)!important;border-color:rgba(245,197,24,.35)!important;color:#fff!important;transform:translateY(-1px)!important}.mz-lang-btn.active{background:linear-gradient(135deg,#f5c518,#e6a817)!important;border-color:#f5c518!important;color:#000!important;font-weight:800!important;box-shadow:0 4px 18px rgba(245,197,24,.35)!important;transform:translateY(-1px)!important}.mz-lang-btn.mz-lang-avail{border-color:rgba(16,185,129,.3)!important}.mz-lang-btn.mz-lang-avail.active{border-color:#f5c518!important}.mz-avail-dot{display:inline-block;width:6px;height:6px;background:#10b981;border-radius:50%;margin-left:3px;flex-shrink:0;box-shadow:0 0 5px rgba(16,185,129,.5)}.mz-lang-btn.active .mz-avail-dot{background:rgba(0,0,0,.4);box-shadow:none}`;
+    document.head.appendChild(_s);
+  }
+  // 1 & 2. Hero aur grid dono ek sath fetch karo (parallel) -> total load time ~half
+  await Promise.all([loadCarousel(), loadMovies('all')]);
   
   // 3. Delay upcoming fetching until browser is idle
   setTimeout(() => {
@@ -149,8 +163,12 @@ function buildCarousel() {
     const genres = (m.genre_ids||[]).slice(0,3).map(id => '<span class="genre-tag">'+escapeHTML(GENRE_MAP[id]||'Movie')+'</span>').join('');
     const slide = document.createElement('div');
     slide.className = 'carousel-slide' + (i === 0 ? ' active' : '');
+    const bgUrl = IMG_BACKDROP+m.backdrop_path;
+    // Performance: only load the FIRST slide's background eagerly.
+    // Remaining slides are lazy-loaded just-in-time (current + next) via ensureSlideBg()
+    // so the page doesn't have to download 6 large images on first paint.
     slide.innerHTML =
-      '<div class="slide-bg" style="background-image:url(\''+IMG_ORIG+m.backdrop_path+'\')"></div>' +
+      '<div class="slide-bg" data-bg="'+bgUrl+'"'+(i === 0 ? ' style="background-image:url(\''+bgUrl+'\')"' : '')+'></div>' +
       '<div class="slide-gradient"></div>' +
       '<div class="slide-content">' +
         '<div class="slide-badge">TRENDING NOW</div>' +
@@ -190,7 +208,21 @@ function buildCarousel() {
   dots.appendChild(dotsFrag);
   thumbs.appendChild(thumbsFrag);
  
+  // Preload the next slide's background while the user is still looking at slide 0
+  if (carouselMovies.length > 1) ensureSlideBg(1 % carouselMovies.length);
+ 
   startAutoSlide();
+}
+ 
+// Sets the background-image of a slide only once it's about to be shown (lazy loading)
+function ensureSlideBg(idx) {
+  const slides = document.querySelectorAll('.carousel-slide');
+  const slide = slides[idx];
+  if (!slide) return;
+  const bg = slide.querySelector('.slide-bg');
+  if (bg && bg.dataset.bg && !bg.style.backgroundImage) {
+    bg.style.backgroundImage = "url('" + bg.dataset.bg + "')";
+  }
 }
  
 function goToSlide(n) {
@@ -208,13 +240,72 @@ function goToSlide(n) {
   if (thumbs[currentSlide]) thumbs[currentSlide].classList.add('active');
   const t = document.getElementById('carouselTrack');
   if (t) t.style.transform = 'translateX(-'+(currentSlide * 100)+'%)';
+  // Make sure current + upcoming slide images are ready
+  ensureSlideBg(currentSlide);
+  ensureSlideBg((currentSlide + 1) % len);
 }
  
 function startAutoSlide() {
   if (autoSlideTimer) clearInterval(autoSlideTimer);
+  restartProgressBar();
   autoSlideTimer = setInterval(() => { goToSlide(currentSlide + 1); }, 5500);
 }
 function resetAutoSlide() { startAutoSlide(); }
+ 
+// ── PREMIUM AUTOPLAY PROGRESS BAR ──
+function restartProgressBar() {
+  const bar = document.getElementById('carouselProgress');
+  if (!bar) return;
+  bar.style.animation = 'none';
+  bar.style.animationPlayState = 'running';
+  // Force reflow so the animation restarts cleanly from 0%
+  void bar.offsetWidth;
+  bar.style.animation = 'carouselProgressFill 5.5s linear forwards';
+}
+function pauseAutoSlide() {
+  if (autoSlideTimer) { clearInterval(autoSlideTimer); autoSlideTimer = null; }
+  const bar = document.getElementById('carouselProgress');
+  if (bar) bar.style.animationPlayState = 'paused';
+}
+function resumeAutoSlide() {
+  if (autoSlideTimer) return;
+  const bar = document.getElementById('carouselProgress');
+  if (bar) bar.style.animationPlayState = 'running';
+  autoSlideTimer = setInterval(() => { goToSlide(currentSlide + 1); }, 5500);
+}
+ 
+// ── HERO INTERACTIONS — pause-on-hover, swipe, arrow nav (premium UX) ──
+(function initHeroInteractions() {
+  const hero = document.getElementById('hero');
+  if (!hero) return;
+ 
+  // Pause autoplay while the user is looking closely (desktop hover)
+  if (!isTV) {
+    hero.addEventListener('mouseenter', pauseAutoSlide);
+    hero.addEventListener('mouseleave', resumeAutoSlide);
+  }
+ 
+  // Prev / Next arrow buttons
+  const prevBtn = document.getElementById('carouselPrev');
+  const nextBtn = document.getElementById('carouselNext');
+  if (prevBtn) prevBtn.addEventListener('click', () => { goToSlide(currentSlide - 1); resetAutoSlide(); });
+  if (nextBtn) nextBtn.addEventListener('click', () => { goToSlide(currentSlide + 1); resetAutoSlide(); });
+ 
+  // Swipe support for touch devices
+  let touchStartX = 0, touchStartY = 0;
+  hero.addEventListener('touchstart', (e) => {
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+  }, { passive: true });
+  hero.addEventListener('touchend', (e) => {
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    const dy = e.changedTouches[0].clientY - touchStartY;
+    if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy)) {
+      goToSlide(currentSlide + (dx < 0 ? 1 : -1));
+      resetAutoSlide();
+    }
+  }, { passive: true });
+})();
  
 // ── BACKGROUND PREFETCH HELPERS (For Instant "Load More") ──
 function prefetchMoviesPage(cat, pageNum) {
@@ -754,7 +845,7 @@ async function openModal(id, type = 'movie') {
     details.media_type = type;
     currentModalMovie = details;
     const bgEl = document.getElementById('modalBg');
-    if (bgEl) bgEl.src = details.backdrop_path ? IMG_ORIG + details.backdrop_path : '';
+    if (bgEl) bgEl.src = details.backdrop_path ? IMG_BACKDROP + details.backdrop_path : '';
  
     // --- HOVER TRAILER LOGIC (Smart Auto-Fallback) ---
     let bestVids = [];
@@ -772,7 +863,7 @@ async function openModal(id, type = 'movie') {
       if (bestVids.length === 0 && ytVids.length > 0) bestVids = ytVids;
     }
     const imageWrapper = document.querySelector('.modal-image-wrapper');
-    if (imageWrapper) {
+    if (imageWrapper && !isTV) {
       let tc = document.getElementById('trailerContainer');
       if (tc) tc.remove();
       if (bestVids.length > 0) {
@@ -1094,42 +1185,129 @@ async function loadRelatedMovies(id, type) {
   } catch(e) { section.style.display = 'none'; }
 }
  
-// 2026 के सबसे ज्यादा चलने वाले और एक्टिव सर्वर्स की लिस्ट
+// ── PLAYER SOURCES — Multi-Language Audio Supported ──
+// Server 0 (Multi-Audio) genuinely supports Hindi/Tamil/Telugu dubbed audio tracks
 const playerSources = [
+  { name: '🌐 Multi-Audio', url: (id, lang, type, s, e) => {
+    // BEST FOR DUBBED: multiembed.mov genuinely serves Hindi/Tamil/Telugu dubbed audio
+    const base = type === 'tv'
+      ? `https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1&s=${s}&e=${e}`
+      : `https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1`;
+    return base + (lang && lang !== 'en' ? `&lang=${lang}` : '');
+  }},
   { name: 'Server 1', url: (id, lang, type, s, e) => {
-    // इंडिया के नेटवर्क्स पर ब्लॉकेज कम आती है
+    // India ke networks par blockage kam aati hai
     return (type === 'tv' ? `https://autoembed.co/tv/tmdb/${id}-${s}-${e}` : 'https://autoembed.co/movie/tmdb/' + id) + `?lang=${lang}`;
   }},
   { name: 'Server 2', url: (id, lang, type, s, e) => {
-    // इंटरफ़ेस बहुत साफ़ है और प्लेयर के अंदर सेटिंग्स
+    // Interface bahut saaf hai aur player ke andar settings
     return (type === 'tv' ? `https://vidlink.pro/tv/${id}/${s}/${e}` : 'https://vidlink.pro/movie/' + id) + `?lang=${lang}`;
   }},
   { name: 'Server 3', url: (id, lang, type, s, e) => {
     // TV aur Movie dono properly support karega
     return (type === 'tv' ? `https://vidsrc.to/embed/tv/${id}/${s}/${e}` : 'https://vidsrc.to/embed/movie/' + id) + `?lang=${lang}`;
   }},
-  { name: 'Server 4 ', url: (id, lang, type, s, e) => {
+  { name: 'Server 4', url: (id, lang, type, s, e) => {
     // Official proxy mirror to fix 'refused to connect' / iframe block issue
     return (type === 'tv' ? `https://vidsrc.pm/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.pm/embed/movie?tmdb=${id}`) + `&lang=${lang}`;
+  }},
+  { name: 'Server 5', url: (id, lang, type, s, e) => {
+    // embed.su — good fallback for regional/dubbed content
+    return type === 'tv'
+      ? `https://embed.su/embed/tv/${id}/${s}/${e}`
+      : `https://embed.su/embed/movie/${id}`;
   }}
 ];
 let currentSourceIdx = 0;
 let isPlayerFullscreen = false;
  
+// ── LANGUAGE CONFIG (for quick-buttons) ──
+const LANG_CONFIG = {
+  hi: { flag: '🇮🇳', name: 'Hindi',      code: 'hi' },
+  en: { flag: '🇬🇧', name: 'English',    code: 'en' },
+  ta: { flag: '🎬',  name: 'Tamil',      code: 'ta' },
+  te: { flag: '🎭',  name: 'Telugu',     code: 'te' },
+  ml: { flag: '🌴',  name: 'Malayalam',  code: 'ml' },
+  kn: { flag: '🟣',  name: 'Kannada',    code: 'kn' },
+  mr: { flag: '🟠',  name: 'Marathi',    code: 'mr' },
+  bn: { flag: '🟡',  name: 'Bengali',    code: 'bn' },
+};
+const DUBBED_LANGS = ['hi', 'ta', 'te', 'ml', 'kn', 'mr', 'bn'];
+const CORE_LANGS   = ['hi', 'en', 'ta', 'te'];
+const EXTRA_LANGS  = ['ml', 'kn', 'mr', 'bn'];
+
+function renderLanguageButtons(spokenLangs) {
+  const ext = document.getElementById('externalSources');
+  if (!ext) return;
+  const old = document.getElementById('mz-lang-section');
+  if (old) old.remove();
+  const tmdbCodes = (spokenLangs || []).map(l => l.iso_639_1);
+  const extra = EXTRA_LANGS.filter(c => tmdbCodes.includes(c));
+  const toShow = [...CORE_LANGS, ...extra];
+  const curLang = getSelectedLang();
+
+  const btnsHtml = toShow.map(code => {
+    const cfg = LANG_CONFIG[code];
+    if (!cfg) return '';
+    const isActive = code === curLang;
+    const isAvail  = tmdbCodes.includes(code);
+    return `<button class="player-chip mz-lang-btn${isActive?' active':''}${isAvail?' mz-lang-avail':''}" data-lang="${code}" title="${isAvail?'✅ Dubbed available on TMDB':'Subtitles if dub unavailable'}"><span>${cfg.flag}</span> ${cfg.name}${isAvail?'<span class="mz-avail-dot"></span>':''}</button>`;
+  }).join('');
+
+  const section = document.createElement('div');
+  section.id = 'mz-lang-section';
+  section.style.cssText = 'margin-top:14px; border-top:1px solid rgba(255,255,255,0.08); padding-top:12px;';
+  section.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
+      <span style="font-size:0.7rem;font-weight:800;letter-spacing:1.8px;color:rgba(255,255,255,0.35);text-transform:uppercase;">🎵 Audio Language</span>
+      <span style="font-size:0.68rem;color:#10b981;background:rgba(16,185,129,0.1);padding:2px 9px;border-radius:999px;border:1px solid rgba(16,185,129,0.2);">🟢 = Dubbed available</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:7px;">${btnsHtml}</div>
+    <div style="margin-top:10px;font-size:0.7rem;color:rgba(255,255,255,0.3);line-height:1.5;">💡 Hindi/Tamil/Telugu select karne par <b style="color:rgba(255,255,255,0.45);">🌐 Multi-Audio server auto-switch</b> hoga — yahi best dubbed support deta hai.</div>
+  `;
+  ext.appendChild(section);
+
+  section.querySelectorAll('.mz-lang-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const lang = btn.getAttribute('data-lang');
+      if (!lang || !currentModalMovie) return;
+      setSelectedLang(lang);
+      const langDrop = document.getElementById('langSelect');
+      if (langDrop) langDrop.value = lang;
+      section.querySelectorAll('.mz-lang-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      // Auto-switch to Multi-Audio (index 0) for dubbed languages
+      let targetSrcIdx = currentSourceIdx;
+      if (DUBBED_LANGS.includes(lang)) {
+        targetSrcIdx = 0;
+        currentSourceIdx = 0;
+        document.querySelectorAll('.player-chip--source').forEach((b, i) => b.classList.toggle('active', i === 0));
+      }
+      loadPlayer(currentModalMovie.id, targetSrcIdx, lang, getSelectedQuality(), currentModalMovie.media_type);
+      const cfg = LANG_CONFIG[lang] || {};
+      showToast(`🎵 ${cfg.flag||''} ${cfg.name||lang} Audio${DUBBED_LANGS.includes(lang)?' | 🌐 Multi-Audio activated':''}`);
+    });
+  });
+}
+
 function renderExternalSources(id, srcIdx, lang) {
   const ext = document.getElementById('externalSources');
   if (!ext) return;
-  const html = playerSources.map((s, i) => 
+
+  const serverBtnsHtml = playerSources.map((s, i) =>
     '<button class="player-chip player-chip--source" data-srcidx="'+i+'">'+escapeHTML(s.name)+'</button>'
   ).join('');
-  ext.innerHTML = html;
+  ext.innerHTML =
+    '<div style="font-size:0.7rem;font-weight:800;letter-spacing:1.8px;color:rgba(255,255,255,0.35);text-transform:uppercase;margin-bottom:8px;">📡 Playback Server</div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:7px;">' + serverBtnsHtml + '</div>';
+
   const srcButtons = ext.querySelectorAll('.player-chip--source');
   srcButtons.forEach(btn => {
     btn.addEventListener('click', () => {
       const idx = parseInt(btn.getAttribute('data-srcidx')||'0', 10);
       const type = currentModalMovie ? currentModalMovie.media_type : 'movie';
       const quality = getSelectedQuality();
-      loadPlayer(id, idx, lang, quality, type);
+      loadPlayer(id, idx, getSelectedLang(), quality, type);
       srcButtons.forEach(b => { b.classList.remove('active'); });
       btn.classList.add('active');
     });
@@ -1139,6 +1317,10 @@ function renderExternalSources(id, srcIdx, lang) {
     const activeBtn = ext.querySelector('.player-chip--source[data-srcidx="'+srcIdx+'"]');
     if (activeBtn) activeBtn.classList.add('active');
   }
+
+  // Render language quick-buttons below server buttons
+  const spokenLangs = (currentModalMovie && currentModalMovie.spoken_languages) || [];
+  renderLanguageButtons(spokenLangs);
 }
  
 function getSelectedLang() {
@@ -1280,7 +1462,8 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
  
   try { renderExternalSources(id, srcIdx, lang); } catch(e){}
  
-  showToast('PLAY ' + buildSourceLabel(srcIdx) + ' | ' + (lang==='hi' ? 'Hindi' : 'English') + ' | ' + quality.toUpperCase() + (type === 'tv' ? ` | S${s} E${e}` : ''));
+  const _toastLangName = (LANG_CONFIG[lang] && LANG_CONFIG[lang].name) || lang.toUpperCase();
+  showToast('▶ ' + buildSourceLabel(srcIdx) + ' | 🎵 ' + _toastLangName + ' | ' + quality.toUpperCase() + (type === 'tv' ? ` | S${s} E${e}` : ''));
  
   // Server/Play par click karne pe smooth scroll karke video player area me chala jayega
   setTimeout(() => {
@@ -1500,7 +1683,20 @@ if (!isTV) {
  
 document.addEventListener('DOMContentLoaded', () => {
   const langSel = document.getElementById('langSelect');
-  if (langSel) langSel.addEventListener('change', (e) => { setSelectedLang(e.target.value); });
+  if (langSel) langSel.addEventListener('change', (e) => {
+    setSelectedLang(e.target.value);
+    // Sync language quick-buttons
+    document.querySelectorAll('.mz-lang-btn').forEach(b => {
+      b.classList.toggle('active', b.getAttribute('data-lang') === e.target.value);
+    });
+    // Reload player if iframe already playing
+    if (currentModalMovie) {
+      const embedEl = document.getElementById('videoEmbed');
+      if (embedEl && embedEl.querySelector('iframe')) {
+        loadPlayer(currentModalMovie.id, currentSourceIdx, e.target.value, getSelectedQuality(), currentModalMovie.media_type);
+      }
+    }
+  });
   const qualSel = document.getElementById('qualitySelect');
   if (qualSel) qualSel.addEventListener('change', (e) => { setSelectedQuality(e.target.value); });
   
@@ -1537,10 +1733,16 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 });
  
+let _scrollTicking = false;
 window.addEventListener('scroll', () => {
-  const nb = document.getElementById('navbar');
-  if (nb) nb.classList.toggle('scrolled', window.scrollY > 60);
-});
+  if (_scrollTicking) return;
+  _scrollTicking = true;
+  requestAnimationFrame(() => {
+    const nb = document.getElementById('navbar');
+    if (nb) nb.classList.toggle('scrolled', window.scrollY > 60);
+    _scrollTicking = false;
+  });
+}, { passive: true });
  
 const hamburgerBtn = document.getElementById('hamburgerBtn');
 if (hamburgerBtn) {
