@@ -134,14 +134,30 @@ async function init() {
  
 // ── CAROUSEL
 async function loadCarousel() {
-  const [t1, t2] = await Promise.all([
-    tmdb('/trending/all/week', { language: 'en-US', page: '1' }), // Ab hero banner me Series bhi aayengi
-    tmdb('/movie/top_rated',    { language: 'en-US', page: '1' })
+  const [tGlobal, tBolly, tTop] = await Promise.all([
+    tmdb('/trending/all/week', { language: 'en-US', page: '1' }), // Global trending (Hollywood/International)
+    tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', 'vote_average.gte': '6.8', 'vote_count.gte': '50', language: 'en-US', page: '1' }), // Bollywood Trending + High Rating
+    tmdb('/movie/top_rated', { language: 'en-US', page: '1' }) // Global Top Rated
   ]);
-  const pool = [...(t1.results||[]), ...(t2.results||[])];
+
+  const global = tGlobal.results || [];
+  const bolly = tBolly.results || [];
+  const top = tTop.results || [];
+  
+  const pool = [];
+  const maxLen = Math.max(global.length, bolly.length, top.length);
+  // Interleave to mix Hollywood and Bollywood perfectly (1 by 1)
+  for (let i = 0; i < maxLen; i++) {
+    if (global[i]) pool.push(global[i]);
+    if (bolly[i]) pool.push(bolly[i]);
+    if (top[i]) pool.push(top[i]);
+  }
+
   const seen = new Set();
   carouselMovies = pool.filter(m => {
     if (!m.backdrop_path || !m.poster_path || seen.has(m.id)) return false;
+    // Strictly keep ONLY High Rating (>= 7.0) OR Highly Trending (popularity > 300)
+    if (m.vote_average < 7.0 && m.popularity < 300) return false;
     seen.add(m.id); return true;
   }).slice(0, 6);
   if (carouselMovies.length) buildCarousel();
@@ -1191,8 +1207,8 @@ const playerSources = [
   { name: '🌐 Multi-Audio', url: (id, lang, type, s, e) => {
     // BEST FOR DUBBED: multiembed.mov genuinely serves Hindi/Tamil/Telugu dubbed audio
     const base = type === 'tv'
-      ? `https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1&s=${s}&e=${e}`
-      : `https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1`;
+      ? `https://multiembed.mov/?video_id=${id}&tmdb=1&s=${s}&e=${e}`
+      : `https://multiembed.mov/?video_id=${id}&tmdb=1`;
     return base + (lang && lang !== 'en' ? `&lang=${lang}` : '');
   }},
   { name: 'Server 1', url: (id, lang, type, s, e) => {
@@ -1211,12 +1227,12 @@ const playerSources = [
     // Official proxy mirror to fix 'refused to connect' / iframe block issue
     return (type === 'tv' ? `https://vidsrc.pm/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.pm/embed/movie?tmdb=${id}`) + `&lang=${lang}`;
   }},
-  { name: 'Server 5', url: (id, lang, type, s, e) => {
-    // embed.su — good fallback for regional/dubbed content
-    return type === 'tv'
-      ? `https://embed.su/embed/tv/${id}/${s}/${e}`
-      : `https://embed.su/embed/movie/${id}`;
-  }}
+  // { name: 'Server 5', url: (id, lang, type, s, e) => {
+  //   // embed.su — good fallback for regional/dubbed content
+  //   return type === 'tv'
+  //     ? `https://embed.su/embed/tv/${id}/${s}/${e}`
+  //     : `https://embed.su/embed/movie/${id}`;
+  // }}
 ];
 let currentSourceIdx = 0;
 let isPlayerFullscreen = false;
@@ -1425,10 +1441,8 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   iframe.style.cssText = 'width: 100%; height: 100%; border: none; overflow: hidden !important; background: transparent; position: relative; z-index: 1;';
   iframe.setAttribute('frameborder', '0');
   iframe.setAttribute('scrolling', 'no');
-  iframe.setAttribute('allowfullscreen', 'true');
-  iframe.setAttribute('webkitallowfullscreen', 'true');
-  iframe.setAttribute('mozallowfullscreen', 'true');
   iframe.setAttribute('allow', 'fullscreen;autoplay;encrypted-media;picture-in-picture');
+  iframe.setAttribute('referrerpolicy', 'origin'); // Helps bypass strict Cloudflare hotlink protections
   iframe.setAttribute('fetchpriority', 'high'); // 🚀 Browser ko strict command for maximum loading speed
   // Iframe load hone ke baad spinner hide kar do
   iframe.onload = () => {
