@@ -644,7 +644,7 @@ body {
   filter: brightness(0.52) saturate(1.15);
 }
 
-.slide-gradient {
+/* .slide-gradient {
   position: absolute;
   inset: 0;
   background:
@@ -662,7 +662,7 @@ body {
       transparent 65%
     );
   z-index: 2;
-}
+} */
 
 .slide-content {
   position: absolute;

@@ -351,9 +351,17 @@ function prefetchMoviesPage(cat, pageNum) {
     tmdb('/discover/tv', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
     tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
   } else if (cat === 'adult') {
-    tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-    tmdb('/discover/tv', { include_adult: 'true', with_keywords: '9799', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799|195669|156321', without_genres: '16,10751,28,12,35,878', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/tv', { include_adult: 'true', with_keywords: '9799|195669|156321', without_genres: '16,10751,10759,10762,35', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799|195669|156321', with_original_language: 'hi', without_genres: '16,10751,28,12,35,878', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799|195669|156321', with_original_language: 'ta', without_genres: '16,10751,28,12,35,878', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799|195669|156321', with_original_language: 'te', without_genres: '16,10751,28,12,35,878', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
     tmdb('/discover/movie', { include_adult: 'true', certification_country: 'US', certification: 'NC-17', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+  } else if (cat === 'horror') {
+    tmdb('/discover/movie', { with_genres: '27', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/movie', { with_genres: '27', with_original_language: 'hi', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/movie', { with_genres: '27', with_original_language: 'ta', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/movie', { with_genres: '27', with_original_language: 'te', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
   } else {
     const base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: 'en-US' });
     tmdb('/discover/movie', Object.assign({}, base, { page: p1 }));
@@ -482,12 +490,30 @@ async function loadMovies(cat, isLoadMore = false) {
           }
         });
       }
+    } else if (cat === 'horror') {
+      const res = await Promise.all([
+        tmdb('/discover/movie', { with_genres: '27', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Global Horror Movies
+        tmdb('/discover/movie', { with_genres: '27', with_original_language: 'hi', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Bollywood Horror
+        tmdb('/discover/movie', { with_genres: '27', with_original_language: 'ta', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Tamil Horror
+        tmdb('/discover/movie', { with_genres: '27', with_original_language: 'te', sort_by: 'popularity.desc', page: p1, language: 'en-US' })  // Telugu Horror
+      ]);
+      let maxLength = 0;
+      res.forEach(r => { if (r.results && r.results.length > maxLength) maxLength = r.results.length; });
+      for (let i = 0; i < maxLength; i++) {
+        res.forEach(r => {
+          if (r.results && i < r.results.length) {
+            movies.push(r.results[i]);
+          }
+        });
+      }
     } else if (cat === 'adult') {
       const res = await Promise.all([
-        tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Erotic/Adult Movies
-        tmdb('/discover/tv', { include_adult: 'true', with_keywords: '9799', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // 18+ Web Series
-        tmdb('/discover/movie', { include_adult: 'true', certification_country: 'US', certification: 'NC-17', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // R/NC-17 Rated
-        tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799', with_original_language: 'hi', sort_by: 'popularity.desc', page: p1, language: 'en-US' }) // Indian 18+ Web Series/Movies
+        tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799|195669|156321', without_genres: '16,10751,28,12,35,878', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Global 18+
+        tmdb('/discover/tv', { include_adult: 'true', with_keywords: '9799|195669|156321', without_genres: '16,10751,10759,10762,35', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // 18+ Web Series
+        tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799|195669|156321', with_original_language: 'hi', without_genres: '16,10751,28,12,35,878', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Bollywood 18+
+        tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799|195669|156321', with_original_language: 'ta', without_genres: '16,10751,28,12,35,878', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Tamil 18+
+        tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799|195669|156321', with_original_language: 'te', without_genres: '16,10751,28,12,35,878', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Telugu 18+
+        tmdb('/discover/movie', { include_adult: 'true', certification_country: 'US', certification: 'NC-17', sort_by: 'popularity.desc', page: p1, language: 'en-US' }) // NC-17
       ]);
       let maxLength = 0;
       res.forEach(r => { if (r.results && r.results.length > maxLength) maxLength = r.results.length; });
@@ -496,7 +522,16 @@ async function loadMovies(cat, isLoadMore = false) {
           if (r.results && i < r.results.length) {
             const item = r.results[i];
             item.media_type = idx === 1 ? 'tv' : 'movie';
-            movies.push(item);
+            
+            // Local Double-Check: Brutally eliminate normal family/action/comedy movies
+            const badGenres = [16, 10751, 28, 12, 878, 10762, 10759, 35]; // Animation, Family, Action, Adventure, SciFi, Kids, Action&Adventure, Comedy
+            let isBad = false;
+            if (item.genre_ids) isBad = item.genre_ids.some(gid => badGenres.includes(gid));
+            
+            // Allow only if NOT bad genre OR if TMDB officially marked it as explicitly Adult
+            if (!isBad || item.adult === true) {
+              movies.push(item);
+            }
           }
         });
       }
@@ -601,7 +636,6 @@ function renderMovies(movies, append = false) {
 const CAT_HEADINGS = {
   all:'ALL MOVIES & SHOWS', tv: 'TV SHOWS & WEB SERIES', hollywood:'HOLLYWOOD', bollywood:'BOLLYWOOD',
   south:'SOUTH INDIAN', tollywood:'TOLLYWOOD', action:'ACTION',
-  comedy:'COMEDY', thriller:'THRILLER', romance:'ROMANCE',
   comedy:'COMEDY', horror:'HORROR', thriller:'THRILLER', romance:'ROMANCE',
   scifi:'SCI-FI', animation:'ANIMATION', kids:'🧸 KIDS & CARTOONS', anime:'⚔️ ANIME SERIES & MOVIES',
   adult:'🔞 18+ ADULT MOVIES & WEB SERIES'
@@ -859,8 +893,7 @@ async function openModal(id, type = 'movie') {
   try { renderExternalSources(id, getSelectedSourceIdx(), getSelectedLang()); } catch(e){}
  
   try {
-    // Added 'translations' to append_to_response to fetch multi-language availability
-    const details = await tmdb('/'+type+'/'+id, { language: 'en-US', append_to_response: 'videos,translations' });
+    const details = await tmdb('/'+type+'/'+id, { language: 'en-US', append_to_response: 'videos' });
     details.media_type = type;
     currentModalMovie = details;
     const bgEl = document.getElementById('modalBg');
@@ -1001,16 +1034,10 @@ async function openModal(id, type = 'movie') {
     const runtime = details.runtime ? (Math.floor(details.runtime/60)+'h '+(details.runtime%60)+'m') : 'N/A';
     const genres  = (details.genres||[]).slice(0,3).map(g => '<span class="genre-tag">'+escapeHTML(g.name)+'</span>').join('');
     const metaEl  = document.getElementById('modalMeta');
-    
-    // Check if Hindi is in spoken languages OR if a Hindi translation exists in TMDB
-    const hasHindi = (details.spoken_languages || []).some(l => l.iso_639_1 === 'hi') || 
-                     ((details.translations && details.translations.translations) || []).some(t => t.iso_639_1 === 'hi' && t.data.overview);
-
     if (metaEl) metaEl.innerHTML =
       '<div class="card-rating" style="font-size:0.9rem">RATING '+((details.vote_average||0).toFixed(1))+' ('+(details.vote_count||0).toLocaleString()+')</div>' +
       '<div class="card-year" style="font-size:0.85rem">YEAR '+((details.release_date||details.first_air_date||'').slice(0,4))+'</div>' +
-      '<div class="card-runtime" style="font-size:0.85rem">RUNTIME '+runtime+'</div>' + genres +
-      (hasHindi ? '<div class="card-rating" style="background:rgba(16,185,129,0.15); border-color:rgba(16,185,129,0.3); color:#10b981; margin-left:8px; box-shadow:0 0 10px rgba(16,185,129,0.2);">🎙️ HINDI DUB</div>' : '');
+      '<div class="card-runtime" style="font-size:0.85rem">RUNTIME '+runtime+'</div>' + genres;
     const embedEl = document.getElementById('videoEmbed');
     if (embedEl) embedEl.innerHTML =
       '<div class="video-placeholder">' +
@@ -1122,7 +1149,6 @@ async function openModal(id, type = 'movie') {
 }
  
 function closeModal() {
-  if (failoverTimer) clearTimeout(failoverTimer);
   if (window.location.hash.startsWith('#watch-')) {
     window.history.replaceState(null, '', window.location.pathname + window.location.search);
   }
@@ -1237,8 +1263,8 @@ const playerSources = [
     // Official proxy mirror to fix 'refused to connect' / iframe block issue
     return (type === 'tv' ? `https://vidsrc.pm/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.pm/embed/movie?tmdb=${id}`) + `&lang=${lang}`;
   }},
-  // { name: 'Server 5 (Dubbed)', url: (id, lang, type, s, e) => {
-  //   // embed.su — excellent fallback for regional/dubbed content
+  // { name: 'Server 5', url: (id, lang, type, s, e) => {
+  //   // embed.su — good fallback for regional/dubbed content
   //   return type === 'tv'
   //     ? `https://embed.su/embed/tv/${id}/${s}/${e}`
   //     : `https://embed.su/embed/movie/${id}`;
@@ -1246,7 +1272,6 @@ const playerSources = [
 ];
 let currentSourceIdx = 0;
 let isPlayerFullscreen = false;
-let failoverTimer = null;
  
 // ── LANGUAGE CONFIG (for quick-buttons) ──
 const LANG_CONFIG = {
@@ -1290,8 +1315,7 @@ function renderLanguageButtons(spokenLangs) {
       <span style="font-size:0.68rem;color:#10b981;background:rgba(16,185,129,0.1);padding:2px 9px;border-radius:999px;border:1px solid rgba(16,185,129,0.2);">🟢 = Dubbed available</span>
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:7px;">${btnsHtml}</div>
-   
-    </div>
+    <div style="margin-top:10px;font-size:0.7rem;color:rgba(255,255,255,0.3);line-height:1.5;">💡 Hindi/Tamil/Telugu select karne par <b style="color:rgba(255,255,255,0.45);">🌐 Multi-Audio server auto-switch</b> hoga — yahi best dubbed support deta hai.</div>
   `;
   ext.appendChild(section);
 
@@ -1424,7 +1448,6 @@ function playNextEpisode() {
 }
  
 function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
-  if (failoverTimer) clearTimeout(failoverTimer);
   const embedEl = document.getElementById('videoEmbed');
   if (!embedEl) return;
   currentSourceIdx = srcIdx;
@@ -1459,34 +1482,12 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   iframe.setAttribute('fetchpriority', 'high'); // 🚀 Browser ko strict command for maximum loading speed
   // Iframe load hone ke baad spinner hide kar do
   iframe.onload = () => {
-    if (failoverTimer) clearTimeout(failoverTimer);
     loader.style.opacity = '0';
     setTimeout(() => { if (loader && loader.parentNode) loader.remove(); }, 400);
   };
  
   embedEl.appendChild(iframe);
  
-  // ── AUTOMATIC FAILOVER LOGIC ──
-  // Agar server (iframe) 6 seconds me load na ho, toh next server auto-try karo
-  failoverTimer = setTimeout(() => {
-    console.warn(`[Failover] ${buildSourceLabel(srcIdx)} is taking too long or blocked. Switching to next server...`);
-    let nextIdx = srcIdx + 1;
-    
-    if (nextIdx >= playerSources.length) {
-      embedEl.innerHTML = `
-        <div style="color:#fff; background:rgba(0,0,0,0.8); padding:30px; text-align:center; border-radius:12px; border:1px solid rgba(230,57,70,0.6); width:90%; max-width:400px; margin:auto; margin-top:15%; backdrop-filter:blur(8px);">
-          <h3 style="color:#e63946; margin-bottom:12px; font-family:'Bebas Neue', sans-serif; letter-spacing:1px; font-size:2rem;">⚠️ STREAMING ERROR</h3>
-          <p style="font-size:0.95rem; color:var(--text2); line-height:1.5;">Filhal saare servers down hain ya ISP dwara block hain.<br><br>Kripya kuch samay baad try karein.</p>
-        </div>`;
-      return;
-    }
-    
-    const srcButtons = document.querySelectorAll('.player-chip--source');
-    srcButtons.forEach((b, i) => b.classList.toggle('active', i === nextIdx));
-    
-    loadPlayer(id, nextIdx, lang, quality, type);
-  }, 6000);
-
   let controlsHtml = '<div id="playerControls" class="player-controls">';
   if (type === 'tv') {
     controlsHtml += '<button onclick="playNextEpisode()" class="player-chip premium-play-btn" style="padding:0 14px; border-radius:999px; min-height:42px; border:none; display:inline-flex; align-items:center; gap:6px;">' +
