@@ -16,8 +16,13 @@ if (isTV) document.documentElement.classList.add('tv-mode');
 // ── SERVER PRECONNECT (FAST STREAMING) ──
 // Background me sabhi servers se pehle se secure connection bana ke rakho jisse fetching instant ho
 (function preconnectServers() {
-  const servers = ['https://vidsrc.to', 'https://autoembed.co', 'https://vidlink.pro', 'https://vidsrc.pm'];
+  const servers = ['https://vidsrc.me', 'https://embed.to', 'https://autoembed.co', 'https://vidlink.pro', 'https://vidsrc.pm', 'https://multiembed.mov'];
   servers.forEach(url => {
+    const dns = document.createElement('link');
+    dns.rel = 'dns-prefetch';
+    dns.href = url;
+    document.head.appendChild(dns);
+
     const link = document.createElement('link');
     link.rel = 'preconnect';
     link.href = url;
@@ -556,7 +561,7 @@ async function loadMovies(cat, isLoadMore = false) {
   const loadMoreBtn = document.getElementById('loadMoreMoviesBtn');
   if (loadMoreBtn) {
     const h = document.getElementById('sectionHeading');
-    if (h && h.textContent === 'MY WATCHLIST') loadMoreBtn.style.display = 'none';
+    if (h && h.textContent.includes('MY WATCHLIST')) loadMoreBtn.style.display = 'none';
     else {
       loadMoreBtn.style.display = (isFullViewMovies && newMovies.length > 0) ? 'inline-block' : 'none';
       loadMoreBtn.innerHTML = 'Load More Movies';
@@ -677,7 +682,7 @@ function handleWatchlistToggle() {
   
   // Update UI immediately if user is viewing the Watchlist tab
   const h = document.getElementById('sectionHeading');
-  if (h && h.textContent === 'MY WATCHLIST') {
+  if (h && h.textContent.includes('MY WATCHLIST')) {
     renderMovies(watchlist);
   }
 }
@@ -696,12 +701,25 @@ function showWatchlist(e) {
   const tabs = document.querySelectorAll('.cat-tab');
   tabs.forEach(t => { if ((t.getAttribute('onclick')||'').includes('showWatchlist')) t.classList.add('active'); });
   const h = document.getElementById('sectionHeading');
-  if (h) h.textContent = 'MY WATCHLIST';
+  if (h) {
+    h.innerHTML = 'MY WATCHLIST' + (watchlist.length > 0 ? ' <button onclick="clearWatchlist()" class="clear-watchlist-btn"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg> Clear All</button>' : '');
+  }
   const sec = document.getElementById('movies-section');
   if (sec) sec.scrollIntoView({ behavior: 'smooth' });
   renderMovies(watchlist);
   const loadMoreBtn = document.getElementById('loadMoreMoviesBtn');
   if (loadMoreBtn) loadMoreBtn.style.display = 'none';
+}
+
+function clearWatchlist() {
+  if (confirm('Are you sure you want to completely clear your watchlist?')) {
+    watchlist = [];
+    localStorage.removeItem('mz_watchlist');
+    showToast('🗑️ Watchlist cleared successfully');
+    renderMovies(watchlist);
+    const h = document.getElementById('sectionHeading');
+    if (h) h.innerHTML = 'MY WATCHLIST';
+  }
 }
  
 // ── UPCOMING
@@ -1175,6 +1193,15 @@ window.addEventListener('popstate', (e) => {
   } else if (overlay && overlay.classList.contains('open')) {
     closeModal();
   }
+  
+  // SHIFT + N for quick Next Episode in Fullscreen
+  if (e.shiftKey && e.key.toLowerCase() === 'n') {
+    const overlay = document.getElementById('modal-overlay');
+    if (overlay && overlay.classList.contains('open') && currentModalMovie && currentModalMovie.media_type === 'tv') {
+      playNextEpisode();
+      e.preventDefault();
+    }
+  }
 });
  
 // ── RELATED MOVIES LOGIC ──
@@ -1247,28 +1274,23 @@ const playerSources = [
       : `https://multiembed.mov/?video_id=${id}&tmdb=1`;
     return base + (lang && lang !== 'en' ? `&lang=${lang}` : '');
   }},
-  { name: 'Server 1', url: (id, lang, type, s, e) => {
+  { name: '⚡ Ultra HD', url: (id, lang, type, s, e) => {
     // India ke networks par blockage kam aati hai
     return (type === 'tv' ? `https://autoembed.co/tv/tmdb/${id}-${s}-${e}` : 'https://autoembed.co/movie/tmdb/' + id) + `?lang=${lang}`;
   }},
-  { name: 'Server 2', url: (id, lang, type, s, e) => {
+  { name: '🔥 Pro Stream', url: (id, lang, type, s, e) => {
     // Interface bahut saaf hai aur player ke andar settings
     return (type === 'tv' ? `https://vidlink.pro/tv/${id}/${s}/${e}` : 'https://vidlink.pro/movie/' + id) + `?lang=${lang}`;
   }},
-  { name: 'Server 3', url: (id, lang, type, s, e) => {
-    // TV aur Movie dono properly support karega
-    return (type === 'tv' ? `https://vidsrc.to/embed/tv/${id}/${s}/${e}` : 'https://vidsrc.to/embed/movie/' + id) + `?lang=${lang}`;
+ { name: '👑 Vidsrc VIP', url: (id, lang, type, s, e) => {
+    // Vidsrc primary root network (me) using direct TMDB mapping to fix 'Unavailable' database error
+    return (type === 'tv' ? `https://vidsrc.me/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.me/embed/movie?tmdb=${id}`) + `&lang=${lang}`;
   }},
-  { name: 'Server 4', url: (id, lang, type, s, e) => {
+  { name: '💎 Premium Mirror', url: (id, lang, type, s, e) => {
     // Official proxy mirror to fix 'refused to connect' / iframe block issue
     return (type === 'tv' ? `https://vidsrc.pm/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.pm/embed/movie?tmdb=${id}`) + `&lang=${lang}`;
   }},
-  // { name: 'Server 5', url: (id, lang, type, s, e) => {
-  //   // embed.su — good fallback for regional/dubbed content
-  //   return type === 'tv'
-  //     ? `https://embed.su/embed/tv/${id}/${s}/${e}`
-  //     : `https://embed.su/embed/movie/${id}`;
-  // }}
+
 ];
 let currentSourceIdx = 0;
 let isPlayerFullscreen = false;
@@ -1431,18 +1453,18 @@ function playNextEpisode() {
   const nextEpOption = Array.from(eInput.options).find(opt => parseInt(opt.value) === currentE + 1);
   
   if (nextEpOption) {
-    // अगले एपिसोड पर जाएं
     eInput.value = currentE + 1;
     eInput.dispatchEvent(new Event('change'));
+    showToast(`⏭️ Playing Season ${currentS} Episode ${currentE + 1}`);
   } else {
-    // अगर सीज़न खत्म हो गया है, तो अगला सीज़न प्ले करें
     const seasons = (currentModalMovie.seasons || []).filter(s => s.season_number > 0);
     const nextSeason = seasons.find(s => s.season_number === currentS + 1);
     if (nextSeason) {
       sInput.value = currentS + 1;
       sInput.dispatchEvent(new Event('change'));
+      showToast(`⏭️ Playing Season ${currentS + 1} Episode 1`);
     } else {
-      showToast("You have reached the latest episode!");
+      showToast("🏆 You have reached the latest episode!");
     }
   }
 }
@@ -1463,23 +1485,29 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   const e = eInput ? eInput.value : '1';
   const src = playerSources[srcIdx].url(id, lang, type, s, e);
  
+  // ── AUTO-SAVE TV PROGRESS (Continue Watching) ──
+  if (type === 'tv') {
+    localStorage.setItem('mz_progress_' + id, JSON.stringify({ season: parseInt(s), episode: parseInt(e) }));
+  }
+
   embedEl.innerHTML = '';
  
   // Custom Loading Spinner add karo
   const loader = document.createElement('div');
   loader.className = 'player-loader';
-  loader.innerHTML = '<div class="player-spinner"></div>';
+  loader.innerHTML = '<div class="player-spinner"></div><div style="color:var(--gold); margin-top:15px; font-weight:600; font-size:0.9rem; text-shadow:0 2px 4px rgba(0,0,0,0.5);">Optimizing stream & buffering...</div>';
   embedEl.appendChild(loader);
  
   const iframe = document.createElement('iframe');
   iframe.id = 'playerFrame';
   iframe.src = src;
-  iframe.style.cssText = 'width: 100%; height: 100%; border: none; overflow: hidden !important; background: transparent; position: relative; z-index: 1;';
+  iframe.style.cssText = 'width: 100%; height: 100%; border: none; overflow: hidden !important; background: transparent; position: relative; z-index: 1; transform: translateZ(0); will-change: transform;';
   iframe.setAttribute('frameborder', '0');
   iframe.setAttribute('scrolling', 'no');
   iframe.setAttribute('allow', 'fullscreen;autoplay;encrypted-media;picture-in-picture');
   iframe.setAttribute('referrerpolicy', 'origin'); // Helps bypass strict Cloudflare hotlink protections
   iframe.setAttribute('fetchpriority', 'high'); // 🚀 Browser ko strict command for maximum loading speed
+  iframe.setAttribute('loading', 'eager'); // ⚡ Instant fetch (no lazy loading)
   // Iframe load hone ke baad spinner hide kar do
   iframe.onload = () => {
     loader.style.opacity = '0';
@@ -1868,7 +1896,7 @@ function viewAllMovies(e) {
   }
   
   const h = document.getElementById('sectionHeading');
-  if (h && h.textContent === 'MY WATCHLIST') {
+  if (h && h.textContent.includes('MY WATCHLIST')) {
     renderMovies(watchlist);
   } else {
     const activeTab = document.querySelector('.cat-tab.active');

@@ -205,17 +205,17 @@ body {
   align-items: center;
   gap: 0.75rem;
   background:
-    linear-gradient(180deg, rgba(255,255,255,0.09) 0%, rgba(255,255,255,0.02) 100%),
-    rgba(4,4,10,0.75);
-  backdrop-filter: blur(32px) saturate(200%) brightness(1.1);
-  -webkit-backdrop-filter: blur(32px) saturate(200%) brightness(1.1);
-  border: 1px solid rgba(255,255,255,0.09);
-  border-top-color: rgba(255,255,255,0.14);
-  border-radius: 28px;
+    linear-gradient(180deg, rgba(15,15,25,0.65) 0%, rgba(5,5,10,0.85) 100%);
+  backdrop-filter: blur(40px) saturate(250%) brightness(1.15);
+  -webkit-backdrop-filter: blur(40px) saturate(250%) brightness(1.15);
+  border: 1px solid rgba(255,255,255,0.04);
+  border-radius: 32px;
   box-shadow:
-    0 24px 60px rgba(0,0,0,0.5),
-    0 1px 0 rgba(255,255,255,0.06) inset,
-    0 -1px 0 rgba(0,0,0,0.3) inset;
+    0 30px 70px rgba(0,0,0,0.7),
+    0 0 0 1px rgba(245,197,24,0.1),
+    inset 0 1px 0 rgba(255,255,255,0.15),
+    inset 0 0 24px rgba(245,197,24,0.05),
+    0 20px 40px rgba(124,58,237,0.06);
   transition:
     box-shadow 0.4s var(--ease-smooth),
     border-color 0.4s var(--ease-smooth),
@@ -230,9 +230,9 @@ body {
   border-radius: inherit;
   background: linear-gradient(90deg,
     rgba(245,197,24,0) 0%,
-    rgba(245,197,24,0.04) 20%,
-    rgba(124,58,237,0.04) 50%,
-    rgba(230,57,70,0.03) 80%,
+    rgba(245,197,24,0.08) 20%,
+    rgba(124,58,237,0.08) 50%,
+    rgba(230,57,70,0.06) 80%,
     rgba(245,197,24,0) 100%
   );
   pointer-events: none;
@@ -240,18 +240,50 @@ body {
   transition: opacity 0.5s ease;
 }
 
+#navbar::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: linear-gradient(90deg, rgba(245,197,24,0.7), rgba(230,57,70,0.5), rgba(124,58,237,0.7), rgba(245,197,24,0.7));
+  background-size: 200% 100%;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.4;
+  animation: borderFlow 4s linear infinite;
+  transition: opacity 0.4s ease;
+}
+
 #navbar.scrolled {
   background:
-    linear-gradient(180deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.04) 100%),
-    rgba(4,4,10,0.94);
-  border-color: rgba(245,197,24,0.16);
+    linear-gradient(180deg, rgba(15,15,25,0.85) 0%, rgba(5,5,10,0.96) 100%);
   box-shadow:
-    0 30px 80px rgba(0,0,0,0.65),
-    0 0 30px rgba(245,197,24,0.05),
-    0 1px 0 rgba(255,255,255,0.1) inset;
+    0 35px 85px rgba(0,0,0,0.85),
+    0 0 0 1px rgba(245,197,24,0.2),
+    0 0 40px rgba(245,197,24,0.12),
+    0 0 40px rgba(124,58,237,0.12),
+    inset 0 1px 0 rgba(255,255,255,0.15);
 }
 
 #navbar.scrolled::before { opacity: 1; }
+#navbar.scrolled::after { opacity: 0.9; animation-duration: 2.5s; }
+
+#navbar:focus-within {
+  transform: translateY(-2px);
+  box-shadow:
+    0 40px 90px rgba(0,0,0,0.8),
+    0 0 0 1px rgba(245,197,24,0.3),
+    0 0 50px rgba(245,197,24,0.2),
+    0 0 50px rgba(124,58,237,0.2),
+    inset 0 1px 0 rgba(255,255,255,0.2);
+}
+#navbar:focus-within::after {
+  opacity: 1;
+  animation-duration: 1.5s;
+}
 
 .nav-brand {
   display: flex;
@@ -1056,6 +1088,32 @@ body {
   letter-spacing: 3px;
   color: var(--text);
   text-shadow: 0 6px 20px rgba(0,0,0,0.35);
+}
+
+.clear-watchlist-btn {
+  font-size: 0.8rem;
+  background: linear-gradient(135deg, var(--red) 0%, #a0101d 100%);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.2);
+  padding: 0.35rem 0.9rem;
+  border-radius: 50px;
+  margin-left: 1rem;
+  cursor: pointer;
+  vertical-align: middle;
+  box-shadow: 0 4px 12px rgba(230,57,70,0.3);
+  transition: all 0.3s var(--ease-spring);
+  font-family: 'Outfit', sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.clear-watchlist-btn:hover {
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 8px 20px rgba(230,57,70,0.5);
+  background: linear-gradient(135deg, #ff4d5e 0%, var(--red) 100%);
 }
 
 .section-title .title-line {
@@ -2246,6 +2304,9 @@ body {
   border: none;
   overflow: hidden !important;
   display: block;
+  /* Hardware Acceleration for Butter Smooth Playback */
+  transform: translateZ(0);
+  will-change: transform;
 }
 
 /* ═══════════════════════════════════════════════════════════════
