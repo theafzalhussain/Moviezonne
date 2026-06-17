@@ -12,6 +12,87 @@ const IMG_BACKDROP = 'https://image.tmdb.org/t/p/original';
 // Tag <html> early so CSS can strip expensive effects (backdrop-filter, film grain, Ken Burns, etc.)
 if (isTV) document.documentElement.classList.add('tv-mode');
  
+// ── PREMIUM CURSOR GLOW ──
+if (!isTV) {
+  const cursorGlow = document.getElementById('cursor-glow');
+  const cursorRing = document.getElementById('cursor-ring');
+  const cursorDot = document.getElementById('cursor-dot');
+  
+  let mouseX = window.innerWidth / 2;
+  let mouseY = window.innerHeight / 2;
+  let ringX = mouseX;
+  let ringY = mouseY;
+
+  window.addEventListener('mousemove', (e) => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+    
+    if (cursorGlow) {
+      cursorGlow.style.left = mouseX + 'px';
+      cursorGlow.style.top = mouseY + 'px';
+    }
+    if (cursorDot) {
+      cursorDot.style.left = mouseX + 'px';
+      cursorDot.style.top = mouseY + 'px';
+    }
+  });
+
+  // Smooth 3D Trailing Animation for the Ring
+  function animateCursorRing() {
+    ringX += (mouseX - ringX) * 0.18; // Smooth spring follow
+    ringY += (mouseY - ringY) * 0.18;
+    
+    if (cursorRing) {
+      const velX = mouseX - ringX;
+      const velY = mouseY - ringY;
+      // Dynamic 3D tilt based on velocity/direction
+      const rotateX = -velY * 1.5; 
+      const rotateY = velX * 1.5;
+      
+      cursorRing.style.left = ringX + 'px';
+      cursorRing.style.top = ringY + 'px';
+      cursorRing.style.transform = `translate(-50%, -50%) perspective(500px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateZ(10px)`;
+    }
+    requestAnimationFrame(animateCursorRing);
+  }
+  animateCursorRing();
+
+  // Interactive Hover Glow Effects
+  const interactiveElements = 'a, button, .movie-card, .upcoming-card, .thumb, .cat-tab, input, select, .player-chip, .nav-logo';
+  document.body.addEventListener('mouseover', (e) => {
+    if (e.target.closest(interactiveElements)) document.body.classList.add('cursor-hover');
+  });
+  document.body.addEventListener('mouseout', (e) => {
+    if (e.target.closest(interactiveElements)) document.body.classList.remove('cursor-hover');
+  });
+
+  // ── CLICK SPARKS (3D Particles) ──
+  window.addEventListener('click', (e) => {
+    const numSparks = 12; // Ek baar me kitne sparks nikalne hain
+    for (let i = 0; i < numSparks; i++) {
+      const spark = document.createElement('div');
+      spark.className = 'click-spark';
+      spark.style.left = e.clientX + 'px';
+      spark.style.top = e.clientY + 'px';
+      
+      // Random direction aur distance calculate karna (20px se 80px tak door jayenge)
+      const angle = Math.random() * Math.PI * 2;
+      const distance = Math.random() * 60 + 20;
+      spark.style.setProperty('--tx', (Math.cos(angle) * distance) + 'px');
+      spark.style.setProperty('--ty', (Math.sin(angle) * distance) + 'px');
+      
+      // Aadhe sparks ko gold aur aadhe ko purple (accent) color dena
+      if (Math.random() > 0.5) {
+        spark.style.background = 'var(--accent)';
+        spark.style.boxShadow = '0 0 12px var(--accent), 0 0 20px var(--gold)';
+      }
+
+      document.body.appendChild(spark);
+      setTimeout(() => { if (spark.parentNode) spark.remove(); }, 600); // Animation ke baad hata do
+    }
+  });
+}
+
 // ── SERVER PRECONNECT (FAST STREAMING) ──
 // Background me sabhi servers se pehle se secure connection bana ke rakho jisse fetching instant ho
 (function preconnectServers() {
@@ -29,6 +110,16 @@ if (isTV) document.documentElement.classList.add('tv-mode');
     document.head.appendChild(link);
   });
 })();
+
+// ── SCROLL REVEAL ANIMATIONS (Intersection Observer) ──
+const scrollObserver = new IntersectionObserver((entries, observer) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('in-view');
+      observer.unobserve(entry.target);
+    }
+  });
+}, { root: null, rootMargin: '0px 0px -40px 0px', threshold: 0.05 });
  
 // ── SECURITY HELPER (XSS Protection) ──
 const escapeHTML = (str) => {
@@ -134,6 +225,27 @@ async function init() {
     if ('requestIdleCallback' in window) requestIdleCallback(() => loadUpcoming());
     else loadUpcoming();
   }, 800);
+
+  // Hide Cinematic Loader smoothly
+  setTimeout(() => {
+    const loader = document.getElementById('mz-loader');
+    if (loader) loader.classList.add('loader-hidden');
+  }, 400);
+
+  // Luxury Ambient Particles
+  if (!isTV && !document.querySelector('.ambient-particles')) {
+    const pContainer = document.createElement('div');
+    pContainer.className = 'ambient-particles';
+    document.body.appendChild(pContainer);
+    for (let i = 0; i < 25; i++) {
+      const p = document.createElement('div');
+      p.className = 'particle';
+      p.style.left = Math.random() * 100 + 'vw';
+      p.style.animationDuration = (Math.random() * 20 + 15) + 's';
+      p.style.animationDelay = '-' + (Math.random() * 15) + 's'; // Spawns instantly
+      pContainer.appendChild(p);
+    }
+  }
 }
  
 // ── CAROUSEL
@@ -631,6 +743,26 @@ function renderMovies(movies, append = false) {
       '</div>';
     card.addEventListener('click', () => { openModal(m.id, type); });
     fragment.appendChild(card);
+  scrollObserver.observe(card);
+
+    // Premium 3D Tilt Effect on Hover
+    if (!isTV) {
+      card.addEventListener('mouseenter', () => { card.style.transition = 'transform 0.15s ease-out'; });
+      card.addEventListener('mousemove', (e) => {
+        const rect = card.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const centerX = rect.width / 2;
+        const centerY = rect.height / 2;
+        const rotateX = ((y - centerY) / centerY) * -10; // Max 10 deg tilt
+        const rotateY = ((x - centerX) / centerX) * 10;
+        card.style.transform = `perspective(1000px) translateY(-12px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.03, 1.03, 1.03)`;
+      });
+      card.addEventListener('mouseleave', () => {
+        card.style.transition = 'transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.4s ease, border-color 0.4s ease';
+        card.style.transform = '';
+      });
+    }
  
   });
   grid.appendChild(fragment);
@@ -776,7 +908,7 @@ async function loadUpcoming(isLoadMore = false) {
       }
       const genres = (m.genre_ids||[]).slice(0,2).map(id => GENRE_MAP[id]).filter(Boolean);
       const card = document.createElement('div');
-      card.className = 'upcoming-card';
+      card.className = 'upcoming-card reveal-up';
       card.tabIndex = 0;
       card.style.animationDelay = ((i % 12) * 0.08) + 's';
       card.innerHTML =
@@ -796,6 +928,24 @@ async function loadUpcoming(isLoadMore = false) {
         '</div>';
       card.addEventListener('click', () => { openModal(m.id); });
       fragment.appendChild(card);
+      scrollObserver.observe(card);
+
+      // Premium 3D Tilt Effect for Upcoming Cards
+      if (!isTV) {
+        card.addEventListener('mouseenter', () => { card.style.transition = 'transform 0.15s ease-out'; });
+        card.addEventListener('mousemove', (e) => {
+          const rect = card.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          const rotateX = ((y - (rect.height / 2)) / (rect.height / 2)) * -8;
+          const rotateY = ((x - (rect.width / 2)) / (rect.width / 2)) * 8;
+          card.style.transform = `perspective(1000px) translateY(-6px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.02, 1.02, 1.02)`;
+        });
+        card.addEventListener('mouseleave', () => {
+          card.style.transition = 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)';
+          card.style.transform = '';
+        });
+      }
     });
     grid.appendChild(fragment);
     
@@ -899,7 +1049,11 @@ async function openModal(id, type = 'movie') {
   if (titleEl) titleEl.textContent = 'Loading...';
   if (descEl) descEl.textContent = 'Fetching high-speed servers...';
   if (metaEl) metaEl.innerHTML = '<div class="player-spinner" style="width:28px; height:28px; border-width:3px; margin: 5px 0;"></div>';
-  if (bgEl) bgEl.src = '';
+  if (bgEl) {
+    bgEl.src = '';
+    bgEl.classList.remove('blur-in');
+    bgEl.style.opacity = '0'; // Hide before new image loads
+  }
   if (embedEl) embedEl.innerHTML =
     '<div class="video-placeholder">' +
       '<div class="player-spinner" style="width:55px; height:55px; border-color:rgba(255,255,255,0.1); border-left-color:var(--gold);"></div>' +
@@ -914,7 +1068,15 @@ async function openModal(id, type = 'movie') {
     details.media_type = type;
     currentModalMovie = details;
     const bgEl = document.getElementById('modalBg');
-    if (bgEl) bgEl.src = details.backdrop_path ? IMG_BACKDROP + details.backdrop_path : '';
+    if (bgEl) {
+      if (details.backdrop_path) {
+        bgEl.onload = () => { bgEl.classList.add('blur-in'); };
+        bgEl.src = IMG_BACKDROP + details.backdrop_path;
+      } else {
+        bgEl.src = '';
+        bgEl.style.opacity = '1';
+      }
+    }
  
     // --- HOVER TRAILER LOGIC (Smart Auto-Fallback) ---
     let bestVids = [];
@@ -1245,7 +1407,7 @@ async function loadRelatedMovies(id, type) {
         else if (m.vote_average >= 6.5) qual = 'FHD';
  
         const card = document.createElement('div');
-        card.className = 'movie-card';
+        card.className = 'movie-card reveal-up';
         card.tabIndex = 0;
         card.style.animationDelay = ((i % 12) * 0.04) + 's';
         card.innerHTML =
@@ -1263,6 +1425,7 @@ async function loadRelatedMovies(id, type) {
           '</div>';
         card.addEventListener('click', () => { openModal(m.id, rType); });
         fragment.appendChild(card);
+        scrollObserver.observe(card);
       });
       grid.appendChild(fragment);
     } else {
@@ -1831,6 +1994,26 @@ document.addEventListener('DOMContentLoaded', () => {
         adultTab.innerHTML = '🔞 18+';
         catTabs.appendChild(adultTab);
       }
+
+  // Fluid Ripple Effect for buttons
+  document.body.addEventListener('click', (e) => {
+    const btn = e.target.closest('.btn-play, .btn-info, .btn-watchlist, .btn-download, .load-more-btn, .premium-play-btn, .cat-tab, .carousel-arrow, .nav-btn');
+    if (btn && !isTV) {
+      btn.classList.add('ripple-wrapper');
+      const circle = document.createElement('span');
+      const diameter = Math.max(btn.clientWidth, btn.clientHeight);
+      const radius = diameter / 2;
+      const rect = btn.getBoundingClientRect();
+      circle.style.width = circle.style.height = `${diameter}px`;
+      circle.style.left = `${e.clientX - rect.left - radius}px`;
+      circle.style.top = `${e.clientY - rect.top - radius}px`;
+      circle.classList.add('ripple-span');
+      const oldRipple = btn.querySelector('.ripple-span');
+      if (oldRipple) oldRipple.remove();
+      btn.appendChild(circle);
+      setTimeout(() => { if (circle) circle.remove(); }, 600);
+    }
+  });
 });
  
 let _scrollTicking = false;

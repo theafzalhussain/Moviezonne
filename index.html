@@ -1,4 +1,4 @@
-﻿﻿<!DOCTYPE html>
+﻿﻿﻿﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -11,6 +11,35 @@
 <link rel="stylesheet" href="moviezone.css">
 </head>
 <body>
+
+<!-- ── PREMIUM CURSOR GLOW ── -->
+<div id="cursor-glow"></div>
+<div id="cursor-ring"></div>
+<div id="cursor-dot"></div>
+
+<!-- ── CINEMATIC LOADER ── -->
+<div id="mz-loader">
+  <div class="mz-loader-brand">
+    <div class="loader-icon">
+      <svg viewBox="0 0 100 100" width="80" height="80">
+        <defs>
+          <linearGradient id="loaderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#f5c518"/>
+            <stop offset="50%" stop-color="#e63946"/>
+            <stop offset="100%" stop-color="#7c3aed"/>
+          </linearGradient>
+        </defs>
+        <circle cx="50" cy="50" r="46" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="2"/>
+        <circle class="loader-spin-ring" cx="50" cy="50" r="46" fill="none" stroke="url(#loaderGrad)" stroke-width="4" stroke-dasharray="80 200" stroke-linecap="round"/>
+        <polygon points="42,32 68,50 42,68" fill="url(#loaderGrad)"/>
+      </svg>
+    </div>
+    <div class="loader-text">
+      <span class="loader-text-main">MOVIEZONE</span>
+      <span class="loader-text-sub">Premium Cinema</span>
+    </div>
+  </div>
+</div>
 
 <!-- â”€â”€ NAVBAR â”€â”€ -->
 <nav id="navbar">
