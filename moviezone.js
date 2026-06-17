@@ -4,9 +4,8 @@ const isTV = /SmartTV|WebOS|Tizen|NetCast|VIDAA|Roku|AppleTV|Android TV|BRAVIA|A
 const LIVE_BACKEND_URL = '/api/tmdb';
 const BASE = isLocalhost ? 'http://localhost:3000/api/tmdb' : LIVE_BACKEND_URL;
 const IMG = 'https://image.tmdb.org/t/p/w500';
-// Hero / Modal backdrops: w1280 looks essentially identical to "original" on screen
-// but is 70-90% smaller in file size -> much faster first paint + no TV lag from huge images
-const IMG_BACKDROP = 'https://image.tmdb.org/t/p/w1280';
+// Hero / Modal backdrops: Switched to "original" for Maximum Full HD/4K quality images
+const IMG_BACKDROP = 'https://image.tmdb.org/t/p/original';
  
 // ── TV MODE (Performance) ──
 // Smart TV browsers have weak CPUs/GPUs: heavy blur/animation cause visible lag.
@@ -16,7 +15,7 @@ if (isTV) document.documentElement.classList.add('tv-mode');
 // ── SERVER PRECONNECT (FAST STREAMING) ──
 // Background me sabhi servers se pehle se secure connection bana ke rakho jisse fetching instant ho
 (function preconnectServers() {
-  const servers = ['https://vidsrc.me', 'https://embed.to', 'https://autoembed.co', 'https://vidlink.pro', 'https://vidsrc.pm', 'https://multiembed.mov'];
+  const servers = ['https://vidsrc.me', 'https://embed.to', 'https://autoembed.co', 'https://vidlink.pro', 'https://vidsrc.pm', 'https://multiembed.mov',];
   servers.forEach(url => {
     const dns = document.createElement('link');
     dns.rel = 'dns-prefetch';
@@ -1051,11 +1050,19 @@ async function openModal(id, type = 'movie') {
     if (descEl) descEl.textContent = details.overview || '';
     const runtime = details.runtime ? (Math.floor(details.runtime/60)+'h '+(details.runtime%60)+'m') : 'N/A';
     const genres  = (details.genres||[]).slice(0,3).map(g => '<span class="genre-tag">'+escapeHTML(g.name)+'</span>').join('');
+    
+    // --- Audio Information Badge ---
+    const tmdbLangs = (details.spoken_languages || []).map(l => l.iso_639_1);
+    const hasDubbed = ['hi', 'ta', 'te', 'ml', 'kn', 'mr', 'bn'].some(lang => tmdbLangs.includes(lang));
+    const audioBadge = hasDubbed 
+      ? '<div class="card-year" style="font-size:0.85rem; background: linear-gradient(135deg, rgba(16,185,129,0.2), rgba(16,185,129,0.05)); border-color: rgba(16,185,129,0.3); color: #10b981;" title="Available in Hindi/Regional Languages">🎤 DUBBED AVAILABLE</div>'
+      : '<div class="card-year" style="font-size:0.85rem; background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.02)); border-color: rgba(255,255,255,0.15); color: #bbb;" title="Only Original Audio Available">🎤 ORIGINAL AUDIO</div>';
+
     const metaEl  = document.getElementById('modalMeta');
     if (metaEl) metaEl.innerHTML =
       '<div class="card-rating" style="font-size:0.9rem">RATING '+((details.vote_average||0).toFixed(1))+' ('+(details.vote_count||0).toLocaleString()+')</div>' +
       '<div class="card-year" style="font-size:0.85rem">YEAR '+((details.release_date||details.first_air_date||'').slice(0,4))+'</div>' +
-      '<div class="card-runtime" style="font-size:0.85rem">RUNTIME '+runtime+'</div>' + genres;
+      '<div class="card-runtime" style="font-size:0.85rem">RUNTIME '+runtime+'</div>' + audioBadge + genres;
     const embedEl = document.getElementById('videoEmbed');
     if (embedEl) embedEl.innerHTML =
       '<div class="video-placeholder">' +
@@ -1272,7 +1279,10 @@ const playerSources = [
     const base = type === 'tv'
       ? `https://multiembed.mov/?video_id=${id}&tmdb=1&s=${s}&e=${e}`
       : `https://multiembed.mov/?video_id=${id}&tmdb=1`;
-    return base + (lang && lang !== 'en' ? `&lang=${lang}` : '');
+    
+    const audioMap = { hi: 'hindi', ta: 'tamil', te: 'telugu', ml: 'malayalam', kn: 'kannada', mr: 'marathi', bn: 'bengali' };
+    const prefAudio = audioMap[lang] || lang;
+    return base + (lang && lang !== 'en' ? `&preferred_audio=${prefAudio}&lang=${lang}` : '');
   }},
   { name: '⚡ Ultra HD', url: (id, lang, type, s, e) => {
     // India ke networks par blockage kam aati hai
@@ -1290,6 +1300,11 @@ const playerSources = [
     // Official proxy mirror to fix 'refused to connect' / iframe block issue
     return (type === 'tv' ? `https://vidsrc.pm/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.pm/embed/movie?tmdb=${id}`) + `&lang=${lang}`;
   }},
+  { name: '🇮🇳 Hindi MAX', url: (id, lang, type, s, e) => {
+    // Switched to embed.su (Highly stable, no blank screen issues, fast loading)
+    return type === 'tv' ? `https://embed.cc/embed/tv/${id}/${s}/${e}` : `https://embed.cc/embed/movie/${id}`;
+  }},
+
 
 ];
 let currentSourceIdx = 0;
@@ -1505,7 +1520,14 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   iframe.setAttribute('frameborder', '0');
   iframe.setAttribute('scrolling', 'no');
   iframe.setAttribute('allow', 'fullscreen;autoplay;encrypted-media;picture-in-picture');
-  iframe.setAttribute('referrerpolicy', 'origin'); // Helps bypass strict Cloudflare hotlink protections
+  
+  // Master Server Bypass: Apply specific rules for Multi-Audio to prevent Vercel block / Refused to connect
+  if (playerSources[srcIdx].name.includes('Multi-Audio')) {
+    iframe.setAttribute('referrerpolicy', 'no-referrer');
+  } else {
+    iframe.setAttribute('referrerpolicy', 'origin'); // Defaults for other servers
+  }
+
   iframe.setAttribute('fetchpriority', 'high'); // 🚀 Browser ko strict command for maximum loading speed
   iframe.setAttribute('loading', 'eager'); // ⚡ Instant fetch (no lazy loading)
   // Iframe load hone ke baad spinner hide kar do
@@ -1977,4 +1999,146 @@ function goHome(e) {
   if (!isHash) window.scrollTo({ top: 0, behavior: 'smooth' });
 }
  
+
+// ── ANTI-DEBUGGING (Developer Tools Detection) ──
+(function() {
+  function detectDevTools() {
+    const threshold = 100;
+    const startTime = new Date();
+    debugger;
+    const endTime = new Date();
+    if (endTime - startTime > threshold) {
+      console.warn('Developer Tools detected. Please close them to ensure the best experience.');
+      window.dispatchEvent(new CustomEvent('devtools-opened'));
+    }
+  }
+
+  // Run the check periodically
+  setInterval(detectDevTools, 2500);
+})();
+
+
+// ── ADVANCED SECURITY (Block View Source & Shortcuts) ──
+(function secureWebsite() {
+  // 1. Disable Right Click (Context Menu)
+  document.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    showToast('Right-click is disabled for security.');
+  });
+
+  // 2. Disable Keyboard Shortcuts (F12, Ctrl+U, Ctrl+Shift+I, etc.)
+  document.addEventListener('keydown', (e) => {
+    // Block F12
+    if (e.key === 'F12' || e.keyCode === 123) {
+      e.preventDefault();
+      return false;
+    }
+    
+    if (e.ctrlKey) {
+      // Block Ctrl+U (View Source), Ctrl+S (Save), Ctrl+P (Print)
+      if (e.key.toLowerCase() === 'u' || e.key.toLowerCase() === 's' || e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        return false;
+      }
+      // Block Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+Shift+C
+      if (e.shiftKey && (e.key.toLowerCase() === 'i' || e.key.toLowerCase() === 'j' || e.key.toLowerCase() === 'c')) {
+        e.preventDefault();
+        return false;
+      }
+    }
+  });
+  
+  // 3. Disable Dragging of Images/Links
+  document.addEventListener('dragstart', (e) => {
+    if (e.target.tagName === 'IMG' || e.target.tagName === 'A') e.preventDefault();
+  });
+})();
+
+
+// ── AD-BLOCKER DETECTION ──
+(function detectAdBlocker() {
+  const adSlot = document.createElement('div');
+  adSlot.className = 'ad_slot'; // Class heavily targeted by adblockers
+  adSlot.style.position = 'absolute';
+  adSlot.style.top = '-9999px';
+  adSlot.style.left = '-9999px';
+  adSlot.style.height = '10px'; // Explicit height to verify against
+  adSlot.style.width = '10px';
+  document.body.appendChild(adSlot);
+
+  // Short delay allows the ad-blocker's content script to process the DOM change
+  setTimeout(() => {
+    if (adSlot.offsetHeight === 0) {
+      console.warn('Ad Blocker detected!');
+      window.dispatchEvent(new CustomEvent('adblocker-detected'));
+    }
+    adSlot.remove(); // Clean up
+  }, 300);
+})();
+
+
+// ── TOP KEYWORDS EXTRACTOR ──
+function extractTopKeywords() {
+  // Clone the body so we don't accidentally modify the actual visible DOM
+  const clone = document.body.cloneNode(true);
+  
+  // Filter out scripts, styles, and other non-text elements
+  const elementsToRemove = clone.querySelectorAll('script, style, noscript, svg');
+  elementsToRemove.forEach(el => el.remove());
+
+  const text = clone.textContent || '';
+  
+  // Extract words (only alphabetical, minimum 3 characters long to filter out small noise)
+  const words = text.toLowerCase().match(/\b[a-z]{3,}\b/g) || [];
+  
+  // Common stop words to ignore to get actual keywords
+  const stopWords = new Set(['the', 'and', 'for', 'that', 'this', 'with', 'you', 'not', 'are', 'from', 'your', 'all', 'have', 'was', 'but', 'out', 'has', 'can', 'will', 'now']);
+  
+  const wordCounts = {};
+  words.forEach(word => {
+    if (!stopWords.has(word)) {
+      wordCounts[word] = (wordCounts[word] || 0) + 1;
+    }
+  });
+
+  // Sort frequencies and get the top 3
+  const top3 = Object.entries(wordCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(entry => ({ word: entry[0], count: entry[1] }));
+
+  console.log('Top 3 Keywords on this page:', top3);
+  return top3;
+}
+
+// Run it briefly after the dynamic content (movies) finishes loading
+setTimeout(extractTopKeywords, 3000);
+
+// ── BOT DETECTION (WebGL Renderer Check) ──
+(function detectBot() {
+  // Run this check after a short delay to not block the initial render.
+  setTimeout(() => {
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      if (!gl) {
+        // WebGL is not supported or disabled.
+        return;
+      }
+
+      const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+      if (debugInfo) {
+        const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+        const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL).toLowerCase();
+
+        const botIndicators = ['swiftshader', 'mesa', 'llvmpipe', 'headless'];
+        if (botIndicators.some(indicator => renderer.includes(indicator))) {
+          console.error('Potential Bot/Headless Browser Detected!', { vendor, renderer });
+          window.dispatchEvent(new CustomEvent('bot-detected', { detail: { vendor, renderer } }));
+        }
+      }
+    } catch (e) { /* Silently fail if canvas/webgl is blocked or fails */ }
+  }, 4500); // Run after other initial scripts.
+})();
+
 init();
