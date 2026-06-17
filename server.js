@@ -4,6 +4,7 @@ const cors = require('cors');
 const helmet = require('helmet'); // 1. Security
 const compression = require('compression'); // 2. Gzip Compression
 const NodeCache = require('node-cache'); // 3. Advanced Caching
+const rateLimit = require('express-rate-limit'); // 4. Traffic Control
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -27,6 +28,14 @@ app.use(cors({
 // Frontend files (index.html, css, js) ko browser mein dikhane ke liye
 app.use(express.static(__dirname, { maxAge: '7d' })); // Added strict browser caching for extremely fast reloads
 
+// API Rate Limiter: Bura traffic aur DDOS attacks block karega (Luxury stability)
+const apiLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes window
+  max: 300, // Limit each IP to 300 API requests per 5 minutes
+  message: { error: 'Too many requests, please calm down and try again.' },
+  standardHeaders: true,
+});
+
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const TMDB_TOKEN = process.env.TMDB_TOKEN;
 
@@ -42,7 +51,7 @@ app.get('/ping', (req, res) => {
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
 // Proxy Endpoint: Frontend yahan request bhejega
-app.use('/api/tmdb', async (req, res) => {
+app.use('/api/tmdb', apiLimiter, async (req, res) => {
   try {
     if (!TMDB_TOKEN) {
       console.error('CRITICAL ERROR: TMDB_TOKEN is missing in environment variables!');
@@ -89,10 +98,27 @@ app.use('/api/tmdb', async (req, res) => {
   }
 });
 
+// ── CACHE WARMUP (PRE-FETCH) ──
+// Server start hote hi sabse important data pehle se fetch karke RAM me rakh lega
+// isse pehle aane wale user ko bhi 0ms "Instant" response milega. (Ultra Premium Speed)
+async function warmupCache() {
+  if (!TMDB_TOKEN) return;
+  const trendingUrl = `${TMDB_BASE_URL}/trending/all/week?language=en-US&page=1`;
+  try {
+    const response = await fetch(trendingUrl, { headers: { 'Authorization': `Bearer ${TMDB_TOKEN}` } });
+    if (response.ok) {
+      const data = await response.json();
+      apiCache.set(trendingUrl, data);
+      console.log('🔥 Luxury Cache Warmup Complete: Trending movies loaded into memory instantly.');
+    }
+  } catch (err) { console.error('Cache warmup failed:', err.message); }
+}
+
 // Server ko start karne ke liye (Local + Render support)
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`Proxy server is running on port ${PORT}`);
+    warmupCache();
   });
 }
 
