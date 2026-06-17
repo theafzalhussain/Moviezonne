@@ -293,6 +293,38 @@ async function init() {
 
   // Luxury Ambient Particles (Disabled on mobile/low-end to save battery & stop lag)
   // Jugnu effects ab har Desktop/Laptop aur high-end tablets par chalenge
+  if (!isTV && !isLowEnd && !document.querySelector('.ambient-particles')) {
+    const pContainer = document.createElement('div');
+    pContainer.className = 'ambient-particles';
+    document.body.appendChild(pContainer);
+
+    // ✨ 45 Magical 3D Fireflies (Jugnu) Generator
+    for (let i = 0; i < 45; i++) {
+      const p = document.createElement('div');
+      p.className = 'particle';
+      const size = Math.random() * 3.5 + 1.5; // Size between 1.5px to 5px
+      p.style.width = size + 'px';
+      p.style.height = size + 'px';
+      p.style.left = Math.random() * 100 + 'vw';
+      p.style.setProperty('--duration', (Math.random() * 18 + 12) + 's'); // Float speed (12s to 30s)
+      p.style.setProperty('--drift', (Math.random() * 160 - 80) + 'px'); // Left/Right sway (-80px to 80px)
+      p.style.animationDelay = '-' + (Math.random() * 25) + 's'; // Start instantly at different heights
+
+      // Randomly assign gold or accent colors
+      if (Math.random() > 0.5) {
+        p.style.setProperty('--p-color', 'var(--gold)');
+        p.style.setProperty('--p-glow1', 'var(--gold)');
+        p.style.setProperty('--p-glow2', 'var(--gold2)');
+        p.style.setProperty('--p-glow3', 'var(--gold3)');
+      } else {
+        p.style.setProperty('--p-color', 'var(--accent)');
+        p.style.setProperty('--p-glow1', 'var(--accent)');
+        p.style.setProperty('--p-glow2', 'var(--accent2)');
+        p.style.setProperty('--p-glow3', 'var(--accent3)');
+      }
+      pContainer.appendChild(p);
+    }
+  }
 }
  
 // ── CAROUSEL
