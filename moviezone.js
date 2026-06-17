@@ -296,12 +296,18 @@ async function init() {
     const pContainer = document.createElement('div');
     pContainer.className = 'ambient-particles';
     document.body.appendChild(pContainer);
-    for (let i = 0; i < 25; i++) {
+    // ✨ 35 Magical Fireflies (Jugnu) with random paths
+    for (let i = 0; i < 35; i++) {
       const p = document.createElement('div');
       p.className = 'particle';
+      const size = Math.random() * 3 + 1.5; // Random size between 1.5px and 4.5px
+      p.style.width = size + 'px';
+      p.style.height = size + 'px';
       p.style.left = Math.random() * 100 + 'vw';
-      p.style.animationDuration = (Math.random() * 20 + 15) + 's';
-      p.style.animationDelay = '-' + (Math.random() * 15) + 's'; // Spawns instantly
+      p.style.setProperty('--duration', (Math.random() * 15 + 15) + 's'); // Upward float speed
+      p.style.setProperty('--twinkle-duration', (Math.random() * 2 + 1.5) + 's'); // Blinking speed
+      p.style.setProperty('--drift', (Math.random() * 120 - 60) + 'px'); // Random left/right sway (-60px to 60px)
+      p.style.animationDelay = '-' + (Math.random() * 25) + 's'; // Start at different heights instantly
       pContainer.appendChild(p);
     }
   }
@@ -830,9 +836,14 @@ function renderMovies(movies, append = false) {
           const y = e.clientY - rect.top;
           const centerX = rect.width / 2;
           const centerY = rect.height / 2;
-          const rotateX = ((y - centerY) / centerY) * -10; // Max 10 deg tilt
-          const rotateY = ((x - centerX) / centerX) * 10;
-          card.style.transform = `perspective(1000px) translateY(-12px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.03, 1.03, 1.03)`;
+          // ✨ ENHANCED 3D TILT: More responsive and attractive values
+          const rotateX = ((y - centerY) / centerY) * -12; 
+          const rotateY = ((x - centerX) / centerX) * 12;
+          const shadowX = (x - centerX) * -0.2;
+          const shadowY = (y - centerY) * -0.2;
+          
+          card.style.transform = `perspective(1000px) translateY(-15px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.05, 1.05, 1.05)`;
+          card.style.boxShadow = `${shadowX}px ${shadowY + 40}px 80px rgba(0,0,0,0.7), 0 0 20px rgba(245,197,24,0.1)`;
         });
       });
       card.addEventListener('mouseleave', () => {
@@ -840,6 +851,7 @@ function renderMovies(movies, append = false) {
         card.style.transition = 'transform 0.3s ease';
         card.style.willChange = 'auto';
         card.style.transform = '';
+        card.style.boxShadow = '';
       });
     }
  
