@@ -3035,53 +3035,96 @@ body.cursor-hover #cursor-dot {
 
 /* ═══════════════════════════════════════════════════════════════
    TV MODE — Smart TV performance optimizations
-   Smart TV browsers (WebOS, Tizen, Android TV, etc.) have weak GPUs.
-   Heavy backdrop-filter blur, film grain, Ken-Burns zoom and big
-   layered shadows cause visible stutter/lag while scrolling or
-   navigating with the remote. Strip / simplify those here so
-   everything stays butter-smooth.
+   EXTREME PERFORMANCE OPTIMIZATION FOR LARGE SCREENS
    ═══════════════════════════════════════════════════════════════ */
 
 .tv-mode * {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
+  text-shadow: none !important;
+  filter: none !important;
 }
 
 /* Film grain noise filter is GPU-expensive — remove on TV */
 .tv-mode #hero::before { display: none !important; }
+.tv-mode #hero::after { display: none !important; }
 
 /* Ken-Burns zoom causes continuous repaint of a huge image — freeze it */
 .tv-mode .slide-bg,
 .tv-mode .carousel-slide.active .slide-bg {
   transform: scale(1) !important;
-  transition: filter 0.6s ease !important;
 }
 
-/* Simplify movie-card hover/focus (remote navigation) — lighter shadow, no big blurs */
+/* Kill ALL heavy box-shadows on TV */
+.tv-mode .movie-card, 
+.tv-mode .upcoming-card, 
+.tv-mode #navbar, 
+.tv-mode .cat-tab, 
+.tv-mode .modal-box,
+.tv-mode .btn-play,
+.tv-mode .btn-info,
+.tv-mode .player-chip {
+  box-shadow: none !important;
+}
+
+/* Fast Focus Outline for Remote instead of laggy shadows */
+.tv-mode .movie-card:focus,
+.tv-mode .movie-card:focus-visible,
+.tv-mode .upcoming-card:focus,
+.tv-mode .upcoming-card:focus-visible,
+.tv-mode .cat-tab:focus,
+.tv-mode .btn-play:focus,
+.tv-mode .btn-info:focus,
+.tv-mode .player-chip:focus,
+.tv-mode .nav-links a:focus,
 .tv-mode .movie-card:hover,
-.tv-mode .movie-card:focus-visible {
-  transform: scale(1.035);
-  box-shadow: 0 0 0 3px var(--gold), 0 12px 28px rgba(0,0,0,0.5);
+.tv-mode .upcoming-card:hover {
+  outline: 4px solid var(--gold) !important;
+  outline-offset: 2px !important;
+  transform: scale(1.04) !important;
+  background-color: var(--card2) !important;
+  z-index: 50 !important;
+  box-shadow: none !important;
 }
 
+/* Disable scaling inside the card to avoid double-painting */
+.tv-mode .movie-card:focus .card-poster img,
 .tv-mode .movie-card:hover .card-poster img,
-.tv-mode .movie-card:focus-visible .card-poster img {
-  transform: scale(1.04);
+.tv-mode .upcoming-card:focus .upcoming-poster img,
+.tv-mode .upcoming-card:hover .upcoming-poster img {
+  transform: none !important;
 }
 
 /* Skip staggered entrance animations — render instantly */
 .tv-mode .movie-card,
-.tv-mode .upcoming-card {
+.tv-mode .upcoming-card,
+.tv-mode .reveal-up {
   animation: none !important;
   opacity: 1 !important;
   transform: none !important;
+  will-change: auto !important;
+}
+
+/* Disable shine sweeps and overlays to save paints */
+.tv-mode .card-poster::after, 
+.tv-mode .upcoming-poster::after,
+.tv-mode .card-overlay {
+  display: none !important;
+}
+
+/* Stop skeleton shimmer animation */
+.tv-mode .skeleton {
+  animation: none !important;
+  background: var(--card2) !important;
 }
 
 /* Carousel arrows: TV has no hover, so keep them visible for remote focus */
-.tv-mode .carousel-arrow { opacity: 1; background: rgba(10,10,22,0.55); }
+.tv-mode .carousel-arrow { opacity: 1; background: var(--card); border: 2px solid rgba(255,255,255,0.2); }
+.tv-mode .carousel-arrow:focus { outline: 3px solid var(--gold) !important; }
 
 /* Progress bar / dot glow are tiny — keep, but drop the pulsing glow animation */
-.tv-mode .dot.active { animation: none; }
+.tv-mode .dot.active { animation: none !important; box-shadow: none !important; }
+.tv-mode .slide-title { animation: none !important; }
 
 /* ═══════════════════════════════════════════════════════════════
    REDUCED MOTION — Accessibility

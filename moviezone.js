@@ -4,8 +4,8 @@ const isTV = /SmartTV|WebOS|Tizen|NetCast|VIDAA|Roku|AppleTV|Android TV|BRAVIA|A
 const LIVE_BACKEND_URL = '/api/tmdb';
 const BASE = isLocalhost ? 'http://localhost:3000/api/tmdb' : LIVE_BACKEND_URL;
 const IMG = 'https://image.tmdb.org/t/p/w500';
-// Hero / Modal backdrops: Switched to "original" for Maximum Full HD/4K quality images
-const IMG_BACKDROP = 'https://image.tmdb.org/t/p/original';
+// Hero / Modal backdrops: "original" is too heavy for TV processors. Using w1280 makes TV lightning fast.
+const IMG_BACKDROP = isTV ? 'https://image.tmdb.org/t/p/w1280' : 'https://image.tmdb.org/t/p/original';
  
 // ── TV MODE (Performance) ──
 // Smart TV browsers have weak CPUs/GPUs: heavy blur/animation cause visible lag.
