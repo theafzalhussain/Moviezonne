@@ -1,5 +1,10 @@
-﻿﻿const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+﻿﻿// ✨ Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
+const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
 const isTV = /SmartTV|WebOS|Tizen|NetCast|VIDAA|Roku|AppleTV|Android TV|BRAVIA|AFT/i.test(navigator.userAgent);
+// ✨ Aggressive Performance: Detect weak mobiles/laptops and touch devices to strip heavy laggy effects
+const isLowEnd = (navigator.deviceMemory && navigator.deviceMemory <= 4) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) || /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+const isTouchDevice = window.matchMedia('(pointer: coarse)').matches;
+
 // Vercel par frontend + backend ek sath deploy ke liye relative path use karein:
 const LIVE_BACKEND_URL = '/api/tmdb';
 const BASE = isLocalhost ? 'http://localhost:3000/api/tmdb' : LIVE_BACKEND_URL;
@@ -10,10 +15,22 @@ const IMG_BACKDROP = isTV ? 'https://image.tmdb.org/t/p/w1280' : 'https://image.
 // ── TV MODE (Performance) ──
 // Smart TV browsers have weak CPUs/GPUs: heavy blur/animation cause visible lag.
 // Tag <html> early so CSS can strip expensive effects (backdrop-filter, film grain, Ken Burns, etc.)
-if (isTV) document.documentElement.classList.add('tv-mode');
+// If it's a weak device, mobile, or TV, we force high-performance rendering (removes lag/hangs completely)
+if (isTV || isLowEnd) document.documentElement.classList.add('tv-mode');
  
+// ── PERFORMANCE BOOST STYLES ──
+const perfStyle = document.createElement('style');
+perfStyle.textContent = `
+  .movie-card, .upcoming-card { content-visibility: auto; contain-intrinsic-size: 180px 320px; contain: layout style paint; transform: translateZ(0); backface-visibility: hidden; }
+  .carousel-slide { will-change: transform, opacity; transform: translateZ(0); }
+  img { content-visibility: auto; }
+  #movies-section, #upcoming { content-visibility: auto; contain-intrinsic-size: 1000px; }
+  .tv-mode * { box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+`;
+document.head.appendChild(perfStyle);
+
 // ── PREMIUM CURSOR GLOW ──
-if (!isTV) {
+if (!isTV && !isTouchDevice && !isLowEnd) {
   const cursorGlow = document.getElementById('cursor-glow');
   const cursorRing = document.getElementById('cursor-ring');
   const cursorDot = document.getElementById('cursor-dot');
@@ -168,45 +185,47 @@ let abortControllers = new Map(); // Track controllers to cancel stale requests
 
 async function tmdb(endpoint, params) {
   params = params || {};
-  params.mz_cb = '1'; // Cache-buster to bypass poisoned browser cache from previous errors
  
-  // Cancel previous request to the same endpoint if it exists (prevents race conditions)
-  if (abortControllers.has(endpoint)) {
-    abortControllers.get(endpoint).abort();
-  }
-  const controller = new AbortController();
-  abortControllers.set(endpoint, controller);
-
   let qs = '';
   if (Object.keys(params).length) {
     qs = '?' + Object.entries(params).map(([k,v]) => encodeURIComponent(k)+'='+encodeURIComponent(v)).join('&');
   }
   const urlStr = BASE + endpoint + qs;
+
+  // ✨ Unique Abort Strategy: Use urlStr instead of endpoint to allow concurrent calls to same route with diff params
+  if (abortControllers.has(urlStr)) {
+    abortControllers.get(urlStr).abort();
+  }
+  const controller = new AbortController();
+  abortControllers.set(urlStr, controller);
   
   if (tmdbCache.has(urlStr)) return tmdbCache.get(urlStr); // Memory cache (instant)
   
-  // LocalStorage check for instant loads across sessions (24hr expiry)
+  // ✨ ZERO-LATENCY SWR (Stale-While-Revalidate) CACHING
   const cacheKey = 'mz_cache_' + urlStr;
   const localDataStr = localStorage.getItem(cacheKey);
+  let cachedData = null;
+  let isFresh = false;
+
   if (localDataStr) {
     try {
       const parsed = JSON.parse(localDataStr);
-      if (parsed.timestamp && (Date.now() - parsed.timestamp < 24 * 60 * 60 * 1000)) {
-        tmdbCache.set(urlStr, parsed.data);
-        return parsed.data; 
+      cachedData = parsed.data;
+      // Agar data 12 ghante se naya hai, toh fresh manenge
+      if (parsed.timestamp && (Date.now() - parsed.timestamp < 12 * 60 * 60 * 1000)) {
+        isFresh = true;
       }
     } catch(e) {}
   }
  
-  if (inFlightRequests.has(urlStr)) return inFlightRequests.get(urlStr);
+  if (inFlightRequests.has(urlStr)) {
+    return cachedData ? cachedData : inFlightRequests.get(urlStr);
+  }
  
   const fetchPromise = (async () => {
     try {
       const r = await fetch(urlStr, { signal: controller.signal }); 
-      if (!r.ok) {
-        console.error(`Backend API Error: ${r.status} for ${urlStr}`);
-        return {};
-      }
+      if (!r.ok) return cachedData || {};
       const data = await r.json();
       tmdbCache.set(urlStr, data);
       
@@ -218,15 +237,18 @@ async function tmdb(endpoint, params) {
     } catch (e) { 
       if (e.name === 'AbortError') return null; // Silently handle cancellations
       console.error('Network/Fetch Error:', e);
-      return {};
+      return cachedData || { results: [] }; // Fallback to stale cache or empty array
     } finally {
-        if (abortControllers.get(endpoint) === controller) abortControllers.delete(endpoint);
+        if (abortControllers.get(urlStr) === controller) abortControllers.delete(urlStr);
     }
   })(); 
   
   inFlightRequests.set(urlStr, fetchPromise);
   fetchPromise.finally(() => inFlightRequests.delete(urlStr));
-  return fetchPromise;
+  
+  // ✨ Makhan Speed: Return instantly if we have stale/fresh cache, otherwise wait for network
+  if (cachedData && !isFresh) tmdbCache.set(urlStr, cachedData);
+  return cachedData ? cachedData : fetchPromise;
 }
  
 // ── INIT ── Priority-based staggered loading for ultra-fast startup
@@ -238,23 +260,39 @@ async function init() {
     _s.textContent = `.mz-lang-btn{display:inline-flex!important;align-items:center;gap:5px;background:rgba(255,255,255,0.05)!important;border:1px solid rgba(255,255,255,0.1)!important;color:rgba(255,255,255,0.65)!important;font-size:0.78rem!important;font-weight:600!important;padding:7px 13px!important;border-radius:999px!important;cursor:pointer!important;transition:all .2s ease!important;letter-spacing:.2px!important;position:relative!important}.mz-lang-btn:hover{background:rgba(245,197,24,.12)!important;border-color:rgba(245,197,24,.35)!important;color:#fff!important;transform:translateY(-1px)!important}.mz-lang-btn.active{background:linear-gradient(135deg,#f5c518,#e6a817)!important;border-color:#f5c518!important;color:#000!important;font-weight:800!important;box-shadow:0 4px 18px rgba(245,197,24,.35)!important;transform:translateY(-1px)!important}.mz-lang-btn.mz-lang-avail{border-color:rgba(16,185,129,.3)!important}.mz-lang-btn.mz-lang-avail.active{border-color:#f5c518!important}.mz-avail-dot{display:inline-block;width:6px;height:6px;background:#10b981;border-radius:50%;margin-left:3px;flex-shrink:0;box-shadow:0 0 5px rgba(16,185,129,.5)}.mz-lang-btn.active .mz-avail-dot{background:rgba(0,0,0,.4);box-shadow:none}`;
     document.head.appendChild(_s);
   }
-  // 1 & 2. Hero aur grid dono ek sath fetch karo (parallel) -> total load time ~half
-  await Promise.all([loadCarousel(), loadMovies('all')]);
-  
-  // 3. Delay upcoming fetching until browser is idle
-  setTimeout(() => {
-    if ('requestIdleCallback' in window) requestIdleCallback(() => loadUpcoming());
-    else loadUpcoming();
-  }, 800);
 
-  // Hide Cinematic Loader smoothly
-  setTimeout(() => {
+  // ✨ EMERGENCY FALLBACK: Hide loader after 1.5s even if API fails
+  const loaderForceHide = setTimeout(() => {
     const loader = document.getElementById('mz-loader');
     if (loader) loader.classList.add('loader-hidden');
-  }, 400);
+  }, 1500);
 
-  // Luxury Ambient Particles
-  if (!isTV && !document.querySelector('.ambient-particles')) {
+  try {
+    // 1 & 2. Hero aur grid fetch karo (Non-blocking: don't 'await' here to prevent UI hang)
+    loadCarousel().catch(e => console.warn('Carousel fail', e));
+    loadMovies('all').catch(e => console.warn('Movies fail', e));
+    
+    // 3. Delay upcoming fetching until browser is idle
+    setTimeout(() => {
+      if ('requestIdleCallback' in window) requestIdleCallback(() => loadUpcoming());
+      else loadUpcoming();
+    }, 800);
+
+    // 4. Hide Cinematic Loader as soon as the basic structure is ready
+    setTimeout(() => {
+      clearTimeout(loaderForceHide);
+      const loader = document.getElementById('mz-loader');
+      if (loader) loader.classList.add('loader-hidden');
+    }, 400);
+
+  } catch (err) {
+    console.error("Init Error:", err);
+    const loader = document.getElementById('mz-loader');
+    if (loader) loader.classList.add('loader-hidden');
+  }
+
+  // Luxury Ambient Particles (Disabled on mobile/low-end to save battery & stop lag)
+  if (!isTV && !isLowEnd && !isTouchDevice && !document.querySelector('.ambient-particles')) {
     const pContainer = document.createElement('div');
     pContainer.className = 'ambient-particles';
     document.body.appendChild(pContainer);
@@ -293,11 +331,11 @@ async function loadCarousel() {
   const seen = new Set();
   carouselMovies = pool.filter(m => {
     if (!m.backdrop_path || !m.poster_path || seen.has(m.id)) return false;
-    // Strictly keep ONLY High Rating (>= 7.0) OR Highly Trending (popularity > 300)
-    if (m.vote_average < 7.0 && m.popularity < 300) return false;
+    // Optimized: Mix of popular and highly rated (flexible for data gaps)
+    if (m.vote_average < 5.0 && m.popularity < 100) return false;
     seen.add(m.id); return true;
   }).slice(0, 6);
-  if (carouselMovies.length) buildCarousel();
+  buildCarousel(); // Force build even with limited data
 }
  
 function buildCarousel() {
@@ -566,18 +604,18 @@ async function loadMovies(cat, isLoadMore = false) {
   
   try {
     if (cat === 'all') {
-      const res = await Promise.all([
+      const res = await Promise.allSettled([
         tmdb('/trending/movie/week', { language: 'en-US', page: pageStr }),
         tmdb('/movie/popular',      { language: 'en-US', page: pageStr }),
         tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' })
       ]);
       
       let maxLength = 0;
-      res.forEach(r => { if (r.results && r.results.length > maxLength) maxLength = r.results.length; });
+      res.forEach(r => { if (r.status === 'fulfilled' && r.value.results && r.value.results.length > maxLength) maxLength = r.value.results.length; });
       for (let i = 0; i < maxLength; i++) {
         res.forEach(r => {
-          if (r.results && i < r.results.length) {
-            movies.push(r.results[i]);
+          if (r.status === 'fulfilled' && r.value.results && i < r.value.results.length) {
+            movies.push(r.value.results[i]);
           }
         });
       }
@@ -757,12 +795,12 @@ function renderMovies(movies, append = false) {
     const card   = document.createElement('div');
     card.className = 'movie-card';
     card.tabIndex = 0;
-    // will-change: transform helps mobile browsers pre-calculate the animation
-    card.style.willChange = 'transform, opacity'; 
+    // Optimized will-change usage
+    card.style.willChange = 'auto'; 
     card.style.animationDelay = ((i % 24) * 0.04) + 's';
     card.innerHTML =
       '<div class="card-poster">' +
-        '<img src="'+IMG+m.poster_path+'" alt="'+escapeHTML(m.title||'')+'" width="171" height="256" loading="lazy" decoding="async">' +
+        `<img src="${IMG}${m.poster_path}" alt="${escapeHTML(m.title||'')}" width="171" height="256" loading="lazy" decoding="async">` +
         '<div class="card-quality">'+qual+'</div>' +
         (isHot ? '<div class="card-hot">HOT</div>' : '') +
         '<div class="card-overlay"><button class="card-play-btn">&#9654;</button></div>' +
@@ -783,7 +821,7 @@ function renderMovies(movies, append = false) {
     // Premium 3D Tilt Effect on Hover
     if (!isTV) {
       let tiltRAF;
-      card.addEventListener('mouseenter', () => { card.style.transition = 'transform 0.15s ease-out'; });
+      card.addEventListener('mouseenter', () => { card.style.transition = 'transform 0.1s ease-out'; card.style.willChange = 'transform'; });
       card.addEventListener('mousemove', (e) => {
         if (tiltRAF) cancelAnimationFrame(tiltRAF);
         tiltRAF = requestAnimationFrame(() => {
@@ -799,7 +837,8 @@ function renderMovies(movies, append = false) {
       });
       card.addEventListener('mouseleave', () => {
         if (tiltRAF) cancelAnimationFrame(tiltRAF);
-        card.style.transition = 'transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.4s ease, border-color 0.4s ease';
+        card.style.transition = 'transform 0.3s ease';
+        card.style.willChange = 'auto';
         card.style.transform = '';
       });
     }
@@ -928,7 +967,7 @@ async function loadUpcoming(isLoadMore = false) {
     res.forEach(r => { movies = movies.concat(r.results||[]); });
     
     const realToday = new Date().toISOString().split('T')[0];
-    movies = movies.filter(m => m.poster_path && m.backdrop_path && m.release_date && m.release_date >= realToday);
+    movies = movies.filter(m => m.poster_path && m.release_date && m.release_date >= realToday); // Removed backdrop requirement for upcoming
     
     const existingIds = new Set(allUpcoming.map(m => m.id));
     const newMovies = movies.filter(m => { if(existingIds.has(m.id)) return false; existingIds.add(m.id); return true; });
@@ -946,6 +985,7 @@ async function loadUpcoming(isLoadMore = false) {
       if (m.release_date) {
         try { dateStr = new Date(m.release_date).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }); } catch(e){}
       }
+      const posterImg = m.backdrop_path ? (isTV ? 'https://image.tmdb.org/t/p/w780' : 'https://image.tmdb.org/t/p/w500') + m.backdrop_path : IMG + m.poster_path;
       const genres = (m.genre_ids||[]).slice(0,2).map(id => GENRE_MAP[id]).filter(Boolean);
       const card = document.createElement('div');
       card.className = 'upcoming-card reveal-up';
@@ -954,7 +994,7 @@ async function loadUpcoming(isLoadMore = false) {
       card.style.animationDelay = ((i % 12) * 0.08) + 's';
       card.innerHTML =
         '<div class="upcoming-poster">' +
-            '<img src="'+(isTV ? 'https://image.tmdb.org/t/p/w780' : 'https://image.tmdb.org/t/p/w500')+m.backdrop_path+'" alt="'+escapeHTML(m.title||'')+'" width="280" height="157" loading="lazy" decoding="async">' +
+            '<img src="'+posterImg+'" alt="'+escapeHTML(m.title||'')+'" width="280" height="157" loading="lazy" decoding="async">' +
           '<div class="upcoming-poster-overlay"></div>' +
           '<div class="upcoming-release-badge">RELEASE '+dateStr+'</div>' +
         '</div>' +
@@ -1514,10 +1554,10 @@ const playerSources = [
     // Official proxy mirror to fix 'refused to connect' / iframe block issue
     return (type === 'tv' ? `https://vidsrc.pm/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.pm/embed/movie?tmdb=${id}`) + `&lang=${lang}`;
   }},
-  { name: '🇮🇳 Hindi MAX', url: (id, lang, type, s, e) => {
-    // Switched to embed.su (Highly stable, no blank screen issues, fast loading)
-    return type === 'tv' ? `https://embed.cc/embed/tv/${id}/${s}/${e}` : `https://embed.cc/embed/movie/${id}`;
-  }},
+  // { name: '🇮🇳 Hindi MAX', url: (id, lang, type, s, e) => {
+  //   // Switched to embed.su (Highly stable, no blank screen issues, fast loading)
+  //   return type === 'tv' ? `https://embed.cc/embed/tv/${id}/${s}/${e}` : `https://embed.cc/embed/movie/${id}`;
+  // }},
 
 
 ];

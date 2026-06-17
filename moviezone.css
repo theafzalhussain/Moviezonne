@@ -1433,6 +1433,9 @@ body.cursor-hover #cursor-dot {
   position: relative;
   content-visibility: auto;
   contain-intrinsic-size: 200px 320px;
+  contain: layout style paint; /* Limit style recalculations for buttery scroll */
+  transform: translateZ(0); /* Hardware Acceleration / GPU Layer */
+  backface-visibility: hidden;
   box-shadow:
     0 16px 48px rgba(0,0,0,0.38),
     inset 0 1px 0 rgba(255,255,255,0.04);
@@ -1734,6 +1737,9 @@ body.cursor-hover #cursor-dot {
   flex-direction: column;
   content-visibility: auto;
   contain-intrinsic-size: 280px 300px;
+  contain: layout style paint; /* Fixes rendering bottlenecks */
+  transform: translateZ(0);
+  backface-visibility: hidden;
   box-shadow: 0 14px 42px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.035);
 }
 
