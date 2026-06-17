@@ -16,7 +16,7 @@
   --card3: #181825;
 
   /* Gold palette */
-  --gold: #f5c518;
+  --gold: #ffc107;
   --gold2: #e6b800;
   --gold3: #ffd750;
   --gold-dim: rgba(245,197,24,0.15);
@@ -105,89 +105,9 @@ body {
    KEYFRAMES — Cinematic animation library
    ═══════════════════════════════════════════════════════════════ */
 
-@keyframes shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-
-@keyframes fadeUp {
-  from { opacity: 0; transform: translateY(24px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes scaleIn {
-  from { opacity: 0; transform: scale(0.9); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-@keyframes slideRight {
-  from { opacity: 0; transform: translateX(-20px); }
-  to { opacity: 1; transform: translateX(0); }
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-@keyframes modalIn {
-  from { opacity: 0; transform: scale(0.96) translateY(20px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
-}
-
-@keyframes toastIn {
-  from { opacity: 0; transform: translateX(100%) scale(0.9); }
-  to { opacity: 1; transform: translateX(0) scale(1); }
-}
-
-@keyframes toastOut {
-  from { opacity: 1; transform: translateX(0) scale(1); }
-  to { opacity: 0; transform: translateX(100%) scale(0.9); }
-}
-
-@keyframes goldPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(245,197,24,0); }
-  50% { box-shadow: 0 0 0 6px rgba(245,197,24,0.1); }
-}
-
-@keyframes floatUp {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-6px); }
-}
-
-@keyframes titleGlow {
-  0%, 100% { text-shadow: 0 0 30px rgba(245,197,24,0.15), 0 8px 40px rgba(0,0,0,0.7); }
-  50% { text-shadow: 0 0 60px rgba(245,197,24,0.3), 0 8px 40px rgba(0,0,0,0.7); }
-}
-
-@keyframes borderFlow {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-
 @keyframes ripple {
   0% { transform: scale(0); opacity: 0.8; }
   100% { transform: scale(4); opacity: 0; }
-}
-
-@keyframes serverFocusPulse {
-  0% { transform: scale(1.02); box-shadow: 0 0 15px rgba(245,197,24,0.4); }
-  100% { transform: scale(1.08); box-shadow: 0 0 30px rgba(245,197,24,0.9); }
-}
-
-@keyframes particleFloat {
-  0% { transform: translateY(0) translateX(0) rotate(0deg); opacity: 1; }
-  100% { transform: translateY(-120px) translateX(20px) rotate(360deg); opacity: 0; }
-}
-
-@keyframes scanline {
-  0% { transform: translateY(-100%); }
-  100% { transform: translateY(100vh); }
 }
 
 @keyframes ripple-anim {
@@ -197,20 +117,6 @@ body {
 @keyframes sparkExplode {
   0% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
   100% { transform: translate(calc(-50% + var(--tx)), calc(-50% + var(--ty))) scale(0); opacity: 0; }
-}
-
-/* ✨ MAGICAL JUGNU (FIREFLIES) MOVEMENT */
-@keyframes floatParticle {
-  0% { transform: translateY(0) translateX(0); }
-  33% { transform: translateY(-35vh) translateX(var(--drift)); }
-  66% { transform: translateY(-70vh) translateX(calc(var(--drift) * -0.8)); }
-  100% { transform: translateY(-110vh) translateX(var(--drift)); }
-}
-
-@keyframes twinkle {
-  0% { opacity: 0; transform: scale(0.5); }
-  50% { opacity: 1; transform: scale(1.2); box-shadow: 0 0 15px var(--gold), 0 0 30px var(--gold2); }
-  100% { opacity: 0.1; transform: scale(0.8); }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -239,7 +145,6 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 1.2rem;
-  animation: floatUp 2.5s ease-in-out infinite;
 }
 
 .loader-icon {
@@ -249,7 +154,6 @@ body {
 
 .loader-spin-ring {
   transform-origin: center;
-  animation: spin 1.2s cubic-bezier(0.6, 0.2, 0.4, 0.8) infinite;
 }
 
 .loader-text {
@@ -268,7 +172,6 @@ body {
   -webkit-text-fill-color: transparent;
   background-clip: text;
   line-height: 1;
-  animation: titleGlow 3s ease-in-out infinite;
 }
 
 .loader-text-sub {
@@ -352,7 +255,7 @@ body.cursor-hover #cursor-dot {
 }
 
 .reveal-up.in-view {
-  animation: fadeUp 0.7s var(--ease-smooth) forwards;
+  opacity: 1;
 }
 
 /* ── Click Sparks ── */
@@ -370,16 +273,15 @@ body.cursor-hover #cursor-dot {
 
 /* ── Ambient Particles ── */
 .ambient-particles {
-  position: fixed; inset: 0; pointer-events: none; z-index: 1; overflow: hidden;
+  position: fixed; inset: 0; pointer-events: none; z-index: 99; overflow: hidden;
 }
 .particle {
   position: absolute; 
   bottom: -20px; 
   background: #fff; 
   border-radius: 50%;
-  box-shadow: 0 0 8px var(--gold), 0 0 16px var(--gold);
-  /* Uses custom properties injected by JS for unique chaotic movement */
-  animation: floatParticle var(--duration) ease-in infinite, twinkle var(--twinkle-duration) ease-in-out infinite alternate;
+  box-shadow: 0 0 10px var(--gold), 0 0 20px var(--gold2), 0 0 30px var(--gold3);
+  will-change: transform;
   pointer-events: none;
 }
 
@@ -458,7 +360,6 @@ body.cursor-hover #cursor-dot {
   mask-composite: exclude;
   pointer-events: none;
   opacity: 0.4;
-  animation: borderFlow 4s linear infinite;
   transition: opacity 0.4s ease;
 }
 
@@ -474,7 +375,7 @@ body.cursor-hover #cursor-dot {
 }
 
 #navbar.scrolled::before { opacity: 1; }
-#navbar.scrolled::after { opacity: 0.9; animation-duration: 2.5s; }
+#navbar.scrolled::after { opacity: 0.9; }
 
 #navbar:focus-within {
   transform: translateY(-2px);
@@ -554,7 +455,7 @@ body.cursor-hover #cursor-dot {
 }
 
 .nav-logo:hover .nav-logo-main {
-  animation: borderFlow 2s linear infinite;
+  color: var(--gold);
 }
 
 .nav-logo-sub {
@@ -727,7 +628,6 @@ body.cursor-hover #cursor-dot {
     0 0 0 1px rgba(245,197,24,0.07),
     inset 0 1px 0 rgba(255,255,255,0.06);
   backdrop-filter: blur(26px) saturate(180%);
-  animation: scaleIn 0.25s var(--ease-smooth) both;
   transform-origin: top center;
 }
 
@@ -927,10 +827,8 @@ body.cursor-hover #cursor-dot {
   text-transform: uppercase;
   margin-bottom: 1.1rem;
   box-shadow: 0 8px 24px rgba(124,58,237,0.3);
-  animation: slideRight 0.8s var(--ease-smooth) 0.6s both;
 }
 
-.carousel-slide.active .slide-badge { animation: slideRight 0.7s var(--ease-smooth) 0.5s both; }
 
 .slide-title {
   font-family: 'Bebas Neue', sans-serif;
@@ -938,7 +836,6 @@ body.cursor-hover #cursor-dot {
   line-height: 0.95;
   letter-spacing: 1.5px;
   color: #fff;
-  animation: titleGlow 4s ease-in-out infinite;
   margin-bottom: 1.1rem;
   text-shadow: 0 8px 40px rgba(0,0,0,0.7), 0 2px 10px rgba(0,0,0,0.5);
   position: relative;
@@ -1104,12 +1001,6 @@ body.cursor-hover #cursor-dot {
   background: linear-gradient(90deg, var(--gold), var(--red));
   border-color: rgba(245,197,24,0.3);
   box-shadow: 0 2px 12px rgba(245,197,24,0.35);
-  animation: dotGlow 2.6s ease-in-out infinite;
-}
-
-@keyframes dotGlow {
-  0%, 100% { box-shadow: 0 2px 12px rgba(245,197,24,0.35); }
-  50% { box-shadow: 0 2px 22px rgba(245,197,24,0.65); }
 }
 
 /* Autoplay progress indicator — premium "now playing" feel */
@@ -1128,11 +1019,6 @@ body.cursor-hover #cursor-dot {
   border-radius: 999px;
   background: linear-gradient(90deg, var(--gold), var(--red));
   box-shadow: 0 0 10px rgba(245,197,24,0.5);
-}
-
-@keyframes carouselProgressFill {
-  from { width: 0%; }
-  to   { width: 100%; }
 }
 
 /* Prev / Next arrow controls — glassmorphism, premium */
@@ -1358,6 +1244,8 @@ body.cursor-hover #cursor-dot {
   gap: 0.65rem;
   flex-wrap: wrap;
   margin-bottom: 2.2rem;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
 }
 
 .cat-tab {
@@ -1557,7 +1445,6 @@ body.cursor-hover #cursor-dot {
   text-transform: uppercase;
   box-shadow: 0 6px 18px rgba(230,57,70,0.4), inset 0 1px 0 rgba(255,255,255,0.2);
   z-index: 3;
-  animation: goldPulse 2s ease-in-out infinite;
 }
 
 .card-overlay {
@@ -1706,7 +1593,6 @@ body.cursor-hover #cursor-dot {
     transparent 40%
   );
   background-size: 250% 100%;
-  animation: shimmer 1.85s linear infinite;
   border-radius: 20px;
   border: 1px solid rgba(255,255,255,0.038);
   box-shadow: 0 16px 48px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.025);
@@ -1934,7 +1820,6 @@ body.cursor-hover #cursor-dot {
   flex-direction: column;
   position: relative;
   box-shadow: none;
-  animation: modalIn 0.45s var(--ease-smooth) both;
 }
 
 .modal-close {
@@ -2005,13 +1890,8 @@ body.cursor-hover #cursor-dot {
 }
 
 /* ── Cinematic Blur Reveal Animation ── */
-@keyframes modalBgBlurReveal {
-  0% { filter: blur(25px) saturate(0) brightness(0.2); opacity: 0; }
-  100% { filter: blur(0px) saturate(1.08) brightness(1); opacity: 1; }
-}
-
 .modal-image-wrapper img.blur-in {
-  animation: modalBgBlurReveal 1.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+  opacity: 1;
 }
 
 /* TV par heavy blur lag (stutter) na kare isliye fallback */
@@ -2051,7 +1931,6 @@ body.cursor-hover #cursor-dot {
   color: #fff;
   margin-bottom: 0.6rem;
   text-shadow: 0 6px 20px rgba(0,0,0,0.8);
-  animation: fadeUp 0.6s var(--ease-smooth) 0.1s both;
 }
 
 .modal-meta {
@@ -2060,7 +1939,6 @@ body.cursor-hover #cursor-dot {
   flex-wrap: wrap;
   align-items: center;
   margin-bottom: 1.2rem;
-  animation: fadeUp 0.6s var(--ease-smooth) 0.18s both;
 }
 
 .modal-meta > div, .modal-meta > span {
@@ -2078,7 +1956,6 @@ body.cursor-hover #cursor-dot {
   margin-bottom: 1.6rem;
   max-width: 90%;
   text-shadow: 0 2px 10px rgba(0,0,0,0.65);
-  animation: fadeUp 0.6s var(--ease-smooth) 0.26s both;
 }
 
 .modal-actions {
@@ -2086,7 +1963,6 @@ body.cursor-hover #cursor-dot {
   align-items: center;
   gap: 1rem;
   flex-wrap: wrap;
-  animation: fadeUp 0.6s var(--ease-smooth) 0.34s both;
 }
 
 /* Premium play button in modal */
@@ -2471,7 +2347,6 @@ body.cursor-hover #cursor-dot {
   cursor: pointer;
   transition: transform 0.35s var(--ease-spring), box-shadow 0.3s ease;
   box-shadow: 0 0 0 0 rgba(230,57,70,0.4);
-  animation: goldPulse 2.5s ease-in-out infinite;
 }
 
 .video-placeholder .play-big:hover {
@@ -2500,7 +2375,6 @@ body.cursor-hover #cursor-dot {
   border: 3px solid rgba(255,255,255,0.08);
   border-left-color: var(--gold);
   border-radius: 50%;
-  animation: spin 0.85s linear infinite;
 }
 
 /* Subtitle button */
@@ -2887,10 +2761,11 @@ body.cursor-hover #cursor-dot {
     scrollbar-width: none;
     -ms-overflow-style: none;
     gap: 0.45rem;
+    scroll-snap-type: x mandatory;
   }
 
   .cat-tabs::-webkit-scrollbar { display: none; }
-  .cat-tab { flex: 0 0 auto; padding: 0.52rem 0.9rem; font-size: 0.78rem; }
+  .cat-tab { flex: 0 0 auto; padding: 0.52rem 0.9rem; font-size: 0.78rem; scroll-snap-align: start; }
   .search-results-dropdown { max-height: 300px; }
 
   .player-controls { left: 10px; right: 10px; bottom: 10px; justify-content: center; }
@@ -2911,12 +2786,16 @@ body.cursor-hover #cursor-dot {
     box-shadow: none !important;
     padding: 6px 0 0 0;
     margin-top: 8px;
-    justify-content: center;
+    justify-content: flex-start;
     gap: 10px;
     flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
     display: flex;
     align-items: center;
   }
+  .player-controls::-webkit-scrollbar { display: none; }
 
   .external-sources { gap: 8px; justify-content: stretch; }
   .external-sources .player-chip--source { min-width: 0; flex: 1 1 calc(50% - 8px); padding: 10px 12px; }
@@ -2947,10 +2826,10 @@ body.cursor-hover #cursor-dot {
   .slide-rating, .slide-year, .slide-runtime { font-size: 0.88rem; }
   .slide-desc { font-size: 0.92rem; }
   .btn-play, .btn-info { padding: 0.95rem 1.5rem; font-size: 1rem; }
-  .main-content, #upcoming { padding-left: 4.5%; padding-right: 4.5%; }
-  .movie-grid { gap: 0.72rem; }
-  .card-info { padding: 0.72rem; }
-  .card-title { font-size: 0.8rem; }
+  .main-content, #upcoming { padding-left: 3.5%; padding-right: 3.5%; }
+  .movie-grid { gap: 0.6rem; }
+  .card-info { padding: 0.6rem; }
+  .card-title { font-size: 0.86rem; }
   .card-rating, .card-year, .card-runtime, .card-genre { font-size: 0.67rem; }
   .cat-tabs { gap: 0.36rem; }
   .cat-tab { padding: 0.47rem 0.8rem; font-size: 0.75rem; }
@@ -2959,9 +2838,9 @@ body.cursor-hover #cursor-dot {
   .player-controls { gap: 6px; }
   .player-chip { padding: 6px 10px; font-size: 11px; }
   .player-chip__icon { width: 16px; height: 16px; }
-  .external-sources .player-chip--source { flex: 1 1 100%; justify-content: center; min-height: 40px; }
+  .external-sources .player-chip--source { flex: 1 1 calc(50% - 6px); justify-content: center; min-height: 38px; padding: 8px 6px; font-size: 0.72rem; }
   .modal-close { top: 0.8rem; left: 0.8rem; height: 38px; padding: 0 1rem; font-size: 0.84rem; }
-  .modal-image-wrapper { height: 220px; }
+  .modal-image-wrapper { height: 240px; }
   .select-group { grid-template-columns: 1fr; }
 }
 
@@ -2973,10 +2852,10 @@ body.cursor-hover #cursor-dot {
   .modal-top { min-height: auto; }
   .modal-image-wrapper { position: relative; height: 280px; }
   .modal-gradient { background: linear-gradient(to top, var(--bg2) 0%, transparent 100%); }
-  .modal-info { padding: 1.5rem; margin-top: -80px; }
-  .modal-title { font-size: 2.2rem; }
+  .modal-info { padding: 1.2rem; margin-top: -60px; }
+  .modal-title { font-size: 2.1rem; }
   .modal-desc { max-width: 100%; font-size: 0.91rem; margin-bottom: 1rem; }
-  .modal-bottom { padding: 0 1.5rem 1.5rem; }
+  .modal-bottom { padding: 0 1.2rem 1.5rem; }
   .modal-actions { flex-direction: column; align-items: stretch; gap: 0.82rem; }
   .select-group { flex-direction: row; display: grid; grid-template-columns: 1fr 1fr; }
   .lang-select, .quality-select { width: 100%; }

@@ -1,22 +1,24 @@
 ﻿﻿// ✨ Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
 const isTV = /SmartTV|WebOS|Tizen|NetCast|VIDAA|Roku|AppleTV|Android TV|BRAVIA|AFT/i.test(navigator.userAgent);
-// ✨ Aggressive Performance: Detect weak mobiles/laptops and touch devices to strip heavy laggy effects
-const isLowEnd = (navigator.deviceMemory && navigator.deviceMemory <= 4) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) || /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
-const isTouchDevice = window.matchMedia('(pointer: coarse)').matches;
+
+// ✨ Balanced Performance: Mobil/Tablet ko low-end manein, par Desktops/Laptops (bhale hi touch ho) ko full features dein
+const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+const isLowEnd = (navigator.deviceMemory && navigator.deviceMemory < 4) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency < 4);
+const isTouchOnly = window.matchMedia('(pointer: coarse)').matches && !window.matchMedia('(pointer: fine)').matches;
 
 // Vercel par frontend + backend ek sath deploy ke liye relative path use karein:
 const LIVE_BACKEND_URL = '/api/tmdb';
 const BASE = isLocalhost ? 'http://localhost:3000/api/tmdb' : LIVE_BACKEND_URL;
-const IMG = 'https://image.tmdb.org/t/p/w500';
+const IMG = 'https://image.tmdb.org/t/p/w342'; // Optimized: w500 is too heavy for thumbnails
 // Hero / Modal backdrops: "original" is too heavy for TV processors. Using w1280 makes TV lightning fast.
-const IMG_BACKDROP = isTV ? 'https://image.tmdb.org/t/p/w1280' : 'https://image.tmdb.org/t/p/original';
- 
+const IMG_BACKDROP = (isTV || isMobile) ? 'https://image.tmdb.org/t/p/w780' : 'https://image.tmdb.org/t/p/w1280';
+
 // ── TV MODE (Performance) ──
 // Smart TV browsers have weak CPUs/GPUs: heavy blur/animation cause visible lag.
 // Tag <html> early so CSS can strip expensive effects (backdrop-filter, film grain, Ken Burns, etc.)
 // If it's a weak device, mobile, or TV, we force high-performance rendering (removes lag/hangs completely)
-if (isTV || isLowEnd) document.documentElement.classList.add('tv-mode');
+if (isTV || (isMobile && isLowEnd)) document.documentElement.classList.add('tv-mode');
  
 // ── PERFORMANCE BOOST STYLES ──
 const perfStyle = document.createElement('style');
@@ -30,7 +32,8 @@ perfStyle.textContent = `
 document.head.appendChild(perfStyle);
 
 // ── PREMIUM CURSOR GLOW ──
-if (!isTV && !isTouchDevice && !isLowEnd) {
+// Sirf TV aur pure Touch devices (bin mouse wale) par cursor hide karein
+if (!isTV && !isTouchOnly) {
   const cursorGlow = document.getElementById('cursor-glow');
   const cursorRing = document.getElementById('cursor-ring');
   const cursorDot = document.getElementById('cursor-dot');
@@ -178,7 +181,7 @@ let currentUpcomingPage = 1;
 let allUpcoming = [];
 let lastFocusedElement = null; // TV remote focus memory
  
-// ── FETCH helper ── Ultra-fast caching with Persistent LocalStorage
+// ── FETCH helper ── Optimized with aggressive parallel execution
 const tmdbCache = new Map();
 const inFlightRequests = new Map(); 
 let abortControllers = new Map(); // Track controllers to cancel stale requests
@@ -192,12 +195,6 @@ async function tmdb(endpoint, params) {
   }
   const urlStr = BASE + endpoint + qs;
 
-  // ✨ Unique Abort Strategy: Use urlStr instead of endpoint to allow concurrent calls to same route with diff params
-  if (abortControllers.has(urlStr)) {
-    abortControllers.get(urlStr).abort();
-  }
-  const controller = new AbortController();
-  abortControllers.set(urlStr, controller);
   
   if (tmdbCache.has(urlStr)) return tmdbCache.get(urlStr); // Memory cache (instant)
   
@@ -213,7 +210,7 @@ async function tmdb(endpoint, params) {
       cachedData = parsed.data;
       // Agar data 12 ghante se naya hai, toh fresh manenge
       if (parsed.timestamp && (Date.now() - parsed.timestamp < 12 * 60 * 60 * 1000)) {
-        isFresh = true;
+        return cachedData; // Immediate return if cache is fresh
       }
     } catch(e) {}
   }
@@ -221,6 +218,13 @@ async function tmdb(endpoint, params) {
   if (inFlightRequests.has(urlStr)) {
     return cachedData ? cachedData : inFlightRequests.get(urlStr);
   }
+
+  // ✨ Unique Abort Strategy
+  if (abortControllers.has(urlStr)) {
+    abortControllers.get(urlStr).abort();
+  }
+  const controller = new AbortController();
+  abortControllers.set(urlStr, controller);
  
   const fetchPromise = (async () => {
     try {
@@ -260,18 +264,15 @@ async function init() {
     _s.textContent = `.mz-lang-btn{display:inline-flex!important;align-items:center;gap:5px;background:rgba(255,255,255,0.05)!important;border:1px solid rgba(255,255,255,0.1)!important;color:rgba(255,255,255,0.65)!important;font-size:0.78rem!important;font-weight:600!important;padding:7px 13px!important;border-radius:999px!important;cursor:pointer!important;transition:all .2s ease!important;letter-spacing:.2px!important;position:relative!important}.mz-lang-btn:hover{background:rgba(245,197,24,.12)!important;border-color:rgba(245,197,24,.35)!important;color:#fff!important;transform:translateY(-1px)!important}.mz-lang-btn.active{background:linear-gradient(135deg,#f5c518,#e6a817)!important;border-color:#f5c518!important;color:#000!important;font-weight:800!important;box-shadow:0 4px 18px rgba(245,197,24,.35)!important;transform:translateY(-1px)!important}.mz-lang-btn.mz-lang-avail{border-color:rgba(16,185,129,.3)!important}.mz-lang-btn.mz-lang-avail.active{border-color:#f5c518!important}.mz-avail-dot{display:inline-block;width:6px;height:6px;background:#10b981;border-radius:50%;margin-left:3px;flex-shrink:0;box-shadow:0 0 5px rgba(16,185,129,.5)}.mz-lang-btn.active .mz-avail-dot{background:rgba(0,0,0,.4);box-shadow:none}`;
     document.head.appendChild(_s);
   }
-
-  // ✨ EMERGENCY FALLBACK: Hide loader after 1.5s even if API fails
-  const loaderForceHide = setTimeout(() => {
-    const loader = document.getElementById('mz-loader');
-    if (loader) loader.classList.add('loader-hidden');
-  }, 1500);
-
   try {
-    // 1 & 2. Hero aur grid fetch karo (Non-blocking: don't 'await' here to prevent UI hang)
-    loadCarousel().catch(e => console.warn('Carousel fail', e));
-    loadMovies('all').catch(e => console.warn('Movies fail', e));
-    
+    // ⚡ Execute everything in parallel for maximum startup speed
+    const tasks = [
+      loadCarousel(),
+      loadMovies('all')
+    ];
+
+    await Promise.allSettled(tasks);
+
     // 3. Delay upcoming fetching until browser is idle
     setTimeout(() => {
       if ('requestIdleCallback' in window) requestIdleCallback(() => loadUpcoming());
@@ -280,7 +281,6 @@ async function init() {
 
     // 4. Hide Cinematic Loader as soon as the basic structure is ready
     setTimeout(() => {
-      clearTimeout(loaderForceHide);
       const loader = document.getElementById('mz-loader');
       if (loader) loader.classList.add('loader-hidden');
     }, 400);
@@ -292,53 +292,41 @@ async function init() {
   }
 
   // Luxury Ambient Particles (Disabled on mobile/low-end to save battery & stop lag)
-  if (!isTV && !isLowEnd && !isTouchDevice && !document.querySelector('.ambient-particles')) {
-    const pContainer = document.createElement('div');
-    pContainer.className = 'ambient-particles';
-    document.body.appendChild(pContainer);
-    // ✨ 35 Magical Fireflies (Jugnu) with random paths
-    for (let i = 0; i < 35; i++) {
-      const p = document.createElement('div');
-      p.className = 'particle';
-      const size = Math.random() * 3 + 1.5; // Random size between 1.5px and 4.5px
-      p.style.width = size + 'px';
-      p.style.height = size + 'px';
-      p.style.left = Math.random() * 100 + 'vw';
-      p.style.setProperty('--duration', (Math.random() * 15 + 15) + 's'); // Upward float speed
-      p.style.setProperty('--twinkle-duration', (Math.random() * 2 + 1.5) + 's'); // Blinking speed
-      p.style.setProperty('--drift', (Math.random() * 120 - 60) + 'px'); // Random left/right sway (-60px to 60px)
-      p.style.animationDelay = '-' + (Math.random() * 25) + 's'; // Start at different heights instantly
-      pContainer.appendChild(p);
-    }
-  }
+  // Jugnu effects ab har Desktop/Laptop aur high-end tablets par chalenge
 }
  
 // ── CAROUSEL
 async function loadCarousel() {
-  const [tGlobal, tBolly, tTop] = await Promise.all([
-    tmdb('/trending/all/week', { language: 'en-US', page: '1' }), // Global trending (Hollywood/International)
-    tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', 'vote_average.gte': '6.8', 'vote_count.gte': '50', language: 'en-US', page: '1' }), // Bollywood Trending + High Rating
-    tmdb('/movie/top_rated', { language: 'en-US', page: '1' }) // Global Top Rated
+  // ✨ Only fetch Hollywood (English language) trending, popular, and top-rated movies for the carousel
+  const [tTrending, tPopular, tTop] = await Promise.all([
+    tmdb('/trending/movie/week', { language: 'en-US', page: '1' }), // Trending Hollywood
+    tmdb('/movie/popular', { language: 'en-US', page: '1' }),       // Popular Hollywood
+    tmdb('/movie/top_rated', { language: 'en-US', page: '1' })      // Top Rated Hollywood
   ]);
 
-  const global = tGlobal.results || [];
-  const bolly = tBolly.results || [];
+  const trending = tTrending.results || [];
+  const popular = tPopular.results || [];
   const top = tTop.results || [];
   
   const pool = [];
-  const maxLen = Math.max(global.length, bolly.length, top.length);
-  // Interleave to mix Hollywood and Bollywood perfectly (1 by 1)
+  const maxLen = Math.max(trending.length, popular.length, top.length);
+  // Interleave to get a good mix of trending, popular, and top-rated Hollywood movies
   for (let i = 0; i < maxLen; i++) {
-    if (global[i]) pool.push(global[i]);
-    if (bolly[i]) pool.push(bolly[i]);
+    if (trending[i]) pool.push(trending[i]);
+    if (popular[i]) pool.push(popular[i]);
     if (top[i]) pool.push(top[i]);
   }
 
   const seen = new Set();
+  const realToday = new Date().toISOString().split('T')[0];
   carouselMovies = pool.filter(m => {
     if (!m.backdrop_path || !m.poster_path || seen.has(m.id)) return false;
-    // Optimized: Mix of popular and highly rated (flexible for data gaps)
-    if (m.vote_average < 5.0 && m.popularity < 100) return false;
+    // ✨ Block unreleased future movies from Hero Carousel
+    const rDate = m.release_date || m.first_air_date;
+    if (rDate && rDate > realToday) return false;
+    // ✨ ENHANCED CAROUSEL FILTER: Only show latest, trending, high-rated movies
+    // Must have a good rating (>=6.5) AND high popularity (>=150) to be considered for the premium carousel
+    if (m.original_language !== 'en' || m.vote_average < 6.5 || m.popularity < 150) return false;
     seen.add(m.id); return true;
   }).slice(0, 6);
   buildCarousel(); // Force build even with limited data
@@ -589,7 +577,6 @@ const CAT_PARAMS = {
 async function loadMovies(cat, isLoadMore = false) {
   const grid = document.getElementById('movieGrid');
   if (!grid) return;
-  if (!isLoadMore) window.scrollTo({ top: 0, behavior: 'smooth' });
   
   if (!cat) cat = 'all';
   
@@ -737,7 +724,16 @@ async function loadMovies(cat, isLoadMore = false) {
     }
   } catch(e) { console.warn(e); }
  
-  movies = movies.filter(m => !!m.poster_path);
+  const realToday = new Date().toISOString().split('T')[0];
+  // ✨ LATEST MOVIES ONLY & BLOCK UPCOMING GLOBALLY
+  movies = movies.filter(m => {
+    if (!m.poster_path) return false;
+    const rDate = m.release_date || m.first_air_date;
+    // Agar date future ki hai, toh isko normal list se strict block kar do
+    if (rDate && rDate > realToday) return false;
+    return true;
+  });
+
   if (!movies.length && !isLoadMore) return;
   
   const existingIds = new Set(allMovies.map(m => m.id));
@@ -867,7 +863,8 @@ const CAT_HEADINGS = {
   scifi:'SCI-FI', animation:'ANIMATION', kids:'🧸 KIDS & CARTOONS', anime:'⚔️ ANIME SERIES & MOVIES',
   adult:'🔞 18+ ADULT MOVIES & WEB SERIES'
 };
-function filterCat(cat) {
+function filterCat(cat, e) {
+  if (e) e.preventDefault();
   document.querySelectorAll('.cat-tab').forEach(t => { t.classList.remove('active'); });
   const tabs = document.querySelectorAll('.cat-tab');
   tabs.forEach(t => { if ((t.getAttribute('onclick')||'').indexOf("'"+cat+"'") !== -1) t.classList.add('active'); });
@@ -1084,7 +1081,13 @@ document.addEventListener('click', (e) => {
  
 async function searchDropdownFill(q) {
   const data = await tmdb('/search/multi', { query: q, language: 'en-US', page: '1' });
-  const movies = (data.results||[]).filter(m => m.media_type !== 'person').slice(0, 6);
+  const realToday = new Date().toISOString().split('T')[0];
+  const movies = (data.results||[]).filter(m => {
+    if (m.media_type === 'person') return false;
+    const rDate = m.release_date || m.first_air_date;
+    if (rDate && rDate > realToday) return false; // Block upcoming from search dropdown
+    return true;
+  }).slice(0, 6);
   const dd = document.getElementById('searchDropdown');
   if (!dd) return;
   if (!movies.length) {
@@ -1114,7 +1117,13 @@ async function searchAndDisplay(q) {
   const sec = document.getElementById('movies-section');
   if (sec) sec.scrollIntoView({ behavior: 'smooth' });
   const data = await tmdb('/search/multi', { query: q, language: 'en-US', page: '1', include_adult: 'false' });
-  const movies = (data.results||[]).filter(m => !!m.poster_path && m.media_type !== 'person');
+  const realToday = new Date().toISOString().split('T')[0];
+  const movies = (data.results||[]).filter(m => {
+    if (!m.poster_path || m.media_type === 'person') return false;
+    const rDate = m.release_date || m.first_air_date;
+    if (rDate && rDate > realToday) return false; // Block upcoming from search results
+    return true;
+  });
   allMovies = movies;
   renderMovies(movies);
   const loadMoreBtn = document.getElementById('loadMoreMoviesBtn');
@@ -1151,7 +1160,7 @@ async function openModal(id, type = 'movie') {
   if (bgEl) {
     bgEl.src = '';
     bgEl.classList.remove('blur-in');
-    bgEl.style.opacity = '0'; // Hide before new image loads
+    bgEl.style.opacity = ''; // Reset opacity so CSS can take over
   }
   if (embedEl) embedEl.innerHTML =
     '<div class="video-placeholder">' +
@@ -1167,12 +1176,16 @@ async function openModal(id, type = 'movie') {
     details.media_type = type;
     currentModalMovie = details;
     const bgEl = document.getElementById('modalBg');
+    const imgPath = details.backdrop_path || details.poster_path;
+
     if (bgEl) {
-      if (details.backdrop_path) {
-        bgEl.onload = () => { bgEl.classList.add('blur-in'); };
-        bgEl.src = IMG_BACKDROP + details.backdrop_path;
+      if (imgPath) {
+        bgEl.onload = () => { 
+          bgEl.classList.add('blur-in');
+          bgEl.style.opacity = '1'; 
+        };
+        bgEl.src = (details.backdrop_path ? IMG_BACKDROP : IMG) + imgPath;
       } else {
-        bgEl.src = '';
         bgEl.style.opacity = '1';
       }
     }
@@ -1494,7 +1507,13 @@ async function loadRelatedMovies(id, type) {
       movies = fallback.results || [];
     }
  
-    movies = movies.filter(m => !!m.poster_path).slice(0, 12); // Top 12 similar items
+    const realToday = new Date().toISOString().split('T')[0];
+    movies = movies.filter(m => {
+      if (!m.poster_path) return false;
+      const rDate = m.release_date || m.first_air_date;
+      if (rDate && rDate > realToday) return false; // Block upcoming from related movies
+      return true;
+    }).slice(0, 12); // Top 12 similar items
  
     if (movies.length > 0) {
       grid.innerHTML = '';
@@ -2302,24 +2321,6 @@ function goHome(e) {
   if (!isHash) window.scrollTo({ top: 0, behavior: 'smooth' });
 }
  
-
-// ── ANTI-DEBUGGING (Developer Tools Detection) ──
-(function() {
-  function detectDevTools() {
-    const threshold = 100;
-    const startTime = new Date();
-    debugger;
-    const endTime = new Date();
-    if (endTime - startTime > threshold) {
-      console.warn('Developer Tools detected. Please close them to ensure the best experience.');
-      window.dispatchEvent(new CustomEvent('devtools-opened'));
-    }
-  }
-
-  // Run the check periodically
-  setInterval(detectDevTools, 2500);
-})();
-
 
 // ── ADVANCED SECURITY (Block View Source & Shortcuts) ──
 (function secureWebsite() {

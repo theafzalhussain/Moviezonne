@@ -1,8 +1,8 @@
-﻿﻿﻿﻿<!DOCTYPE html>
+﻿﻿﻿﻿﻿﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>MovieZone</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>M</text></svg>">
 <link rel="preconnect" href="https://image.tmdb.org">
@@ -60,11 +60,11 @@
   <ul class="nav-links" id="navLinks">
     <li><a href="#" class="active" onclick="goHome(event)">Home</a></li>
     <!-- <li><a href="#movies-section" onclick="goHome(event)">Movies</a></li> -->
-    <li><a href="#" onclick="filterCat('tv')">TV Shows</a></li>
+    <li><a href="#" onclick="filterCat('tv', event)">TV Shows</a></li>
     <li><a href="#upcoming" onclick="goHome(event)">Upcoming</a></li>
-    <li><a href="#" onclick="filterCat('bollywood')">Bollywood</a></li>
-    <li><a href="#" onclick="filterCat('hollywood')">Hollywood</a></li>
-    <li><a href="#" onclick="filterCat('south')">South</a></li>
+    <li><a href="#" onclick="filterCat('bollywood', event)">Bollywood</a></li>
+    <li><a href="#" onclick="filterCat('hollywood', event)">Hollywood</a></li>
+    <li><a href="#" onclick="filterCat('south', event)">South</a></li>
     <li><a href="#" onclick="showWatchlist(event)">Watchlist</a></li>
   </ul>
   <div class="nav-search">
