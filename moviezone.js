@@ -11,8 +11,19 @@ const isTouchOnly = window.matchMedia('(pointer: coarse)').matches && !window.ma
 const LIVE_BACKEND_URL = '/api/tmdb';
 const BASE = isLocalhost ? 'http://localhost:3000/api/tmdb' : LIVE_BACKEND_URL;
 const IMG = 'https://image.tmdb.org/t/p/w342'; // Optimized: w500 is too heavy for thumbnails
-// Hero / Modal backdrops: "original" is too heavy for TV processors. Using w1280 makes TV lightning fast.
-const IMG_BACKDROP = (isTV || isMobile) ? 'https://image.tmdb.org/t/p/w780' : 'https://image.tmdb.org/t/p/w1280';
+
+// ✨ NETWORK-AWARE IMAGE LOADING
+// Automatically serves High-Quality images on fast networks, and Normal/Low on slow networks (3G/2G)
+function getResponsiveBackdrop(path) {
+  if (!path) return '';
+  const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  const isSlow = conn && (conn.saveData || /^[23]g/.test(conn.effectiveType));
+  
+  if (isSlow) return `https://image.tmdb.org/t/p/w500${path}`; // Prevents lag on slow networks
+  if (isTV || isMobile) return `https://image.tmdb.org/t/p/w780${path}`; // Balanced for mobile/TV
+  if (!isLowEnd) return `https://image.tmdb.org/t/p/original${path}`; // Ultra HD for powerful desktops
+  return `https://image.tmdb.org/t/p/w1280${path}`; // Normal HD fallback
+}
 
 // ── TV MODE (Performance) ──
 // Smart TV browsers have weak CPUs/GPUs: heavy blur/animation cause visible lag.
@@ -54,31 +65,28 @@ if (!isTV && !isTouchOnly) {
     cursorIdleTimer = setTimeout(() => isCursorMoving = false, 150);
     
     if (cursorGlow) {
-      cursorGlow.style.left = mouseX + 'px';
-      cursorGlow.style.top = mouseY + 'px';
+      cursorGlow.style.transform = `translate3d(${mouseX}px, ${mouseY}px, 0) translate(-50%, -50%)`;
     }
     if (cursorDot) {
-      cursorDot.style.left = mouseX + 'px';
-      cursorDot.style.top = mouseY + 'px';
+      cursorDot.style.transform = `translate3d(${mouseX}px, ${mouseY}px, 0) translate(-50%, -50%)`;
     }
   });
 
   // Smooth 3D Trailing Animation for the Ring
   function animateCursorRing() {
     if (isCursorMoving || Math.abs(mouseX - ringX) > 0.1 || Math.abs(mouseY - ringY) > 0.1) {
-      ringX += (mouseX - ringX) * 0.18; // Smooth spring follow
-      ringY += (mouseY - ringY) * 0.18;
+      // ✨ Super Fast Cursor Speed (0.45 is 2.5x faster than 0.18)
+      ringX += (mouseX - ringX) * 0.45; 
+      ringY += (mouseY - ringY) * 0.45;
       
       if (cursorRing) {
         const velX = mouseX - ringX;
         const velY = mouseY - ringY;
-        // Dynamic 3D tilt based on velocity/direction
-        const rotateX = -velY * 1.5; 
-        const rotateY = velX * 1.5;
+        const rotateX = -velY * 0.8; 
+        const rotateY = velX * 0.8;
         
-        cursorRing.style.left = ringX + 'px';
-        cursorRing.style.top = ringY + 'px';
-        cursorRing.style.transform = `translate(-50%, -50%) perspective(500px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateZ(10px)`;
+        // Use pure hardware-accelerated transform instead of top/left
+        cursorRing.style.transform = `translate3d(${ringX}px, ${ringY}px, 0) translate(-50%, -50%) perspective(500px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateZ(5px)`;
       }
     }
     requestAnimationFrame(animateCursorRing);
@@ -298,8 +306,8 @@ async function init() {
     pContainer.className = 'ambient-particles';
     document.body.appendChild(pContainer);
 
-    // ✨ 45 Magical 3D Fireflies (Jugnu) Generator
-    for (let i = 0; i < 45; i++) {
+    // ✨ Optimized to 20 Fireflies to eliminate lag on mid-tier devices
+    for (let i = 0; i < 20; i++) {
       const p = document.createElement('div');
       p.className = 'particle';
       const size = Math.random() * 3.5 + 1.5; // Size between 1.5px to 5px
@@ -329,25 +337,27 @@ async function init() {
  
 // ── CAROUSEL
 async function loadCarousel() {
-  // ✨ Only fetch Hollywood (English language) trending, popular, and top-rated movies for the carousel
-  const [tTrending, tPopular, tTop] = await Promise.all([
-    tmdb('/trending/movie/week', { language: 'en-US', page: '1' }), // Trending Hollywood
-    tmdb('/movie/popular', { language: 'en-US', page: '1' }),       // Popular Hollywood
-    tmdb('/movie/top_rated', { language: 'en-US', page: '1' })      // Top Rated Hollywood
+  // ✨ Fetch Hollywood + Top Bollywood for a mixed premium carousel
+  const [tTrending, tPopular, tBolly] = await Promise.all([
+    tmdb('/trending/movie/week', { language: 'en-US', page: '1' }),
+    tmdb('/movie/popular', { language: 'en-US', page: '1' }),
+    tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', 'vote_average.gte': '6.5', language: 'en-US', page: '1' })
   ]);
 
   const trending = tTrending.results || [];
   const popular = tPopular.results || [];
-  const top = tTop.results || [];
+  const bolly = (tBolly.results || []).slice(0, 2); // Take top 2 Bollywood movies
   
   const pool = [];
-  const maxLen = Math.max(trending.length, popular.length, top.length);
-  // Interleave to get a good mix of trending, popular, and top-rated Hollywood movies
+  const maxLen = Math.max(trending.length, popular.length);
   for (let i = 0; i < maxLen; i++) {
     if (trending[i]) pool.push(trending[i]);
     if (popular[i]) pool.push(popular[i]);
-    if (top[i]) pool.push(top[i]);
   }
+
+  // Inject Bollywood movies at premium positions (2nd and 4th slot)
+  if (bolly[0]) pool.splice(1, 0, bolly[0]);
+  if (bolly[1]) pool.splice(3, 0, bolly[1]);
 
   const seen = new Set();
   const realToday = new Date().toISOString().split('T')[0];
@@ -356,9 +366,8 @@ async function loadCarousel() {
     // ✨ Block unreleased future movies from Hero Carousel
     const rDate = m.release_date || m.first_air_date;
     if (rDate && rDate > realToday) return false;
-    // ✨ ENHANCED CAROUSEL FILTER: Only show latest, trending, high-rated movies
-    // Must have a good rating (>=6.5) AND high popularity (>=150) to be considered for the premium carousel
-    if (m.original_language !== 'en' || m.vote_average < 6.5 || m.popularity < 150) return false;
+    // ✨ Require good rating (>=6.5) AND high popularity (>=150), allow English and Hindi
+    if (!['en', 'hi'].includes(m.original_language) || m.vote_average < 6.5 || m.popularity < 150) return false;
     seen.add(m.id); return true;
   }).slice(0, 6);
   buildCarousel(); // Force build even with limited data
@@ -380,7 +389,7 @@ function buildCarousel() {
     const genres = (m.genre_ids||[]).slice(0,3).map(id => '<span class="genre-tag">'+escapeHTML(GENRE_MAP[id]||'Movie')+'</span>').join('');
     const slide = document.createElement('div');
     slide.className = 'carousel-slide' + (i === 0 ? ' active' : '');
-    const bgUrl = IMG_BACKDROP+m.backdrop_path;
+    const bgUrl = getResponsiveBackdrop(m.backdrop_path);
     
     // Preload the very first Large Image for blazing fast Initial Render (LCP Optimization)
     if (i === 0) {
@@ -855,11 +864,17 @@ function renderMovies(movies, append = false) {
     // Premium 3D Tilt Effect on Hover
     if (!isTV) {
       let tiltRAF;
-      card.addEventListener('mouseenter', () => { card.style.transition = 'transform 0.1s ease-out'; card.style.willChange = 'transform'; });
+      let cachedRect = null; // Cache to stop Layout Thrashing
+      card.addEventListener('mouseenter', () => { 
+        card.style.transition = 'transform 0.1s ease-out'; 
+        card.style.willChange = 'transform'; 
+        cachedRect = card.getBoundingClientRect();
+      });
       card.addEventListener('mousemove', (e) => {
         if (tiltRAF) cancelAnimationFrame(tiltRAF);
         tiltRAF = requestAnimationFrame(() => {
-          const rect = card.getBoundingClientRect();
+          if (!cachedRect) cachedRect = card.getBoundingClientRect();
+          const rect = cachedRect;
           const x = e.clientX - rect.left;
           const y = e.clientY - rect.top;
           const centerX = rect.width / 2;
@@ -876,11 +891,14 @@ function renderMovies(movies, append = false) {
       });
       card.addEventListener('mouseleave', () => {
         if (tiltRAF) cancelAnimationFrame(tiltRAF);
-        card.style.transition = 'transform 0.3s ease';
+        card.style.transition = 'transform 0.3s ease, box-shadow 0.3s ease';
         card.style.willChange = 'auto';
         card.style.transform = '';
         card.style.boxShadow = '';
+        cachedRect = null; // Clear cache
       });
+      // Update cache on scroll if hovering
+      card.addEventListener('wheel', () => cachedRect = null, {passive: true});
     }
  
   });
@@ -1055,11 +1073,16 @@ async function loadUpcoming(isLoadMore = false) {
       // Premium 3D Tilt Effect for Upcoming Cards
       if (!isTV) {
         let tiltRAF;
-        card.addEventListener('mouseenter', () => { card.style.transition = 'transform 0.15s ease-out'; });
+        let cachedRect = null;
+        card.addEventListener('mouseenter', () => { 
+          card.style.transition = 'transform 0.15s ease-out'; 
+          cachedRect = card.getBoundingClientRect();
+        });
         card.addEventListener('mousemove', (e) => {
           if (tiltRAF) cancelAnimationFrame(tiltRAF);
           tiltRAF = requestAnimationFrame(() => {
-            const rect = card.getBoundingClientRect();
+            if (!cachedRect) cachedRect = card.getBoundingClientRect();
+            const rect = cachedRect;
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
             const rotateX = ((y - (rect.height / 2)) / (rect.height / 2)) * -8;
@@ -1071,7 +1094,9 @@ async function loadUpcoming(isLoadMore = false) {
           if (tiltRAF) cancelAnimationFrame(tiltRAF);
           card.style.transition = 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)';
           card.style.transform = '';
+          cachedRect = null;
         });
+        card.addEventListener('wheel', () => cachedRect = null, {passive: true});
       }
     });
     grid.appendChild(fragment);
@@ -1216,7 +1241,7 @@ async function openModal(id, type = 'movie') {
           bgEl.classList.add('blur-in');
           bgEl.style.opacity = '1'; 
         };
-        bgEl.src = (details.backdrop_path ? IMG_BACKDROP : IMG) + imgPath;
+        bgEl.src = details.backdrop_path ? getResponsiveBackdrop(details.backdrop_path) : IMG + imgPath;
       } else {
         bgEl.style.opacity = '1';
       }
