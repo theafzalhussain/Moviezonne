@@ -116,9 +116,18 @@ async function warmupCache() {
 
 // Server ko start karne ke liye (Local + Render support)
 if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`Proxy server is running on port ${PORT}`);
+  const server = app.listen(PORT, () => {
+    console.log(`🚀 Proxy server is running on port ${PORT} | Worker PID: ${process.pid}`);
     warmupCache();
+  });
+
+  // Graceful Shutdown: PM2 Zero-Downtime Reload ke liye
+  process.on('SIGINT', () => {
+    console.log(`🛑 PM2 stopping worker PID: ${process.pid}. Closing connections gracefully...`);
+    server.close(() => {
+      console.log('✅ Server gracefully shut down.');
+      process.exit(0);
+    });
   });
 }
 
