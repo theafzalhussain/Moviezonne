@@ -25,7 +25,7 @@ app.use(cors({
 }));
 
 // Frontend files (index.html, css, js) ko browser mein dikhane ke liye
-app.use(express.static(__dirname));
+app.use(express.static(__dirname, { maxAge: '7d' })); // Added strict browser caching for extremely fast reloads
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const TMDB_TOKEN = process.env.TMDB_TOKEN;

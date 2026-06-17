@@ -22,10 +22,16 @@ if (!isTV) {
   let mouseY = window.innerHeight / 2;
   let ringX = mouseX;
   let ringY = mouseY;
+  
+  let cursorIdleTimer;
+  let isCursorMoving = true;
 
   window.addEventListener('mousemove', (e) => {
     mouseX = e.clientX;
     mouseY = e.clientY;
+    isCursorMoving = true;
+    clearTimeout(cursorIdleTimer);
+    cursorIdleTimer = setTimeout(() => isCursorMoving = false, 150);
     
     if (cursorGlow) {
       cursorGlow.style.left = mouseX + 'px';
@@ -39,19 +45,21 @@ if (!isTV) {
 
   // Smooth 3D Trailing Animation for the Ring
   function animateCursorRing() {
-    ringX += (mouseX - ringX) * 0.18; // Smooth spring follow
-    ringY += (mouseY - ringY) * 0.18;
-    
-    if (cursorRing) {
-      const velX = mouseX - ringX;
-      const velY = mouseY - ringY;
-      // Dynamic 3D tilt based on velocity/direction
-      const rotateX = -velY * 1.5; 
-      const rotateY = velX * 1.5;
+    if (isCursorMoving || Math.abs(mouseX - ringX) > 0.1 || Math.abs(mouseY - ringY) > 0.1) {
+      ringX += (mouseX - ringX) * 0.18; // Smooth spring follow
+      ringY += (mouseY - ringY) * 0.18;
       
-      cursorRing.style.left = ringX + 'px';
-      cursorRing.style.top = ringY + 'px';
-      cursorRing.style.transform = `translate(-50%, -50%) perspective(500px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateZ(10px)`;
+      if (cursorRing) {
+        const velX = mouseX - ringX;
+        const velY = mouseY - ringY;
+        // Dynamic 3D tilt based on velocity/direction
+        const rotateX = -velY * 1.5; 
+        const rotateY = velX * 1.5;
+        
+        cursorRing.style.left = ringX + 'px';
+        cursorRing.style.top = ringY + 'px';
+        cursorRing.style.transform = `translate(-50%, -50%) perspective(500px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateZ(10px)`;
+      }
     }
     requestAnimationFrame(animateCursorRing);
   }
@@ -151,6 +159,7 @@ let isFullViewUpcoming = false;
 let currentMoviePage = 1;
 let currentUpcomingPage = 1;
 let allUpcoming = [];
+let lastFocusedElement = null; // TV remote focus memory
  
 // ── FETCH helper ── Ultra-fast caching with Persistent LocalStorage
 const tmdbCache = new Map();
@@ -296,6 +305,16 @@ function buildCarousel() {
     const slide = document.createElement('div');
     slide.className = 'carousel-slide' + (i === 0 ? ' active' : '');
     const bgUrl = IMG_BACKDROP+m.backdrop_path;
+    
+    // Preload the very first Large Image for blazing fast Initial Render (LCP Optimization)
+    if (i === 0) {
+      const preload = document.createElement('link');
+      preload.rel = 'preload';
+      preload.as = 'image';
+      preload.href = bgUrl;
+      document.head.appendChild(preload);
+    }
+
     // Performance: only load the FIRST slide's background eagerly.
     // Remaining slides are lazy-loaded just-in-time (current + next) via ensureSlideBg()
     // so the page doesn't have to download 6 large images on first paint.
@@ -747,18 +766,23 @@ function renderMovies(movies, append = false) {
 
     // Premium 3D Tilt Effect on Hover
     if (!isTV) {
+      let tiltRAF;
       card.addEventListener('mouseenter', () => { card.style.transition = 'transform 0.15s ease-out'; });
       card.addEventListener('mousemove', (e) => {
-        const rect = card.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        const centerX = rect.width / 2;
-        const centerY = rect.height / 2;
-        const rotateX = ((y - centerY) / centerY) * -10; // Max 10 deg tilt
-        const rotateY = ((x - centerX) / centerX) * 10;
-        card.style.transform = `perspective(1000px) translateY(-12px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.03, 1.03, 1.03)`;
+        if (tiltRAF) cancelAnimationFrame(tiltRAF);
+        tiltRAF = requestAnimationFrame(() => {
+          const rect = card.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          const centerX = rect.width / 2;
+          const centerY = rect.height / 2;
+          const rotateX = ((y - centerY) / centerY) * -10; // Max 10 deg tilt
+          const rotateY = ((x - centerX) / centerX) * 10;
+          card.style.transform = `perspective(1000px) translateY(-12px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.03, 1.03, 1.03)`;
+        });
       });
       card.addEventListener('mouseleave', () => {
+        if (tiltRAF) cancelAnimationFrame(tiltRAF);
         card.style.transition = 'transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.4s ease, border-color 0.4s ease';
         card.style.transform = '';
       });
@@ -932,16 +956,21 @@ async function loadUpcoming(isLoadMore = false) {
 
       // Premium 3D Tilt Effect for Upcoming Cards
       if (!isTV) {
+        let tiltRAF;
         card.addEventListener('mouseenter', () => { card.style.transition = 'transform 0.15s ease-out'; });
         card.addEventListener('mousemove', (e) => {
-          const rect = card.getBoundingClientRect();
-          const x = e.clientX - rect.left;
-          const y = e.clientY - rect.top;
-          const rotateX = ((y - (rect.height / 2)) / (rect.height / 2)) * -8;
-          const rotateY = ((x - (rect.width / 2)) / (rect.width / 2)) * 8;
-          card.style.transform = `perspective(1000px) translateY(-6px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.02, 1.02, 1.02)`;
+          if (tiltRAF) cancelAnimationFrame(tiltRAF);
+          tiltRAF = requestAnimationFrame(() => {
+            const rect = card.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const rotateX = ((y - (rect.height / 2)) / (rect.height / 2)) * -8;
+            const rotateY = ((x - (rect.width / 2)) / (rect.width / 2)) * 8;
+            card.style.transform = `perspective(1000px) translateY(-6px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.02, 1.02, 1.02)`;
+          });
         });
         card.addEventListener('mouseleave', () => {
+          if (tiltRAF) cancelAnimationFrame(tiltRAF);
           card.style.transition = 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)';
           card.style.transform = '';
         });
@@ -1032,6 +1061,7 @@ function closeDropdown() {
 async function openModal(id, type = 'movie') {
   // Add hash to URL to behave like a separate page
   window.history.pushState({ watchPage: true }, '', '#watch-' + type + '-' + id);
+  if (isTV) lastFocusedElement = document.activeElement;
   const overlay = document.getElementById('modal-overlay');
   if (!overlay) return;
  
@@ -1328,7 +1358,7 @@ async function openModal(id, type = 'movie') {
     // TV ke liye Auto-Focus on Play button
     if (isTV) {
       setTimeout(() => {
-        const playBtn = document.querySelector('.premium-play-btn');
+        const playBtn = document.querySelector('.play-big') || document.querySelector('.premium-play-btn');
         if (playBtn) playBtn.focus();
       }, 300);
     }
@@ -1351,6 +1381,10 @@ function closeModal() {
   currentModalMovie = null;
   const relSec = document.getElementById('relatedMoviesSection');
   if (relSec) relSec.style.display = 'none';
+  
+  if (isTV && lastFocusedElement) {
+    setTimeout(() => lastFocusedElement.focus(), 100);
+  }
 }
  
 // TV / Phone Back Button Navigation for Watch Page
@@ -2060,7 +2094,7 @@ function showToast(msg) {
 // ── TV REMOTE NAVIGATION ──
 document.addEventListener('keydown', (e) => {
   // TV Enter/OK key: Simulate click on custom focusable elements (cards, tabs, etc.)
-  if (e.key === 'Enter' && document.activeElement) {
+  if ((e.key === 'Enter' || e.key === ' ') && document.activeElement) {
     const tag = document.activeElement.tagName;
     if (tag !== 'BUTTON' && tag !== 'A' && tag !== 'INPUT') {
       document.activeElement.click();
@@ -2068,6 +2102,12 @@ document.addEventListener('keydown', (e) => {
     }
   }
   
+  // Smart TV dedicated Hardware Play/Pause remote button
+  if (e.key === 'MediaPlayPause' || e.key === 'MediaPlay' || e.keyCode === 179 || e.keyCode === 415) {
+    const playBtn = document.querySelector('.play-big') || document.querySelector('.premium-play-btn');
+    if (playBtn) { playBtn.click(); e.preventDefault(); }
+  }
+
   // TV Back keys: Android (Escape/Backspace), WebOS (461), Tizen (10009)
   const isBackKey = e.key === 'Escape' || e.keyCode === 27 || e.keyCode === 10009 || e.keyCode === 461 || (e.key === 'Backspace' && document.activeElement.tagName !== 'INPUT');
   
@@ -2082,6 +2122,17 @@ document.addEventListener('keydown', (e) => {
     }
   }
 });
+
+// Auto-Scroll into center for TV spatial navigation (Prevents focus moving off-screen)
+if (isTV) {
+  document.addEventListener('focus', (e) => {
+    const overlay = document.getElementById('modal-overlay');
+    // Sirf main page items ke liye auto-center karein (modal me default theek rehta hai)
+    if (e.target && e.target.scrollIntoView && (!overlay || !overlay.classList.contains('open'))) {
+      e.target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, true);
+}
  
 // ── PAGE NAVIGATION (SPA) ──
 function viewAllMovies(e) {
