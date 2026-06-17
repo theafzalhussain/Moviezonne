@@ -26,7 +26,7 @@ app.use(cors({
 }));
 
 // Frontend files (index.html, css, js) ko browser mein dikhane ke liye
-app.use(express.static(__dirname, { maxAge: '7d' })); // Added strict browser caching for extremely fast reloads
+app.use(express.static(__dirname, { maxAge: '30d', etag: true, lastModified: true })); // Extended caching for static assets
 
 // API Rate Limiter: Bura traffic aur DDOS attacks block karega (Luxury stability)
 const apiLimiter = rateLimit({
@@ -67,12 +67,12 @@ app.use('/api/tmdb', apiLimiter, async (req, res) => {
     // Check if data is already in node-cache
     const cachedData = apiCache.get(url);
     if (cachedData) {
-      res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=43200');
+      res.setHeader('Cache-Control', 'public, max-age=7200, s-maxage=86400, stale-while-revalidate=604800');
       return res.json(cachedData);
     }
 
     const response = await fetch(url, {
-      method: 'GET',
+      method: 'GET', 
       headers: { 'Authorization': `Bearer ${TMDB_TOKEN}` }
     });
 
@@ -86,7 +86,7 @@ app.use('/api/tmdb', apiLimiter, async (req, res) => {
     const data = await response.json();
 
     // CDN & Browser Caching (Only cache successful responses)
-    res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=43200');
+    res.setHeader('Cache-Control', 'public, max-age=7200, s-maxage=86400, stale-while-revalidate=604800');
 
     // Naya data memory me save karo (TTL is automatically handled by node-cache)
     apiCache.set(url, data);

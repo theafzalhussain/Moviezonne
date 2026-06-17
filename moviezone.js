@@ -163,11 +163,20 @@ let lastFocusedElement = null; // TV remote focus memory
  
 // ── FETCH helper ── Ultra-fast caching with Persistent LocalStorage
 const tmdbCache = new Map();
-const inFlightRequests = new Map(); // Request deduplication
+const inFlightRequests = new Map(); 
+let abortControllers = new Map(); // Track controllers to cancel stale requests
+
 async function tmdb(endpoint, params) {
   params = params || {};
   params.mz_cb = '1'; // Cache-buster to bypass poisoned browser cache from previous errors
  
+  // Cancel previous request to the same endpoint if it exists (prevents race conditions)
+  if (abortControllers.has(endpoint)) {
+    abortControllers.get(endpoint).abort();
+  }
+  const controller = new AbortController();
+  abortControllers.set(endpoint, controller);
+
   let qs = '';
   if (Object.keys(params).length) {
     qs = '?' + Object.entries(params).map(([k,v]) => encodeURIComponent(k)+'='+encodeURIComponent(v)).join('&');
@@ -193,7 +202,7 @@ async function tmdb(endpoint, params) {
  
   const fetchPromise = (async () => {
     try {
-      const r = await fetch(urlStr); 
+      const r = await fetch(urlStr, { signal: controller.signal }); 
       if (!r.ok) {
         console.error(`Backend API Error: ${r.status} for ${urlStr}`);
         return {};
@@ -206,11 +215,14 @@ async function tmdb(endpoint, params) {
       } catch (err) {}
       
       return data;
-    } catch (e) {
+    } catch (e) { 
+      if (e.name === 'AbortError') return null; // Silently handle cancellations
       console.error('Network/Fetch Error:', e);
       return {};
+    } finally {
+        if (abortControllers.get(endpoint) === controller) abortControllers.delete(endpoint);
     }
-  })();
+  })(); 
   
   inFlightRequests.set(urlStr, fetchPromise);
   fetchPromise.finally(() => inFlightRequests.delete(urlStr));
@@ -533,6 +545,7 @@ const CAT_PARAMS = {
 async function loadMovies(cat, isLoadMore = false) {
   const grid = document.getElementById('movieGrid');
   if (!grid) return;
+  if (!isLoadMore) window.scrollTo({ top: 0, behavior: 'smooth' });
   
   if (!cat) cat = 'all';
   
@@ -681,6 +694,7 @@ async function loadMovies(cat, isLoadMore = false) {
   } catch(e) { console.warn(e); }
  
   movies = movies.filter(m => !!m.poster_path);
+  if (!movies.length && !isLoadMore) return;
   
   const existingIds = new Set(allMovies.map(m => m.id));
   const newMovies = movies.filter(m => { if(existingIds.has(m.id)) return false; existingIds.add(m.id); return true; });
@@ -743,10 +757,12 @@ function renderMovies(movies, append = false) {
     const card   = document.createElement('div');
     card.className = 'movie-card';
     card.tabIndex = 0;
+    // will-change: transform helps mobile browsers pre-calculate the animation
+    card.style.willChange = 'transform, opacity'; 
     card.style.animationDelay = ((i % 24) * 0.04) + 's';
     card.innerHTML =
       '<div class="card-poster">' +
-        '<img src="'+IMG+m.poster_path+'" alt="'+escapeHTML(m.title||'')+'" width="200" height="300" loading="lazy" decoding="async">' +
+        '<img src="'+IMG+m.poster_path+'" alt="'+escapeHTML(m.title||'')+'" width="171" height="256" loading="lazy" decoding="async">' +
         '<div class="card-quality">'+qual+'</div>' +
         (isHot ? '<div class="card-hot">HOT</div>' : '') +
         '<div class="card-overlay"><button class="card-play-btn">&#9654;</button></div>' +
@@ -934,10 +950,11 @@ async function loadUpcoming(isLoadMore = false) {
       const card = document.createElement('div');
       card.className = 'upcoming-card reveal-up';
       card.tabIndex = 0;
+        card.style.willChange = 'transform, opacity';
       card.style.animationDelay = ((i % 12) * 0.08) + 's';
       card.innerHTML =
         '<div class="upcoming-poster">' +
-          '<img src="'+IMG+m.backdrop_path+'" alt="'+escapeHTML(m.title||'')+'" width="280" height="157" loading="lazy" decoding="async">' +
+            '<img src="'+(isTV ? 'https://image.tmdb.org/t/p/w780' : 'https://image.tmdb.org/t/p/w500')+m.backdrop_path+'" alt="'+escapeHTML(m.title||'')+'" width="280" height="157" loading="lazy" decoding="async">' +
           '<div class="upcoming-poster-overlay"></div>' +
           '<div class="upcoming-release-badge">RELEASE '+dateStr+'</div>' +
         '</div>' +
