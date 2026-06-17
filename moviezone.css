@@ -294,6 +294,23 @@ body.cursor-hover #cursor-dot {
   animation: floatParticle3D var(--duration) ease-in-out infinite;
 }
 
+/* ── Mobile Nav Overlay ── */
+.mobile-nav-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 3, 10, 0.65);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 998;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s var(--ease-smooth);
+}
+.mobile-nav-overlay.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 /* ── Ripple Effect ── */
 .ripple-wrapper { position: relative; overflow: hidden; }
 .ripple-span {
@@ -2724,14 +2741,30 @@ body.cursor-hover #cursor-dot {
     align-items: flex-start;
     padding: 6rem 2rem 2rem;
     gap: 1.5rem;
-    transition: right 0.45s var(--ease-smooth);
+    transition: right 0.5s cubic-bezier(0.86, 0, 0.07, 1), box-shadow 0.5s ease;
     box-shadow: -24px 0 60px rgba(0,0,0,0.75);
     z-index: 999;
   }
 
   .nav-links::-webkit-scrollbar { display: none; }
-  .nav-links.open { right: 0; }
-  .nav-links a { font-size: 1.1rem; width: 100%; padding: 0.5rem 0; }
+  .nav-links.open { right: 0; box-shadow: -40px 0 100px rgba(0,0,0,0.9); }
+  
+  /* ✨ Premium Staggered Menu Link Animations */
+  .nav-links li a { 
+    font-size: 1.1rem; width: 100%; padding: 0.5rem 0; 
+    opacity: 0; transform: translateX(35px); 
+    transition: opacity 0.4s ease, transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  }
+  .nav-links.open li a { opacity: 1; transform: translateX(0); }
+  .nav-links.open li:nth-child(1) a { transition-delay: 0.1s; }
+  .nav-links.open li:nth-child(2) a { transition-delay: 0.15s; }
+  .nav-links.open li:nth-child(3) a { transition-delay: 0.2s; }
+  .nav-links.open li:nth-child(4) a { transition-delay: 0.25s; }
+  .nav-links.open li:nth-child(5) a { transition-delay: 0.3s; }
+  .nav-links.open li:nth-child(6) a { transition-delay: 0.35s; }
+  .nav-links.open li:nth-child(7) a { transition-delay: 0.4s; }
+  .nav-links.open li:nth-child(8) a { transition-delay: 0.45s; }
+
   .nav-links a::after { left: 0; transform: none; }
   .nav-links a:hover::after, .nav-links a.active::after { width: 40px; }
 
@@ -2851,6 +2884,30 @@ body.cursor-hover #cursor-dot {
   .modal-close { top: 0.8rem; left: 0.8rem; height: 38px; padding: 0 1rem; font-size: 0.84rem; }
   .modal-image-wrapper { height: 240px; }
   .select-group { grid-template-columns: 1fr; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ULTRA SMALL SCREENS (iPhone SE, Small Androids)
+   ═══════════════════════════════════════════════════════════════ */
+@media (max-width: 380px) {
+  html { font-size: 92%; } /* Shrinks overall layout naturally */
+  #navbar { padding: 0.6rem; width: calc(100vw - 12px); border-radius: 16px; }
+  .nav-logo-main { font-size: 1.15rem; }
+  .nav-logo-mark { width: 1.8rem; height: 1.8rem; font-size: 0.65rem; }
+  .hamburger-btn { width: 36px; height: 36px; }
+  #hero { height: 60vh; margin-top: 100px; }
+  .slide-title { font-size: 2.2rem !important; }
+  .slide-desc { font-size: 0.88rem; line-height: 1.4; }
+  .btn-play, .btn-info { padding: 0.8rem 1rem; width: 100%; justify-content: center; font-size: 0.95rem; }
+  .main-content, #upcoming { padding-left: 3%; padding-right: 3%; }
+  .movie-grid { gap: 0.45rem; }
+  .card-info { padding: 0.45rem; }
+  .card-title { font-size: 0.78rem; line-height: 1.25; }
+  .card-rating, .card-year, .card-runtime { font-size: 0.62rem; padding: 0.2rem 0.4rem; }
+  .modal-info { padding: 1rem; margin-top: -30px; }
+  .modal-title { font-size: 1.7rem; }
+  .premium-play-btn, .btn-watchlist, .btn-download { width: 100%; padding: 0.75rem 1rem; justify-content: center; }
+  .modal-actions { gap: 0.5rem; }
 }
 
 /* ═══════════════════════════════════════════════════════════════
