@@ -299,15 +299,16 @@ async function init() {
     if (loader) loader.classList.add('loader-hidden');
   }
 
-  // Luxury Ambient Particles (Disabled on mobile/low-end to save battery & stop lag)
-  // Jugnu effects ab har Desktop/Laptop aur high-end tablets par chalenge
-  if (!isTV && !isLowEnd && !document.querySelector('.ambient-particles')) {
+  // Luxury Ambient Particles (Jugnu)
+  // Mobile par bhi show hoga, performance makhan rakhne ke liye sirf mobile pe count kam (8) kiya hai
+  if (!isTV && !document.querySelector('.ambient-particles')) {
     const pContainer = document.createElement('div');
     pContainer.className = 'ambient-particles';
     document.body.appendChild(pContainer);
 
-    // ✨ Optimized to 20 Fireflies to eliminate lag on mid-tier devices
-    for (let i = 0; i < 20; i++) {
+    // ✨ Optimized: 8 Fireflies for mobile, 20 for desktop
+    const particleCount = isMobile ? 8 : 20;
+    for (let i = 0; i < particleCount; i++) {
       const p = document.createElement('div');
       p.className = 'particle';
       const size = Math.random() * 3.5 + 1.5; // Size between 1.5px to 5px

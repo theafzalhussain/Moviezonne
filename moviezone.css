@@ -1,4 +1,4 @@
-﻿﻿/* ═══════════════════════════════════════════════════════════════
+﻿/* ═══════════════════════════════════════════════════════════════
    MOVIEZONE — ULTRA PREMIUM LUXURY EDITION
    Complete design system with cinematic animations
    ═══════════════════════════════════════════════════════════════ */
@@ -2888,34 +2888,35 @@ body.cursor-hover #cursor-dot {
   .player-chip { padding: 6px 10px; font-size: 11px; }
   .player-chip__icon { width: 16px; height: 16px; }
   .external-sources .player-chip--source { flex: 1 1 calc(50% - 6px); justify-content: center; min-height: 38px; padding: 8px 6px; font-size: 0.72rem; }
-  .modal-close { top: 0.8rem; left: 0.8rem; height: 38px; padding: 0 1rem; font-size: 0.84rem; }
-  .modal-image-wrapper { height: 240px; }
-  .select-group { grid-template-columns: 1fr; }
+  .modal-close { top: 0.8rem; left: 0.8rem; height: 34px; padding: 0 0.8rem; font-size: 0.75rem; }
+  .modal-image-wrapper { height: 180px; }
 }
 
 /* ═══════════════════════════════════════════════════════════════
    ULTRA SMALL SCREENS (iPhone SE, Small Androids)
    ═══════════════════════════════════════════════════════════════ */
 @media (max-width: 380px) {
-  html { font-size: 92%; } /* Shrinks overall layout naturally */
-  #navbar { padding: 0.6rem; width: calc(100vw - 12px); border-radius: 16px; }
-  .nav-logo-main { font-size: 1.15rem; }
-  .nav-logo-mark { width: 1.8rem; height: 1.8rem; font-size: 0.65rem; }
-  .hamburger-btn { width: 36px; height: 36px; }
+  html { font-size: 92%; }
+  #navbar { padding: 0.4rem 0.5rem; width: calc(100vw - 12px); border-radius: 14px; }
+  .nav-logo-main { font-size: 1.05rem; }
+  .nav-logo-mark { width: 1.6rem; height: 1.6rem; font-size: 0.6rem; border-radius: 8px; }
+  .hamburger-btn { width: 30px; height: 30px; border-radius: 8px; }
+  .nav-search input { font-size: 0.7rem; padding: 0.45rem 1rem 0.45rem 2rem; border-radius: 10px; }
+  .nav-search .search-icon { width: 1.2rem; height: 1.2rem; }
   #hero { height: 55vh; margin-top: 85px; }
   .slide-title { font-size: 1.8rem !important; margin-bottom: 0.5rem; }
   .slide-desc { font-size: 0.75rem; line-height: 1.3; -webkit-line-clamp: 2; margin-bottom: 0.8rem; }
   .slide-actions { flex-direction: row; gap: 0.4rem; }
-  .btn-play, .btn-info { padding: 0.6rem 0.4rem; width: 50%; justify-content: center; font-size: 0.8rem; }
+  .btn-play, .btn-info { padding: 0.45rem 0.3rem; width: 50%; justify-content: center; font-size: 0.7rem; border-radius: 6px; }
+  .btn-play svg, .btn-info svg { width: 14px; height: 14px; }
   .main-content, #upcoming { padding-left: 3%; padding-right: 3%; }
   .movie-grid { gap: 0.45rem; }
   .card-info { padding: 0.45rem; }
   .card-title { font-size: 0.78rem; line-height: 1.25; }
   .card-rating, .card-year, .card-runtime { font-size: 0.62rem; padding: 0.2rem 0.4rem; }
-  .modal-info { padding: 1rem; margin-top: -30px; }
-  .modal-title { font-size: 1.7rem; }
-  .premium-play-btn, .btn-watchlist, .btn-download { width: 100%; padding: 0.75rem 1rem; justify-content: center; }
-  .modal-actions { gap: 0.5rem; }
+  .modal-info { padding: 0.8rem; margin-top: -20px; }
+  .modal-title { font-size: 1.4rem; }
+  .modal-actions { display: flex; flex-direction: column; gap: 0.4rem; }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -2924,15 +2925,19 @@ body.cursor-hover #cursor-dot {
 
 @media (max-width: 768px) {
   .modal-top { min-height: auto; }
-  .modal-image-wrapper { position: relative; height: 280px; }
+  .modal-image-wrapper { position: relative; height: 210px; }
   .modal-gradient { background: linear-gradient(to top, var(--bg2) 0%, transparent 100%); }
-  .modal-info { padding: 1.2rem; margin-top: -60px; }
-  .modal-title { font-size: 2.1rem; }
-  .modal-desc { max-width: 100%; font-size: 0.91rem; margin-bottom: 1rem; }
-  .modal-bottom { padding: 0 1.2rem 1.5rem; }
-  .modal-actions { flex-direction: column; align-items: stretch; gap: 0.82rem; }
-  .select-group { flex-direction: row; display: grid; grid-template-columns: 1fr 1fr; }
-  .lang-select, .quality-select { width: 100%; }
+  .modal-info { padding: 1rem; margin-top: -45px; }
+  .modal-title { font-size: 1.6rem; margin-bottom: 0.4rem; }
+  .modal-meta { gap: 0.4rem; margin-bottom: 0.6rem; }
+  .modal-meta > div, .modal-meta > span { padding: 3px 8px; font-size: 0.68rem !important; }
+  .modal-desc { max-width: 100%; font-size: 0.78rem; margin-bottom: 1rem; line-height: 1.4; -webkit-line-clamp: 3; }
+  .modal-bottom { padding: 0 1rem 1.5rem; gap: 1rem; }
+  .modal-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+  .premium-play-btn { grid-column: 1 / -1; padding: 0.75rem 1rem; font-size: 0.95rem; justify-content: center; }
+  .btn-watchlist, .btn-download { padding: 0.6rem 0.5rem; font-size: 0.8rem; justify-content: center; }
+  .select-group { grid-column: 1 / -1; display: flex; flex-direction: row; gap: 0.5rem; }
+  .lang-select, .quality-select { width: 50%; padding: 0.55rem 1.5rem 0.55rem 0.8rem; font-size: 0.8rem; background-position: right 8px center; }
 }
 
 /* ═══════════════════════════════════════════════════════════════
