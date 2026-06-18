@@ -306,21 +306,22 @@ async function init() {
     pContainer.className = 'ambient-particles';
     document.body.appendChild(pContainer);
 
-    // ✨ Optimized: 8 Fireflies for mobile, 20 for desktop
-    const particleCount = isMobile ? 8 : 20;
+    // ✨ Optimized: 8 Fireflies for mobile, 35 for desktop (Premium density)
+    const particleCount = isMobile ? 8 : 35;
     for (let i = 0; i < particleCount; i++) {
       const p = document.createElement('div');
       p.className = 'particle';
-      const size = Math.random() * 3.5 + 1.5; // Size between 1.5px to 5px
-      p.style.width = size + 'px';
-      p.style.height = size + 'px';
-      p.style.left = Math.random() * 100 + 'vw';
-      p.style.setProperty('--duration', (Math.random() * 18 + 12) + 's'); // Float speed (12s to 30s)
-      p.style.setProperty('--drift', (Math.random() * 160 - 80) + 'px'); // Left/Right sway (-80px to 80px)
-      p.style.animationDelay = '-' + (Math.random() * 25) + 's'; // Start instantly at different heights
+      
+      let size = Math.random() * 3.5 + 1.5; // Size between 1.5px to 5px
+      const isGold = Math.random() > 0.5;
 
       // Randomly assign gold or accent colors
-      if (Math.random() > 0.5) {
+      if (isGold) {
+        // ✨ Minor size boost for golden fireflies ONLY on large screens
+        if (!isMobile) {
+          size = size * 1.5 + 1;
+        }
+        
         p.style.setProperty('--p-color', 'var(--gold)');
         p.style.setProperty('--p-glow1', 'var(--gold)');
         p.style.setProperty('--p-glow2', 'var(--gold2)');
@@ -331,6 +332,14 @@ async function init() {
         p.style.setProperty('--p-glow2', 'var(--accent2)');
         p.style.setProperty('--p-glow3', 'var(--accent3)');
       }
+
+      p.style.width = size + 'px';
+      p.style.height = size + 'px';
+      p.style.left = Math.random() * 100 + 'vw';
+      p.style.setProperty('--duration', (Math.random() * 18 + 12) + 's'); // Float speed (12s to 30s)
+      p.style.setProperty('--drift', (Math.random() * 160 - 80) + 'px'); // Left/Right sway (-80px to 80px)
+      p.style.animationDelay = '-' + (Math.random() * 25) + 's'; // Start instantly at different heights
+
       pContainer.appendChild(p);
     }
   }
