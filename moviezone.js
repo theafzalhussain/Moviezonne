@@ -42,9 +42,9 @@ perfStyle.textContent = `
 `;
 document.head.appendChild(perfStyle);
 
-// ── PREMIUM CURSOR GLOW ──
-// Sirf TV aur pure Touch devices (bin mouse wale) par cursor hide karein
-if (!isTV && !isTouchOnly) {
+// ── PREMIUM CURSOR GLOW & CLICK SPARKS ──
+// Disable on TV, Touch, and Mobile to save CPU/battery and ensure smooth performance
+if (!isTV && !isTouchOnly && !isMobile) {
   const cursorGlow = document.getElementById('cursor-glow');
   const cursorRing = document.getElementById('cursor-ring');
   const cursorDot = document.getElementById('cursor-dot');

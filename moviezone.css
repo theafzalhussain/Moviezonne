@@ -1,4 +1,4 @@
-﻿/* ═══════════════════════════════════════════════════════════════
+﻿﻿/* ═══════════════════════════════════════════════════════════════
    MOVIEZONE — ULTRA PREMIUM LUXURY EDITION
    Complete design system with cinematic animations
    ═══════════════════════════════════════════════════════════════ */
@@ -2695,6 +2695,11 @@ body.cursor-hover #cursor-dot {
 }
 
 @media (max-width: 768px) {
+  /* ✨ Mobile Performance & Premium Compact UI Boost */
+  body { background-image: none !important; } /* Heavy gradients removed */
+  #hero::before, #hero::after { display: none !important; } /* Remove GPU-heavy grain */
+  .slide-gradient { background: linear-gradient(to top, rgba(3,3,10,0.98) 0%, rgba(3,3,10,0.3) 50%, transparent 100%) !important; }
+
   #navbar {
     width: min(100% - 0.75rem, 1400px);
     margin-top: 0.4rem;
@@ -2769,15 +2774,17 @@ body.cursor-hover #cursor-dot {
   .nav-links a:hover::after, .nav-links a.active::after { width: 40px; }
 
   #hero {
-    height: 74vh;
-    margin-top: 120px;
+    height: 65vh;
+    margin-top: 105px;
   }
 
-  .slide-content { left: 5%; right: 5%; bottom: 11%; max-width: none; }
-  .slide-title { font-size: clamp(3rem, 9vw, 4.5rem); }
-  .slide-desc { font-size: 1rem; -webkit-line-clamp: 3; }
-  .slide-actions { flex-direction: column; }
-  .slide-actions .btn-play, .slide-actions .btn-info { width: 100%; justify-content: center; }
+  .slide-content { left: 4%; right: 4%; bottom: 8%; max-width: none; }
+  .slide-title { font-size: clamp(2.5rem, 9vw, 3.8rem); margin-bottom: 0.8rem; }
+  .slide-badge { margin-bottom: 0.8rem; font-size: 0.65rem; padding: 0.25rem 0.8rem; }
+  .slide-meta { margin-bottom: 0.8rem; gap: 0.6rem; }
+  .slide-desc { font-size: 0.85rem; line-height: 1.4; -webkit-line-clamp: 2; margin-bottom: 1.2rem; }
+  .slide-actions { flex-direction: row; gap: 0.6rem; }
+  .slide-actions .btn-play, .slide-actions .btn-info { width: 50%; justify-content: center; padding: 0.8rem 1rem; font-size: 0.95rem; border-radius: 12px; }
   .carousel-thumbs { display: none; }
   .carousel-arrow { display: none; }
   .carousel-nav { bottom: 4.5%; }
@@ -2860,14 +2867,14 @@ body.cursor-hover #cursor-dot {
   .nav-links a { padding: 0.32rem 0.65rem; font-size: 0.76rem; }
   .nav-links { width: calc(100vw - 12px); right: -100%; border-radius: 20px; }
 
-  #hero { height: 68vh; margin-top: 114px; }
-  .slide-content { bottom: 9%; }
-  .slide-badge { font-size: 0.65rem; padding: 0.25rem 0.72rem; }
-  .slide-title { font-size: clamp(2.3rem, 11vw, 3rem); }
-  .slide-meta { gap: 0.7rem; }
-  .slide-rating, .slide-year, .slide-runtime { font-size: 0.88rem; }
-  .slide-desc { font-size: 0.92rem; }
-  .btn-play, .btn-info { padding: 0.95rem 1.5rem; font-size: 1rem; }
+  #hero { height: 60vh; margin-top: 95px; }
+  .slide-content { bottom: 6%; }
+  .slide-badge { font-size: 0.6rem; padding: 0.2rem 0.6rem; margin-bottom: 0.6rem; }
+  .slide-title { font-size: clamp(2rem, 10vw, 2.6rem); margin-bottom: 0.6rem; }
+  .slide-meta { gap: 0.5rem; margin-bottom: 0.6rem; }
+  .slide-rating, .slide-year, .slide-runtime { font-size: 0.75rem; padding: 0.2rem 0.5rem; }
+  .slide-desc { font-size: 0.8rem; -webkit-line-clamp: 2; margin-bottom: 1rem; }
+  .btn-play, .btn-info { padding: 0.75rem 0.5rem; font-size: 0.85rem; border-radius: 10px; }
   .main-content, #upcoming { padding-left: 3.5%; padding-right: 3.5%; }
   .movie-grid { gap: 0.6rem; }
   .card-info { padding: 0.6rem; }
@@ -2895,10 +2902,11 @@ body.cursor-hover #cursor-dot {
   .nav-logo-main { font-size: 1.15rem; }
   .nav-logo-mark { width: 1.8rem; height: 1.8rem; font-size: 0.65rem; }
   .hamburger-btn { width: 36px; height: 36px; }
-  #hero { height: 60vh; margin-top: 100px; }
-  .slide-title { font-size: 2.2rem !important; }
-  .slide-desc { font-size: 0.88rem; line-height: 1.4; }
-  .btn-play, .btn-info { padding: 0.8rem 1rem; width: 100%; justify-content: center; font-size: 0.95rem; }
+  #hero { height: 55vh; margin-top: 85px; }
+  .slide-title { font-size: 1.8rem !important; margin-bottom: 0.5rem; }
+  .slide-desc { font-size: 0.75rem; line-height: 1.3; -webkit-line-clamp: 2; margin-bottom: 0.8rem; }
+  .slide-actions { flex-direction: row; gap: 0.4rem; }
+  .btn-play, .btn-info { padding: 0.6rem 0.4rem; width: 50%; justify-content: center; font-size: 0.8rem; }
   .main-content, #upcoming { padding-left: 3%; padding-right: 3%; }
   .movie-grid { gap: 0.45rem; }
   .card-info { padding: 0.45rem; }
