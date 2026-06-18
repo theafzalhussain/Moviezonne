@@ -2933,9 +2933,9 @@ body.cursor-hover #cursor-dot {
   .modal-meta > div, .modal-meta > span { padding: 3px 8px; font-size: 0.68rem !important; }
   .modal-desc { max-width: 100%; font-size: 0.78rem; margin-bottom: 1rem; line-height: 1.4; -webkit-line-clamp: 3; }
   .modal-bottom { padding: 0 1rem 1.5rem; gap: 1rem; }
-  .video-embed { width: calc(100% + 2rem); margin-left: -1rem; border-radius: 0; border-left: none; border-right: none; }
+  .video-embed { width: calc(100% + 2rem); margin-left: -1rem; height: 260px; aspect-ratio: auto; border-radius: 0; border-left: none; border-right: none; }
   .modal-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
-  .premium-play-btn { grid-column: 1 / -1; padding: 0.75rem 1rem; font-size: 0.95rem; justify-content: center; }
+  .premium-play-btn { grid-column: 1 / -1; width: 100%; padding: 0.75rem 1rem; font-size: 0.95rem; justify-content: center; text-align: center; }
   .btn-watchlist, .btn-download { padding: 0.6rem 0.5rem; font-size: 0.8rem; justify-content: center; }
   .select-group { grid-column: 1 / -1; display: flex; flex-direction: row; gap: 0.5rem; }
   .select-group:not(#tvSelectGroup) { display: none !important; } /* Language & Quality ko mobile par hide karne ke liye */
