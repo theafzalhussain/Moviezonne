@@ -1391,37 +1391,55 @@ async function openModal(id, type = 'movie') {
         };
         activeTrailerStopper = stopTrailer; // Register the stopper
 
-        // ✨ Universal Interaction: Hover for desktop, Click for all devices
-        let trailerIsPlaying = false; // Keep track of state
-
-        // Hover to play (for devices with a pointer)
-        eventContainer.onmouseenter = () => {
-          // Only start hover-play if not already playing from a click
-          if (!trailerIsPlaying) {
-            trailerTimeout = setTimeout(playTrailer, 600);
-          }
-        };
-
-        // Leave to stop (for devices with a pointer)
-        eventContainer.onmouseleave = () => {
-          // Only stop if it was started by hover (i.e., user hasn't clicked to lock it on)
-          if (!trailerIsPlaying) {
-            stopTrailer();
-          }
-        };
-
-        // Click to toggle play/stop (works on all devices)
-        eventContainer.onclick = (e) => {
-            if (e.target.closest('button, a, select, input')) return;
-            if (!trailerIsPlaying) {
-                stopTrailer(); // Clear any pending hover-play timeout
-                playTrailer();
-                trailerIsPlaying = true;
-            } else {
+        // ✨ Device-aware interaction: Click for mobile, Hover for desktop
+        if (isMobile || isTouchOnly) {
+            let trailerIsPlaying = false;
+            eventContainer.onclick = (e) => {
+                // Stop if the click was on any interactive element (buttons, links, selects, etc.)
+                if (e.target.closest('button, a, select, input')) return;
+                
+                if (!trailerIsPlaying) {
+                    playTrailer();
+                    trailerIsPlaying = true;
+                } else {
+                    stopTrailer();
+                    trailerIsPlaying = false;
+                }
+            };
+        } else { // Desktop hover & click logic
+            let trailerIsPlaying = false; // Keep track of state
+            
+            // Hover to play
+            eventContainer.onmouseenter = () => {
+              // Only start hover-play if not already playing from a click
+              if (!trailerIsPlaying) {
+                trailerTimeout = setTimeout(playTrailer, 600);
+              }
+            };
+        
+            // Leave to stop
+            eventContainer.onmouseleave = () => {
+              // Only stop if it was started by hover (i.e., user hasn't clicked to lock it on)
+              if (!trailerIsPlaying) {
                 stopTrailer();
-                trailerIsPlaying = false;
-            }
-        };
+              }
+            };
+        
+            // Click to toggle play/stop
+            eventContainer.onclick = (e) => {
+                // Ignore clicks on buttons inside the container
+                if (e.target.closest('button, a, select, input')) return;
+                
+                if (!trailerIsPlaying) {
+                    stopTrailer(); // Clear any pending hover-play timeout
+                    playTrailer();
+                    trailerIsPlaying = true;
+                } else {
+                    stopTrailer();
+                    trailerIsPlaying = false;
+                }
+            };
+        }
       }
     }
     const titleEl = document.getElementById('modalTitle');
