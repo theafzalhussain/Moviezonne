@@ -186,6 +186,7 @@ let isFullViewMovies = false;
 let isFullViewUpcoming = false;
 let currentMoviePage = 1;
 let currentUpcomingPage = 1;
+let activeTrailerStopper = null; // Function to stop the currently playing trailer
 let allUpcoming = [];
 let lastFocusedElement = null; // TV remote focus memory
  
@@ -1300,7 +1301,7 @@ async function openModal(id, type = 'movie') {
             tc.style.display = 'block';
             setTimeout(() => { tc.style.opacity = '1'; }, 50);
  
-            const getYTUrl = (key) => `https://www.youtube-nocookie.com/embed/${key}?autoplay=1&mute=1&controls=0&modestbranding=1&playsinline=1&rel=0&loop=1&playlist=${key}&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}`;
+            const getYTUrl = (key) => `https://www.youtube-nocookie.com/embed/${key}?autoplay=1&mute=1&controls=0&modestbranding=1&playsinline=1&rel=0&loop=1&playlist=${key}&enablejsapi=1&iv_load_policy=3&origin=${encodeURIComponent(window.location.origin)}`;
  
             tc.innerHTML = `
               <div id="trailerLoader" style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:5; background:rgba(0,0,0,0.6); transition:opacity 0.4s ease; backdrop-filter:blur(4px);">
@@ -1388,6 +1389,7 @@ async function openModal(id, type = 'movie') {
                 setTimeout(() => { if(tc) { tc.style.display = 'none'; tc.innerHTML = ''; } }, 400);
             }
         };
+        activeTrailerStopper = stopTrailer; // Register the stopper
 
         // ✨ Device-aware interaction: Click for mobile, Hover for desktop
         if (isMobile || isTouchOnly) {
@@ -1583,6 +1585,7 @@ function closeModal() {
   }
   isPlayerFullscreen = false;
   currentModalMovie = null;
+  activeTrailerStopper = null; // Unregister trailer stopper on close
   const relSec = document.getElementById('relatedMoviesSection');
   if (relSec) relSec.style.display = 'none';
   
@@ -1892,6 +1895,11 @@ function playNextEpisode() {
 }
  
 function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
+  // ✨ New Feature: Stop trailer automatically when movie starts playing
+  if (activeTrailerStopper) {
+    activeTrailerStopper();
+  }
+
   const embedEl = document.getElementById('videoEmbed');
   if (!embedEl) return;
   currentSourceIdx = srcIdx;
