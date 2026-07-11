@@ -126,7 +126,11 @@
     <div class="skeleton skeleton-card"></div>
     <div class="skeleton skeleton-card"></div>
   </div>
-  <div style="text-align: center; margin-top: 2.5rem;">
+  <div id="loadingIndicator" style="text-align: center; margin: 2.5rem 0; display: none;">
+    <div class="player-spinner" style="width:48px; height:48px; border-width:3px; border-color:rgba(255,255,255,0.1); border-left-color:var(--gold); margin: 0 auto;"></div>
+  </div>
+  <div id="infiniteScrollTrigger" style="height: 50px;"></div>
+  <div style="text-align: center; margin-top: 1rem;">
     <button id="loadMoreMoviesBtn" class="load-more-btn" style="display: none;" onclick="loadMoreMoviesAction()">Load More Movies</button>
   </div>
 </div>

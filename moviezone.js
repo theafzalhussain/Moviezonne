@@ -38,9 +38,26 @@ perfStyle.textContent = `
   .carousel-slide { will-change: transform, opacity; transform: translateZ(0); }
   img { content-visibility: auto; }
   #movies-section, #upcoming { content-visibility: auto; contain-intrinsic-size: 1000px; }
-  .tv-mode * { box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+  
+  /* TV aur Weak devices par heavy graphics band karke speed max karein */
+  .tv-mode *, .low-end-mode * {
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    text-shadow: none !important;
+    filter: none !important;
+    animation: none !important;
+    transition: none !important;
+  }
+  .tv-mode .ambient-particles, .low-end-mode .ambient-particles { display: none !important; }
+  .tv-mode #hero::before, .tv-mode #hero::after, .low-end-mode #hero::before, .low-end-mode #hero::after { display: none !important; }
 `;
 document.head.appendChild(perfStyle);
+
+// Weak device detect karke class lagana
+if (isTV || (isMobile && isLowEnd)) {
+  document.documentElement.classList.add(isTV ? 'tv-mode' : 'low-end-mode');
+}
 
 // ── PREMIUM CURSOR GLOW & CLICK SPARKS ──
 // Disable on TV, Touch, and Mobile to save CPU/battery and ensure smooth performance
@@ -180,6 +197,7 @@ let allMovies = [];
 let currentSlide = 0;
 let carouselMovies = [];
 let autoSlideTimer = null;
+let isLoadingMore = false;
 let currentModalMovie = null;
 let watchlist = JSON.parse(localStorage.getItem('mz_watchlist') || '[]');
 let isFullViewMovies = false;
@@ -344,6 +362,38 @@ async function init() {
       pContainer.appendChild(p);
     }
   }
+
+  setupInfiniteScroll();
+}
+
+function setupInfiniteScroll() {
+    const trigger = document.getElementById('infiniteScrollTrigger');
+    if (!trigger) return;
+
+    const observer = new IntersectionObserver((entries) => {
+        const entry = entries[0];
+        if (entry.isIntersecting && !isLoadingMore) {
+            const activeTab = document.querySelector('.cat-tab.active');
+            let cat = 'all';
+            if (activeTab) {
+                const onclickAttr = activeTab.getAttribute('onclick') || '';
+                if (onclickAttr.includes("filterCat")) {
+                    const match = onclickAttr.match(/'([^']+)'/);
+                    if (match) cat = match[1];
+                } else if (onclickAttr.includes("showWatchlist")) {
+                    return; // Don't infinite scroll on watchlist
+                }
+            }
+            
+            // Only trigger for the 'all' category as requested.
+            if (cat === 'all') {
+                loadMoreMoviesAction();
+            }
+        }
+    }, {
+        rootMargin: '400px' // Start loading 400px before the element is visible
+    });
+    observer.observe(trigger);
 }
  
 // ── CAROUSEL
@@ -639,14 +689,16 @@ async function loadMovies(cat, isLoadMore = false) {
   
   if (!cat) cat = 'all';
   
-  if (!isLoadMore) {
+  if (isLoadMore) {
+    if (isLoadingMore) return;
+    isLoadingMore = true;
+    const indicator = document.getElementById('loadingIndicator');
+    if (indicator) indicator.style.display = 'block';
+    currentMoviePage++;
+  } else {
     currentMoviePage = 1;
     grid.innerHTML = Array(8).fill('<div class="skeleton skeleton-card"></div>').join('');
     allMovies = [];
-  } else {
-    currentMoviePage++;
-    const btn = document.getElementById('loadMoreMoviesBtn');
-    if (btn) btn.innerHTML = 'Loading...';
   }
  
   let movies = [];
@@ -656,21 +708,39 @@ async function loadMovies(cat, isLoadMore = false) {
   
   try {
     if (cat === 'all') {
+      // Fetch a diverse set of movies: latest, trending, popular, and top Indian.
       const res = await Promise.allSettled([
+        tmdb('/movie/now_playing', { language: 'en-US', page: pageStr }), // Latest theatrical releases
         tmdb('/trending/movie/week', { language: 'en-US', page: pageStr }),
         tmdb('/movie/popular',      { language: 'en-US', page: pageStr }),
         tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' })
       ]);
       
-      let maxLength = 0;
-      res.forEach(r => { if (r.status === 'fulfilled' && r.value.results && r.value.results.length > maxLength) maxLength = r.value.results.length; });
-      for (let i = 0; i < maxLength; i++) {
-        res.forEach(r => {
-          if (r.status === 'fulfilled' && r.value.results && i < r.value.results.length) {
-            movies.push(r.value.results[i]);
-          }
-        });
+      const combinedMovies = [];
+      res.forEach(r => {
+        if (r.status === 'fulfilled' && r.value.results) {
+          combinedMovies.push(...r.value.results);
+        }
+      });
+      
+      // Remove duplicates, keeping the first occurrence
+      const uniqueMovies = [];
+      const seenIds = new Set();
+      for (const movie of combinedMovies) {
+        if (movie && movie.id && !seenIds.has(movie.id)) {
+          uniqueMovies.push(movie);
+          seenIds.add(movie.id);
+        }
       }
+      
+      // Sort by release date, newest first.
+      uniqueMovies.sort((a, b) => {
+        const dateA = a.release_date || a.first_air_date || '0';
+        const dateB = b.release_date || b.first_air_date || '0';
+        return dateB.localeCompare(dateA); // '2024-05-20' > '2024-05-19'
+      });
+
+      movies.push(...uniqueMovies);
     } else if (cat === 'tv') {
       const res = await Promise.all([
         tmdb('/trending/tv/week', { language: 'en-US', page: pageStr }),
@@ -821,18 +891,17 @@ async function loadMovies(cat, isLoadMore = false) {
   renderMovies(isLoadMore ? newMovies : (isFullViewMovies ? allMovies : allMovies.slice(0, 24)), isLoadMore);
   
   const loadMoreBtn = document.getElementById('loadMoreMoviesBtn');
-  if (loadMoreBtn) {
-    const h = document.getElementById('sectionHeading');
-    if (h && h.textContent.includes('MY WATCHLIST')) loadMoreBtn.style.display = 'none';
-    else {
-      loadMoreBtn.style.display = (isFullViewMovies && newMovies.length > 0) ? 'inline-block' : 'none';
-      loadMoreBtn.innerHTML = 'Load More Movies';
-    }
-  }
+  if (loadMoreBtn) loadMoreBtn.style.display = 'none'; // Always hide button for infinite scroll
  
   // Har load ke baad agle page ko chupke se fetch karke ready rakho
   if (isFullViewMovies && !isTV) {
     setTimeout(() => prefetchMoviesPage(cat, currentMoviePage + 1), 800);
+  }
+
+  if (isLoadMore) {
+    isLoadingMore = false;
+    const indicator = document.getElementById('loadingIndicator');
+    if (indicator) indicator.style.display = 'none';
   }
 }
  
@@ -899,44 +968,9 @@ function renderMovies(movies, append = false) {
   scrollObserver.observe(card);
 
     // Premium 3D Tilt Effect on Hover
-    if (!isTV) {
-      let tiltRAF;
-      let cachedRect = null; // Cache to stop Layout Thrashing
-      card.addEventListener('mouseenter', () => { 
-        card.style.transition = 'transform 0.1s ease-out'; 
-        card.style.willChange = 'transform'; 
-        cachedRect = card.getBoundingClientRect();
-      });
-      card.addEventListener('mousemove', (e) => {
-        if (tiltRAF) cancelAnimationFrame(tiltRAF);
-        tiltRAF = requestAnimationFrame(() => {
-          if (!cachedRect) cachedRect = card.getBoundingClientRect();
-          const rect = cachedRect;
-          const x = e.clientX - rect.left;
-          const y = e.clientY - rect.top;
-          const centerX = rect.width / 2;
-          const centerY = rect.height / 2;
-          // ✨ ENHANCED 3D TILT: More responsive and attractive values
-          const rotateX = ((y - centerY) / centerY) * -12; 
-          const rotateY = ((x - centerX) / centerX) * 12;
-          const shadowX = (x - centerX) * -0.2;
-          const shadowY = (y - centerY) * -0.2;
-          
-          card.style.transform = `perspective(1000px) translateY(-15px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.05, 1.05, 1.05)`;
-          card.style.boxShadow = `${shadowX}px ${shadowY + 40}px 80px rgba(0,0,0,0.7), 0 0 20px rgba(245,197,24,0.1)`;
-        });
-      });
-      card.addEventListener('mouseleave', () => {
-        if (tiltRAF) cancelAnimationFrame(tiltRAF);
-        card.style.transition = 'transform 0.3s ease, box-shadow 0.3s ease';
-        card.style.willChange = 'auto';
-        card.style.transform = '';
-        card.style.boxShadow = '';
-        cachedRect = null; // Clear cache
-      });
-      // Update cache on scroll if hovering
-      card.addEventListener('wheel', () => cachedRect = null, {passive: true});
-    }
+  
+    scrollObserver.observe(card);
+    
  
   });
   grid.appendChild(fragment);
@@ -1109,33 +1143,10 @@ async function loadUpcoming(isLoadMore = false) {
       scrollObserver.observe(card);
 
       // Premium 3D Tilt Effect for Upcoming Cards
-      if (!isTV) {
-        let tiltRAF;
-        let cachedRect = null;
-        card.addEventListener('mouseenter', () => { 
-          card.style.transition = 'transform 0.15s ease-out'; 
-          cachedRect = card.getBoundingClientRect();
-        });
-        card.addEventListener('mousemove', (e) => {
-          if (tiltRAF) cancelAnimationFrame(tiltRAF);
-          tiltRAF = requestAnimationFrame(() => {
-            if (!cachedRect) cachedRect = card.getBoundingClientRect();
-            const rect = cachedRect;
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            const rotateX = ((y - (rect.height / 2)) / (rect.height / 2)) * -8;
-            const rotateY = ((x - (rect.width / 2)) / (rect.width / 2)) * 8;
-            card.style.transform = `perspective(1000px) translateY(-6px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.02, 1.02, 1.02)`;
-          });
-        });
-        card.addEventListener('mouseleave', () => {
-          if (tiltRAF) cancelAnimationFrame(tiltRAF);
-          card.style.transition = 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)';
-          card.style.transform = '';
-          cachedRect = null;
-        });
-        card.addEventListener('wheel', () => cachedRect = null, {passive: true});
-      }
+     
+      // Tilt effect ab fast CSS se handle hoga (Zero Lag)
+      scrollObserver.observe(card);
+      
     });
     grid.appendChild(fragment);
     
