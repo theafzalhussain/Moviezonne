@@ -385,8 +385,8 @@ function setupInfiniteScroll() {
                 }
             }
             
-            // Only trigger for the 'all' category as requested.
-            if (cat === 'all') {
+            // Trigger for 'all' and 'tv' (Web Series) categories.
+            if (cat === 'all' || cat === 'tv') {
                 loadMoreMoviesAction();
             }
         }
@@ -742,20 +742,40 @@ async function loadMovies(cat, isLoadMore = false) {
 
       movies.push(...uniqueMovies);
     } else if (cat === 'tv') {
-      const res = await Promise.all([
+      // Fetch a diverse set of web series: latest, trending, and popular from various regions.
+      const res = await Promise.allSettled([
+        tmdb('/tv/on_the_air', { language: 'en-US', page: pageStr }), // Latest airing shows
         tmdb('/trending/tv/week', { language: 'en-US', page: pageStr }),
-        tmdb('/discover/tv',      { language: 'en-US', sort_by: 'popularity.desc', page: pageStr }),
-        tmdb('/discover/tv', { with_original_language: 'hi', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' })
+        tmdb('/discover/tv', { with_original_language: 'hi', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }), // Hindi
+        tmdb('/discover/tv', { with_original_language: 'en', sort_by: 'popularity.desc', page: pageStr }), // English
+        tmdb('/discover/tv', { with_original_language: 'ko', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }) // Korean
       ]);
-      let maxLength = 0;
-      res.forEach(r => { if (r.results && r.results.length > maxLength) maxLength = r.results.length; });
-      for (let i = 0; i < maxLength; i++) {
-        res.forEach(r => {
-          if (r.results && i < r.results.length) {
-            movies.push(r.results[i]);
-          }
-        });
+
+      const combinedShows = [];
+      res.forEach(r => {
+        if (r.status === 'fulfilled' && r.value.results) {
+          combinedShows.push(...r.value.results);
+        }
+      });
+
+      // Remove duplicates, keeping the first occurrence
+      const uniqueShows = [];
+      const seenIds = new Set();
+      for (const show of combinedShows) {
+        if (show && show.id && !seenIds.has(show.id)) {
+          uniqueShows.push(show);
+          seenIds.add(show.id);
+        }
       }
+
+      // Sort by first air date, newest first, to show latest on top
+      uniqueShows.sort((a, b) => {
+        const dateA = a.first_air_date || '0';
+        const dateB = b.first_air_date || '0';
+        return dateB.localeCompare(dateA);
+      });
+
+      movies.push(...uniqueShows);
     } else if (cat === 'hollywood') {
       const res = await Promise.all([
         tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p1 }),
@@ -1013,7 +1033,7 @@ function renderMovies(movies, append = false) {
  
 // CATEGORY FILTER
 const CAT_HEADINGS = {
-  all:'ALL MOVIES & SHOWS', tv: 'TV SHOWS & WEB SERIES', hollywood:'HOLLYWOOD', bollywood:'BOLLYWOOD',
+  all:'ALL MOVIES & SHOWS', tv: 'WEB SERIES', hollywood:'HOLLYWOOD', bollywood:'BOLLYWOOD',
   south:'SOUTH INDIAN', tollywood:'TOLLYWOOD', action:'ACTION',
   comedy:'COMEDY', horror:'HORROR', thriller:'THRILLER', romance:'ROMANCE',
   scifi:'SCI-FI', animation:'ANIMATION', kids:'🧸 KIDS & CARTOONS', anime:'⚔️ ANIME SERIES & MOVIES',
@@ -2303,6 +2323,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // Make HTML static category tabs focusable for TV
   document.querySelectorAll('.cat-tab').forEach(t => { t.tabIndex = 0; });
   
+  // Change TV Shows tab text to Web Series
+  const tvTab = document.querySelector('.cat-tab[onclick*="filterCat(\'tv\')"]');
+  if (tvTab) {
+    tvTab.innerHTML = 'Web Series';
+  }
+
   // ── DYNAMICALLY ADD KIDS TAB ──
   const catTabs = document.querySelector('.cat-tabs');
   if (catTabs && !document.querySelector('.cat-tab[onclick*="kids"]')) {
