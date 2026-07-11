@@ -968,9 +968,44 @@ function renderMovies(movies, append = false) {
   scrollObserver.observe(card);
 
     // Premium 3D Tilt Effect on Hover
-  
-    scrollObserver.observe(card);
-    
+    if (!isTV) {
+      let tiltRAF;
+      let cachedRect = null; // Cache to stop Layout Thrashing
+      card.addEventListener('mouseenter', () => { 
+        card.style.transition = 'transform 0.1s ease-out'; 
+        card.style.willChange = 'transform'; 
+        cachedRect = card.getBoundingClientRect();
+      });
+      card.addEventListener('mousemove', (e) => {
+        if (tiltRAF) cancelAnimationFrame(tiltRAF);
+        tiltRAF = requestAnimationFrame(() => {
+          if (!cachedRect) cachedRect = card.getBoundingClientRect();
+          const rect = cachedRect;
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          const centerX = rect.width / 2;
+          const centerY = rect.height / 2;
+          // ✨ ENHANCED 3D TILT: More responsive and attractive values
+          const rotateX = ((y - centerY) / centerY) * -12; 
+          const rotateY = ((x - centerX) / centerX) * 12;
+          const shadowX = (x - centerX) * -0.2;
+          const shadowY = (y - centerY) * -0.2;
+          
+          card.style.transform = `perspective(1000px) translateY(-15px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.05, 1.05, 1.05)`;
+          card.style.boxShadow = `${shadowX}px ${shadowY + 40}px 80px rgba(0,0,0,0.7), 0 0 20px rgba(245,197,24,0.1)`;
+        });
+      });
+      card.addEventListener('mouseleave', () => {
+        if (tiltRAF) cancelAnimationFrame(tiltRAF);
+        card.style.transition = 'transform 0.3s ease, box-shadow 0.3s ease';
+        card.style.willChange = 'auto';
+        card.style.transform = '';
+        card.style.boxShadow = '';
+        cachedRect = null; // Clear cache
+      });
+      // Update cache on scroll if hovering
+      card.addEventListener('wheel', () => cachedRect = null, {passive: true});
+    }
  
   });
   grid.appendChild(fragment);
@@ -1143,10 +1178,8 @@ async function loadUpcoming(isLoadMore = false) {
       scrollObserver.observe(card);
 
       // Premium 3D Tilt Effect for Upcoming Cards
-     
-      // Tilt effect ab fast CSS se handle hoga (Zero Lag)
+        // Tilt effect ab fast CSS se handle hoga (Zero Lag)
       scrollObserver.observe(card);
-      
     });
     grid.appendChild(fragment);
     
