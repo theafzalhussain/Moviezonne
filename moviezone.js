@@ -1736,12 +1736,10 @@ const playerSources = [
       ? `https://www.2embed.cc/embedtv/${id}&s=${s}&e=${e}` 
       : `https://www.2embed.cc/embed/${id}`;
   }},
-  //   { name: '⚡ Super Stream', url: (id, lang, type, s, e) => {
-  //   // 3. VidSrc.to: Properly supports TMDB IDs. Extremely fast, highly stable, multi-audio (Hindi) support.
-  //   return type === 'tv' 
-  //     ? `https://vidsrc.to/embed/tv/tmdb/${id}-${s}-${e}` 
-  //     : `https://vidsrc.to/embed/movie/tmdb/${id}`;
-  // }},
+  { name: '⚡ Ultra HD', url: (id, lang, type, s, e) => {
+    // India ke networks par blockage kam aati hai
+    return (type === 'tv' ? `https://autoembed.co/tv/tmdb/${id}-${s}-${e}` : 'https://autoembed.co/movie/tmdb/' + id) + `?lang=${lang}`;
+  }},
   { name: '🔥 Pro Stream', url: (id, lang, type, s, e) => {
     // Clean interface with settings
     return (type === 'tv' ? `https://vidlink.pro/tv/${id}/${s}/${e}` : 'https://vidlink.pro/movie/' + id) + `?lang=${lang}`;
