@@ -593,7 +593,14 @@ function prefetchMoviesPage(cat, pageNum) {
     tmdb('/discover/movie', { with_genres: '27', with_original_language: 'hi', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
     tmdb('/discover/movie', { with_genres: '27', with_original_language: 'ta', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
     tmdb('/discover/movie', { with_genres: '27', with_original_language: 'te', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-  } else {
+  } else if (cat === 'dubbed') {
+    tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p1 });
+    tmdb('/discover/movie', { with_original_language: 'ta', sort_by: 'popularity.desc', language: 'en-US', page: p1 });
+    tmdb('/discover/movie', { with_original_language: 'te', sort_by: 'popularity.desc', language: 'en-US', page: p1 });
+    tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', language: 'en-US', page: p1 });
+  
+  }
+  else {
     const base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: 'en-US' });
     tmdb('/discover/movie', Object.assign({}, base, { page: p1 }));
     tmdb('/discover/movie', Object.assign({}, base, { page: p2 }));
@@ -737,6 +744,25 @@ async function loadMovies(cat, isLoadMore = false) {
           }
         });
       }
+    } else if (cat === 'dubbed') {
+      // Hindi Dubbed ke liye: Hollywood + Tamil + Telugu + Anime Movies (Kyunki yahi sab dub hoti hain)
+      const res = await Promise.all([
+        tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p1 }),
+        tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p2 }),
+        tmdb('/discover/movie', { with_original_language: 'ta', sort_by: 'popularity.desc', language: 'en-US', page: p1 }),
+        tmdb('/discover/movie', { with_original_language: 'te', sort_by: 'popularity.desc', language: 'en-US', page: p1 }),
+        tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', language: 'en-US', page: p1 })
+      ]);
+      let maxLength = 0;
+      res.forEach(r => { if (r.results && r.results.length > maxLength) maxLength = r.results.length; });
+      for (let i = 0; i < maxLength; i++) {
+        res.forEach(r => {
+          if (r.results && i < r.results.length) {
+            movies.push(r.results[i]);
+          }
+        });
+      }
+
     } else if (cat === 'adult') {
       const res = await Promise.all([
         tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799|195669|156321', without_genres: '16,10751,28,12,35,878', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Global 18+
@@ -922,6 +948,7 @@ const CAT_HEADINGS = {
   south:'SOUTH INDIAN', tollywood:'TOLLYWOOD', action:'ACTION',
   comedy:'COMEDY', horror:'HORROR', thriller:'THRILLER', romance:'ROMANCE',
   scifi:'SCI-FI', animation:'ANIMATION', kids:'🧸 KIDS & CARTOONS', anime:'⚔️ ANIME SERIES & MOVIES',
+  dubbed:'🎬 HINDI DUBBED MOVIES', // <-- YE LINE ADD KI HAI
   adult:'🔞 18+ ADULT MOVIES & WEB SERIES'
 };
 function filterCat(cat, e) {
@@ -1278,6 +1305,17 @@ async function openModal(id, type = 'movie') {
     if (eventContainer && imageWrapper) {
       let tc = document.getElementById('trailerContainer');
       if (tc) tc.remove();
+
+      // ✨ NEW: Add trailer indicator icon
+      let trailerIndicator = imageWrapper.querySelector('.modal-trailer-indicator');
+      if (!trailerIndicator) {
+        trailerIndicator = document.createElement('div');
+        trailerIndicator.className = 'modal-trailer-indicator';
+        // Just the icon, as requested
+        trailerIndicator.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>';
+        imageWrapper.appendChild(trailerIndicator);
+      }
+      // END NEW
 
       // Clear any previous listeners to prevent memory leaks
       eventContainer.onclick = null;
@@ -1681,42 +1719,50 @@ async function loadRelatedMovies(id, type) {
   } catch(e) { section.style.display = 'none'; }
 }
  
-// ── PLAYER SOURCES — Multi-Language Audio Supported ──
-// Server 0 (Multi-Audio) genuinely supports Hindi/Tamil/Telugu dubbed audio tracks
+// ── PLAYER SOURCES — Multi-Language Audio Supported (Updated & Fixed) ──
 const playerSources = [
   { name: '🌐 Multi-Audio', url: (id, lang, type, s, e) => {
-    // BEST FOR DUBBED: multiembed.mov genuinely serves Hindi/Tamil/Telugu dubbed audio
+    // 1. Multiembed: Automatically triggers Hindi audio via URL parameter
     const base = type === 'tv'
       ? `https://multiembed.mov/?video_id=${id}&tmdb=1&s=${s}&e=${e}`
       : `https://multiembed.mov/?video_id=${id}&tmdb=1`;
-    
     const audioMap = { hi: 'hindi', ta: 'tamil', te: 'telugu', ml: 'malayalam', kn: 'kannada', mr: 'marathi', bn: 'bengali' };
     const prefAudio = audioMap[lang] || lang;
     return base + (lang && lang !== 'en' ? `&preferred_audio=${prefAudio}&lang=${lang}` : '');
   }},
-  { name: '⚡ Ultra HD', url: (id, lang, type, s, e) => {
-    // India ke networks par blockage kam aati hai
-    return (type === 'tv' ? `https://autoembed.co/tv/tmdb/${id}-${s}-${e}` : 'https://autoembed.co/movie/tmdb/' + id) + `?lang=${lang}`;
+  { name: '🇮🇳 Hindi Prime', url: (id, lang, type, s, e) => {
+    // 2. 2Embed: Best for India. Has a gear icon (⚙️) inside the player to switch to Hindi dub.
+    return type === 'tv' 
+      ? `https://www.2embed.cc/embedtv/${id}&s=${s}&e=${e}` 
+      : `https://www.2embed.cc/embed/${id}`;
   }},
+  //   { name: '⚡ Super Stream', url: (id, lang, type, s, e) => {
+  //   // 3. VidSrc.to: Properly supports TMDB IDs. Extremely fast, highly stable, multi-audio (Hindi) support.
+  //   return type === 'tv' 
+  //     ? `https://vidsrc.to/embed/tv/tmdb/${id}-${s}-${e}` 
+  //     : `https://vidsrc.to/embed/movie/tmdb/${id}`;
+  // }},
   { name: '🔥 Pro Stream', url: (id, lang, type, s, e) => {
-    // Interface bahut saaf hai aur player ke andar settings
+    // Clean interface with settings
     return (type === 'tv' ? `https://vidlink.pro/tv/${id}/${s}/${e}` : 'https://vidlink.pro/movie/' + id) + `?lang=${lang}`;
   }},
- { name: '👑 Vidsrc VIP', url: (id, lang, type, s, e) => {
-    // Vidsrc primary root network (me) using direct TMDB mapping to fix 'Unavailable' database error
+  { name: '👑 Vidsrc VIP', url: (id, lang, type, s, e) => {
     return (type === 'tv' ? `https://vidsrc.me/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.me/embed/movie?tmdb=${id}`) + `&lang=${lang}`;
   }},
   { name: '💎 Premium Mirror', url: (id, lang, type, s, e) => {
     // Official proxy mirror to fix 'refused to connect' / iframe block issue
     return (type === 'tv' ? `https://vidsrc.pm/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.pm/embed/movie?tmdb=${id}`) + `&lang=${lang}`;
   }},
-  // { name: '🇮🇳 Hindi MAX', url: (id, lang, type, s, e) => {
-  //   // Switched to embed.su (Highly stable, no blank screen issues, fast loading)
-  //   return type === 'tv' ? `https://embed.cc/embed/tv/${id}/${s}/${e}` : `https://embed.cc/embed/movie/${id}`;
-  // }},
-
-
+  { name: '🎬 Smashy Stream', url: (id, lang, type, s, e) => {
+    // New fast source added for extra fallback and Hindi support
+    return type === 'tv' 
+      ? `https://embed.smashystream.com/playere.php?tmdb=${id}&season=${s}&episode=${e}` 
+      : `https://embed.smashystream.com/playere.php?tmdb=${id}`;
+  }}
 ];
+
+
+
 let currentSourceIdx = 0;
 let isPlayerFullscreen = false;
  
@@ -1895,13 +1941,12 @@ function playNextEpisode() {
 }
  
 function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
-  // ✨ New Feature: Stop trailer automatically when movie starts playing
-  if (activeTrailerStopper) {
-    activeTrailerStopper();
-  }
+  // Stop trailer instantly when movie starts playing
+  if (activeTrailerStopper) activeTrailerStopper();
 
   const embedEl = document.getElementById('videoEmbed');
   if (!embedEl) return;
+  
   currentSourceIdx = srcIdx;
   setSelectedSourceIdx(srcIdx);
   lang = lang || getSelectedLang();
@@ -1915,87 +1960,73 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   const e = eInput ? eInput.value : '1';
   const src = playerSources[srcIdx].url(id, lang, type, s, e);
  
-  // ── AUTO-SAVE TV PROGRESS (Continue Watching) ──
+  // AUTO-SAVE TV PROGRESS (Continue Watching)
   if (type === 'tv') {
     localStorage.setItem('mz_progress_' + id, JSON.stringify({ season: parseInt(s), episode: parseInt(e) }));
   }
 
+  // Clear previous player instantly to prevent background audio/lag
   embedEl.innerHTML = '';
  
-  // Custom Loading Spinner add karo
+  // Add Optimized Loading Spinner
   const loader = document.createElement('div');
   loader.className = 'player-loader';
-  loader.innerHTML = '<div class="player-spinner"></div><div style="color:var(--gold); margin-top:15px; font-weight:600; font-size:0.9rem; text-shadow:0 2px 4px rgba(0,0,0,0.5);">Optimizing stream & buffering...</div>';
+  loader.innerHTML = '<div class="player-spinner"></div><div style="color:var(--gold); margin-top:15px; font-weight:600; font-size:0.9rem;">Fetching Secure Stream...</div>';
   embedEl.appendChild(loader);
  
   const iframe = document.createElement('iframe');
   iframe.id = 'playerFrame';
   iframe.src = src;
-  iframe.style.cssText = 'width: 100%; height: 100%; border: none; overflow: hidden !important; background: transparent; position: relative; z-index: 1; transform: translateZ(0); will-change: transform;';
+  // Remove heavy styles, use pure CSS class for GPU acceleration
+  iframe.style.cssText = 'width: 100%; height: 100%; border: none; background: transparent; position: relative; z-index: 1; transform: translateZ(0);';
   iframe.setAttribute('frameborder', '0');
   iframe.setAttribute('scrolling', 'no');
   iframe.setAttribute('allow', 'fullscreen;autoplay;encrypted-media;picture-in-picture');
   
-  // Master Server Bypass: Apply specific rules for Multi-Audio to prevent Vercel block / Refused to connect
-  if (playerSources[srcIdx].name.includes('Multi-Audio')) {
-    iframe.setAttribute('referrerpolicy', 'no-referrer');
-  } else {
-    iframe.setAttribute('referrerpolicy', 'origin'); // Defaults for other servers
-  }
-
-  iframe.setAttribute('fetchpriority', 'high'); // 🚀 Browser ko strict command for maximum loading speed
-  iframe.setAttribute('loading', 'eager'); // ⚡ Instant fetch (no lazy loading)
+  // Master Bypass for Ad-Redirects & Refused Connections
+  iframe.setAttribute('referrerpolicy', 'no-referrer'); // Best for all third-party servers
+  iframe.setAttribute('fetchpriority', 'high'); 
+  iframe.setAttribute('loading', 'eager'); 
   
   embedEl.appendChild(iframe);
 
-  // Optimistically start fading out the loader after a short delay,
-  // assuming the iframe will start loading soon. This improves perceived speed.
+  // Optimistic UI: Start fading loader after 1.2s for perceived speed
   setTimeout(() => {
-    if (loader) {
+    if (loader && loader.parentNode) {
         loader.style.opacity = '0';
         setTimeout(() => { if (loader && loader.parentNode) loader.remove(); }, 400);
     }
-  }, 1500); // 1.5 seconds is a reasonable time to wait for buffering to start.
+  }, 1200);
 
-  // The onload is a fallback for very slow connections or if the optimistic removal fails.
   iframe.onload = () => {
-    if (loader && loader.parentNode) { // If it's still there
+    if (loader && loader.parentNode) { 
       loader.style.opacity = '0';
       setTimeout(() => { if (loader && loader.parentNode) loader.remove(); }, 400);
     }
   };
  
+  // Render Player Controls
   let controlsHtml = '<div id="playerControls" class="player-controls">';
   if (type === 'tv') {
     controlsHtml += '<button onclick="playNextEpisode()" class="player-chip premium-play-btn" style="padding:0 14px; border-radius:999px; min-height:42px; border:none; display:inline-flex; align-items:center; gap:6px;">' +
         '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>' +
-        '<span style="font-size:13px; font-weight:800; letter-spacing:0.3px;">Next Ep</span>' +
-      '</button>';
+        '<span style="font-size:13px; font-weight:800;">Next Ep</span></button>';
   }
   controlsHtml += '<button onclick="togglePlayerFS()" class="player-chip player-chip--fs" id="fsBtn">' +
-        '<svg class="player-chip__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
-          '<path d="M7 3H3v4h2V5h2V3zm10 0v2h2v2h2V3h-4zM5 17H3v4h4v-2H5v-2zm16 0h-2v2h-2v2h4v-4z"></path>' +
-        '</svg>' +
-        '<span>Fullscreen</span>' +
-      '</button>' +
-    '</div>';
+        '<svg class="player-chip__icon" viewBox="0 0 24 24"><path d="M7 3H3v4h2V5h2V3zm10 0v2h2v2h2V3h-4zM5 17H3v4h4v-2H5v-2zm16 0h-2v2h-2v2h4v-4z"></path></svg>' +
+        '<span>Fullscreen</span></button></div>';
  
   const existingControls = document.getElementById('playerControls');
-  if (existingControls) {
-    existingControls.outerHTML = controlsHtml;
-  } else {
-    embedEl.insertAdjacentHTML('afterend', controlsHtml);
-  }
+  if (existingControls) existingControls.outerHTML = controlsHtml;
+  else embedEl.insertAdjacentHTML('afterend', controlsHtml);
  
   try { renderExternalSources(id, srcIdx, lang); } catch(e){}
  
   const _toastLangName = (LANG_CONFIG[lang] && LANG_CONFIG[lang].name) || lang.toUpperCase();
   showToast('▶ ' + buildSourceLabel(srcIdx) + ' | 🎵 ' + _toastLangName + ' | ' + quality.toUpperCase() + (type === 'tv' ? ` | S${s} E${e}` : ''));
  
-  // Server/Play par click karne pe smooth scroll karke video player area me chala jayega
-  setTimeout(() => {
-    embedEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, 300);
+  // Smooth scroll to video player
+  setTimeout(() => embedEl.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
 }
  
 function togglePlayerLang() {
@@ -2257,6 +2288,16 @@ document.addEventListener('DOMContentLoaded', () => {
         adultTab.setAttribute('onclick', "filterCat('adult')");
         adultTab.innerHTML = '🔞 18+';
         catTabs.appendChild(adultTab);
+      }
+
+            // ── DYNAMICALLY ADD HINDI DUBBED TAB ──
+      if (catTabs && !document.querySelector('.cat-tab[onclick*="dubbed"]')) {
+        const dubbedTab = document.createElement('button');
+        dubbedTab.className = 'cat-tab';
+        dubbedTab.tabIndex = 0;
+        dubbedTab.setAttribute('onclick', "filterCat('dubbed')");
+        dubbedTab.innerHTML = '🎬 Hindi Dubbed';
+        catTabs.appendChild(dubbedTab);
       }
 
   // Fluid Ripple Effect for buttons
