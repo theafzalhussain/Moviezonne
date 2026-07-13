@@ -1773,21 +1773,45 @@ async function loadRelatedMovies(id, type) {
   grid.innerHTML = Array(6).fill('<div class="skeleton skeleton-card"></div>').join('');
  
   try {
-    // Pehle advance recommendations check karenge, varna similar movies
-    const res = await tmdb('/' + type + '/' + id + '/recommendations', { language: 'en-US', page: '1' });
-    let movies = res.results || [];
-    if (movies.length === 0) {
-      const fallback = await tmdb('/' + type + '/' + id + '/similar', { language: 'en-US', page: '1' });
-      movies = fallback.results || [];
+    const combinedResults = [];
+    const seenIds = new Set([id]); // Exclude the current movie from its own related list
+
+    // ✨ PRIORITY 1: Fetch movies from the same collection/franchise (e.g., all Avengers movies)
+    if (type === 'movie' && currentModalMovie && currentModalMovie.belongs_to_collection) {
+      const collectionId = currentModalMovie.belongs_to_collection.id;
+      const collectionData = await tmdb(`/collection/${collectionId}`, { language: 'en-US' });
+      if (collectionData && collectionData.parts) {
+        // Sort collection by release date
+        collectionData.parts.sort((a, b) => (a.release_date || '0').localeCompare(b.release_date || '0'));
+        collectionData.parts.forEach(movie => {
+          if (movie && movie.id && !seenIds.has(movie.id)) {
+            combinedResults.push(movie);
+            seenIds.add(movie.id);
+          }
+        });
+      }
+    }
+ 
+    // ✨ PRIORITY 2: Fetch TMDB's own recommendations and similar items
+    const [recs, sims] = await Promise.allSettled([
+      tmdb('/' + type + '/' + id + '/recommendations', { language: 'en-US', page: '1' }),
+      tmdb('/' + type + '/' + id + '/similar', { language: 'en-US', page: '1' })
+    ]);
+ 
+    if (recs.status === 'fulfilled' && recs.value.results) {
+      recs.value.results.forEach(movie => { if (movie && movie.id && !seenIds.has(movie.id)) { combinedResults.push(movie); seenIds.add(movie.id); } });
+    }
+    if (sims.status === 'fulfilled' && sims.value.results) {
+      sims.value.results.forEach(movie => { if (movie && movie.id && !seenIds.has(movie.id)) { combinedResults.push(movie); seenIds.add(movie.id); } });
     }
  
     const realToday = new Date().toISOString().split('T')[0];
-    movies = movies.filter(m => {
+    const movies = combinedResults.filter(m => {
       if (!m.poster_path) return false;
       const rDate = m.release_date || m.first_air_date;
       if (rDate && rDate > realToday) return false; // Block upcoming from related movies
       return true;
-    }).slice(0, 12); // Top 12 similar items
+    }).slice(0, 12); // Show top 12 relevant results
  
     if (movies.length > 0) {
       grid.innerHTML = '';
@@ -1827,7 +1851,10 @@ async function loadRelatedMovies(id, type) {
     } else {
       section.style.display = 'none';
     }
-  } catch(e) { section.style.display = 'none'; }
+  } catch(e) { 
+    console.warn("Could not load related movies:", e);
+    section.style.display = 'none'; 
+  }
 }
  
 // ── PLAYER SOURCES — Multi-Language Audio Supported (Updated & Fixed) ──
