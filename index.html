@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿<!DOCTYPE html>
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -64,7 +64,7 @@
   <ul class="nav-links" id="navLinks">
     <li><a href="#" class="active" onclick="goHome(event)">Home</a></li>
     <!-- <li><a href="#movies-section" onclick="goHome(event)">Movies</a></li> -->
-    <li><a href="#" onclick="filterCat('tv', event)">TV Shows</a></li>
+    <li><a href="#" onclick="filterCat('tv', event)">Web Series</a></li>
     <li><a href="#upcoming" onclick="goHome(event)">Upcoming</a></li>
     <li><a href="#" onclick="filterCat('bollywood', event)">Bollywood</a></li>
     <li><a href="#" onclick="filterCat('hollywood', event)">Hollywood</a></li>
@@ -97,11 +97,10 @@
       <div class="title-line"></div>
       <h2 id="sectionHeading">ALL MOVIES & SHOWS</h2>
     </div>
-    <a href="#" class="see-all" onclick="viewAllMovies(event)">Browse All -&gt;</a>
   </div>
   <div class="cat-tabs" id="catTabs">
     <button class="cat-tab active" onclick="filterCat('all')">All</button>
-    <button class="cat-tab" onclick="filterCat('tv')">TV Shows</button>
+    <button class="cat-tab" onclick="filterCat('tv')">Web Series</button>
     <button class="cat-tab" onclick="showWatchlist(event)">Watchlist</button>
     <button class="cat-tab" onclick="filterCat('hollywood')">Hollywood</button>
     <button class="cat-tab" onclick="filterCat('bollywood')">Bollywood</button>
@@ -144,7 +143,6 @@
       <div class="title-line"></div>
       <h2>UPCOMING RELEASES</h2>
     </div>
-    <a href="#" class="see-all" onclick="viewAllUpcoming(event)">View Calendar -&gt;</a>
   </div>
   <div class="upcoming-grid" id="upcomingGrid">
     <div class="skeleton skeleton-card"></div>
@@ -152,6 +150,7 @@
     <div class="skeleton skeleton-card"></div>
     <div class="skeleton skeleton-card"></div>
   </div>
+  <div id="infiniteScrollTriggerUpcoming" style="height: 50px;"></div>
   <div style="text-align: center; margin-top: 2.5rem;">
     <button id="loadMoreUpcomingBtn" class="load-more-btn" style="display: none;" onclick="loadUpcoming(true)">Load More Upcoming</button>
   </div>
@@ -240,10 +239,7 @@
                 <option value="en">🇬🇧 English</option>
                 <option value="ta">🎬 Tamil</option>
                 <option value="te">🎭 Telugu</option>
-                <option value="ml">🌴 Malayalam</option>
-                <option value="kn">🟣 Kannada</option>
-                <option value="mr">🟠 Marathi</option>
-                <option value="bn">🟡 Bengali</option>
+  
               </select>
               <select class="quality-select" id="qualitySelect">
                 <option value="4k">4K UHD</option>

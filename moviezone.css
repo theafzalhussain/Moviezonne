@@ -1427,6 +1427,7 @@ body.cursor-hover #cursor-dot {
   box-shadow:
     0 16px 48px rgba(0,0,0,0.38),
     inset 0 1px 0 rgba(255,255,255,0.04);
+    margin-top: 22px;
 }
 
 .movie-card::before {
@@ -1480,6 +1481,7 @@ body.cursor-hover #cursor-dot {
 .movie-card:hover .card-poster img,
 .movie-card:focus-visible .card-poster img {
   transform: scale(1.1);
+  transform: scale(1.03);
   filter: saturate(1.15) contrast(1.07) brightness(1);
 }
 
@@ -1692,6 +1694,7 @@ body.cursor-hover #cursor-dot {
 
 .skeleton-card { aspect-ratio: 2/3.6; }
 
+
 /* ═══════════════════════════════════════════════════════════════
    UPCOMING SECTION
    ═══════════════════════════════════════════════════════════════ */
@@ -1751,6 +1754,7 @@ body.cursor-hover #cursor-dot {
 .upcoming-card:hover .upcoming-poster img,
 .upcoming-card:focus-visible .upcoming-poster img {
   transform: scale(1.08);
+  transform: scale(1.02);
   filter: saturate(1.15);
 }
 

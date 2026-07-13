@@ -364,6 +364,7 @@ async function init() {
   }
 
   setupInfiniteScroll();
+  setupUpcomingInfiniteScroll();
 }
 
 function setupInfiniteScroll() {
@@ -374,24 +375,32 @@ function setupInfiniteScroll() {
         const entry = entries[0];
         if (entry.isIntersecting && !isLoadingMore) {
             const activeTab = document.querySelector('.cat-tab.active');
-            let cat = 'all';
             if (activeTab) {
                 const onclickAttr = activeTab.getAttribute('onclick') || '';
-                if (onclickAttr.includes("filterCat")) {
-                    const match = onclickAttr.match(/'([^']+)'/);
-                    if (match) cat = match[1];
-                } else if (onclickAttr.includes("showWatchlist")) {
+                if (onclickAttr.includes("showWatchlist")) {
                     return; // Don't infinite scroll on watchlist
                 }
             }
             
-            // Trigger for 'all' and 'tv' (Web Series) categories.
-            if (cat === 'all' || cat === 'tv') {
-                loadMoreMoviesAction();
-            }
+            loadMoreMoviesAction();
         }
     }, {
         rootMargin: '400px' // Start loading 400px before the element is visible
+    });
+    observer.observe(trigger);
+}
+ 
+function setupUpcomingInfiniteScroll() {
+    const trigger = document.getElementById('infiniteScrollTriggerUpcoming');
+    if (!trigger) return;
+
+    const observer = new IntersectionObserver((entries) => {
+        const entry = entries[0];
+        if (entry.isIntersecting && !isLoadingMore) {
+            loadUpcoming(true);
+        }
+    }, {
+        rootMargin: '400px'
     });
     observer.observe(trigger);
 }
@@ -620,9 +629,12 @@ function prefetchMoviesPage(cat, pageNum) {
     tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p1 });
     tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p2 });
   } else if (cat === 'tv') {
-    tmdb('/trending/tv/week', { language: 'en-US', page: pageStr });
-    tmdb('/discover/tv', { language: 'en-US', sort_by: 'popularity.desc', page: pageStr });
-    tmdb('/discover/tv', { with_original_language: 'hi', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
+    const STREAMING_NETWORKS = '213|1024|122|3295|3009|193|2583|2600|2212|2552|453|49|3353|4330|2694|3321|3328'; // Netflix, Prime, Hotstar, Jio, MX, SonyLIV, ZEE5, AppleTV+, Hulu, HBO, aha, Hoichoi etc.
+    const TV_CHANNELS_TO_EXCLUDE = '71|105|70|118|194|2584|3294'; // Star Plus, Colors, Zee TV, Sony TV, SAB, &TV, Star Bharat
+    tmdb('/discover/tv', { with_networks: STREAMING_NETWORKS, without_networks: TV_CHANNELS_TO_EXCLUDE, with_original_language: 'hi', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
+    tmdb('/discover/tv', { with_networks: STREAMING_NETWORKS, without_networks: TV_CHANNELS_TO_EXCLUDE, with_original_language: 'en', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
+    tmdb('/discover/tv', { with_networks: STREAMING_NETWORKS, without_networks: TV_CHANNELS_TO_EXCLUDE, with_original_language: 'ko', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
+    tmdb('/discover/tv', { with_networks: STREAMING_NETWORKS, without_networks: TV_CHANNELS_TO_EXCLUDE, sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
   } else if (cat === 'kids') {
     tmdb('/discover/tv', { with_genres: '10762', with_original_language: 'hi', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
     tmdb('/discover/tv', { with_genres: '10762', with_original_language: 'ja', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
@@ -742,13 +754,48 @@ async function loadMovies(cat, isLoadMore = false) {
 
       movies.push(...uniqueMovies);
     } else if (cat === 'tv') {
-      // Fetch a diverse set of web series: latest, trending, and popular from various regions.
+      // ✨ EXPANDED OTT LIST: Now includes JioCinema, MX Player, HBO, aha, Hoichoi and more major platforms.
+      const STREAMING_NETWORKS = '213|1024|122|3295|3009|193|2583|2600|2212|2552|453|49|3353|4330|2694|3321|3328'; // Netflix, Prime, Hotstar, Jio, MX, SonyLIV, ZEE5, AppleTV+, Hulu, HBO, aha, Hoichoi etc.
+      // ✨ EXCLUSION LIST: Traditional Indian TV channels to strictly remove from Web Series section
+      const TV_CHANNELS_TO_EXCLUDE = '71|105|70|118|194|2584|3294'; // Star Plus, Colors, Zee TV, Sony TV, SAB, &TV, Star Bharat
+
+      // Fetch a diverse set of web series from major streaming platforms, removing traditional TV shows.
       const res = await Promise.allSettled([
-        tmdb('/tv/on_the_air', { language: 'en-US', page: pageStr }), // Latest airing shows
-        tmdb('/trending/tv/week', { language: 'en-US', page: pageStr }),
-        tmdb('/discover/tv', { with_original_language: 'hi', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }), // Hindi
-        tmdb('/discover/tv', { with_original_language: 'en', sort_by: 'popularity.desc', page: pageStr }), // English
-        tmdb('/discover/tv', { with_original_language: 'ko', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }) // Korean
+        // Top Hindi Web Series from streaming platforms
+        tmdb('/discover/tv', {
+            with_networks: STREAMING_NETWORKS,
+            without_networks: TV_CHANNELS_TO_EXCLUDE,
+            with_original_language: 'hi',
+            sort_by: 'popularity.desc',
+            page: pageStr,
+            language: 'en-US'
+        }),
+        // Top English Web Series from streaming platforms
+        tmdb('/discover/tv', {
+            with_networks: STREAMING_NETWORKS,
+            without_networks: TV_CHANNELS_TO_EXCLUDE,
+            with_original_language: 'en',
+            sort_by: 'popularity.desc',
+            page: pageStr,
+            language: 'en-US'
+        }),
+        // Top Korean Web Series from streaming platforms
+        tmdb('/discover/tv', {
+            with_networks: STREAMING_NETWORKS,
+            without_networks: TV_CHANNELS_TO_EXCLUDE,
+            with_original_language: 'ko',
+            sort_by: 'popularity.desc',
+            page: pageStr,
+            language: 'en-US'
+        }),
+        // General popular shows from these platforms as a fallback
+        tmdb('/discover/tv', { 
+            with_networks: STREAMING_NETWORKS, 
+            without_networks: TV_CHANNELS_TO_EXCLUDE,
+            sort_by: 'popularity.desc', 
+            page: pageStr, 
+            language: 'en-US' 
+        })
       ]);
 
       const combinedShows = [];
@@ -914,7 +961,7 @@ async function loadMovies(cat, isLoadMore = false) {
   if (loadMoreBtn) loadMoreBtn.style.display = 'none'; // Always hide button for infinite scroll
  
   // Har load ke baad agle page ko chupke se fetch karke ready rakho
-  if (isFullViewMovies && !isTV) {
+  if (!isTV) {
     setTimeout(() => prefetchMoviesPage(cat, currentMoviePage + 1), 800);
   }
 
@@ -1205,13 +1252,13 @@ async function loadUpcoming(isLoadMore = false) {
     
     const loadMoreBtn = document.getElementById('loadMoreUpcomingBtn');
     if (loadMoreBtn) {
-      loadMoreBtn.style.display = (isFullViewUpcoming && newMovies.length > 0) ? 'inline-block' : 'none';
+      loadMoreBtn.style.display = 'none';
       loadMoreBtn.innerHTML = 'Load More Upcoming';
     }
   } catch(e) { console.warn(e); }
  
   // Har load ke baad agle upcoming page ko chupke se fetch karke ready rakho
-  if (isFullViewUpcoming && !isTV) {
+  if (!isTV) {
     setTimeout(() => prefetchUpcomingPage(currentUpcomingPage + 1), 800);
   }
 }
@@ -2101,6 +2148,7 @@ function togglePlayerLang() {
 async function downloadMovie() {
   if (!currentModalMovie) return;
   const title = currentModalMovie.title || currentModalMovie.name || '';
+  const year = (currentModalMovie.release_date || currentModalMovie.first_air_date || '').slice(0, 4);
   const isTV = currentModalMovie.media_type === 'tv';
   
   // Get download button reference
@@ -2118,7 +2166,23 @@ async function downloadMovie() {
   const existingModal = document.getElementById('dlModal');
   if (existingModal) existingModal.remove();
  
-  // 2. Fetch Torrents directly from YTS API
+  // 1. Direct Download Search Links (Naya Feature)
+  let directLinksHtml = '';
+  const searchQuery = `${title} ${year} direct download`;
+  const googleSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`;
+  
+  directLinksHtml = `
+    <a href="${googleSearchUrl}" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid #10b981; margin-bottom:8px;">
+      <span style="display:flex; align-items:center; gap:10px;">
+        <span style="font-size:1.2rem;">🔍</span>
+        <strong style="color:#fff; font-size:1rem;">Search Direct Download</strong>
+      </span>
+      <span style="font-size:0.85rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">Google</span>
+    </a>
+    <p style="font-size:0.75rem; color:var(--text3); text-align:left; margin: -4px 0 12px 4px;">Tip: Search results mein 'index of', 'vegamovies', 'hdmovie2' jaisi sites check karein.</p>
+  `;
+
+  // 2. Torrents Fetch karna
   let torrentsHtml = '';
   try {
     if (!isTV) {
@@ -2191,9 +2255,14 @@ async function downloadMovie() {
   const dlModalHtml = `
     <div id="dlModal" style="position:fixed; inset:0; z-index:999999; background:rgba(5,5,8,0.85); backdrop-filter:blur(12px); display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity 0.3s ease;">
       <div style="background:var(--card); padding:2.5rem; border-radius:20px; border:1px solid rgba(255,255,255,0.1); width:90%; max-width:420px; text-align:center; box-shadow:0 25px 50px rgba(0,0,0,0.6); transform:scale(0.95); transition:transform 0.3s ease;" id="dlModalBox">
-        <h3 style="margin-bottom:0.5rem; font-family:'Bebas Neue', sans-serif; font-size:2.2rem; color:#fff; letter-spacing:1px;">Available Torrents</h3>
-        <p style="font-size:0.85rem; color:var(--text2); margin-bottom:1.5rem; line-height:1.5;">Make sure you have a Torrent client installed (e.g., uTorrent, BitTorrent, Flud) before clicking.</p>
-        <div style="display:flex; flex-direction:column; max-height:280px; overflow-y:auto; padding-right:5px; text-align:left;">
+        <h3 style="margin-bottom:0.5rem; font-family:'Bebas Neue', sans-serif; font-size:2.2rem; color:#fff; letter-spacing:1px;">Download Options</h3>
+        <p style="font-size:0.85rem; color:var(--text2); margin-bottom:1.5rem; line-height:1.5;">Apna pasandeeda download method chunein.</p>
+        <div style="display:flex; flex-direction:column; max-height:350px; overflow-y:auto; padding-right:5px; text-align:left;">
+          
+          <h4 style="font-size:0.7rem; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:var(--text2); margin-bottom:0.8rem; padding-bottom:0.4rem; border-bottom: 1px solid rgba(255,255,255,0.1);">DIRECT DOWNLOAD</h4>
+          ${directLinksHtml}
+
+          <h4 style="font-size:0.7rem; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:var(--text2); margin-top:1.2rem; margin-bottom:0.8rem; padding-bottom:0.4rem; border-bottom: 1px solid rgba(255,255,255,0.1);">TORRENT DOWNLOAD</h4>
           ${torrentsHtml}
         </div>
         <button onclick="const m=document.getElementById('dlModal'); m.style.opacity='0'; setTimeout(()=>m.remove(),300);" style="margin-top:1.5rem; width:100%; background:transparent; border:1px solid rgba(255,255,255,0.2); color:var(--text); padding:0.8rem; border-radius:12px; cursor:pointer; font-weight:600; transition:all 0.2s;">Close</button>
@@ -2489,58 +2558,6 @@ if (isTV) {
   }, true);
 }
  
-// ── PAGE NAVIGATION (SPA) ──
-function viewAllMovies(e) {
-  if (e) e.preventDefault();
-  isFullViewMovies = true;
-  const hero = document.getElementById('hero');
-  const upcoming = document.getElementById('upcoming');
-  const sep = document.querySelector('.section-sep');
-  if (hero) hero.style.display = 'none';
-  if (upcoming) upcoming.style.display = 'none';
-  if (sep) sep.style.display = 'none';
-  
-  const btn = document.querySelector('#movies-section .see-all');
-  if (btn) {
-    btn.innerHTML = '&lt;- Back Home';
-    btn.onclick = goHome;
-  }
-  
-  const h = document.getElementById('sectionHeading');
-  if (h && h.textContent.includes('MY WATCHLIST')) {
-    renderMovies(watchlist);
-  } else {
-    const activeTab = document.querySelector('.cat-tab.active');
-    let currentCat = 'all';
-    if (activeTab && activeTab.getAttribute('onclick')?.includes('filterCat')) {
-      const match = activeTab.getAttribute('onclick').match(/'([^']+)'/);
-      if (match) currentCat = match[1];
-    }
-    loadMovies(currentCat);
-  }
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-}
- 
-function viewAllUpcoming(e) {
-  if (e) e.preventDefault();
-  isFullViewUpcoming = true;
-  const hero = document.getElementById('hero');
-  const moviesSec = document.getElementById('movies-section');
-  const sep = document.querySelector('.section-sep');
-  if (hero) hero.style.display = 'none';
-  if (moviesSec) moviesSec.style.display = 'none';
-  if (sep) sep.style.display = 'none';
-  
-  const btn = document.querySelector('#upcoming .see-all');
-  if (btn) {
-    btn.innerHTML = '&lt;- Back Home';
-    btn.onclick = goHome;
-  }
-  
-  loadUpcoming();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-}
- 
 function goHome(e) {
   let isHash = false;
   if (e && e.type === 'click' && e.currentTarget) {
@@ -2559,12 +2576,6 @@ function goHome(e) {
   if (moviesSec) moviesSec.style.display = 'block';
   if (upcoming) upcoming.style.display = 'block';
   if (sep) sep.style.display = 'block';
-  
-  const mBtn = document.querySelector('#movies-section .see-all');
-  if (mBtn) { mBtn.innerHTML = 'Browse All -&gt;'; mBtn.onclick = viewAllMovies; }
-  
-  const uBtn = document.querySelector('#upcoming .see-all');
-  if (uBtn) { uBtn.innerHTML = 'View Calendar -&gt;'; uBtn.onclick = viewAllUpcoming; }
   
   const h = document.getElementById('sectionHeading');
   if (h && h.textContent === 'MY WATCHLIST') {
