@@ -397,7 +397,7 @@ body.cursor-hover #cursor-dot {
   background: rgba(3, 3, 10, 0.6);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
-  z-index: 998;
+  z-index: 9999;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.28s ease;
@@ -800,7 +800,8 @@ body.cursor-hover #cursor-dot {
   padding: 0;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.07);
   transition: background 0.3s ease, transform 0.3s ease;
-  z-index: 2001;
+  z-index: 10001;
+  position: relative;
 }
 
 .hamburger-btn:hover {
@@ -3943,16 +3944,16 @@ body.cursor-hover #cursor-dot {
     align-items: stretch;
     padding: 5.5rem 1.8rem 2rem;
     gap: 0.25rem;
-    background: linear-gradient(160deg, rgba(10,10,22,0.97) 0%, rgba(6,6,14,0.99) 100%);
+    background: linear-gradient(160deg, rgba(10,10,22,0.98) 0%, rgba(6,6,14,0.99) 100%);
     backdrop-filter: blur(50px) saturate(200%);
     -webkit-backdrop-filter: blur(50px) saturate(200%);
-    border-left: 1px solid rgba(245,197,24,0.08);
-    box-shadow: -20px 0 60px rgba(0,0,0,0.8);
-    z-index: 999;
+    border-left: 1px solid rgba(245,197,24,0.12);
+    box-shadow: -20px 0 60px rgba(0,0,0,0.9);
+    z-index: 10000;
     overflow-y: auto;
     scrollbar-width: none;
     transform: translateX(100%);
-    transition: transform 0.32s cubic-bezier(0.32, 0.72, 0, 1);
+    transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
     will-change: transform;
   }
 
@@ -4055,15 +4056,21 @@ body.cursor-hover #cursor-dot {
     padding: 6px 0 0 0;
     margin-top: 8px;
     justify-content: flex-start;
-    gap: 10px;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
+    gap: 8px;
+    flex-wrap: wrap;
     display: flex;
     align-items: center;
   }
   .player-controls::-webkit-scrollbar { display: none; }
+
+  .player-chip {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .player-chip--fs {
+    flex: 0 0 auto;
+  }
 
   .external-sources { gap: 8px; justify-content: stretch; }
   .external-sources .player-chip--source { min-width: 0; flex: 1 1 calc(50% - 8px); padding: 10px 12px; }
@@ -4083,8 +4090,9 @@ body.cursor-hover #cursor-dot {
   .nav-logo-main { font-size: 1.28rem; letter-spacing: 1.8px; }
   .nav-logo-sub { display: none; }
   .hamburger-btn { width: 42px; height: 42px; border-radius: 12px; }
-  .nav-links a { padding: 0.32rem 0.65rem; font-size: 0.76rem; }
-  .nav-links { width: calc(100vw - 12px); right: -100%; border-radius: 20px; }
+  .nav-links a { padding: 0.7rem 1rem; font-size: 0.95rem; }
+  .nav-links { width: min(280px, 85vw); border-radius: 0; padding: 5rem 1.5rem 2rem; }
+  .nav-links.open { transform: translateX(0); }
 
   #hero { height: 60vh; margin-top: 95px; }
   .slide-content { bottom: 11%; }
@@ -4103,9 +4111,11 @@ body.cursor-hover #cursor-dot {
   .cat-tab { padding: 0.47rem 0.8rem; font-size: 0.75rem; }
   .footer-inner { grid-template-columns: 1fr; gap: 1.5rem; }
   .footer-bottom { align-items: flex-start; }
-  .player-controls { gap: 6px; }
+  .player-controls { gap: 6px; flex-wrap: wrap; }
   .player-chip { padding: 6px 10px; font-size: 11px; }
   .player-chip__icon { width: 16px; height: 16px; }
+  .player-chip--fs span { display: none; }
+  .player-chip--fs { padding: 8px 10px; min-height: 36px; }
   .external-sources .player-chip--source { flex: 1 1 calc(50% - 6px); justify-content: center; min-height: 38px; padding: 8px 6px; font-size: 0.72rem; }
   .modal-close { top: 0.8rem; left: 0.8rem; height: 34px; padding: 0 0.8rem; font-size: 0.75rem; }
   .modal-image-wrapper { height: 180px; }

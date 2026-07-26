@@ -3534,7 +3534,25 @@ window.addEventListener('scroll', () => {
     _scrollTicking = false;
   });
 }, { passive: true });
- 
+
+// Move nav-links to body on mobile to escape navbar backdrop-filter stacking context
+const navLinksEl = document.getElementById('navLinks');
+if (navLinksEl && window.innerWidth <= 768) {
+  document.body.appendChild(navLinksEl);
+}
+window.addEventListener('resize', () => {
+  const nl = document.getElementById('navLinks');
+  if (!nl) return;
+  if (window.innerWidth <= 768 && nl.parentElement !== document.body) {
+    document.body.appendChild(nl);
+  } else if (window.innerWidth > 768 && nl.parentElement === document.body) {
+    const navbar = document.getElementById('navbar');
+    const searchEl = navbar.querySelector('.nav-search');
+    if (searchEl) navbar.insertBefore(nl, searchEl);
+    else navbar.appendChild(nl);
+  }
+});
+
 const hamburgerBtn = document.getElementById('hamburgerBtn');
 const mobileNavOverlay = document.getElementById('mobileNavOverlay');
 if (hamburgerBtn) {
