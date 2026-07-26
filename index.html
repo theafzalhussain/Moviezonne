@@ -14,9 +14,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700;900&family=Playfair+Display:ital,wght@0,700;1,400&display=swap" rel="stylesheet">
-<link rel="preload" href="moviezone.css?v=2.3" as="style">
-<link rel="preload" href="moviezone.js?v=2.3" as="script">
-<link rel="stylesheet" href="moviezone.css?v=2.3">
+<link rel="preload" href="moviezone.css?v=2.5" as="style">
+<link rel="preload" href="moviezone.js?v=2.5" as="script">
+<link rel="stylesheet" href="moviezone.css?v=2.5">
 </head>
 <body>
 
@@ -330,8 +330,20 @@
         <div class="video-embed" id="videoEmbed"></div>
         <div id="externalSources" class="external-sources" aria-hidden="false"></div>
         <div id="relatedMoviesSection" class="related-section" style="display:none;">
-          <h3 class="related-title">More Like This</h3>
-          <div class="movie-grid" id="relatedMoviesGrid"></div>
+          <div class="related-header">
+            <h3 class="related-title">More Like This</h3>
+            <div class="related-nav">
+              <button class="related-arrow related-prev" id="relatedPrev" aria-label="Previous">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+              </button>
+              <button class="related-arrow related-next" id="relatedNext" aria-label="Next">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="related-slider-wrapper">
+            <div class="related-slider" id="relatedMoviesGrid"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -341,7 +353,7 @@
 <!-- â”€â”€ TOAST â”€â”€ -->
 <div id="toast"></div>
 
-<script src="moviezone.js?v=2.3" defer></script>
+<script src="moviezone.js?v=2.5" defer></script>
 <script>
 // INSTANT PERFORMANCE: Remove loader faster + mark page interactive
 document.addEventListener('DOMContentLoaded', () => {
