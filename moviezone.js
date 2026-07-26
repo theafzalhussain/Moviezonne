@@ -1,4 +1,4 @@
-﻿﻿// Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
+﻿﻿﻿﻿// Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
 const isTV = /SmartTV|WebOS|Tizen|NetCast|VIDAA|Roku|AppleTV|Android TV|BRAVIA|AFT/i.test(navigator.userAgent);
 
@@ -2747,7 +2747,7 @@ function renderLanguageButtons(spokenLangs) {
       <span style="font-size:0.68rem;color:#10b981;background:rgba(16,185,129,0.1);padding:2px 9px;border-radius:999px;border:1px solid rgba(16,185,129,0.2);"> = Dubbed available</span>
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:7px;">${btnsHtml}</div>
-    <div style="margin-top:10px;font-size:0.7rem;color:rgba(255,255,255,0.3);line-height:1.5;"> <b style="color:rgba(255,255,255,0.5);">Hindi Audio kaise?</b> Player load hone ke baad <b style="color:var(--gold);"> Settings ? Audio ? Hindi</b> select karo. Agar Hindi nahi dikhe = dusra server try karo.</div>
+
   `;
   ext.appendChild(section);
 
@@ -2782,7 +2782,7 @@ function renderExternalSources(id, srcIdx, lang) {
     '<button class="player-chip player-chip--source'+(s.dubbed ? ' player-chip--dubbed' : '')+(s.is4K ? ' player-chip--4k' : '')+'" data-srcidx="'+i+'" title="'+(s.is4K ? '4K AI Upscaling + Multi-Language + Spatial Audio' : (s.dubbed ? 'Hindi Dubbed Supported' : 'Mostly English Audio'))+'">'+escapeHTML(s.name)+(s.dubbed ? '<span class="dubbed-dot"></span>' : '')+(s.is4K ? '<span class="fourk-badge">4K</span>' : '')+'</button>'
   ).join('');
   ext.innerHTML =
-    '<div style="font-size:0.7rem;font-weight:800;letter-spacing:1.8px;color:rgba(255,255,255,0.35);text-transform:uppercase;margin-bottom:8px;"> Playback Server <span style="color:#ff9800;font-size:0.65rem;margin-left:8px;">? = Hindi Dubbed</span> <span style="color:#00e5ff;font-size:0.65rem;margin-left:6px;">4K = AI Ultra HD</span></div>' +
+    '<div style="font-size:0.7rem;font-weight:800;letter-spacing:1.8px;color:rgba(255,255,255,0.35);text-transform:uppercase;margin-bottom:8px;"> Playback Server</div>' +
     '<div style="display:flex;flex-wrap:wrap;gap:7px;">' + serverBtnsHtml + '</div>';
 
   const srcButtons = ext.querySelectorAll('.player-chip--source');
@@ -3019,59 +3019,8 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   // Smooth scroll to video player
   setTimeout(() => embedEl.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
   
-  // -- HINDI AUDIO GUIDE: Show one-time guide on how to switch audio inside player --
-  const DUBBED_LANG_LIST2 = ['hi', 'ta', 'te', 'ml', 'kn', 'mr', 'bn'];
-  if (DUBBED_LANG_LIST2.includes(lang) && !localStorage.getItem('mz_hindi_guide_shown')) {
-    setTimeout(() => {
-      showHindiAudioGuide();
-      localStorage.setItem('mz_hindi_guide_shown', '1');
-    }, 3000);
-  }
 }
 
-// -- HINDI AUDIO GUIDE POPUP --
-function showHindiAudioGuide() {
-  const existing = document.getElementById('mzHindiGuide');
-  if (existing) existing.remove();
-  
-  const guide = document.createElement('div');
-  guide.id = 'mzHindiGuide';
-  guide.style.cssText = `
-    position: fixed; bottom: 20px; right: 20px; z-index: 999999;
-    background: linear-gradient(135deg, #1a1a2e, #16213e); 
-    border: 1px solid rgba(245,197,24,0.3); border-radius: 16px;
-    padding: 20px 24px; max-width: 360px; width: 90%;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.7), 0 0 30px rgba(245,197,24,0.1);
-    animation: guideSlideIn 0.4s ease-out;
-    font-family: 'Outfit', sans-serif;
-  `;
-  guide.innerHTML = `
-    <style>
-      @keyframes guideSlideIn { from { transform: translateY(30px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-    </style>
-    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
-      <div style="font-size:1.1rem; font-weight:800; color:var(--gold);"> Hindi Audio Kaise Lagayein?</div>
-      <button onclick="document.getElementById('mzHindiGuide').remove()" style="background:none; border:none; color:rgba(255,255,255,0.5); font-size:1.4rem; cursor:pointer; line-height:1;">&times;</button>
-    </div>
-    <div style="color:rgba(255,255,255,0.85); font-size:0.85rem; line-height:1.7;">
-      <div style="margin-bottom:10px;">Player ke andar ye steps follow karo:</div>
-      <div style="background:rgba(0,0,0,0.3); border-radius:10px; padding:12px; margin-bottom:10px;">
-        <div style="margin-bottom:6px;"><strong style="color:#f5c518;">Step 1:</strong> Player mein <strong> Settings</strong> ya <strong> Audio</strong> icon dhundo</div>
-        <div style="margin-bottom:6px;"><strong style="color:#f5c518;">Step 2:</strong> <strong>Audio Track</strong> ya <strong>Language</strong> option pe click karo</div>
-        <div><strong style="color:#f5c518;">Step 3:</strong> <strong>Hindi</strong> select karo (agar available ho)</div>
-      </div>
-      <div style="font-size:0.78rem; color:rgba(255,255,255,0.5); border-top:1px solid rgba(255,255,255,0.1); padding-top:8px;">
-         Agar Hindi option nahi dikhe = us movie ka Hindi dub us server pe nahi hai.<br>
-         <strong style="color:var(--gold);">"Try All Dubbed Servers"</strong> button dabao ya dusra server select karo.
-      </div>
-    </div>
-    <button onclick="document.getElementById('mzHindiGuide').remove()" style="margin-top:12px; width:100%; padding:10px; background:linear-gradient(135deg, #f5c518, #e6a800); color:#000; border:none; border-radius:10px; font-weight:800; font-size:0.9rem; cursor:pointer;">Samajh Gaya! </button>
-  `;
-  document.body.appendChild(guide);
-  
-  // Auto-hide after 15 seconds
-  setTimeout(() => { const g = document.getElementById('mzHindiGuide'); if (g) g.remove(); }, 15000);
-}
 function autoRetryNextServer(id, currentIdx, lang, quality, type) {
   const DUBBED_LANG_LIST = ['hi', 'ta', 'te', 'ml', 'kn', 'mr', 'bn'];
   const isDubbedLang = DUBBED_LANG_LIST.includes(lang);
