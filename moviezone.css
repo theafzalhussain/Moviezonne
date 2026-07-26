@@ -4418,40 +4418,43 @@ body.cursor-hover #cursor-dot {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   TV MODE — Smart TV performance optimizations
-   EXTREME PERFORMANCE OPTIMIZATION FOR LARGE SCREENS
+   TV MODE & LOW-END MODE — Performance optimizations
+   EXTREME PERFORMANCE OPTIMIZATION FOR TV + MOBILE
    ═══════════════════════════════════════════════════════════════ */
 
-.tv-mode * {
+.tv-mode *,
+.low-end-mode * {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   text-shadow: none !important;
   filter: none !important;
 }
 
-/* Film grain noise filter is GPU-expensive — remove on TV */
-.tv-mode #hero::before { display: none !important; }
-.tv-mode #hero::after { display: none !important; }
+/* Film grain noise filter is GPU-expensive — remove */
+.tv-mode #hero::before, .low-end-mode #hero::before { display: none !important; }
+.tv-mode #hero::after, .low-end-mode #hero::after { display: none !important; }
 
 /* Ken-Burns zoom causes continuous repaint of a huge image — freeze it */
 .tv-mode .slide-bg,
-.tv-mode .carousel-slide.active .slide-bg {
+.tv-mode .carousel-slide.active .slide-bg,
+.low-end-mode .slide-bg,
+.low-end-mode .carousel-slide.active .slide-bg {
   transform: scale(1) !important;
 }
 
-/* Kill ALL heavy box-shadows on TV */
-.tv-mode .movie-card, 
-.tv-mode .upcoming-card, 
-.tv-mode #navbar, 
-.tv-mode .cat-tab, 
-.tv-mode .modal-box,
-.tv-mode .btn-play,
-.tv-mode .btn-info,
-.tv-mode .player-chip {
+/* Kill ALL heavy box-shadows */
+.tv-mode .movie-card, .low-end-mode .movie-card,
+.tv-mode .upcoming-card, .low-end-mode .upcoming-card,
+.tv-mode #navbar, .low-end-mode #navbar,
+.tv-mode .cat-tab, .low-end-mode .cat-tab,
+.tv-mode .modal-box, .low-end-mode .modal-box,
+.tv-mode .btn-play, .low-end-mode .btn-play,
+.tv-mode .btn-info, .low-end-mode .btn-info,
+.tv-mode .player-chip, .low-end-mode .player-chip {
   box-shadow: none !important;
 }
 
-/* Fast Focus Outline for Remote instead of laggy shadows */
+/* Fast Focus Outline instead of laggy shadows */
 .tv-mode .movie-card:focus,
 .tv-mode .movie-card:focus-visible,
 .tv-mode .upcoming-card:focus,
@@ -4475,47 +4478,63 @@ body.cursor-hover #cursor-dot {
 .tv-mode .movie-card:focus .card-poster img,
 .tv-mode .movie-card:hover .card-poster img,
 .tv-mode .upcoming-card:focus .upcoming-poster img,
-.tv-mode .upcoming-card:hover .upcoming-poster img {
+.tv-mode .upcoming-card:hover .upcoming-poster img,
+.low-end-mode .movie-card .card-poster img,
+.low-end-mode .upcoming-card .upcoming-poster img {
   transform: none !important;
 }
 
 /* Skip staggered entrance animations — render instantly */
-.tv-mode .movie-card,
-.tv-mode .upcoming-card,
-.tv-mode .reveal-up {
+.tv-mode .movie-card, .low-end-mode .movie-card,
+.tv-mode .upcoming-card, .low-end-mode .upcoming-card,
+.tv-mode .reveal-up, .low-end-mode .reveal-up {
   animation: none !important;
   opacity: 1 !important;
-  transform: none !important;
   will-change: auto !important;
 }
 
 /* Disable shine sweeps and overlays to save paints */
-.tv-mode .card-poster::after, 
-.tv-mode .upcoming-poster::after,
-.tv-mode .card-overlay {
+.tv-mode .card-poster::after, .low-end-mode .card-poster::after,
+.tv-mode .upcoming-poster::after, .low-end-mode .upcoming-poster::after,
+.tv-mode .card-overlay, .low-end-mode .card-overlay {
   display: none !important;
 }
 
+/* Kill pseudo-element decorations */
+.low-end-mode .movie-card::before, .low-end-mode .movie-card::after,
+.low-end-mode .upcoming-card::before, .low-end-mode .upcoming-card::after,
+.low-end-mode .main-content::before,
+.low-end-mode .nav-search::before,
+.low-end-mode #navbar::before {
+  display: none !important;
+}
+
+/* Simplify navbar background */
+.low-end-mode #navbar {
+  background: rgba(5,5,12,0.95) !important;
+  border: 1px solid rgba(255,255,255,0.05) !important;
+}
+
 /* Stop skeleton shimmer animation */
-.tv-mode .skeleton {
+.tv-mode .skeleton, .low-end-mode .skeleton {
   animation: none !important;
   background: var(--card2) !important;
 }
 
-/* Carousel arrows: TV has no hover, so keep them visible for remote focus */
+/* Carousel arrows: keep visible */
 .tv-mode .carousel-arrow { opacity: 1; background: var(--card); border: 2px solid rgba(255,255,255,0.2); }
 .tv-mode .carousel-arrow:focus { outline: 3px solid var(--gold) !important; }
 
 /* Progress bar / dot glow are tiny — keep, but drop the pulsing glow animation */
-.tv-mode .dot.active { animation: none !important; box-shadow: none !important; }
-.tv-mode .slide-title { animation: none !important; }
+.tv-mode .dot.active, .low-end-mode .dot.active { animation: none !important; box-shadow: none !important; }
+.tv-mode .slide-title, .low-end-mode .slide-title { animation: none !important; }
 
 /* ═══════════════════════════════════════════════════════════════
    REDUCED MOTION — Accessibility
    ═══════════════════════════════════════════════════════════════ */
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::as {
+  *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

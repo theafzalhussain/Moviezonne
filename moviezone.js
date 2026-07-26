@@ -59,8 +59,9 @@ function getResponsiveBackdrop(path) {
 // -- TV MODE (Performance) --
 // Smart TV browsers have weak CPUs/GPUs: heavy blur/animation cause visible lag.
 // Tag <html> early so CSS can strip expensive effects (backdrop-filter, film grain, Ken Burns, etc.)
-// If it's a weak device, mobile, or TV, we force high-performance rendering (removes lag/hangs completely)
-if (isTV || (isMobile && isLowEnd)) document.documentElement.classList.add('tv-mode');
+// Apply to ALL mobiles and TVs - even mid-range phones lag with these effects
+if (isTV) document.documentElement.classList.add('tv-mode');
+if (isMobile) document.documentElement.classList.add('low-end-mode');
  
 // -- PERFORMANCE BOOST STYLES --
 const perfStyle = document.createElement('style');
@@ -68,52 +69,82 @@ perfStyle.textContent = `
   /* === UNIVERSAL DEVICE PERFORMANCE === */
   
   /* GPU-accelerated cards for all devices */
-  .movie-card, .upcoming-card { content-visibility: auto; contain-intrinsic-size: 180px 320px; contain: layout style paint; transform: translateZ(0); backface-visibility: hidden; }
-  .carousel-slide { will-change: transform, opacity; transform: translateZ(0); }
+  .movie-card, .upcoming-card { content-visibility: auto; contain-intrinsic-size: 180px 320px; contain: layout style paint; }
+  .carousel-slide { will-change: transform, opacity; }
   img { content-visibility: auto; }
   #movies-section, #upcoming { content-visibility: auto; contain-intrinsic-size: 1000px; }
   
   /* === MOBILE / SMALL SCREEN OPTIMIZATION (< 768px) === */
   @media (max-width: 768px) {
-    /* Reduce animations for smoother scroll */
-    .movie-card, .upcoming-card { transition: none !important; }
-    .movie-card:hover, .upcoming-card:hover { transform: none !important; }
-    /* Smaller images = less memory */
-    .card-poster img { max-height: 240px; }
-    /* Disable particles on mobile to save battery + RAM */
+    /* Kill ALL animations on mobile — biggest performance gain */
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.2s !important;
+    }
+    /* Exceptions: only allow essential transitions */
+    #mzMobilePanel, .mobile-nav-overlay, .hamburger-btn span {
+      transition-duration: 0.3s !important;
+    }
+    #mzMobilePanel .mz-mp-link {
+      transition-duration: 0.25s !important;
+    }
+    
+    /* Remove ALL hover effects on mobile */
+    .movie-card:hover, .upcoming-card:hover { transform: none !important; box-shadow: none !important; }
+    
+    /* Kill GPU-heavy effects entirely */
     .ambient-particles { display: none !important; }
-    /* Reduce grid gap for less reflow */
+    #hero::before, #hero::after { display: none !important; }
+    .click-spark { display: none !important; }
+    
+    /* Remove ALL backdrop-filters on mobile (main lag cause) */
+    * { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+    /* Only re-enable on mobile panel */
+    #mzMobilePanel { backdrop-filter: blur(20px) !important; -webkit-backdrop-filter: blur(20px) !important; }
+    
+    /* Simplify box-shadows (major GPU cost) */
+    .movie-card, .upcoming-card, .player-chip, .player-chip--source, .cat-tab { 
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
+    }
+    #navbar {
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5) !important;
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+      background: rgba(5,5,12,0.95) !important;
+    }
+    
+    /* Disable 3D tilt on touch */
+    .movie-card { perspective: none !important; transform-style: flat !important; }
+    
+    /* Reduce grid reflow */
     .movie-grid { gap: 10px !important; }
-    /* Disable backdrop-filter on mobile (GPU heavy) */
-    .nav-links, .modal-box, #navbar.scrolled { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
-    /* Disable 3D tilt completely on touch */
-    .movie-card { perspective: none !important; }
+    
+    /* Remove pseudo-element decorations */
+    .movie-card::before, .movie-card::after, .upcoming-card::before, .upcoming-card::after,
+    .nav-search::before, #navbar::before { display: none !important; }
+    
+    /* Reduce paint complexity */
+    .slide-gradient { background: linear-gradient(to top, rgba(3,3,10,0.95) 0%, transparent 60%) !important; }
   }
   
   /* === TABLET (768px - 1024px) === */
   @media (min-width: 769px) and (max-width: 1024px) {
-    .movie-card:hover { transform: translateY(-5px) !important; }
-    .ambient-particles .particle { opacity: 0.4 !important; }
+    .movie-card:hover { transform: translateY(-4px) !important; }
+    .ambient-particles .particle:nth-child(n+12) { display: none !important; }
+    .movie-card::before, .upcoming-card::before { display: none !important; }
+    #navbar { backdrop-filter: blur(20px) !important; -webkit-backdrop-filter: blur(20px) !important; }
   }
   
-  /* === TV / LARGE SCREEN OPTIMIZATION (> 1920px) === */
-  @media (min-width: 1920px) {
-    /* Limit grid items rendered at once to prevent crash */
+  /* === TV / LARGE SCREEN OPTIMIZATION === */
+  @media (min-width: 1920px), (hover: none) and (min-width: 960px) {
     .movie-grid { contain: layout style paint; }
-    /* Reduce particle count effect */
-    .ambient-particles .particle:nth-child(n+20) { display: none; }
-    /* Larger click targets for remote */
+    .ambient-particles .particle:nth-child(n+15) { display: none !important; }
     .movie-card, .upcoming-card, .cat-tab, button { min-height: 48px; }
   }
   
-  /* === ULTRA WIDE / 4K SCREENS (> 2560px) === */
-  @media (min-width: 2560px) {
-    .movie-grid { max-width: 2400px; margin: 0 auto; }
-    .ambient-particles .particle:nth-child(n+25) { display: none; }
-  }
-  
-  /* === TV MODE: Strip ALL heavy effects === */
-  .tv-mode *, .low-end-mode * {
+  /* === TV MODE: Strip ALL heavy effects (TVs need zero visual overhead) === */
+  .tv-mode *, .tv-mode *::before, .tv-mode *::after {
     box-shadow: none !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
@@ -122,16 +153,50 @@ perfStyle.textContent = `
     animation: none !important;
     transition: none !important;
   }
+  /* === LOW-END / MOBILE MODE: Strip effects but KEEP short transitions for smooth UI === */
+  .low-end-mode *, .low-end-mode *::before, .low-end-mode *::after {
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    text-shadow: none !important;
+    filter: none !important;
+    animation: none !important;
+    transition-duration: 0.2s !important;
+    transition-timing-function: ease !important;
+  }
+  /* Allow mobile panel to animate smoothly */
+  .low-end-mode #mzMobilePanel,
+  .low-end-mode .mobile-nav-overlay,
+  .low-end-mode .hamburger-btn span,
+  .low-end-mode #mzMobilePanel .mz-mp-link {
+    transition-duration: 0.3s !important;
+  }
   .tv-mode .ambient-particles, .low-end-mode .ambient-particles { display: none !important; }
-  .tv-mode #hero::before, .tv-mode #hero::after, .low-end-mode #hero::before, .low-end-mode #hero::after { display: none !important; }
+  .tv-mode #hero::before, .tv-mode #hero::after,
+  .low-end-mode #hero::before, .low-end-mode #hero::after { display: none !important; }
+  .tv-mode .click-spark, .low-end-mode .click-spark { display: none !important; }
+  .tv-mode .movie-card::before, .tv-mode .movie-card::after,
+  .low-end-mode .movie-card::before, .low-end-mode .movie-card::after { display: none !important; }
+  .tv-mode #navbar, .low-end-mode #navbar { 
+    background: rgba(5,5,12,0.97) !important; 
+    border: 1px solid rgba(255,255,255,0.05) !important;
+  }
+  .tv-mode .slide-gradient, .low-end-mode .slide-gradient { 
+    background: linear-gradient(to top, rgba(3,3,10,0.98) 0%, transparent 50%) !important; 
+  }
+  
+  /* === REDUCED MOTION (accessibility + performance) === */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation: none !important;
+      transition-duration: 0.01ms !important;
+    }
+    .ambient-particles { display: none !important; }
+  }
 `;
 document.head.appendChild(perfStyle);
 
 // Weak device detect karke class lagana
-if (isTV || (isMobile && isLowEnd)) {
-  document.documentElement.classList.add(isTV ? 'tv-mode' : 'low-end-mode');
-}
-
 // -- PREMIUM CURSOR GLOW & CLICK SPARKS --
 // Disable on TV, Touch, and Mobile to save CPU/battery and ensure smooth performance
 if (!isTV && !isTouchOnly && !isMobile) {
@@ -390,14 +455,14 @@ async function init() {
   }
 
   // Luxury Ambient Particles (Jugnu)
-  // Mobile par bhi show hoga, performance makhan rakhne ke liye sirf mobile pe count kam (8) kiya hai
-  if (!isTV && !document.querySelector('.ambient-particles')) {
+  // Only create on desktop - mobile/TV gets zero particles for performance
+  if (!isTV && !isMobile && !document.querySelector('.ambient-particles')) {
     const pContainer = document.createElement('div');
     pContainer.className = 'ambient-particles';
     document.body.appendChild(pContainer);
 
-    // Optimized: 8 Fireflies for mobile, 35 for desktop (Premium density)
-    const particleCount = isMobile ? 8 : 35;
+    // Optimized: 18 Fireflies for desktop (was 35 - less GPU load)
+    const particleCount = isLowEnd ? 8 : 18;
     for (let i = 0; i < particleCount; i++) {
       const p = document.createElement('div');
       p.className = 'particle';
@@ -1373,8 +1438,8 @@ function renderMovies(movies, append = false) {
     fragment.appendChild(card);
   scrollObserver.observe(card);
 
-    // Premium 3D Tilt Effect on Hover
-    if (!isTV) {
+    // Premium 3D Tilt Effect on Hover (Desktop only - causes lag on mobile/TV)
+    if (!isTV && !isMobile) {
       let tiltRAF;
       let cachedRect = null; // Cache to stop Layout Thrashing
       card.addEventListener('mouseenter', () => { 
@@ -3873,20 +3938,20 @@ setTimeout(extractTopKeywords, 3000);
     // If frame took > 100ms (less than 10 FPS), device is struggling
     if (delta > 100) {
       lowFPSCount++;
-      if (lowFPSCount > 5 && !document.documentElement.classList.contains('low-end-mode')) {
-        // Auto-enable low-end mode to save the device
-        document.documentElement.classList.add('low-end-mode');
+      if (lowFPSCount > 3 && !document.documentElement.classList.contains('tv-mode')) {
+        // Auto-enable tv-mode to save the device — most aggressive performance mode
+        document.documentElement.classList.add('tv-mode');
         const particles = document.querySelector('.ambient-particles');
         if (particles) particles.remove();
-        console.warn('Performance: Auto-enabled low-end mode due to low FPS');
+        console.warn('Performance: Auto-enabled tv-mode due to low FPS');
       }
     } else {
       lowFPSCount = Math.max(0, lowFPSCount - 1);
     }
     requestAnimationFrame(checkPerformance);
   }
-  // Only run FPS monitor on potentially weak devices
-  if (isMobile || isTV || isLowEnd) requestAnimationFrame(checkPerformance);
+  // Run FPS monitor on all devices to auto-detect lag
+  requestAnimationFrame(checkPerformance);
 })();
 
 init();
