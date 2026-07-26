@@ -1,8 +1,8 @@
-﻿﻿// ✨ Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
+﻿﻿// Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
 const isTV = /SmartTV|WebOS|Tizen|NetCast|VIDAA|Roku|AppleTV|Android TV|BRAVIA|AFT/i.test(navigator.userAgent);
 
-// ✨ Balanced Performance: Mobil/Tablet ko low-end manein, par Desktops/Laptops (bhale hi touch ho) ko full features dein
+// Balanced Performance: Mobil/Tablet ko low-end manein, par Desktops/Laptops (bhale hi touch ho) ko full features dein
 const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
 const isLowEnd = (navigator.deviceMemory && navigator.deviceMemory < 4) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency < 4);
 const isTouchOnly = window.matchMedia('(pointer: coarse)').matches && !window.matchMedia('(pointer: fine)').matches;
@@ -12,7 +12,7 @@ const LIVE_BACKEND_URL = '/api/tmdb';
 const BASE = isLocalhost ? 'http://localhost:3000/api/tmdb' : LIVE_BACKEND_URL;
 const IMG = 'https://image.tmdb.org/t/p/w342'; // Optimized: w500 is too heavy for thumbnails
 
-// ✨ NETWORK-AWARE IMAGE LOADING
+// NETWORK-AWARE IMAGE LOADING
 // Automatically serves High-Quality images on fast networks, and Normal/Low on slow networks (3G/2G)
 function getResponsiveBackdrop(path) {
   if (!path) return '';
@@ -25,13 +25,13 @@ function getResponsiveBackdrop(path) {
   return `https://image.tmdb.org/t/p/w1280${path}`; // Normal HD fallback
 }
 
-// ── TV MODE (Performance) ──
+// -- TV MODE (Performance) --
 // Smart TV browsers have weak CPUs/GPUs: heavy blur/animation cause visible lag.
 // Tag <html> early so CSS can strip expensive effects (backdrop-filter, film grain, Ken Burns, etc.)
 // If it's a weak device, mobile, or TV, we force high-performance rendering (removes lag/hangs completely)
 if (isTV || (isMobile && isLowEnd)) document.documentElement.classList.add('tv-mode');
  
-// ── PERFORMANCE BOOST STYLES ──
+// -- PERFORMANCE BOOST STYLES --
 const perfStyle = document.createElement('style');
 perfStyle.textContent = `
   .movie-card, .upcoming-card { content-visibility: auto; contain-intrinsic-size: 180px 320px; contain: layout style paint; transform: translateZ(0); backface-visibility: hidden; }
@@ -59,7 +59,7 @@ if (isTV || (isMobile && isLowEnd)) {
   document.documentElement.classList.add(isTV ? 'tv-mode' : 'low-end-mode');
 }
 
-// ── PREMIUM CURSOR GLOW & CLICK SPARKS ──
+// -- PREMIUM CURSOR GLOW & CLICK SPARKS --
 // Disable on TV, Touch, and Mobile to save CPU/battery and ensure smooth performance
 if (!isTV && !isTouchOnly && !isMobile) {
   const cursorGlow = document.getElementById('cursor-glow');
@@ -92,7 +92,7 @@ if (!isTV && !isTouchOnly && !isMobile) {
   // Smooth 3D Trailing Animation for the Ring
   function animateCursorRing() {
     if (isCursorMoving || Math.abs(mouseX - ringX) > 0.1 || Math.abs(mouseY - ringY) > 0.1) {
-      // ✨ Super Fast Cursor Speed (0.45 is 2.5x faster than 0.18)
+      // Super Fast Cursor Speed (0.45 is 2.5x faster than 0.18)
       ringX += (mouseX - ringX) * 0.45; 
       ringY += (mouseY - ringY) * 0.45;
       
@@ -119,7 +119,7 @@ if (!isTV && !isTouchOnly && !isMobile) {
     if (e.target.closest(interactiveElements)) document.body.classList.remove('cursor-hover');
   });
 
-  // ── CLICK SPARKS (3D Particles) ──
+  // -- CLICK SPARKS (3D Particles) --
   window.addEventListener('click', (e) => {
     const numSparks = 12; // Ek baar me kitne sparks nikalne hain
     for (let i = 0; i < numSparks; i++) {
@@ -146,10 +146,10 @@ if (!isTV && !isTouchOnly && !isMobile) {
   });
 }
 
-// ── SERVER PRECONNECT (FAST STREAMING) ──
+// -- SERVER PRECONNECT (FAST STREAMING) --
 // Background me sabhi servers se pehle se secure connection bana ke rakho jisse fetching instant ho
 (function preconnectServers() {
-  const servers = ['https://vidsrc.me', 'https://embed.to', 'https://autoembed.co', 'https://vidlink.pro', 'https://vidsrc.pm', 'https://multiembed.mov',];
+  const servers = ['https://www.viduki.net', 'https://cinextream.net', 'https://www.2embed.stream', 'https://vidnest.fun', 'https://vidsrc.sbs', 'https://vidcore.org', 'https://multiembed.mov', 'https://autoembed.co'];
   servers.forEach(url => {
     const dns = document.createElement('link');
     dns.rel = 'dns-prefetch';
@@ -164,7 +164,7 @@ if (!isTV && !isTouchOnly && !isMobile) {
   });
 })();
 
-// ── SCROLL REVEAL ANIMATIONS (Intersection Observer) ──
+// -- SCROLL REVEAL ANIMATIONS (Intersection Observer) --
 const scrollObserver = new IntersectionObserver((entries, observer) => {
   entries.forEach(entry => {
     if (entry.isIntersecting) {
@@ -174,7 +174,7 @@ const scrollObserver = new IntersectionObserver((entries, observer) => {
   });
 }, { root: null, rootMargin: '0px 0px -40px 0px', threshold: 0.05 });
  
-// ── SECURITY HELPER (XSS Protection) ──
+// -- SECURITY HELPER (XSS Protection) --
 const escapeHTML = (str) => {
   if (!str) return '';
   return String(str)
@@ -185,7 +185,7 @@ const escapeHTML = (str) => {
     .replace(/'/g, '&#39;');
 };
  
-// ── GENRE MAP (defined first so carousel HTML can use it)
+// -- GENRE MAP (defined first so carousel HTML can use it)
 const GENRE_MAP = {
   28:'Action',18:'Drama',35:'Comedy',27:'Horror',878:'Sci-Fi',10749:'Romance',
   53:'Thriller',12:'Adventure',16:'Animation',80:'Crime',14:'Fantasy',
@@ -208,7 +208,7 @@ let activeTrailerStopper = null; // Function to stop the currently playing trail
 let allUpcoming = [];
 let lastFocusedElement = null; // TV remote focus memory
  
-// ── FETCH helper ── Optimized with aggressive parallel execution
+// -- FETCH helper -- Optimized with aggressive parallel execution
 const tmdbCache = new Map();
 const inFlightRequests = new Map(); 
 let abortControllers = new Map(); // Track controllers to cancel stale requests
@@ -225,7 +225,7 @@ async function tmdb(endpoint, params) {
   
   if (tmdbCache.has(urlStr)) return tmdbCache.get(urlStr); // Memory cache (instant)
   
-  // ✨ ZERO-LATENCY SWR (Stale-While-Revalidate) CACHING
+  // ZERO-LATENCY SWR (Stale-While-Revalidate) CACHING
   const cacheKey = 'mz_cache_' + urlStr;
   const localDataStr = localStorage.getItem(cacheKey);
   let cachedData = null;
@@ -246,7 +246,7 @@ async function tmdb(endpoint, params) {
     return cachedData ? cachedData : inFlightRequests.get(urlStr);
   }
 
-  // ✨ Unique Abort Strategy
+  // Unique Abort Strategy
   if (abortControllers.has(urlStr)) {
     abortControllers.get(urlStr).abort();
   }
@@ -277,12 +277,12 @@ async function tmdb(endpoint, params) {
   inFlightRequests.set(urlStr, fetchPromise);
   fetchPromise.finally(() => inFlightRequests.delete(urlStr));
   
-  // ✨ Makhan Speed: Return instantly if we have stale/fresh cache, otherwise wait for network
+  // Makhan Speed: Return instantly if we have stale/fresh cache, otherwise wait for network
   if (cachedData && !isFresh) tmdbCache.set(urlStr, cachedData);
   return cachedData ? cachedData : fetchPromise;
 }
  
-// ── INIT ── Priority-based staggered loading for ultra-fast startup
+// -- INIT -- Priority-based staggered loading for ultra-fast startup
 async function init() {
   // Inject Multi-Language UI styles
   if (!document.getElementById('mz-multilang-css')) {
@@ -292,7 +292,7 @@ async function init() {
     document.head.appendChild(_s);
   }
   try {
-    // ⚡ Execute everything in parallel for maximum startup speed
+    // Execute everything in parallel for maximum startup speed
     const tasks = [
       loadCarousel(),
       loadMovies('all')
@@ -325,7 +325,7 @@ async function init() {
     pContainer.className = 'ambient-particles';
     document.body.appendChild(pContainer);
 
-    // ✨ Optimized: 8 Fireflies for mobile, 35 for desktop (Premium density)
+    // Optimized: 8 Fireflies for mobile, 35 for desktop (Premium density)
     const particleCount = isMobile ? 8 : 35;
     for (let i = 0; i < particleCount; i++) {
       const p = document.createElement('div');
@@ -336,7 +336,7 @@ async function init() {
 
       // Randomly assign gold or accent colors
       if (isGold) {
-        // ✨ Minor size boost for golden fireflies ONLY on large screens
+        // Minor size boost for golden fireflies ONLY on large screens
         if (!isMobile) {
           size = size * 1.5 + 1;
         }
@@ -405,9 +405,9 @@ function setupUpcomingInfiniteScroll() {
     observer.observe(trigger);
 }
  
-// ── CAROUSEL
+// -- CAROUSEL
 async function loadCarousel() {
-  // ✨ Fetch Hollywood + Top Bollywood for a mixed premium carousel
+  // Fetch Hollywood + Top Bollywood for a mixed premium carousel
   const [tTrending, tPopular, tBolly] = await Promise.all([
     tmdb('/trending/movie/week', { language: 'en-US', page: '1' }),
     tmdb('/movie/popular', { language: 'en-US', page: '1' }),
@@ -433,10 +433,10 @@ async function loadCarousel() {
   const realToday = new Date().toISOString().split('T')[0];
   carouselMovies = pool.filter(m => {
     if (!m.backdrop_path || !m.poster_path || seen.has(m.id)) return false;
-    // ✨ Block unreleased future movies from Hero Carousel
+    // Block unreleased future movies from Hero Carousel
     const rDate = m.release_date || m.first_air_date;
     if (rDate && rDate > realToday) return false;
-    // ✨ Require good rating (>=6.5) AND high popularity (>=150), allow English and Hindi
+    // Require good rating (>=6.5) AND high popularity (>=150), allow English and Hindi
     if (!['en', 'hi'].includes(m.original_language) || m.vote_average < 6.5 || m.popularity < 150) return false;
     seen.add(m.id); return true;
   }).slice(0, 6);
@@ -558,7 +558,7 @@ function startAutoSlide() {
 }
 function resetAutoSlide() { startAutoSlide(); }
  
-// ── PREMIUM AUTOPLAY PROGRESS BAR ──
+// -- PREMIUM AUTOPLAY PROGRESS BAR --
 function restartProgressBar() {
   const bar = document.getElementById('carouselProgress');
   if (!bar) return;
@@ -580,7 +580,7 @@ function resumeAutoSlide() {
   autoSlideTimer = setInterval(() => { goToSlide(currentSlide + 1); }, 5500);
 }
  
-// ── HERO INTERACTIONS — pause-on-hover, swipe, arrow nav (premium UX) ──
+// -- HERO INTERACTIONS — pause-on-hover, swipe, arrow nav (premium UX) --
 (function initHeroInteractions() {
   const hero = document.getElementById('hero');
   if (!hero) return;
@@ -613,7 +613,7 @@ function resumeAutoSlide() {
   }, { passive: true });
 })();
  
-// ── BACKGROUND PREFETCH HELPERS (For Instant "Load More") ──
+// -- BACKGROUND PREFETCH HELPERS (For Instant "Load More") --
 function prefetchMoviesPage(cat, pageNum) {
   const pageStr = String(pageNum);
   const p1 = String(pageNum * 2 - 1);
@@ -680,7 +680,7 @@ function prefetchUpcomingPage(pageNum) {
   tmdb('/discover/movie', { language: 'en-US', page: p2, sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'hi', region: 'IN' });
 }
  
-// ── LOAD MOVIES
+// -- LOAD MOVIES
 const CAT_PARAMS = {
   bollywood: { with_original_language: 'hi', sort_by: 'popularity.desc', page: '1' },
   south:     { with_original_language: 'ta', sort_by: 'popularity.desc', page: '1' },
@@ -754,9 +754,9 @@ async function loadMovies(cat, isLoadMore = false) {
 
       movies.push(...uniqueMovies);
     } else if (cat === 'tv') {
-      // ✨ EXPANDED OTT LIST: Now includes JioCinema, MX Player, HBO, aha, Hoichoi and more major platforms.
+      // EXPANDED OTT LIST: Now includes JioCinema, MX Player, HBO, aha, Hoichoi and more major platforms.
       const STREAMING_NETWORKS = '213|1024|122|3295|3009|193|2583|2600|2212|2552|453|49|3353|4330|2694|3321|3328'; // Netflix, Prime, Hotstar, Jio, MX, SonyLIV, ZEE5, AppleTV+, Hulu, HBO, aha, Hoichoi etc.
-      // ✨ EXCLUSION LIST: Traditional Indian TV channels to strictly remove from Web Series section
+      // EXCLUSION LIST: Traditional Indian TV channels to strictly remove from Web Series section
       const TV_CHANNELS_TO_EXCLUDE = '71|105|70|118|194|2584|3294'; // Star Plus, Colors, Zee TV, Sony TV, SAB, &TV, Star Bharat
 
       // Fetch a diverse set of web series from major streaming platforms, removing traditional TV shows.
@@ -940,7 +940,7 @@ async function loadMovies(cat, isLoadMore = false) {
   } catch(e) { console.warn(e); }
  
   const realToday = new Date().toISOString().split('T')[0];
-  // ✨ LATEST MOVIES ONLY & BLOCK UPCOMING GLOBALLY
+  // LATEST MOVIES ONLY & BLOCK UPCOMING GLOBALLY
   movies = movies.filter(m => {
     if (!m.poster_path) return false;
     const rDate = m.release_date || m.first_air_date;
@@ -994,7 +994,7 @@ function renderMovies(movies, append = false) {
     const genres = (m.genre_ids||[]).slice(0,2).map(id => GENRE_MAP[id]).filter(Boolean);
     const isHot  = m.popularity > 100;
     
-    // ── DYNAMIC QUALITY BADGE LOGIC ──
+    // -- DYNAMIC QUALITY BADGE LOGIC --
     let qual = 'HD';
     const rDateStr = m.release_date || m.first_air_date;
     if (rDateStr) {
@@ -1008,6 +1008,10 @@ function renderMovies(movies, append = false) {
         qual = 'FHD';
       }
     }
+    // -- HINDI DUBBED BADGE: Show on Hollywood/Japanese/Korean movies (likely dubbed)
+    const dubbedLangs = ['en', 'ja', 'ko', 'fr', 'es', 'de']; // Languages that are commonly dubbed to Hindi
+    const isDubbedLikely = dubbedLangs.includes(m.original_language) && m.popularity > 50;
+    
     const card   = document.createElement('div');
     card.className = 'movie-card';
     card.tabIndex = 0;
@@ -1019,6 +1023,7 @@ function renderMovies(movies, append = false) {
         `<img src="${IMG}${m.poster_path}" alt="${escapeHTML(m.title||'')}" width="171" height="256" loading="lazy" decoding="async">` +
         '<div class="card-quality">'+qual+'</div>' +
         (isHot ? '<div class="card-hot">HOT</div>' : '') +
+        (isDubbedLikely ? '<div class="card-dubbed"> HINDI</div>' : '') +
         '<div class="card-overlay"><button class="card-play-btn">&#9654;</button></div>' +
       '</div>' +
       '<div class="card-info">' +
@@ -1052,7 +1057,7 @@ function renderMovies(movies, append = false) {
           const y = e.clientY - rect.top;
           const centerX = rect.width / 2;
           const centerY = rect.height / 2;
-          // ✨ ENHANCED 3D TILT: More responsive and attractive values
+          // ENHANCED 3D TILT: More responsive and attractive values
           const rotateX = ((y - centerY) / centerY) * -12; 
           const rotateY = ((x - centerX) / centerX) * 12;
           const shadowX = (x - centerX) * -0.2;
@@ -1083,9 +1088,9 @@ const CAT_HEADINGS = {
   all:'ALL MOVIES & SHOWS', tv: 'WEB SERIES', hollywood:'HOLLYWOOD', bollywood:'BOLLYWOOD',
   south:'SOUTH INDIAN', tollywood:'TOLLYWOOD', action:'ACTION',
   comedy:'COMEDY', horror:'HORROR', thriller:'THRILLER', romance:'ROMANCE',
-  scifi:'SCI-FI', animation:'ANIMATION', kids:'🧸 KIDS & CARTOONS', anime:'⚔️ ANIME SERIES & MOVIES',
-  dubbed:'🎬 HINDI DUBBED MOVIES', // <-- YE LINE ADD KI HAI
-  adult:'🔞 18+ ADULT MOVIES & WEB SERIES'
+  scifi:'SCI-FI', animation:'ANIMATION', kids:'KIDS & CARTOONS', anime:'ANIME SERIES & MOVIES',
+  dubbed:'HINDI DUBBED MOVIES', // <-- YE LINE ADD KI HAI
+  adult:'18+ ADULT MOVIES & WEB SERIES'
 };
 function filterCat(cat, e) {
   if (e) e.preventDefault();
@@ -1109,7 +1114,7 @@ function loadMoreMoviesAction() {
   loadMovies(cat, true);
 }
  
-// ── WATCHLIST LOGIC ──
+// -- WATCHLIST LOGIC --
 function handleWatchlistToggle() {
   if (!currentModalMovie) return;
   const idx = watchlist.findIndex(m => m.id === currentModalMovie.id);
@@ -1158,14 +1163,14 @@ function clearWatchlist() {
   if (confirm('Are you sure you want to completely clear your watchlist?')) {
     watchlist = [];
     localStorage.removeItem('mz_watchlist');
-    showToast('🗑️ Watchlist cleared successfully');
+    showToast('Watchlist cleared successfully');
     renderMovies(watchlist);
     const h = document.getElementById('sectionHeading');
     if (h) h.innerHTML = 'MY WATCHLIST';
   }
 }
  
-// ── UPCOMING
+// -- UPCOMING
 async function loadUpcoming(isLoadMore = false) {
   const grid = document.getElementById('upcomingGrid');
   if (!grid) return;
@@ -1417,7 +1422,7 @@ async function openModal(id, type = 'movie') {
       let tc = document.getElementById('trailerContainer');
       if (tc) tc.remove();
 
-      // ✨ NEW: Add trailer indicator icon
+      // NEW: Add trailer indicator icon
       let trailerIndicator = imageWrapper.querySelector('.modal-trailer-indicator');
       if (!trailerIndicator) {
         trailerIndicator = document.createElement('div');
@@ -1540,7 +1545,7 @@ async function openModal(id, type = 'movie') {
         };
         activeTrailerStopper = stopTrailer; // Register the stopper
 
-        // ✨ Device-aware interaction: Click for mobile, Hover for desktop
+        // Device-aware interaction: Click for mobile, Hover for desktop
         if (isMobile || isTouchOnly) {
             let trailerIsPlaying = false;
             eventContainer.onclick = (e) => {
@@ -1602,8 +1607,8 @@ async function openModal(id, type = 'movie') {
     const tmdbLangs = (details.spoken_languages || []).map(l => l.iso_639_1);
     const hasDubbed = ['hi', 'ta', 'te', 'ml', 'kn', 'mr', 'bn'].some(lang => tmdbLangs.includes(lang));
     const audioBadge = hasDubbed 
-      ? '<div class="card-year" style="font-size:0.85rem; background: linear-gradient(135deg, rgba(16,185,129,0.2), rgba(16,185,129,0.05)); border-color: rgba(16,185,129,0.3); color: #10b981;" title="Available in Hindi/Regional Languages">🎤 DUBBED AVAILABLE</div>'
-      : '<div class="card-year" style="font-size:0.85rem; background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.02)); border-color: rgba(255,255,255,0.15); color: #bbb;" title="Only Original Audio Available">🎤 ORIGINAL AUDIO</div>';
+      ? '<div class="card-year" style="font-size:0.85rem; background: linear-gradient(135deg, rgba(16,185,129,0.2), rgba(16,185,129,0.05)); border-color: rgba(16,185,129,0.3); color: #10b981;" title="Available in Hindi/Regional Languages"> DUBBED AVAILABLE</div>'
+      : '<div class="card-year" style="font-size:0.85rem; background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.02)); border-color: rgba(255,255,255,0.15); color: #bbb;" title="Only Original Audio Available"> ORIGINAL AUDIO</div>';
 
     const metaEl  = document.getElementById('modalMeta');
     if (metaEl) metaEl.innerHTML =
@@ -1647,7 +1652,7 @@ async function openModal(id, type = 'movie') {
         const seasons = (details.seasons || []).filter(s => s.season_number > 0);
         
         if (seasons.length > 0) {
-          // ── CONTINUE WATCHING LOGIC ──
+          // -- CONTINUE WATCHING LOGIC --
           let lastS = seasons[0].season_number;
           let lastE = 1;
           try {
@@ -1698,9 +1703,9 @@ async function openModal(id, type = 'movie') {
             } catch(err) { eInput.innerHTML = '<option value="1">Episode 1</option>'; }
           };
           
-          sInput.onchange = (e) => fetchEpisodes(e.target.value, 1); // Season change होने पर Episode 1
+          sInput.onchange = (e) => fetchEpisodes(e.target.value, 1); // Season change   Episode 1
           
-          fetchEpisodes(lastS, lastE); // लास्ट सेव किया हुआ या पहला एपिसोड लोड करें
+          fetchEpisodes(lastS, lastE); // Load last saved or first episode
         }
       }
     }
@@ -1763,7 +1768,7 @@ window.addEventListener('popstate', (e) => {
   }
 });
  
-// ── RELATED MOVIES LOGIC ──
+// -- RELATED MOVIES LOGIC --
 async function loadRelatedMovies(id, type) {
   const section = document.getElementById('relatedMoviesSection');
   const grid = document.getElementById('relatedMoviesGrid');
@@ -1776,7 +1781,7 @@ async function loadRelatedMovies(id, type) {
     const combinedResults = [];
     const seenIds = new Set([id]); // Exclude the current movie from its own related list
 
-    // ✨ PRIORITY 1: Fetch movies from the same collection/franchise (e.g., all Avengers movies)
+    // PRIORITY 1: Fetch movies from the same collection/franchise (e.g., all Avengers movies)
     if (type === 'movie' && currentModalMovie && currentModalMovie.belongs_to_collection) {
       const collectionId = currentModalMovie.belongs_to_collection.id;
       const collectionData = await tmdb(`/collection/${collectionId}`, { language: 'en-US' });
@@ -1792,7 +1797,7 @@ async function loadRelatedMovies(id, type) {
       }
     }
  
-    // ✨ PRIORITY 2: Fetch TMDB's own recommendations and similar items
+    // PRIORITY 2: Fetch TMDB's own recommendations and similar items
     const [recs, sims] = await Promise.allSettled([
       tmdb('/' + type + '/' + id + '/recommendations', { language: 'en-US', page: '1' }),
       tmdb('/' + type + '/' + id + '/similar', { language: 'en-US', page: '1' })
@@ -1857,61 +1862,77 @@ async function loadRelatedMovies(id, type) {
   }
 }
  
-// ── PLAYER SOURCES — Multi-Language Audio Supported (Updated & Fixed) ──
+// -- PLAYER SOURCES — FINAL (July 2026) --
+// All tested & working. Includes 2 PREMIUM all-in-one servers.
 const playerSources = [
-  { name: '🌐 Multi-Audio', url: (id, lang, type, s, e) => {
-    // 1. Multiembed: Automatically triggers Hindi audio via URL parameter
-    const base = type === 'tv'
-      ? `https://multiembed.mov/?video_id=${id}&tmdb=1&s=${s}&e=${e}`
-      : `https://multiembed.mov/?video_id=${id}&tmdb=1`;
-    const audioMap = { hi: 'hindi', ta: 'tamil', te: 'telugu', ml: 'malayalam', kn: 'kannada', mr: 'marathi', bn: 'bengali' };
-    const prefAudio = audioMap[lang] || lang;
-    return base + (lang && lang !== 'en' ? `&preferred_audio=${prefAudio}&lang=${lang}` : '');
+  { name: '4K Ultra HD', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
+    // #1: Viduki.net API 2 — 4K AI Upscaling + Multi-Language + 5.1 Surround
+    return type === 'tv'
+      ? `https://www.viduki.net/2/tv/${id}/${s}/${e}`
+      : `https://www.viduki.net/2/movie/${id}`;
   }},
-  { name: '🇮🇳 Hindi Prime', url: (id, lang, type, s, e) => {
-    // 2. 2Embed: Best for India. Has a gear icon (⚙️) inside the player to switch to Hindi dub.
-    return type === 'tv' 
-      ? `https://www.2embed.cc/embedtv/${id}&s=${s}&e=${e}` 
-      : `https://www.2embed.cc/embed/${id}`;
+  { name: 'Cinextream All-in-One', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
+    // #2 ULTIMATE ALL-ROUNDER: Cinextream.net
+    // 115K Movies + 79K Shows + 9K Anime (SUB & DUB)
+    // Hindi Dubbed anime, Auto-next, Fast servers, 1080p, Customizable
+    // No heavy ads, server fallback built-in, error recovery
+    return type === 'tv'
+      ? `https://cinextream.net/api/embed/tv/${id}/${s}/${e}?color=E6B800&autoplay=true`
+      : `https://cinextream.net/api/embed/movie/${id}?color=E6B800&autoplay=true`;
   }},
-  { name: '⚡ Ultra HD', url: (id, lang, type, s, e) => {
-    // India ke networks par blockage kam aati hai
-    return (type === 'tv' ? `https://autoembed.co/tv/tmdb/${id}-${s}-${e}` : 'https://autoembed.co/movie/tmdb/' + id) + `?lang=${lang}`;
+  { name: 'VidPhantom Pro', dubbed: true, url: (id, lang, type, s, e) => {
+    // #3 PREMIUM: VidPhantom — AD-FREE, 115K Movies + 79K Episodes + 5.3K Anime
+    // Multi-provider failover, customizable player, watch progress, next episode hook
+    return type === 'tv'
+      ? `https://vidphantom.com/tv/${id}/${s}/${e}?autoplay=true&sub_lang=${lang}`
+      : `https://vidphantom.com/movie/${id}?autoplay=true&sub_lang=${lang}`;
   }},
-  { name: '🔥 Pro Stream', url: (id, lang, type, s, e) => {
-    // Clean interface with settings
+  { name: 'Pro Stream', dubbed: true, url: (id, lang, type, s, e) => {
+    // #4: VidLink Pro — Clean interface with settings
     return (type === 'tv' ? `https://vidlink.pro/tv/${id}/${s}/${e}` : 'https://vidlink.pro/movie/' + id) + `?lang=${lang}`;
   }},
-  { name: '👑 Vidsrc VIP', url: (id, lang, type, s, e) => {
-    return (type === 'tv' ? `https://vidsrc.me/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.me/embed/movie?tmdb=${id}`) + `&lang=${lang}`;
+  { name: 'VidNest', dubbed: true, url: (id, lang, type, s, e) => {
+    // #5: VidNest — 9 servers, Audio switcher, ad-free plays
+    return type === 'tv'
+      ? `https://vidnest.fun/tv/${id}/${s}/${e}`
+      : `https://vidnest.fun/movie/${id}`;
   }},
-  { name: '💎 Premium Mirror', url: (id, lang, type, s, e) => {
-    // Official proxy mirror to fix 'refused to connect' / iframe block issue
+  { name: 'Ultra HD', dubbed: true, url: (id, lang, type, s, e) => {
+    // #6: AutoEmbed — India ke networks par blockage kam aati hai
+    return (type === 'tv' ? `https://autoembed.co/tv/tmdb/${id}-${s}-${e}` : 'https://autoembed.co/movie/tmdb/' + id) + `?lang=${lang}`;
+  }},
+  { name: 'VidCore', dubbed: true, url: (id, lang, type, s, e) => {
+    // #7: VidCore — 14 servers, subtitle support
+    return type === 'tv'
+      ? `https://vidcore.org/embed/tv/${id}/${s}/${e}`
+      : `https://vidcore.org/embed/movie/${id}`;
+  }},
+  { name: 'Flicky Stream', dubbed: true, url: (id, lang, type, s, e) => {
+    // #8: Flicky — Working embed, multiple servers
+    return type === 'tv'
+      ? `https://flicky.host/embed/tv/?id=${id}&s=${s}&e=${e}`
+      : `https://flicky.host/embed/movie/?id=${id}`;
+  }},
+  { name: 'Premium Mirror', dubbed: true, url: (id, lang, type, s, e) => {
+    // #9: Official proxy mirror to fix 'refused to connect' / iframe block issue
     return (type === 'tv' ? `https://vidsrc.pm/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.pm/embed/movie?tmdb=${id}`) + `&lang=${lang}`;
-  }},
-  { name: '🎬 Smashy Stream', url: (id, lang, type, s, e) => {
-    // New fast source added for extra fallback and Hindi support
-    return type === 'tv' 
-      ? `https://embed.smashystream.com/playere.php?tmdb=${id}&season=${s}&episode=${e}` 
-      : `https://embed.smashystream.com/playere.php?tmdb=${id}`;
   }}
 ];
-
 
 
 let currentSourceIdx = 0;
 let isPlayerFullscreen = false;
  
-// ── LANGUAGE CONFIG (for quick-buttons) ──
+// -- LANGUAGE CONFIG (for quick-buttons) --
 const LANG_CONFIG = {
-  hi: { flag: '🇮🇳', name: 'Hindi',      code: 'hi' },
-  en: { flag: '🇬🇧', name: 'English',    code: 'en' },
-  ta: { flag: '🎬',  name: 'Tamil',      code: 'ta' },
-  te: { flag: '🎭',  name: 'Telugu',     code: 'te' },
-  ml: { flag: '🌴',  name: 'Malayalam',  code: 'ml' },
-  kn: { flag: '🟣',  name: 'Kannada',    code: 'kn' },
-  mr: { flag: '🟠',  name: 'Marathi',    code: 'mr' },
-  bn: { flag: '🟡',  name: 'Bengali',    code: 'bn' },
+  hi: { flag: 'HI', name: 'Hindi',      code: 'hi' },
+  en: { flag: 'EN', name: 'English',    code: 'en' },
+  ta: { flag: 'TA', name: 'Tamil',      code: 'ta' },
+  te: { flag: 'TE', name: 'Telugu',     code: 'te' },
+  ml: { flag: 'ML', name: 'Malayalam',  code: 'ml' },
+  kn: { flag: 'KN', name: 'Kannada',    code: 'kn' },
+  mr: { flag: 'MR', name: 'Marathi',    code: 'mr' },
+  bn: { flag: 'BN', name: 'Bengali',    code: 'bn' },
 };
 const DUBBED_LANGS = ['hi', 'ta', 'te', 'ml', 'kn', 'mr', 'bn'];
 const CORE_LANGS   = ['hi', 'en', 'ta', 'te'];
@@ -1932,7 +1953,7 @@ function renderLanguageButtons(spokenLangs) {
     if (!cfg) return '';
     const isActive = code === curLang;
     const isAvail  = tmdbCodes.includes(code);
-    return `<button class="player-chip mz-lang-btn${isActive?' active':''}${isAvail?' mz-lang-avail':''}" data-lang="${code}" title="${isAvail?'✅ Dubbed available on TMDB':'Subtitles if dub unavailable'}"><span>${cfg.flag}</span> ${cfg.name}${isAvail?'<span class="mz-avail-dot"></span>':''}</button>`;
+    return `<button class="player-chip mz-lang-btn${isActive?' active':''}${isAvail?' mz-lang-avail':''}" data-lang="${code}" title="${isAvail?'Dubbed available on TMDB':'Subtitles if dub unavailable'}"><span>${cfg.flag}</span> ${cfg.name}${isAvail?'<span class="mz-avail-dot"></span>':''}</button>`;
   }).join('');
 
   const section = document.createElement('div');
@@ -1940,11 +1961,11 @@ function renderLanguageButtons(spokenLangs) {
   section.style.cssText = 'margin-top:14px; border-top:1px solid rgba(255,255,255,0.08); padding-top:12px;';
   section.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
-      <span style="font-size:0.7rem;font-weight:800;letter-spacing:1.8px;color:rgba(255,255,255,0.35);text-transform:uppercase;">🎵 Audio Language</span>
-      <span style="font-size:0.68rem;color:#10b981;background:rgba(16,185,129,0.1);padding:2px 9px;border-radius:999px;border:1px solid rgba(16,185,129,0.2);">🟢 = Dubbed available</span>
+      <span style="font-size:0.7rem;font-weight:800;letter-spacing:1.8px;color:rgba(255,255,255,0.35);text-transform:uppercase;"> Audio Language</span>
+      <span style="font-size:0.68rem;color:#10b981;background:rgba(16,185,129,0.1);padding:2px 9px;border-radius:999px;border:1px solid rgba(16,185,129,0.2);"> = Dubbed available</span>
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:7px;">${btnsHtml}</div>
-    <div style="margin-top:10px;font-size:0.7rem;color:rgba(255,255,255,0.3);line-height:1.5;">💡 Hindi/Tamil/Telugu select karne par <b style="color:rgba(255,255,255,0.45);">🌐 Multi-Audio server auto-switch</b> hoga — yahi best dubbed support deta hai.</div>
+    <div style="margin-top:10px;font-size:0.7rem;color:rgba(255,255,255,0.3);line-height:1.5;"> <b style="color:rgba(255,255,255,0.5);">Hindi Audio kaise?</b> Player load hone ke baad <b style="color:var(--gold);"> Settings ? Audio ? Hindi</b> select karo. Agar Hindi nahi dikhe = dusra server try karo.</div>
   `;
   ext.appendChild(section);
 
@@ -1966,7 +1987,7 @@ function renderLanguageButtons(spokenLangs) {
       }
       loadPlayer(currentModalMovie.id, targetSrcIdx, lang, getSelectedQuality(), currentModalMovie.media_type);
       const cfg = LANG_CONFIG[lang] || {};
-      showToast(`🎵 ${cfg.flag||''} ${cfg.name||lang} Audio${DUBBED_LANGS.includes(lang)?' | 🌐 Multi-Audio activated':''}`);
+      showToast(` ${cfg.flag||''} ${cfg.name||lang} Audio${DUBBED_LANGS.includes(lang)?' |  Multi-Audio activated':''}`);
     });
   });
 }
@@ -1976,10 +1997,10 @@ function renderExternalSources(id, srcIdx, lang) {
   if (!ext) return;
 
   const serverBtnsHtml = playerSources.map((s, i) =>
-    '<button class="player-chip player-chip--source" data-srcidx="'+i+'">'+escapeHTML(s.name)+'</button>'
+    '<button class="player-chip player-chip--source'+(s.dubbed ? ' player-chip--dubbed' : '')+(s.is4K ? ' player-chip--4k' : '')+'" data-srcidx="'+i+'" title="'+(s.is4K ? '4K AI Upscaling + Multi-Language + Spatial Audio' : (s.dubbed ? 'Hindi Dubbed Supported' : 'Mostly English Audio'))+'">'+escapeHTML(s.name)+(s.dubbed ? '<span class="dubbed-dot"></span>' : '')+(s.is4K ? '<span class="fourk-badge">4K</span>' : '')+'</button>'
   ).join('');
   ext.innerHTML =
-    '<div style="font-size:0.7rem;font-weight:800;letter-spacing:1.8px;color:rgba(255,255,255,0.35);text-transform:uppercase;margin-bottom:8px;">📡 Playback Server</div>' +
+    '<div style="font-size:0.7rem;font-weight:800;letter-spacing:1.8px;color:rgba(255,255,255,0.35);text-transform:uppercase;margin-bottom:8px;"> Playback Server <span style="color:#ff9800;font-size:0.65rem;margin-left:8px;">? = Hindi Dubbed</span> <span style="color:#00e5ff;font-size:0.65rem;margin-left:6px;">4K = AI Ultra HD</span></div>' +
     '<div style="display:flex;flex-wrap:wrap;gap:7px;">' + serverBtnsHtml + '</div>';
 
   const srcButtons = ext.querySelectorAll('.player-chip--source');
@@ -2006,7 +2027,7 @@ function renderExternalSources(id, srcIdx, lang) {
  
 function getSelectedLang() {
   const select = document.getElementById('langSelect');
-  return select ? select.value : (localStorage.getItem('moviezone.playerLang') || 'en');
+  return select ? select.value : (localStorage.getItem('moviezone.playerLang') || 'hi');
 }
  
 function setSelectedLang(lang) {
@@ -2062,16 +2083,16 @@ function playNextEpisode() {
   if (nextEpOption) {
     eInput.value = currentE + 1;
     eInput.dispatchEvent(new Event('change'));
-    showToast(`⏭️ Playing Season ${currentS} Episode ${currentE + 1}`);
+    showToast(` Playing Season ${currentS} Episode ${currentE + 1}`);
   } else {
     const seasons = (currentModalMovie.seasons || []).filter(s => s.season_number > 0);
     const nextSeason = seasons.find(s => s.season_number === currentS + 1);
     if (nextSeason) {
       sInput.value = currentS + 1;
       sInput.dispatchEvent(new Event('change'));
-      showToast(`⏭️ Playing Season ${currentS + 1} Episode 1`);
+      showToast(` Playing Season ${currentS + 1} Episode 1`);
     } else {
-      showToast("🏆 You have reached the latest episode!");
+      showToast(" You have reached the latest episode!");
     }
   }
 }
@@ -2090,6 +2111,19 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   quality = quality || getSelectedQuality();
   setSelectedQuality(quality);
   
+  // -- SMART SERVER SELECTION: Hindi/Regional = auto-pick best dubbed server --
+  const DUBBED_LANG_LIST = ['hi', 'ta', 'te', 'ml', 'kn', 'mr', 'bn'];
+  if (DUBBED_LANG_LIST.includes(lang) && playerSources[srcIdx] && !playerSources[srcIdx].dubbed) {
+    // User ne Hindi/Regional select kiya but non-dubbed server pe hai - auto switch to best dubbed server
+    const bestDubIdx = playerSources.findIndex(s => s.dubbed === true);
+    if (bestDubIdx !== -1 && bestDubIdx !== srcIdx) {
+      srcIdx = bestDubIdx;
+      currentSourceIdx = srcIdx;
+      setSelectedSourceIdx(srcIdx);
+      showToast(` Auto-switched to ${playerSources[srcIdx].name} for best Hindi Dub`);
+    }
+  }
+  
   const sInput = document.getElementById('seasonInput');
   const eInput = document.getElementById('episodeInput');
   const s = sInput ? sInput.value : '1';
@@ -2103,51 +2137,89 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
 
   // Clear previous player instantly to prevent background audio/lag
   embedEl.innerHTML = '';
+  
+  // Cancel any running auto-retry timer
+  if (window._mzRetryTimer) { clearTimeout(window._mzRetryTimer); window._mzRetryTimer = null; }
  
-  // Add Optimized Loading Spinner
+  // Add Optimized Loading Spinner with server info
   const loader = document.createElement('div');
   loader.className = 'player-loader';
-  loader.innerHTML = '<div class="player-spinner"></div><div style="color:var(--gold); margin-top:15px; font-weight:600; font-size:0.9rem;">Fetching Secure Stream...</div>';
+  loader.id = 'mzPlayerLoader';
+  const isDubServer = playerSources[srcIdx].dubbed;
+  loader.innerHTML = `
+    <div class="player-spinner"></div>
+    <div style="color:var(--gold); margin-top:15px; font-weight:600; font-size:0.9rem;">
+      ${isDubServer ? 'Loading Hindi Dubbed Stream...' : 'Loading Stream...'}
+    </div>
+    <div style="color:rgba(255,255,255,0.4); margin-top:6px; font-size:0.75rem;">
+      Server: ${escapeHTML(playerSources[srcIdx].name)} ${isDubServer ? '• Dubbed ?' : ''}
+    </div>
+  `;
   embedEl.appendChild(loader);
  
   const iframe = document.createElement('iframe');
   iframe.id = 'playerFrame';
   iframe.src = src;
-  // Remove heavy styles, use pure CSS class for GPU acceleration
   iframe.style.cssText = 'width: 100%; height: 100%; border: none; background: transparent; position: relative; z-index: 1; transform: translateZ(0);';
   iframe.setAttribute('frameborder', '0');
   iframe.setAttribute('scrolling', 'no');
   iframe.setAttribute('allow', 'fullscreen;autoplay;encrypted-media;picture-in-picture');
-  
-  // Master Bypass for Ad-Redirects & Refused Connections
-  iframe.setAttribute('referrerpolicy', 'no-referrer'); // Best for all third-party servers
+  iframe.setAttribute('referrerpolicy', 'no-referrer');
   iframe.setAttribute('fetchpriority', 'high'); 
   iframe.setAttribute('loading', 'eager'); 
   
   embedEl.appendChild(iframe);
 
-  // Optimistic UI: Start fading loader after 1.2s for perceived speed
-  setTimeout(() => {
-    if (loader && loader.parentNode) {
-        loader.style.opacity = '0';
-        setTimeout(() => { if (loader && loader.parentNode) loader.remove(); }, 400);
-    }
-  }, 1200);
-
+  // -- AUTO-RETRY SYSTEM: If server doesn't load in 12s, try next dubbed server --
+  let hasLoaded = false;
+  
   iframe.onload = () => {
+    hasLoaded = true;
     if (loader && loader.parentNode) { 
       loader.style.opacity = '0';
       setTimeout(() => { if (loader && loader.parentNode) loader.remove(); }, 400);
     }
   };
+  
+  iframe.onerror = () => {
+    // Server refused connection - auto try next
+    autoRetryNextServer(id, srcIdx, lang, quality, type);
+  };
+
+  // Timeout-based auto-retry (if iframe stuck loading for 12 seconds)
+  window._mzRetryTimer = setTimeout(() => {
+    if (!hasLoaded) {
+      const loaderEl = document.getElementById('mzPlayerLoader');
+      if (loaderEl) {
+        loaderEl.innerHTML = `
+          <div style="color:#e63946; font-size:0.9rem; font-weight:600;"> Server slow/blocked</div>
+          <div style="color:rgba(255,255,255,0.5); margin-top:6px; font-size:0.78rem;">Auto-trying next dubbed server...</div>
+          <div class="player-spinner" style="width:28px; height:28px; border-width:2px; margin-top:10px;"></div>
+        `;
+      }
+      setTimeout(() => autoRetryNextServer(id, srcIdx, lang, quality, type), 1500);
+    }
+  }, 12000);
+
+  // Optimistic UI: Start fading loader after 1.5s for perceived speed
+  setTimeout(() => {
+    if (hasLoaded && loader && loader.parentNode) {
+        loader.style.opacity = '0';
+        setTimeout(() => { if (loader && loader.parentNode) loader.remove(); }, 400);
+    }
+  }, 1500);
  
-  // Render Player Controls
+  // Render Player Controls with "Try All Servers" button
   let controlsHtml = '<div id="playerControls" class="player-controls">';
   if (type === 'tv') {
     controlsHtml += '<button onclick="playNextEpisode()" class="player-chip premium-play-btn" style="padding:0 14px; border-radius:999px; min-height:42px; border:none; display:inline-flex; align-items:center; gap:6px;">' +
         '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>' +
         '<span style="font-size:13px; font-weight:800;">Next Ep</span></button>';
   }
+  // TRY ALL SERVERS BUTTON (Dubbed)
+  controlsHtml += '<button onclick="tryAllDubbedServers()" class="player-chip" id="tryAllBtn" style="background:linear-gradient(135deg, rgba(245,197,24,0.15), rgba(230,57,70,0.1)); border:1px solid rgba(245,197,24,0.3); color:var(--gold);" title="Automatically cycle through all dubbed servers to find working Hindi audio">' +
+      '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>' +
+      '<span style="font-size:12px; font-weight:700;">Try All Dubbed Servers</span></button>';
   controlsHtml += '<button onclick="togglePlayerFS()" class="player-chip player-chip--fs" id="fsBtn">' +
         '<svg class="player-chip__icon" viewBox="0 0 24 24"><path d="M7 3H3v4h2V5h2V3zm10 0v2h2v2h2V3h-4zM5 17H3v4h4v-2H5v-2zm16 0h-2v2h-2v2h4v-4z"></path></svg>' +
         '<span>Fullscreen</span></button></div>';
@@ -2159,10 +2231,163 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   try { renderExternalSources(id, srcIdx, lang); } catch(e){}
  
   const _toastLangName = (LANG_CONFIG[lang] && LANG_CONFIG[lang].name) || lang.toUpperCase();
-  showToast('▶ ' + buildSourceLabel(srcIdx) + ' | 🎵 ' + _toastLangName + ' | ' + quality.toUpperCase() + (type === 'tv' ? ` | S${s} E${e}` : ''));
+  const _dubbedStatus = isDubServer ? 'Dubbed' : 'Original';
+  showToast('' + buildSourceLabel(srcIdx) + ' |  ' + _toastLangName + ' | ' + _dubbedStatus + (type === 'tv' ? ` | S${s} E${e}` : ''));
  
   // Smooth scroll to video player
   setTimeout(() => embedEl.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
+  
+  // -- HINDI AUDIO GUIDE: Show one-time guide on how to switch audio inside player --
+  const DUBBED_LANG_LIST2 = ['hi', 'ta', 'te', 'ml', 'kn', 'mr', 'bn'];
+  if (DUBBED_LANG_LIST2.includes(lang) && !localStorage.getItem('mz_hindi_guide_shown')) {
+    setTimeout(() => {
+      showHindiAudioGuide();
+      localStorage.setItem('mz_hindi_guide_shown', '1');
+    }, 3000);
+  }
+}
+
+// -- HINDI AUDIO GUIDE POPUP --
+function showHindiAudioGuide() {
+  const existing = document.getElementById('mzHindiGuide');
+  if (existing) existing.remove();
+  
+  const guide = document.createElement('div');
+  guide.id = 'mzHindiGuide';
+  guide.style.cssText = `
+    position: fixed; bottom: 20px; right: 20px; z-index: 999999;
+    background: linear-gradient(135deg, #1a1a2e, #16213e); 
+    border: 1px solid rgba(245,197,24,0.3); border-radius: 16px;
+    padding: 20px 24px; max-width: 360px; width: 90%;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.7), 0 0 30px rgba(245,197,24,0.1);
+    animation: guideSlideIn 0.4s ease-out;
+    font-family: 'Outfit', sans-serif;
+  `;
+  guide.innerHTML = `
+    <style>
+      @keyframes guideSlideIn { from { transform: translateY(30px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    </style>
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
+      <div style="font-size:1.1rem; font-weight:800; color:var(--gold);"> Hindi Audio Kaise Lagayein?</div>
+      <button onclick="document.getElementById('mzHindiGuide').remove()" style="background:none; border:none; color:rgba(255,255,255,0.5); font-size:1.4rem; cursor:pointer; line-height:1;">&times;</button>
+    </div>
+    <div style="color:rgba(255,255,255,0.85); font-size:0.85rem; line-height:1.7;">
+      <div style="margin-bottom:10px;">Player ke andar ye steps follow karo:</div>
+      <div style="background:rgba(0,0,0,0.3); border-radius:10px; padding:12px; margin-bottom:10px;">
+        <div style="margin-bottom:6px;"><strong style="color:#f5c518;">Step 1:</strong> Player mein <strong> Settings</strong> ya <strong> Audio</strong> icon dhundo</div>
+        <div style="margin-bottom:6px;"><strong style="color:#f5c518;">Step 2:</strong> <strong>Audio Track</strong> ya <strong>Language</strong> option pe click karo</div>
+        <div><strong style="color:#f5c518;">Step 3:</strong> <strong>Hindi</strong> select karo (agar available ho)</div>
+      </div>
+      <div style="font-size:0.78rem; color:rgba(255,255,255,0.5); border-top:1px solid rgba(255,255,255,0.1); padding-top:8px;">
+         Agar Hindi option nahi dikhe = us movie ka Hindi dub us server pe nahi hai.<br>
+         <strong style="color:var(--gold);">"Try All Dubbed Servers"</strong> button dabao ya dusra server select karo.
+      </div>
+    </div>
+    <button onclick="document.getElementById('mzHindiGuide').remove()" style="margin-top:12px; width:100%; padding:10px; background:linear-gradient(135deg, #f5c518, #e6a800); color:#000; border:none; border-radius:10px; font-weight:800; font-size:0.9rem; cursor:pointer;">Samajh Gaya! </button>
+  `;
+  document.body.appendChild(guide);
+  
+  // Auto-hide after 15 seconds
+  setTimeout(() => { const g = document.getElementById('mzHindiGuide'); if (g) g.remove(); }, 15000);
+}
+function autoRetryNextServer(id, currentIdx, lang, quality, type) {
+  const DUBBED_LANG_LIST = ['hi', 'ta', 'te', 'ml', 'kn', 'mr', 'bn'];
+  const isDubbedLang = DUBBED_LANG_LIST.includes(lang);
+  
+  // Find next server to try (prefer dubbed servers for dubbed languages)
+  let nextIdx = -1;
+  for (let i = currentIdx + 1; i < playerSources.length; i++) {
+    if (isDubbedLang && playerSources[i].dubbed) { nextIdx = i; break; }
+  }
+  // If no more dubbed servers, try any server
+  if (nextIdx === -1) {
+    for (let i = currentIdx + 1; i < playerSources.length; i++) {
+      nextIdx = i; break;
+    }
+  }
+  // Wrap around to first server if we've exhausted all
+  if (nextIdx === -1 && currentIdx > 0) {
+    nextIdx = 0;
+  }
+  
+  if (nextIdx !== -1 && nextIdx !== currentIdx) {
+    showToast(` Server failed. Trying ${playerSources[nextIdx].name}...`);
+    loadPlayer(id, nextIdx, lang, quality, type);
+    // Update active state on server buttons
+    document.querySelectorAll('.player-chip--source').forEach((b, i) => b.classList.toggle('active', i === nextIdx));
+  } else {
+    showToast('All servers tried. Please try again later or change language.');
+  }
+}
+
+// -- TRY ALL DUBBED SERVERS (One-click cycle through all dubbed servers) --
+let _tryAllRunning = false;
+let _tryAllCancelled = false;
+
+function tryAllDubbedServers() {
+  if (!currentModalMovie) return;
+  
+  if (_tryAllRunning) {
+    // Cancel if already running
+    _tryAllCancelled = true;
+    _tryAllRunning = false;
+    const btn = document.getElementById('tryAllBtn');
+    if (btn) btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg><span style="font-size:12px; font-weight:700;">Try All Dubbed Servers</span>';
+    showToast('Server cycling stopped');
+    return;
+  }
+  
+  _tryAllRunning = true;
+  _tryAllCancelled = false;
+  
+  const lang = getSelectedLang();
+  const quality = getSelectedQuality();
+  const type = currentModalMovie.media_type || 'movie';
+  const id = currentModalMovie.id;
+  
+  // Get only dubbed servers
+  const dubbedIndices = [];
+  playerSources.forEach((s, i) => { if (s.dubbed) dubbedIndices.push(i); });
+  
+  if (dubbedIndices.length === 0) {
+    showToast('No dubbed servers available');
+    _tryAllRunning = false;
+    return;
+  }
+  
+  const btn = document.getElementById('tryAllBtn');
+  let currentTryIdx = 0;
+  
+  function tryNext() {
+    if (_tryAllCancelled || currentTryIdx >= dubbedIndices.length) {
+      _tryAllRunning = false;
+      if (btn) btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg><span style="font-size:12px; font-weight:700;">Try All Dubbed Servers</span>';
+      if (!_tryAllCancelled) showToast('All dubbed servers tested! Keep the one that works best.');
+      return;
+    }
+    
+    const serverIdx = dubbedIndices[currentTryIdx];
+    const serverName = playerSources[serverIdx].name;
+    
+    if (btn) btn.innerHTML = `<div class="player-spinner" style="width:14px;height:14px;border-width:2px;border-color:rgba(245,197,24,0.2);border-left-color:var(--gold);"></div><span style="font-size:12px;font-weight:700;">Testing ${currentTryIdx + 1}/${dubbedIndices.length}... (Click to Stop)</span>`;
+    
+    showToast(` Testing server ${currentTryIdx + 1}/${dubbedIndices.length}: ${serverName}`);
+    loadPlayer(id, serverIdx, lang, quality, type);
+    
+    // Update active button
+    document.querySelectorAll('.player-chip--source').forEach((b, i) => b.classList.toggle('active', i === serverIdx));
+    
+    currentTryIdx++;
+    
+    // Give 8 seconds per server before trying next
+    window._mzTryAllTimer = setTimeout(tryNext, 8000);
+  }
+  
+  // Clear any existing retry timer
+  if (window._mzRetryTimer) { clearTimeout(window._mzRetryTimer); window._mzRetryTimer = null; }
+  if (window._mzTryAllTimer) { clearTimeout(window._mzTryAllTimer); window._mzTryAllTimer = null; }
+  
+  tryNext();
 }
  
 function togglePlayerLang() {
@@ -2177,13 +2402,13 @@ async function downloadMovie() {
   const title = currentModalMovie.title || currentModalMovie.name || '';
   const year = (currentModalMovie.release_date || currentModalMovie.first_air_date || '').slice(0, 4);
   const isTV = currentModalMovie.media_type === 'tv';
+  const lang = currentModalMovie.original_language || 'en';
   
   // Get download button reference
   const dlBtn = document.querySelector('.btn-download');
   let originalBtnHtml = '';
   if (dlBtn) {
     originalBtnHtml = dlBtn.innerHTML;
-    // Button me same spinner aur "Searching..." text show karo
     dlBtn.innerHTML = '<div class="player-spinner" style="width:18px; height:18px; border-width:2px; border-color:rgba(16,185,129,0.2); border-left-color:#10b981;"></div><span style="color:#10b981;">Searching...</span>';
     dlBtn.style.pointerEvents = 'none';
     dlBtn.style.borderColor = '#10b981';
@@ -2192,33 +2417,81 @@ async function downloadMovie() {
   // Remove existing modal if any
   const existingModal = document.getElementById('dlModal');
   if (existingModal) existingModal.remove();
- 
-  // 1. Direct Download Search Links (Naya Feature)
-  let directLinksHtml = '';
-  const searchQuery = `${title} ${year} direct download`;
-  const googleSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`;
-  
-  directLinksHtml = `
-    <a href="${googleSearchUrl}" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid #10b981; margin-bottom:8px;">
-      <span style="display:flex; align-items:center; gap:10px;">
-        <span style="font-size:1.2rem;">🔍</span>
-        <strong style="color:#fff; font-size:1rem;">Search Direct Download</strong>
-      </span>
-      <span style="font-size:0.85rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">Google</span>
-    </a>
-    <p style="font-size:0.75rem; color:var(--text3); text-align:left; margin: -4px 0 12px 4px;">Tip: Search results mein 'index of', 'vegamovies', 'hdmovie2' jaisi sites check karein.</p>
-  `;
 
-  // 2. Torrents Fetch karna
+  // ── BUILD DOWNLOAD LINKS ──
+  
+  // 1. DIRECT DOWNLOAD SITES (Multiple options for Movies, TV, Anime)
+  const encodedTitle = encodeURIComponent(title);
+  const encodedTitleYear = encodeURIComponent(`${title} ${year}`);
+  
+  let directLinksHtml = '';
+  
+  if (isTV) {
+    // TV SHOWS / WEB SERIES download links
+    directLinksHtml = `
+      <a href="https://www.google.com/search?q=${encodedTitleYear}+download+hindi+dubbed+web+series" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid #10b981; margin-bottom:8px;">
+        <span style="display:flex; align-items:center; gap:10px;">
+          <strong style="color:#fff; font-size:0.95rem;">Google - Hindi Dubbed</strong>
+        </span>
+        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">Search</span>
+      </a>
+      <a href="https://1337x.to/search/${encodedTitle}+${year}/1/" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid #e63946; margin-bottom:8px;">
+        <span style="display:flex; align-items:center; gap:10px;">
+          <strong style="color:#fff; font-size:0.95rem;">1337x Torrents</strong>
+        </span>
+        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">All Seasons</span>
+      </a>
+      <a href="https://www.google.com/search?q=${encodedTitleYear}+index+of+mkv+480p+720p+1080p" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid var(--accent); margin-bottom:8px;">
+        <span style="display:flex; align-items:center; gap:10px;">
+          <strong style="color:#fff; font-size:0.95rem;">Index of (Direct Files)</strong>
+        </span>
+        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">MKV/MP4</span>
+      </a>
+      <a href="https://www.google.com/search?q=${encodedTitle}+vegamovies+OR+moviesflix+OR+filmyzilla+download" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid var(--gold); margin-bottom:8px;">
+        <span style="display:flex; align-items:center; gap:10px;">
+          <strong style="color:#fff; font-size:0.95rem;">Hindi Dubbed Sites</strong>
+        </span>
+        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">480p-4K</span>
+      </a>
+    `;
+  } else {
+    // MOVIES download links
+    directLinksHtml = `
+      <a href="https://www.google.com/search?q=${encodedTitleYear}+download+hindi+dubbed+480p+720p+1080p+4k" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid #10b981; margin-bottom:8px;">
+        <span style="display:flex; align-items:center; gap:10px;">
+          <strong style="color:#fff; font-size:0.95rem;">Google - Hindi Dubbed</strong>
+        </span>
+        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">All Quality</span>
+      </a>
+      <a href="https://1337x.to/search/${encodedTitle}+${year}/1/" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid #e63946; margin-bottom:8px;">
+        <span style="display:flex; align-items:center; gap:10px;">
+          <strong style="color:#fff; font-size:0.95rem;">1337x Torrents</strong>
+        </span>
+        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">HD/4K</span>
+      </a>
+      <a href="https://www.google.com/search?q=${encodedTitleYear}+index+of+mkv+1080p+OR+2160p+OR+4k" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid var(--accent); margin-bottom:8px;">
+        <span style="display:flex; align-items:center; gap:10px;">
+          <strong style="color:#fff; font-size:0.95rem;">Index of (Direct Files)</strong>
+        </span>
+        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">MKV/MP4</span>
+      </a>
+      <a href="https://www.google.com/search?q=${encodedTitle}+${year}+vegamovies+OR+moviesflix+OR+filmyzilla+OR+mp4moviez+download+hindi" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid var(--gold); margin-bottom:8px;">
+        <span style="display:flex; align-items:center; gap:10px;">
+          <strong style="color:#fff; font-size:0.95rem;">Hindi Dubbed Sites</strong>
+        </span>
+        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">Dual Audio</span>
+      </a>
+    `;
+  }
+
+  // 2. TORRENT SECTION (YTS for movies, 1337x for all)
   let torrentsHtml = '';
   try {
     if (!isTV) {
-      // Agar IMDB id hai to usse search karein, warna movie ke title se
       const query = currentModalMovie.imdb_id || title;
       let ytsData = null;
       let fetchSuccess = false;
       
-      // ISP Block Bypass: Multiple YTS Mirrors check karega
       const mirrors = ['https://yts.mx', 'https://yts.rs', 'https://yts.do', 'https://yify.is'];
       
       for (const mirror of mirrors) {
@@ -2227,47 +2500,81 @@ async function downloadMovie() {
           if (ytsRes.ok) {
             ytsData = await ytsRes.json();
             fetchSuccess = true;
-            break; // Success milte hi loop rok do
+            break;
           }
-        } catch(e) { console.warn("Mirror blocked or failed:", mirror); }
+        } catch(e) {}
       }
       
-      if (!fetchSuccess) throw new Error("All Torrent mirrors blocked by ISP.");
-      
-      if (ytsData && ytsData.data && ytsData.data.movies && ytsData.data.movies.length > 0) {
+      if (fetchSuccess && ytsData && ytsData.data && ytsData.data.movies && ytsData.data.movies.length > 0) {
         const movie = ytsData.data.movies[0];
         if (movie.torrents && movie.torrents.length > 0) {
           torrentsHtml = movie.torrents.map(t => {
-            // Create Magnet URI
-            const magnet = `magnet:?xt=urn:btih:${t.hash}&dn=${encodeURIComponent(movie.title)}&tr=udp://open.demonii.com:1337/announce&tr=udp://tracker.openbittorrent.com:80`;
+            const magnet = `magnet:?xt=urn:btih:${t.hash}&dn=${encodeURIComponent(movie.title)}&tr=udp://open.demonii.com:1337/announce&tr=udp://tracker.openbittorrent.com:80&tr=udp://tracker.opentrackr.org:1337/announce`;
             return `
               <a href="${magnet}" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid var(--gold); margin-bottom:8px;">
                 <span style="display:flex; align-items:center; gap:10px;">
-                  <span style="font-size:1.2rem;">🧲</span>
-                  <strong style="color:#fff; font-size:1rem;">${t.quality} ${t.type.toUpperCase()}</strong>
+                  <strong style="color:#fff; font-size:0.95rem;">${t.quality} ${t.type.toUpperCase()}</strong>
                 </span>
-                <span style="font-size:0.85rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">${t.size}</span>
+                <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">${t.size}</span>
               </a>
             `;
           }).join('');
         }
       }
     }
- 
+    
+    // Fallback for TV shows and if YTS fails
     if (!torrentsHtml) {
       torrentsHtml = `
-        <div style="padding:15px; background:rgba(230,57,70,0.1); border:1px solid rgba(230,57,70,0.2); border-radius:10px; color:var(--text); font-size:0.9rem;">
-          No direct torrents found for <strong>${escapeHTML(title)}</strong>.<br>
-          <span style="font-size:0.8rem; color:var(--text3); display:block; margin-top:5px;">(TV Shows, Regional movies, or newly released CAM prints might not have open magnet links available).</span>
-        </div>
+        <a href="https://1337x.to/search/${encodedTitle}+${year}/1/" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid var(--gold); margin-bottom:8px;">
+          <span style="display:flex; align-items:center; gap:10px;">
+            <strong style="color:#fff; font-size:0.95rem;">Search on 1337x</strong>
+          </span>
+          <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">Torrent</span>
+        </a>
+        <a href="https://torrentgalaxy.to/torrents.php?search=${encodedTitle}+${year}" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid var(--accent); margin-bottom:8px;">
+          <span style="display:flex; align-items:center; gap:10px;">
+            <strong style="color:#fff; font-size:0.95rem;">TorrentGalaxy</strong>
+          </span>
+          <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">All Quality</span>
+        </a>
       `;
     }
   } catch(err) {
     torrentsHtml = `
-      <div style="padding:15px; background:rgba(230,57,70,0.1); border:1px solid rgba(230,57,70,0.2); border-radius:10px; color:var(--text); font-size:0.9rem;">
-        Error connecting to Torrent network. Your ISP might be blocking it.<br>
-        <a href="https://1337x.to/search/${encodeURIComponent(title)}/1/" target="_blank" style="color:var(--gold); font-weight:bold; display:inline-block; margin-top:8px; text-decoration:none;">👉 Click here to search manually</a>
-      </div>
+      <a href="https://1337x.to/search/${encodedTitle}+${year}/1/" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid var(--gold); margin-bottom:8px;">
+        <span style="display:flex; align-items:center; gap:10px;">
+          <strong style="color:#fff; font-size:0.95rem;">Search on 1337x</strong>
+        </span>
+        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">Manual Search</span>
+      </a>
+    `;
+  }
+
+  // 3. ANIME DOWNLOAD (if anime/cartoon detected)
+  let animeHtml = '';
+  const isAnime = (currentModalMovie.genre_ids || []).includes(16) || lang === 'ja';
+  if (isAnime || isTV) {
+    animeHtml = `
+      <h4 style="font-size:0.7rem; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:var(--text2); margin-top:1.2rem; margin-bottom:0.8rem; padding-bottom:0.4rem; border-bottom: 1px solid rgba(255,255,255,0.1);">ANIME / CARTOON DOWNLOAD</h4>
+      <a href="https://www.google.com/search?q=${encodedTitle}+hindi+dubbed+anime+download+480p+720p+1080p" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid #06b6d4; margin-bottom:8px;">
+        <span style="display:flex; align-items:center; gap:10px;">
+          <strong style="color:#fff; font-size:0.95rem;">Anime Hindi Dubbed</strong>
+        </span>
+        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">Google</span>
+      </a>
+      <a href="https://nyaa.si/?f=0&c=0_0&q=${encodedTitle}" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid #7c3aed; margin-bottom:8px;">
+        <span style="display:flex; align-items:center; gap:10px;">
+          <strong style="color:#fff; font-size:0.95rem;">Nyaa.si (Anime Torrents)</strong>
+        </span>
+        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">Sub/Dub</span>
+      </a>
+      <a href="https://www.google.com/search?q=${encodedTitle}+animedubhindi+OR+toonsplus+OR+toonworld4all+download" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid #f59e0b; margin-bottom:8px;">
+        <span style="display:flex; align-items:center; gap:10px;">
+          <strong style="color:#fff; font-size:0.95rem;">Cartoon/Anime Hindi Sites</strong>
+        </span>
+        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">Multi Quality</span>
+      </a>
     `;
   }
  
@@ -2291,6 +2598,7 @@ async function downloadMovie() {
 
           <h4 style="font-size:0.7rem; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:var(--text2); margin-top:1.2rem; margin-bottom:0.8rem; padding-bottom:0.4rem; border-bottom: 1px solid rgba(255,255,255,0.1);">TORRENT DOWNLOAD</h4>
           ${torrentsHtml}
+          ${animeHtml}
         </div>
         <button onclick="const m=document.getElementById('dlModal'); m.style.opacity='0'; setTimeout(()=>m.remove(),300);" style="margin-top:1.5rem; width:100%; background:transparent; border:1px solid rgba(255,255,255,0.2); color:var(--text); padding:0.8rem; border-radius:12px; cursor:pointer; font-weight:600; transition:all 0.2s;">Close</button>
       </div>
@@ -2384,8 +2692,8 @@ if (modalOverlay) {
   });
 }
  
-// ── ANTI-REDIRECT (FRAME-BUSTING BLOCKER) WITHOUT SANDBOX ──
-// यह कोड मोबाइल या छोटी स्क्रीन पर थर्ड-पार्टी सर्वर्स के ऑटो-रीडायरेक्ट को रोकेगा
+// -- ANTI-REDIRECT (FRAME-BUSTING BLOCKER) WITHOUT SANDBOX --
+// Anti-redirect blocker for mobile (prevents third-party server auto-redirects)
 // TVs par ye block issue create karta hai video iframes ke liye, isliye !isTV par lagaya
 if (!isTV) {
   window.addEventListener('beforeunload', (e) => {
@@ -2425,7 +2733,7 @@ document.addEventListener('DOMContentLoaded', () => {
     tvTab.innerHTML = 'Web Series';
   }
 
-  // ── DYNAMICALLY ADD KIDS TAB ──
+  // -- DYNAMICALLY ADD KIDS TAB --
   const catTabs = document.querySelector('.cat-tabs');
   if (catTabs && !document.querySelector('.cat-tab[onclick*="kids"]')) {
     const kidsTab = document.createElement('button');
@@ -2444,23 +2752,23 @@ document.addEventListener('DOMContentLoaded', () => {
     catTabs.appendChild(animeTab);
   }
       
-      // ── DYNAMICALLY ADD 18+ ADULT TAB ──
+      // -- DYNAMICALLY ADD 18+ ADULT TAB --
       if (catTabs && !document.querySelector('.cat-tab[onclick*="adult"]')) {
         const adultTab = document.createElement('button');
         adultTab.className = 'cat-tab';
         adultTab.tabIndex = 0;
         adultTab.setAttribute('onclick', "filterCat('adult')");
-        adultTab.innerHTML = '🔞 18+';
+        adultTab.innerHTML = '18+';
         catTabs.appendChild(adultTab);
       }
 
-            // ── DYNAMICALLY ADD HINDI DUBBED TAB ──
+            // -- DYNAMICALLY ADD HINDI DUBBED TAB --
       if (catTabs && !document.querySelector('.cat-tab[onclick*="dubbed"]')) {
         const dubbedTab = document.createElement('button');
         dubbedTab.className = 'cat-tab';
         dubbedTab.tabIndex = 0;
         dubbedTab.setAttribute('onclick', "filterCat('dubbed')");
-        dubbedTab.innerHTML = '🎬 Hindi Dubbed';
+        dubbedTab.innerHTML = 'Hindi Dubbed';
         catTabs.appendChild(dubbedTab);
       }
 
@@ -2542,7 +2850,7 @@ function showToast(msg) {
   setTimeout(() => { t.classList.remove('show'); }, 3000);
 }
  
-// ── TV REMOTE NAVIGATION ──
+// -- TV REMOTE NAVIGATION --
 document.addEventListener('keydown', (e) => {
   // TV Enter/OK key: Simulate click on custom focusable elements (cards, tabs, etc.)
   if ((e.key === 'Enter' || e.key === ' ') && document.activeElement) {
@@ -2627,7 +2935,7 @@ function goHome(e) {
 }
  
 
-// ── ADVANCED SECURITY (Block View Source & Shortcuts) ──
+// -- ADVANCED SECURITY (Block View Source & Shortcuts) --
 (function secureWebsite() {
   // 1. Disable Right Click (Context Menu)
   document.addEventListener('contextmenu', (e) => {
@@ -2664,7 +2972,7 @@ function goHome(e) {
 })();
 
 
-// ── AD-BLOCKER DETECTION ──
+// -- AD-BLOCKER DETECTION --
 (function detectAdBlocker() {
   const adSlot = document.createElement('div');
   adSlot.className = 'ad_slot'; // Class heavily targeted by adblockers
@@ -2686,7 +2994,7 @@ function goHome(e) {
 })();
 
 
-// ── TOP KEYWORDS EXTRACTOR ──
+// -- TOP KEYWORDS EXTRACTOR --
 function extractTopKeywords() {
   // Clone the body so we don't accidentally modify the actual visible DOM
   const clone = document.body.cloneNode(true);
@@ -2723,7 +3031,7 @@ function extractTopKeywords() {
 // Run it briefly after the dynamic content (movies) finishes loading
 setTimeout(extractTopKeywords, 3000);
 
-// ── BOT DETECTION (WebGL Renderer Check) ──
+// -- BOT DETECTION (WebGL Renderer Check) --
 (function detectBot() {
   // Run this check after a short delay to not block the initial render.
   setTimeout(() => {

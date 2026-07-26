@@ -1541,6 +1541,29 @@ body.cursor-hover #cursor-dot {
   z-index: 3;
 }
 
+/* ── HINDI DUBBED BADGE ── */
+.card-dubbed {
+  position: absolute;
+  bottom: 9px;
+  left: 9px;
+  background: linear-gradient(135deg, #ff9800, #f57c00);
+  padding: 0.22rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: #fff;
+  text-transform: uppercase;
+  box-shadow: 0 4px 12px rgba(255,152,0,0.4), inset 0 1px 0 rgba(255,255,255,0.2);
+  z-index: 3;
+  transform: translateZ(25px);
+  animation: dubbedPulse 2.5s ease-in-out infinite;
+}
+@keyframes dubbedPulse {
+  0%, 100% { box-shadow: 0 4px 12px rgba(255,152,0,0.4); }
+  50% { box-shadow: 0 4px 18px rgba(255,152,0,0.7), 0 0 8px rgba(255,152,0,0.3); }
+}
+
 .card-overlay {
   position: absolute;
   inset: 0;
@@ -2389,6 +2412,59 @@ body.cursor-hover #cursor-dot {
   background: linear-gradient(135deg, rgba(255,175,64,0.97), rgba(230,57,70,0.93));
   color: #fff;
   box-shadow: 0 12px 30px rgba(230,57,70,0.24), inset 0 1px 0 rgba(255,255,255,0.14);
+}
+
+/* ── DUBBED SERVER INDICATOR ── */
+.player-chip--dubbed {
+  border-color: rgba(255,152,0,0.35) !important;
+  position: relative;
+}
+.player-chip--dubbed:not(.active) {
+  background: linear-gradient(135deg, rgba(18,18,30,0.94), rgba(40,25,0,0.4));
+}
+.dubbed-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  background: #ff9800;
+  border-radius: 50%;
+  margin-left: 3px;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px rgba(255,152,0,0.6);
+  animation: dubbedDotPulse 2s ease-in-out infinite;
+}
+@keyframes dubbedDotPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.3); }
+}
+
+/* ── 4K SERVER BADGE ── */
+.player-chip--4k {
+  border-color: rgba(0,229,255,0.4) !important;
+  position: relative;
+}
+.player-chip--4k:not(.active) {
+  background: linear-gradient(135deg, rgba(18,18,30,0.94), rgba(0,40,60,0.5));
+  box-shadow: 0 10px 24px rgba(0,0,0,0.3), 0 0 12px rgba(0,229,255,0.1);
+}
+.fourk-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #00e5ff, #00b8d4);
+  color: #000;
+  font-size: 0.6rem;
+  font-weight: 900;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 5px;
+  letter-spacing: 0.5px;
+  box-shadow: 0 2px 8px rgba(0,229,255,0.5);
+  animation: fourkGlow 2.5s ease-in-out infinite;
+}
+@keyframes fourkGlow {
+  0%, 100% { box-shadow: 0 2px 8px rgba(0,229,255,0.5); }
+  50% { box-shadow: 0 2px 16px rgba(0,229,255,0.9), 0 0 6px rgba(0,229,255,0.4); }
 }
 
 .player-chip--lang {
