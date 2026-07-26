@@ -26,7 +26,26 @@ app.use(cors({
 }));
 
 // Frontend files (index.html, css, js) ko browser mein dikhane ke liye
-app.use(express.static(__dirname, { maxAge: '7d' })); // Added strict browser caching for extremely fast reloads
+app.use(express.static(__dirname, { 
+  maxAge: '30d',
+  etag: true,
+  lastModified: true,
+  immutable: true,
+  setHeaders: (res, path) => {
+    // CSS/JS ko 30 days cache + immutable (browser re-validate bhi nahi karega)
+    if (path.endsWith('.css') || path.endsWith('.js')) {
+      res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
+    }
+    // Images ko 60 days cache
+    if (/\.(jpg|jpeg|png|gif|svg|webp|ico)$/.test(path)) {
+      res.setHeader('Cache-Control', 'public, max-age=5184000, immutable');
+    }
+    // HTML ko short cache (fresh content milta rahe)
+    if (path.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
+    }
+  }
+}));
 
 // API Rate Limiter: Bura traffic aur DDOS attacks block karega (Luxury stability)
 const apiLimiter = rateLimit({

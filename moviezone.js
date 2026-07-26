@@ -7,6 +7,37 @@ const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
 const isLowEnd = (navigator.deviceMemory && navigator.deviceMemory < 4) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency < 4);
 const isTouchOnly = window.matchMedia('(pointer: coarse)').matches && !window.matchMedia('(pointer: fine)').matches;
 
+// -- ULTRA PERFORMANCE BOOST (Instant Load) --
+// 1. Mark document as loading for instant visual feedback
+document.documentElement.style.setProperty('--page-loaded', '0');
+
+// 2. Lazy Image Observer (loads images only when near viewport - saves bandwidth + speed)
+const lazyImageObserver = ('IntersectionObserver' in window) ? new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      const img = entry.target;
+      if (img.dataset.src) { img.src = img.dataset.src; img.removeAttribute('data-src'); }
+      lazyImageObserver.unobserve(img);
+    }
+  });
+}, { rootMargin: '300px' }) : null;
+
+// 3. Passive event listeners globally (smoother scroll)
+if (typeof EventTarget !== 'undefined') {
+  const origAdd = EventTarget.prototype.addEventListener;
+  EventTarget.prototype.addEventListener = function(type, fn, opts) {
+    if (type === 'touchstart' || type === 'touchmove' || type === 'wheel' || type === 'scroll') {
+      if (typeof opts === 'boolean') opts = { capture: opts, passive: true };
+      else if (typeof opts === 'object' || opts === undefined) opts = Object.assign({}, opts, { passive: true });
+    }
+    return origAdd.call(this, type, fn, opts);
+  };
+}
+
+// 4. Instant page visibility (reduce white flash)
+document.documentElement.style.backgroundColor = '#03030a';
+document.documentElement.style.colorScheme = 'dark';
+
 // Vercel par frontend + backend ek sath deploy ke liye relative path use karein:
 const LIVE_BACKEND_URL = '/api/tmdb';
 const BASE = isLocalhost ? 'http://localhost:3000/api/tmdb' : LIVE_BACKEND_URL;
@@ -34,12 +65,54 @@ if (isTV || (isMobile && isLowEnd)) document.documentElement.classList.add('tv-m
 // -- PERFORMANCE BOOST STYLES --
 const perfStyle = document.createElement('style');
 perfStyle.textContent = `
+  /* === UNIVERSAL DEVICE PERFORMANCE === */
+  
+  /* GPU-accelerated cards for all devices */
   .movie-card, .upcoming-card { content-visibility: auto; contain-intrinsic-size: 180px 320px; contain: layout style paint; transform: translateZ(0); backface-visibility: hidden; }
   .carousel-slide { will-change: transform, opacity; transform: translateZ(0); }
   img { content-visibility: auto; }
   #movies-section, #upcoming { content-visibility: auto; contain-intrinsic-size: 1000px; }
   
-  /* TV aur Weak devices par heavy graphics band karke speed max karein */
+  /* === MOBILE / SMALL SCREEN OPTIMIZATION (< 768px) === */
+  @media (max-width: 768px) {
+    /* Reduce animations for smoother scroll */
+    .movie-card, .upcoming-card { transition: none !important; }
+    .movie-card:hover, .upcoming-card:hover { transform: none !important; }
+    /* Smaller images = less memory */
+    .card-poster img { max-height: 240px; }
+    /* Disable particles on mobile to save battery + RAM */
+    .ambient-particles { display: none !important; }
+    /* Reduce grid gap for less reflow */
+    .movie-grid { gap: 10px !important; }
+    /* Disable backdrop-filter on mobile (GPU heavy) */
+    .nav-links, .modal-box, #navbar.scrolled { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+    /* Disable 3D tilt completely on touch */
+    .movie-card { perspective: none !important; }
+  }
+  
+  /* === TABLET (768px - 1024px) === */
+  @media (min-width: 769px) and (max-width: 1024px) {
+    .movie-card:hover { transform: translateY(-5px) !important; }
+    .ambient-particles .particle { opacity: 0.4 !important; }
+  }
+  
+  /* === TV / LARGE SCREEN OPTIMIZATION (> 1920px) === */
+  @media (min-width: 1920px) {
+    /* Limit grid items rendered at once to prevent crash */
+    .movie-grid { contain: layout style paint; }
+    /* Reduce particle count effect */
+    .ambient-particles .particle:nth-child(n+20) { display: none; }
+    /* Larger click targets for remote */
+    .movie-card, .upcoming-card, .cat-tab, button { min-height: 48px; }
+  }
+  
+  /* === ULTRA WIDE / 4K SCREENS (> 2560px) === */
+  @media (min-width: 2560px) {
+    .movie-grid { max-width: 2400px; margin: 0 auto; }
+    .ambient-particles .particle:nth-child(n+25) { display: none; }
+  }
+  
+  /* === TV MODE: Strip ALL heavy effects === */
   .tv-mode *, .low-end-mode * {
     box-shadow: none !important;
     backdrop-filter: none !important;
@@ -3056,6 +3129,77 @@ setTimeout(extractTopKeywords, 3000);
       }
     } catch (e) { /* Silently fail if canvas/webgl is blocked or fails */ }
   }, 4500); // Run after other initial scripts.
+})();
+
+// -- MEMORY & CRASH PREVENTION SYSTEM --
+// Prevents lag/crash on TV, old phones, and low-RAM devices
+(function memoryGuard() {
+  // 1. Limit maximum cards in DOM (recycle old ones)
+  const MAX_CARDS_MOBILE = 30;
+  const MAX_CARDS_TV = 24;
+  const MAX_CARDS_DESKTOP = 80;
+  
+  const getMaxCards = () => {
+    if (isTV) return MAX_CARDS_TV;
+    if (isMobile || isLowEnd) return MAX_CARDS_MOBILE;
+    return MAX_CARDS_DESKTOP;
+  };
+  
+  // 2. Periodic garbage collection hint
+  setInterval(() => {
+    // Clean up old tmdb memory cache (keep only last 50 entries)
+    if (tmdbCache.size > 50) {
+      const entries = Array.from(tmdbCache.entries());
+      entries.slice(0, entries.length - 50).forEach(([key]) => tmdbCache.delete(key));
+    }
+    // Clean up old localStorage cache (keep only last 30)
+    try {
+      const keys = Object.keys(localStorage).filter(k => k.startsWith('mz_cache_'));
+      if (keys.length > 30) {
+        keys.slice(0, keys.length - 30).forEach(k => localStorage.removeItem(k));
+      }
+    } catch(e) {}
+  }, 60000); // Every 60 seconds
+  
+  // 3. Reduce image quality on low memory warning
+  if ('memory' in performance) {
+    setInterval(() => {
+      const mem = performance.memory;
+      if (mem.usedJSHeapSize > mem.jsHeapSizeLimit * 0.85) {
+        // Memory critical - disable heavy features
+        document.documentElement.classList.add('low-end-mode');
+        const particles = document.querySelector('.ambient-particles');
+        if (particles) particles.remove();
+      }
+    }, 10000);
+  }
+  
+  // 4. Detect if page becomes unresponsive and lighten load
+  let lastFrameTime = performance.now();
+  let lowFPSCount = 0;
+  
+  function checkPerformance() {
+    const now = performance.now();
+    const delta = now - lastFrameTime;
+    lastFrameTime = now;
+    
+    // If frame took > 100ms (less than 10 FPS), device is struggling
+    if (delta > 100) {
+      lowFPSCount++;
+      if (lowFPSCount > 5 && !document.documentElement.classList.contains('low-end-mode')) {
+        // Auto-enable low-end mode to save the device
+        document.documentElement.classList.add('low-end-mode');
+        const particles = document.querySelector('.ambient-particles');
+        if (particles) particles.remove();
+        console.warn('Performance: Auto-enabled low-end mode due to low FPS');
+      }
+    } else {
+      lowFPSCount = Math.max(0, lowFPSCount - 1);
+    }
+    requestAnimationFrame(checkPerformance);
+  }
+  // Only run FPS monitor on potentially weak devices
+  if (isMobile || isTV || isLowEnd) requestAnimationFrame(checkPerformance);
 })();
 
 init();

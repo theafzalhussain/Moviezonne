@@ -3,12 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="dark">
 <title>MovieZone</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>M</text></svg>">
-<link rel="preconnect" href="https://image.tmdb.org">
-<link rel="preconnect" href="https://fonts.googleapis.com"> 
+<link rel="dns-prefetch" href="https://image.tmdb.org">
+<link rel="dns-prefetch" href="https://fonts.googleapis.com">
+<link rel="dns-prefetch" href="https://fonts.gstatic.com">
+<link rel="preconnect" href="https://image.tmdb.org" crossorigin>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700;900&family=Playfair+Display:ital,wght@0,700;1,400&display=swap" rel="stylesheet">
 <link rel="preload" href="moviezone.css" as="style">
+<link rel="preload" href="moviezone.js" as="script">
 <link rel="stylesheet" href="moviezone.css">
 </head>
 <body>
@@ -278,5 +285,27 @@
 <div id="toast"></div>
 
 <script src="moviezone.js" defer></script>
+<script>
+// INSTANT PERFORMANCE: Remove loader faster + mark page interactive
+document.addEventListener('DOMContentLoaded', () => {
+  // Reduce loader time for fast connections
+  const conn = navigator.connection || {};
+  const isFastNet = !conn.saveData && conn.effectiveType !== '2g' && conn.effectiveType !== '3g';
+  if (isFastNet) {
+    const loader = document.getElementById('mz-loader');
+    if (loader) setTimeout(() => loader.classList.add('loader-hidden'), 200);
+  }
+  // Mark page as loaded for CSS transitions
+  document.documentElement.style.setProperty('--page-loaded', '1');
+});
+// PRIORITY: Preload first visible images for instant LCP
+if ('requestIdleCallback' in window) {
+  requestIdleCallback(() => {
+    document.querySelectorAll('img[loading="lazy"]').forEach((img, i) => {
+      if (i < 4) img.loading = 'eager'; // First 4 images load immediately
+    });
+  });
+}
+</script>
 </body>
 </html>
