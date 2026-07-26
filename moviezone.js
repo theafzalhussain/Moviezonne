@@ -339,7 +339,7 @@ async function tmdb(endpoint, params) {
       
       return data;
     } catch (e) { 
-      if (e.name === 'AbortError') return null; // Silently handle cancellations
+      if (e.name === 'AbortError') return cachedData || { results: [] }; // Return safe fallback on cancellation
       console.error('Network/Fetch Error:', e);
       return cachedData || { results: [] }; // Fallback to stale cache or empty array
     } finally {
@@ -365,13 +365,11 @@ async function init() {
     document.head.appendChild(_s);
   }
   try {
-    // Execute everything in parallel for maximum startup speed
-    const tasks = [
+    // Load carousel and movies in parallel (Promise.allSettled ensures one failure doesn't block other)
+    await Promise.allSettled([
       loadCarousel(),
       loadMovies('all')
-    ];
-
-    await Promise.allSettled(tasks);
+    ]);
 
     // 3. Delay upcoming fetching until browser is idle
     setTimeout(() => {
@@ -478,42 +476,215 @@ function setupUpcomingInfiniteScroll() {
     observer.observe(trigger);
 }
  
-// -- CAROUSEL
+// -- CAROUSEL (PROFESSIONAL DISCOVERY ALGORITHM)
+// Netflix/Hotstar-grade weighted scoring: fetches from ALL categories and ranks by composite score
+// Score = (rating_weight) + (popularity_weight) + (recency_boost) + (trending_velocity) + (vote_confidence)
+
+function calculateMovieScore(movie) {
+  const now = Date.now();
+  const releaseDate = new Date(movie.release_date || movie.first_air_date || '2020-01-01');
+  const daysSinceRelease = Math.max(0, (now - releaseDate) / (1000 * 60 * 60 * 24));
+  
+  // 1. Rating Weight (0-10 scale, boosted): High-quality movies get exponential boost
+  const rating = movie.vote_average || 0;
+  const ratingScore = Math.pow(rating, 1.8) * 2; // Exponential: 8.0 → 98, 7.0 → 76, 6.0 → 56
+  
+  // 2. Popularity Weight (TMDB popularity is 0-5000+): Normalize and cap
+  const popularity = Math.min(movie.popularity || 0, 5000);
+  const popularityScore = (popularity / 50) * 1.5; // Max ~150 points
+  
+  // 3. Recency Boost: Newer movies get significant advantage (decays over 180 days)
+  let recencyBoost = 0;
+  if (daysSinceRelease <= 7) recencyBoost = 80;        // This week: massive boost
+  else if (daysSinceRelease <= 14) recencyBoost = 65;  // Last 2 weeks
+  else if (daysSinceRelease <= 30) recencyBoost = 50;  // Last month
+  else if (daysSinceRelease <= 60) recencyBoost = 35;  // Last 2 months
+  else if (daysSinceRelease <= 90) recencyBoost = 20;  // Last 3 months
+  else if (daysSinceRelease <= 180) recencyBoost = 10; // Last 6 months
+  else recencyBoost = 0;
+  
+  // 4. Trending Velocity: If popularity is high relative to vote count, it's trending fast
+  const voteCount = movie.vote_count || 1;
+  const trendingVelocity = Math.min((popularity / Math.max(voteCount, 1)) * 5, 40);
+  
+  // 5. Vote Confidence: More votes = more reliable score (logarithmic scale)
+  const voteConfidence = Math.min(Math.log10(voteCount + 1) * 8, 30);
+  
+  // 6. Now Playing / In Theaters bonus
+  const nowPlayingBonus = (daysSinceRelease <= 45 && daysSinceRelease >= 0) ? 25 : 0;
+  
+  return ratingScore + popularityScore + recencyBoost + trendingVelocity + voteConfidence + nowPlayingBonus;
+}
+
 async function loadCarousel() {
-  // Fetch Hollywood + Top Bollywood for a mixed premium carousel
-  const [tTrending, tPopular, tBolly] = await Promise.all([
+  // FETCH FROM ALL MAJOR CATEGORIES IN PARALLEL (Professional-grade discovery)
+  const results = await Promise.allSettled([
     tmdb('/trending/movie/week', { language: 'en-US', page: '1' }),
+    tmdb('/trending/movie/day', { language: 'en-US', page: '1' }),
     tmdb('/movie/popular', { language: 'en-US', page: '1' }),
-    tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', 'vote_average.gte': '6.5', language: 'en-US', page: '1' })
+    tmdb('/movie/top_rated', { language: 'en-US', page: '1' }),
+    tmdb('/movie/now_playing', { language: 'en-US', page: '1' }),
+    tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', language: 'en-US', page: '1' }),
+    tmdb('/discover/movie', { with_original_language: 'ta', sort_by: 'popularity.desc', language: 'en-US', page: '1' }),
+    tmdb('/discover/movie', { with_original_language: 'te', sort_by: 'popularity.desc', language: 'en-US', page: '1' }),
+    tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', language: 'en-US', page: '1' }),
+    tmdb('/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', language: 'en-US', page: '1' })
   ]);
 
-  const trending = tTrending.results || [];
-  const popular = tPopular.results || [];
-  const bolly = (tBolly.results || []).slice(0, 2); // Take top 2 Bollywood movies
-  
-  const pool = [];
-  const maxLen = Math.max(trending.length, popular.length);
-  for (let i = 0; i < maxLen; i++) {
-    if (trending[i]) pool.push(trending[i]);
-    if (popular[i]) pool.push(popular[i]);
-  }
+  const sourceNames = ['trending_week','trending_day','popular','top_rated','now_playing','bollywood','south','tollywood','anime','korean'];
 
-  // Inject Bollywood movies at premium positions (2nd and 4th slot)
-  if (bolly[0]) pool.splice(1, 0, bolly[0]);
-  if (bolly[1]) pool.splice(3, 0, bolly[1]);
+  // Combine all results into a master pool with source tags (safely handle null/undefined)
+  const masterPool = [];
+  results.forEach((r, idx) => {
+    if (r.status === 'fulfilled' && r.value && r.value.results) {
+      r.value.results.forEach(m => { if (m) { m._source = sourceNames[idx]; masterPool.push(m); } });
+    }
+  });
 
-  const seen = new Set();
+  // If no data came at all, fallback silently
+  if (masterPool.length === 0) { buildCarousel(); return; }
+
+  // Deduplicate: Keep best version (highest popularity) of each movie
+  const movieMap = new Map();
+  masterPool.forEach(m => {
+    if (!m || !m.id) return;
+    const existing = movieMap.get(m.id);
+    if (!existing || (m.popularity || 0) > (existing.popularity || 0)) {
+      movieMap.set(m.id, m);
+    }
+  });
+
   const realToday = new Date().toISOString().split('T')[0];
-  carouselMovies = pool.filter(m => {
-    if (!m.backdrop_path || !m.poster_path || seen.has(m.id)) return false;
-    // Block unreleased future movies from Hero Carousel
+  
+  // Two pools: 
+  // 1. candidates = movies with BOTH backdrop + poster (for premium carousel display)
+  // 2. allReleased = movies with at least poster (for forced representation fallback)
+  const allReleased = Array.from(movieMap.values()).filter(m => {
+    if (!m.poster_path) return false;
     const rDate = m.release_date || m.first_air_date;
     if (rDate && rDate > realToday) return false;
-    // Require good rating (>=6.5) AND high popularity (>=150), allow English and Hindi
-    if (!['en', 'hi'].includes(m.original_language) || m.vote_average < 6.5 || m.popularity < 150) return false;
-    seen.add(m.id); return true;
-  }).slice(0, 6);
-  buildCarousel(); // Force build even with limited data
+    return true;
+  });
+  
+  let candidates = allReleased.filter(m => m.backdrop_path);
+
+  // Score ALL released movies
+  allReleased.forEach(m => { m._score = calculateMovieScore(m); });
+  
+  // Sort by composite score (highest first)
+  candidates.sort((a, b) => b._score - a._score);
+  allReleased.sort((a, b) => b._score - a._score);
+
+  // FORCED REPRESENTATION: Ensure EVERY category gets at least 1 slot in carousel
+  const diverseCarousel = [];
+  const usedIds = new Set();
+  
+  // Step 1: Pick the BEST movie from each language/category (guaranteed slots)
+  // First try from candidates (with backdrop), then fallback to allReleased (poster only)
+  const langGroupsBackdrop = {};
+  const langGroupsAll = {};
+  candidates.forEach(m => {
+    const lang = m.original_language || 'en';
+    if (!langGroupsBackdrop[lang]) langGroupsBackdrop[lang] = [];
+    langGroupsBackdrop[lang].push(m);
+  });
+  allReleased.forEach(m => {
+    const lang = m.original_language || 'en';
+    if (!langGroupsAll[lang]) langGroupsAll[lang] = [];
+    langGroupsAll[lang].push(m);
+  });
+  
+  // Priority order: English (Hollywood), Hindi (Bollywood), Tamil (South), Telugu (Tollywood), Korean, Japanese (Anime)
+  const priorityLangs = ['en', 'hi', 'ta', 'te', 'ko', 'ja'];
+  
+  // Pick top 1 from each priority language (prefer backdrop, fallback to poster-only)
+  for (const lang of priorityLangs) {
+    if (diverseCarousel.length >= 10) break;
+    
+    // Try with backdrop first
+    const backdropPool = langGroupsBackdrop[lang] || [];
+    let best = backdropPool.find(m => !usedIds.has(m.id));
+    
+    // Fallback: pick from poster-only pool
+    if (!best) {
+      const allPool = langGroupsAll[lang] || [];
+      best = allPool.find(m => !usedIds.has(m.id));
+    }
+    
+    if (best) {
+      diverseCarousel.push(best);
+      usedIds.add(best.id);
+    }
+  }
+  
+  // Step 2: Fill remaining slots (up to 10) with highest scored movies regardless of language
+  // But don't allow more than 3 from same language total
+  const langCount = {};
+  diverseCarousel.forEach(m => {
+    const lang = m.original_language || 'en';
+    langCount[lang] = (langCount[lang] || 0) + 1;
+  });
+  
+  for (const movie of candidates) {
+    if (diverseCarousel.length >= 10) break;
+    if (usedIds.has(movie.id)) continue;
+    
+    const lang = movie.original_language || 'en';
+    if ((langCount[lang] || 0) >= 3) continue; // Max 3 per language
+    
+    diverseCarousel.push(movie);
+    usedIds.add(movie.id);
+    langCount[lang] = (langCount[lang] || 0) + 1;
+  }
+  
+  // Step 3: Keep carousel in mixed order (forced picks first gives natural diversity)
+  // No re-sorting - the forced representation already ensures mix
+  
+  // If diversity filter was too strict, just take top scored movies
+  if (diverseCarousel.length < 4) {
+    const fallback = candidates.filter(m => !usedIds.has(m.id)).slice(0, 10 - diverseCarousel.length);
+    diverseCarousel.push(...fallback);
+  }
+  
+  // Assign dynamic carousel badges based on category + context
+  diverseCarousel.forEach(m => {
+    const daysSince = (Date.now() - new Date(m.release_date || '2020-01-01')) / (1000 * 60 * 60 * 24);
+    const lang = m.original_language || 'en';
+    
+    // Priority: Freshness > Category-specific > Generic
+    if (daysSince <= 7) {
+      m._badge = '🔥 JUST RELEASED';
+    } else if (daysSince <= 30 && m._source === 'now_playing') {
+      m._badge = '🎬 NOW IN THEATERS';
+    } else if (lang === 'hi' && m.vote_average >= 7.0) {
+      m._badge = '🎬 BOLLYWOOD HIT';
+    } else if (lang === 'hi') {
+      m._badge = '🎬 BOLLYWOOD TRENDING';
+    } else if (lang === 'ta') {
+      m._badge = '🔥 SOUTH BLOCKBUSTER';
+    } else if (lang === 'te') {
+      m._badge = '🔥 TOLLYWOOD HIT';
+    } else if (lang === 'ko') {
+      m._badge = '🇰🇷 KOREAN TRENDING';
+    } else if (lang === 'ja') {
+      m._badge = '🎌 ANIME TRENDING';
+    } else if (m._source === 'trending_day') {
+      m._badge = '📈 TRENDING TODAY';
+    } else if (m._source === 'trending_week') {
+      m._badge = '🔥 TRENDING NOW';
+    } else if (m.vote_average >= 8.0) {
+      m._badge = '⭐ CRITICALLY ACCLAIMED';
+    } else if (m._source === 'top_rated') {
+      m._badge = '🏆 TOP RATED';
+    } else {
+      m._badge = '🔥 POPULAR NOW';
+    }
+  });
+
+  carouselMovies = diverseCarousel.slice(0, 10);
+  if (carouselMovies.length === 0) carouselMovies = candidates.slice(0, 6); // Ultimate fallback
+  console.log('🎬 Carousel Movies:', carouselMovies.map(m => `${m.title || m.name} (${m.original_language})`));
+  buildCarousel();
 }
  
 function buildCarousel() {
@@ -532,7 +703,7 @@ function buildCarousel() {
     const genres = (m.genre_ids||[]).slice(0,3).map(id => '<span class="genre-tag">'+escapeHTML(GENRE_MAP[id]||'Movie')+'</span>').join('');
     const slide = document.createElement('div');
     slide.className = 'carousel-slide' + (i === 0 ? ' active' : '');
-    const bgUrl = getResponsiveBackdrop(m.backdrop_path);
+    const bgUrl = m.backdrop_path ? getResponsiveBackdrop(m.backdrop_path) : `https://image.tmdb.org/t/p/w780${m.poster_path}`;
     
     // Preload the very first Large Image for blazing fast Initial Render (LCP Optimization)
     if (i === 0) {
@@ -550,7 +721,7 @@ function buildCarousel() {
       '<div class="slide-bg" data-bg="'+bgUrl+'"'+(i === 0 ? ' style="background-image:url(\''+bgUrl+'\')"' : '')+'></div>' +
       '<div class="slide-gradient"></div>' +
       '<div class="slide-content">' +
-        '<div class="slide-badge">TRENDING NOW</div>' +
+        '<div class="slide-badge">'+(m._badge || '🔥 TRENDING NOW')+'</div>' +
         '<h1 class="slide-title">'+escapeHTML(m.title||m.name||'')+'</h1>' +
         '<div class="slide-meta">' +
           '<div class="slide-rating">RATING '+((m.vote_average||0).toFixed(1))+'</div>' +
@@ -693,10 +864,13 @@ function prefetchMoviesPage(cat, pageNum) {
   const p2 = String(pageNum * 2);
   if (cat === 'all') {
     tmdb('/trending/movie/week', { language: 'en-US', page: pageStr });
+    tmdb('/trending/movie/day', { language: 'en-US', page: pageStr });
     tmdb('/movie/popular', { language: 'en-US', page: pageStr });
     tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
     tmdb('/discover/movie', { with_original_language: 'ta', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
     tmdb('/discover/movie', { with_original_language: 'te', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
+    tmdb('/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
+    tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
     tmdb('/movie/now_playing', { language: 'en-US', page: pageStr });
   } else if (cat === 'hollywood') {
     tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p1 });
@@ -793,39 +967,63 @@ async function loadMovies(cat, isLoadMore = false) {
   
   try {
     if (cat === 'all') {
-      // Fetch a diverse set of movies: latest, trending, popular, and top Indian.
+      // NETFLIX-STYLE DISCOVERY: Fetch diverse sources for maximum content freshness
       const res = await Promise.allSettled([
-        tmdb('/movie/now_playing', { language: 'en-US', page: pageStr }), // Latest theatrical releases
+        tmdb('/movie/now_playing', { language: 'en-US', page: pageStr }),
         tmdb('/trending/movie/week', { language: 'en-US', page: pageStr }),
-        tmdb('/movie/popular',      { language: 'en-US', page: pageStr }),
-        tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' })
+        tmdb('/trending/movie/day', { language: 'en-US', page: pageStr }),
+        tmdb('/movie/popular', { language: 'en-US', page: pageStr }),
+        tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }),
+        tmdb('/discover/movie', { with_original_language: 'ta', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }),
+        tmdb('/discover/movie', { with_original_language: 'te', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }),
+        tmdb('/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }),
+        tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' })
       ]);
       
       const combinedMovies = [];
       res.forEach(r => {
-        if (r.status === 'fulfilled' && r.value.results) {
+        if (r.status === 'fulfilled' && r.value && r.value.results) {
           combinedMovies.push(...r.value.results);
         }
       });
       
-      // Remove duplicates, keeping the first occurrence
-      const uniqueMovies = [];
-      const seenIds = new Set();
+      // INTELLIGENT DEDUPLICATION: Keep the highest-popularity version
+      const movieMap = new Map();
       for (const movie of combinedMovies) {
-        if (movie && movie.id && !seenIds.has(movie.id)) {
-          uniqueMovies.push(movie);
-          seenIds.add(movie.id);
+        if (!movie || !movie.id) continue;
+        const existing = movieMap.get(movie.id);
+        if (!existing || (movie.popularity || 0) > (existing.popularity || 0)) {
+          movieMap.set(movie.id, movie);
+        }
+      }
+      const uniqueMovies = Array.from(movieMap.values());
+      
+      // NETFLIX-STYLE COMPOSITE RANKING: Score each movie
+      uniqueMovies.forEach(m => { m._rankScore = calculateMovieScore(m); });
+      
+      // Sort by composite score (highest first)
+      uniqueMovies.sort((a, b) => b._rankScore - a._rankScore);
+      
+      // SIMPLE DIVERSITY: Just ensure not too many same-language in a row
+      const diverseGrid = [];
+      const skipped = [];
+      
+      for (const m of uniqueMovies) {
+        const lang = m.original_language || 'en';
+        const lastThree = diverseGrid.slice(-3);
+        
+        // If last 3 are all same language, skip this one for now
+        if (lastThree.length >= 3 && lastThree.every(x => (x.original_language || 'en') === lang)) {
+          skipped.push(m);
+        } else {
+          diverseGrid.push(m);
         }
       }
       
-      // Sort by release date, newest first.
-      uniqueMovies.sort((a, b) => {
-        const dateA = a.release_date || a.first_air_date || '0';
-        const dateB = b.release_date || b.first_air_date || '0';
-        return dateB.localeCompare(dateA); // '2024-05-20' > '2024-05-19'
-      });
+      // Add back any skipped movies at the end
+      diverseGrid.push(...skipped);
 
-      movies.push(...uniqueMovies);
+      movies.push(...diverseGrid);
     } else if (cat === 'tv') {
       // EXPANDED OTT LIST: Now includes JioCinema, MX Player, HBO, aha, Hoichoi and more major platforms.
       const STREAMING_NETWORKS = '213|1024|122|3295|3009|193|2583|2600|2212|2552|453|49|3353|4330|2694|3321|3328'; // Netflix, Prime, Hotstar, Jio, MX, SonyLIV, ZEE5, AppleTV+, Hulu, HBO, aha, Hoichoi etc.
@@ -1022,7 +1220,13 @@ async function loadMovies(cat, isLoadMore = false) {
     return true;
   });
 
-  if (!movies.length && !isLoadMore) return;
+  if (!movies.length && !isLoadMore) {
+    const grid = document.getElementById('movieGrid');
+    if (grid) grid.innerHTML = '<div class="no-results"><h3>Loading movies...</h3><p>Retrying in a moment...</p></div>';
+    // Auto-retry after 3 seconds
+    setTimeout(() => loadMovies(cat), 3000);
+    return;
+  }
   
   const existingIds = new Set(allMovies.map(m => m.id));
   const newMovies = movies.filter(m => { if(existingIds.has(m.id)) return false; existingIds.add(m.id); return true; });
@@ -1065,21 +1269,73 @@ function renderMovies(movies, append = false) {
     const year   = (m.release_date || m.first_air_date || '').slice(0, 4);
     const votes  = m.vote_count > 999 ? (m.vote_count/1000).toFixed(1)+'K' : (m.vote_count||0);
     const genres = (m.genre_ids||[]).slice(0,2).map(id => GENRE_MAP[id]).filter(Boolean);
-    const isHot  = m.popularity > 100;
-    
-    // -- DYNAMIC QUALITY BADGE LOGIC --
-    let qual = 'HD';
     const rDateStr = m.release_date || m.first_air_date;
+    const isHot  = m.popularity > 100 && ((m.vote_count || 0) > 50 || (new Date() - new Date(rDateStr || '2000-01-01')) / (1000*60*60*24) < 60);
+    
+    // -- PROFESSIONAL QUALITY BADGE DETECTION ALGORITHM --
+    // Mimics how real platforms detect quality: Release window + vote patterns + popularity signals
+    let qual = 'HD';
+    let qualClass = '';
     if (rDateStr) {
       const rDate = new Date(rDateStr);
       const daysOld = (new Date() - rDate) / (1000 * 60 * 60 * 24);
-      if (type === 'movie' && daysOld >= 0 && daysOld <= 45) {
-        qual = 'CAM'; // Recently released movies in theaters are usually CAM/TS
-      } else if (m.vote_average >= 7.5) {
-        qual = '4K';
-      } else if (m.vote_average >= 6.5) {
-        qual = 'FHD';
+      
+      if (type === 'movie') {
+        if (daysOld >= 0 && daysOld <= 21) {
+          // 0-21 days: Movie just hit theaters, only CAM available
+          qual = 'CAM';
+          qualClass = 'qual-cam';
+        } else if (daysOld > 21 && daysOld <= 45) {
+          // 21-45 days: Better quality CAM/TS available (TeleSync)
+          qual = 'TS';
+          qualClass = 'qual-ts';
+        } else if (daysOld > 45 && daysOld <= 75) {
+          // 45-75 days: Pre-release HDTS/HDCAM or early digital leaks
+          qual = 'HDTS';
+          qualClass = 'qual-hdts';
+        } else if (daysOld > 75 && daysOld <= 120) {
+          // 75-120 days: Digital release window (OTT release likely)
+          qual = 'HD';
+          qualClass = 'qual-hd';
+        } else if (daysOld > 120 && daysOld <= 200) {
+          // 120-200 days: Full HD available on streaming platforms
+          qual = 'FHD';
+          qualClass = 'qual-fhd';
+        } else if (daysOld > 200) {
+          // 200+ days: 4K/Blu-ray release window
+          if (m.vote_average >= 7.0 && m.popularity >= 50) {
+            qual = '4K';
+            qualClass = 'qual-4k';
+          } else {
+            qual = 'FHD';
+            qualClass = 'qual-fhd';
+          }
+        }
+      } else {
+        // TV Shows / Web Series: Usually direct-to-digital (HD from day 1)
+        if (daysOld <= 7) {
+          qual = 'NEW';
+          qualClass = 'qual-new';
+        } else if (m.vote_average >= 8.0 && m.popularity >= 100) {
+          qual = '4K';
+          qualClass = 'qual-4k';
+        } else if (m.vote_average >= 6.5) {
+          qual = 'FHD';
+          qualClass = 'qual-fhd';
+        } else {
+          qual = 'HD';
+          qualClass = 'qual-hd';
+        }
       }
+    }
+    
+    // -- SMART RELEASE FRESHNESS BADGE --
+    let freshBadge = '';
+    if (rDateStr) {
+      const daysOld = (new Date() - new Date(rDateStr)) / (1000 * 60 * 60 * 24);
+      if (daysOld >= 0 && daysOld <= 3) freshBadge = '<div class="card-fresh card-fresh-today">TODAY</div>';
+      else if (daysOld <= 7) freshBadge = '<div class="card-fresh card-fresh-new">NEW</div>';
+      else if (daysOld <= 14) freshBadge = '<div class="card-fresh card-fresh-recent">THIS WEEK</div>';
     }
     // -- HINDI DUBBED BADGE: Show on Hollywood/Japanese/Korean movies (likely dubbed)
     const dubbedLangs = ['en', 'ja', 'ko', 'fr', 'es', 'de']; // Languages that are commonly dubbed to Hindi
@@ -1094,8 +1350,9 @@ function renderMovies(movies, append = false) {
     card.innerHTML =
       '<div class="card-poster">' +
         `<img src="${IMG}${m.poster_path}" alt="${escapeHTML(m.title||'')}" width="171" height="256" loading="lazy" decoding="async">` +
-        '<div class="card-quality">'+qual+'</div>' +
+        '<div class="card-quality '+(qualClass||'')+'">'+qual+'</div>' +
         (isHot ? '<div class="card-hot">HOT</div>' : '') +
+        freshBadge +
         (isDubbedLikely ? '<div class="card-dubbed"> HINDI</div>' : '') +
         '<div class="card-overlay"><button class="card-play-btn">&#9654;</button></div>' +
       '</div>' +
@@ -1298,32 +1555,44 @@ async function loadUpcoming(isLoadMore = false) {
       }
       const posterImg = m.backdrop_path ? (isTV ? 'https://image.tmdb.org/t/p/w780' : 'https://image.tmdb.org/t/p/w500') + m.backdrop_path : IMG + m.poster_path;
       const genres = (m.genre_ids||[]).slice(0,2).map(id => GENRE_MAP[id]).filter(Boolean);
+      
+      // Calculate countdown days
+      let countdownText = '';
+      if (m.release_date) {
+        const relDate = new Date(m.release_date);
+        const today = new Date();
+        today.setHours(0,0,0,0);
+        const daysLeft = Math.ceil((relDate - today) / (1000 * 60 * 60 * 24));
+        if (daysLeft === 0) countdownText = 'Releasing TODAY!';
+        else if (daysLeft === 1) countdownText = 'Tomorrow!';
+        else if (daysLeft <= 7) countdownText = daysLeft + ' days left';
+        else if (daysLeft <= 30) countdownText = Math.ceil(daysLeft / 7) + ' weeks left';
+        else countdownText = Math.ceil(daysLeft / 30) + ' months left';
+      }
+
       const card = document.createElement('div');
       card.className = 'upcoming-card reveal-up';
       card.tabIndex = 0;
-        card.style.willChange = 'transform, opacity';
+      card.style.willChange = 'transform, opacity';
       card.style.animationDelay = ((i % 12) * 0.08) + 's';
       card.innerHTML =
         '<div class="upcoming-poster">' +
-            '<img src="'+posterImg+'" alt="'+escapeHTML(m.title||'')+'" width="280" height="157" loading="lazy" decoding="async">' +
+          '<img src="'+posterImg+'" alt="'+escapeHTML(m.title||'')+'" width="280" height="157" loading="lazy" decoding="async">' +
           '<div class="upcoming-poster-overlay"></div>' +
-          '<div class="upcoming-release-badge">RELEASE '+dateStr+'</div>' +
+          '<div class="upcoming-release-badge"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" style="margin-right:4px;vertical-align:-1px"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10z"/></svg>'+dateStr+'</div>' +
+          (countdownText ? '<div class="upcoming-countdown-badge">⏳ '+countdownText+'</div>' : '') +
+          '<div class="upcoming-play-hint"><svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3" stroke-linecap="round"/></svg><span>View Details</span></div>' +
         '</div>' +
         '<div class="upcoming-info">' +
           '<div class="upcoming-title">'+escapeHTML(m.title||'')+'</div>' +
           '<div class="upcoming-meta">' +
-            '<div class="card-rating" style="font-size:0.73rem">RATING '+((m.vote_average||0).toFixed(1))+'</div>' +
-            '<div class="card-year" style="font-size:0.71rem">YEAR '+((m.release_date||'').slice(0,4))+'</div>' +
-            genres.map(g => '<span class="card-genre">'+escapeHTML(g)+'</span>').join('') +
+            '<div class="upcoming-lang-badge">'+(m.original_language||'en').toUpperCase()+'</div>' +
+            genres.map(g => '<span class="upcoming-genre-tag">'+escapeHTML(g)+'</span>').join('') +
           '</div>' +
-          '<p class="upcoming-desc">'+escapeHTML(m.overview||'')+'</p>' +
+          '<p class="upcoming-desc">'+escapeHTML((m.overview||'').slice(0, 120))+(m.overview && m.overview.length > 120 ? '...' : '')+'</p>' +
         '</div>';
-      card.addEventListener('click', () => { openModal(m.id); });
+      card.addEventListener('click', () => { openUpcomingDetail(m.id); });
       fragment.appendChild(card);
-      scrollObserver.observe(card);
-
-      // Premium 3D Tilt Effect for Upcoming Cards
-        // Tilt effect ab fast CSS se handle hoga (Zero Lag)
       scrollObserver.observe(card);
     });
     grid.appendChild(fragment);
@@ -1340,7 +1609,239 @@ async function loadUpcoming(isLoadMore = false) {
     setTimeout(() => prefetchUpcomingPage(currentUpcomingPage + 1), 800);
   }
 }
- 
+
+// ── UPCOMING MOVIE DETAIL PAGE (Premium Info Modal) ──
+let currentUpcomingMovie = null;
+let upcomingTrailerKey = null;
+
+async function openUpcomingDetail(id) {
+  const overlay = document.getElementById('upcoming-detail-overlay');
+  if (!overlay) return;
+  
+  // Open overlay instantly
+  overlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  overlay.scrollTop = 0;
+  
+  // Show loading state
+  document.getElementById('udTitle').textContent = 'Loading...';
+  document.getElementById('udOverview').textContent = '';
+  document.getElementById('udMeta').innerHTML = '<div class="player-spinner" style="width:24px;height:24px;border-width:2px;border-color:rgba(255,255,255,0.1);border-left-color:var(--gold);"></div>';
+  document.getElementById('udGenres').innerHTML = '';
+  document.getElementById('udTagline').textContent = '';
+  document.getElementById('udCastGrid').innerHTML = '';
+  document.getElementById('udExtraInfo').innerHTML = '';
+  document.getElementById('udTrailerSection').style.display = 'none';
+  document.getElementById('udCastSection').style.display = 'none';
+  
+  try {
+    // Fetch full movie details with videos, credits, and similar
+    const details = await tmdb('/movie/' + id, { language: 'en-US', append_to_response: 'videos,credits,similar' });
+    if (!details || !details.id) { closeUpcomingDetail(); return; }
+    
+    currentUpcomingMovie = details;
+    
+    // Backdrop
+    const bdEl = document.getElementById('udBackdrop');
+    if (details.backdrop_path) {
+      bdEl.src = getResponsiveBackdrop(details.backdrop_path);
+    } else if (details.poster_path) {
+      bdEl.src = 'https://image.tmdb.org/t/p/w780' + details.poster_path;
+    }
+    
+    // Poster
+    const posterEl = document.getElementById('udPoster');
+    if (details.poster_path) {
+      posterEl.src = 'https://image.tmdb.org/t/p/w342' + details.poster_path;
+    }
+    
+    // Title
+    document.getElementById('udTitle').textContent = details.title || details.name || '';
+    
+    // Tagline
+    const taglineEl = document.getElementById('udTagline');
+    if (details.tagline) {
+      taglineEl.textContent = '"' + details.tagline + '"';
+      taglineEl.style.display = 'block';
+    } else {
+      taglineEl.style.display = 'none';
+    }
+    
+    // Meta info
+    let metaHTML = '';
+    if (details.release_date) {
+      const relDate = new Date(details.release_date);
+      const dateFormatted = relDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+      metaHTML += '<span class="ud-meta-item ud-meta-date"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10z"/></svg> ' + dateFormatted + '</span>';
+    }
+    if (details.runtime) {
+      const hrs = Math.floor(details.runtime / 60);
+      const mins = details.runtime % 60;
+      metaHTML += '<span class="ud-meta-item"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm4.2 14.2L11 13V7h1.5v5.2l4.5 2.7-.8 1.3z"/></svg> ' + (hrs ? hrs + 'h ' : '') + mins + 'min</span>';
+    }
+    if (details.original_language) {
+      metaHTML += '<span class="ud-meta-item">' + details.original_language.toUpperCase() + '</span>';
+    }
+    if (details.vote_average > 0) {
+      metaHTML += '<span class="ud-meta-item ud-meta-rating"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg> ' + details.vote_average.toFixed(1) + '</span>';
+    }
+    if (details.budget > 0) {
+      metaHTML += '<span class="ud-meta-item">💰 Budget: $' + (details.budget / 1000000).toFixed(0) + 'M</span>';
+    }
+    document.getElementById('udMeta').innerHTML = metaHTML;
+    
+    // Genres
+    let genresHTML = '';
+    if (details.genres && details.genres.length) {
+      genresHTML = details.genres.map(g => '<span class="ud-genre-tag">' + escapeHTML(g.name) + '</span>').join('');
+    }
+    document.getElementById('udGenres').innerHTML = genresHTML;
+    
+    // Overview
+    document.getElementById('udOverview').textContent = details.overview || 'No overview available yet.';
+    
+    // Countdown
+    const countdownEl = document.getElementById('udCountdown');
+    if (details.release_date) {
+      const relDate = new Date(details.release_date);
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      const daysLeft = Math.ceil((relDate - today) / (1000 * 60 * 60 * 24));
+      
+      if (daysLeft > 0) {
+        const months = Math.floor(daysLeft / 30);
+        const weeks = Math.floor((daysLeft % 30) / 7);
+        const days = daysLeft % 7;
+        let countdownHTML = '<div class="ud-countdown-label">RELEASING IN</div><div class="ud-countdown-timer">';
+        if (months > 0) countdownHTML += '<div class="ud-countdown-unit"><span class="ud-countdown-num">' + months + '</span><span class="ud-countdown-txt">MONTHS</span></div>';
+        if (weeks > 0 || months > 0) countdownHTML += '<div class="ud-countdown-unit"><span class="ud-countdown-num">' + weeks + '</span><span class="ud-countdown-txt">WEEKS</span></div>';
+        countdownHTML += '<div class="ud-countdown-unit"><span class="ud-countdown-num">' + days + '</span><span class="ud-countdown-txt">DAYS</span></div>';
+        countdownHTML += '</div>';
+        countdownEl.innerHTML = countdownHTML;
+        countdownEl.style.display = 'flex';
+      } else {
+        countdownEl.innerHTML = '<div class="ud-countdown-label" style="color:var(--gold)">🎬 RELEASING TODAY!</div>';
+        countdownEl.style.display = 'flex';
+      }
+    }
+    
+    // Trailer
+    upcomingTrailerKey = null;
+    if (details.videos && details.videos.results) {
+      const ytVids = details.videos.results.filter(v => v.site === 'YouTube');
+      const trailer = ytVids.find(v => v.type === 'Trailer') || ytVids.find(v => v.type === 'Teaser') || ytVids[0];
+      if (trailer) {
+        upcomingTrailerKey = trailer.key;
+        document.getElementById('udTrailerBtn').style.display = 'inline-flex';
+      } else {
+        document.getElementById('udTrailerBtn').style.display = 'none';
+      }
+    } else {
+      document.getElementById('udTrailerBtn').style.display = 'none';
+    }
+    
+    // Cast
+    if (details.credits && details.credits.cast && details.credits.cast.length > 0) {
+      const castSection = document.getElementById('udCastSection');
+      const castGrid = document.getElementById('udCastGrid');
+      castSection.style.display = 'block';
+      
+      const topCast = details.credits.cast.slice(0, 10);
+      castGrid.innerHTML = topCast.map(person => {
+        const imgSrc = person.profile_path 
+          ? 'https://image.tmdb.org/t/p/w185' + person.profile_path 
+          : 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2280%22 height=%22120%22><rect width=%2280%22 height=%22120%22 fill=%22%23222%22/><text x=%2240%22 y=%2265%22 fill=%22%23555%22 text-anchor=%22middle%22 font-size=%2224%22>👤</text></svg>';
+        return '<div class="ud-cast-card">' +
+          '<img src="' + imgSrc + '" alt="' + escapeHTML(person.name) + '" loading="lazy" decoding="async">' +
+          '<div class="ud-cast-name">' + escapeHTML(person.name) + '</div>' +
+          '<div class="ud-cast-char">' + escapeHTML(person.character || '') + '</div>' +
+        '</div>';
+      }).join('');
+    }
+    
+    // Director + Production
+    let extraHTML = '';
+    if (details.credits && details.credits.crew) {
+      const directors = details.credits.crew.filter(c => c.job === 'Director');
+      if (directors.length > 0) {
+        extraHTML += '<div class="ud-extra-row"><span class="ud-extra-label">Director</span><span class="ud-extra-value">' + directors.map(d => escapeHTML(d.name)).join(', ') + '</span></div>';
+      }
+    }
+    if (details.production_companies && details.production_companies.length > 0) {
+      extraHTML += '<div class="ud-extra-row"><span class="ud-extra-label">Production</span><span class="ud-extra-value">' + details.production_companies.slice(0, 3).map(c => escapeHTML(c.name)).join(', ') + '</span></div>';
+    }
+    if (details.production_countries && details.production_countries.length > 0) {
+      extraHTML += '<div class="ud-extra-row"><span class="ud-extra-label">Country</span><span class="ud-extra-value">' + details.production_countries.map(c => escapeHTML(c.name)).join(', ') + '</span></div>';
+    }
+    if (details.status) {
+      extraHTML += '<div class="ud-extra-row"><span class="ud-extra-label">Status</span><span class="ud-extra-value">' + escapeHTML(details.status) + '</span></div>';
+    }
+    document.getElementById('udExtraInfo').innerHTML = extraHTML;
+    
+    // Watchlist button state
+    updateUpcomingWatchlistBtn(details.id);
+    
+  } catch (err) {
+    console.error('Upcoming Detail Error:', err);
+    document.getElementById('udTitle').textContent = 'Error loading movie details';
+  }
+}
+
+function closeUpcomingDetail() {
+  const overlay = document.getElementById('upcoming-detail-overlay');
+  if (overlay) overlay.classList.remove('open');
+  document.body.style.overflow = '';
+  
+  // Stop any playing trailer
+  const embed = document.getElementById('udTrailerEmbed');
+  if (embed) embed.innerHTML = '';
+  document.getElementById('udTrailerSection').style.display = 'none';
+  
+  currentUpcomingMovie = null;
+  upcomingTrailerKey = null;
+}
+
+function playUpcomingTrailer() {
+  if (!upcomingTrailerKey) return;
+  const section = document.getElementById('udTrailerSection');
+  const embed = document.getElementById('udTrailerEmbed');
+  section.style.display = 'block';
+  embed.innerHTML = '<iframe src="https://www.youtube.com/embed/' + upcomingTrailerKey + '?autoplay=1&rel=0" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen style="width:100%;aspect-ratio:16/9;border-radius:12px;"></iframe>';
+  section.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function handleUpcomingWatchlist() {
+  if (!currentUpcomingMovie) return;
+  const idx = watchlist.findIndex(m => m.id === currentUpcomingMovie.id);
+  if (idx > -1) {
+    watchlist.splice(idx, 1);
+    showToast('Removed from Watchlist');
+  } else {
+    watchlist.push(currentUpcomingMovie);
+    showToast('Added to Watchlist');
+  }
+  localStorage.setItem('mz_watchlist', JSON.stringify(watchlist));
+  updateUpcomingWatchlistBtn(currentUpcomingMovie.id);
+}
+
+function updateUpcomingWatchlistBtn(id) {
+  const btn = document.getElementById('udWatchlistBtn');
+  if (!btn) return;
+  const isSaved = watchlist.some(m => m.id === id);
+  btn.innerHTML = isSaved 
+    ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg> Saved!'
+    : '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg> Add to Watchlist';
+  btn.classList.toggle('active', isSaved);
+}
+
+// Close upcoming detail on back button
+window.addEventListener('popstate', () => {
+  const overlay = document.getElementById('upcoming-detail-overlay');
+  if (overlay && overlay.classList.contains('open')) {
+    closeUpcomingDetail();
+  }
+});
+
 // SEARCH
 let searchTimer = null;
 const searchInput = document.getElementById('searchInput');
@@ -1944,7 +2445,7 @@ const playerSources = [
       ? `https://www.viduki.net/2/tv/${id}/${s}/${e}`
       : `https://www.viduki.net/2/movie/${id}`;
   }},
-  { name: 'Cinextream All-in-One', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
+  { name: 'Cinextream', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
     // #2 ULTIMATE ALL-ROUNDER: Cinextream.net
     // 115K Movies + 79K Shows + 9K Anime (SUB & DUB)
     // Hindi Dubbed anime, Auto-next, Fast servers, 1080p, Customizable

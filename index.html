@@ -14,9 +14,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700;900&family=Playfair+Display:ital,wght@0,700;1,400&display=swap" rel="stylesheet">
-<link rel="preload" href="moviezone.css" as="style">
-<link rel="preload" href="moviezone.js" as="script">
-<link rel="stylesheet" href="moviezone.css">
+<link rel="preload" href="moviezone.css?v=2.3" as="style">
+<link rel="preload" href="moviezone.js?v=2.3" as="script">
+<link rel="stylesheet" href="moviezone.css?v=2.3">
 </head>
 <body>
 
@@ -163,6 +163,63 @@
   </div>
 </section>
 
+<!-- ── UPCOMING MOVIE DETAIL MODAL ── -->
+<div id="upcoming-detail-overlay" class="upcoming-detail-overlay">
+  <div class="upcoming-detail-box">
+    <button class="upcoming-detail-close" onclick="closeUpcomingDetail()" aria-label="Close">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+    </button>
+    
+    <!-- Backdrop Hero -->
+    <div class="ud-hero">
+      <img id="udBackdrop" src="" alt="" class="ud-backdrop-img">
+      <div class="ud-hero-gradient"></div>
+      <div class="ud-countdown-box" id="udCountdown"></div>
+    </div>
+    
+    <!-- Main Content -->
+    <div class="ud-content">
+      <div class="ud-top-row">
+        <img id="udPoster" src="" alt="" class="ud-poster">
+        <div class="ud-info">
+          <h1 class="ud-title" id="udTitle"></h1>
+          <div class="ud-tagline" id="udTagline"></div>
+          <div class="ud-meta" id="udMeta"></div>
+          <div class="ud-genres" id="udGenres"></div>
+          <p class="ud-overview" id="udOverview"></p>
+          <div class="ud-actions">
+            <button class="ud-btn ud-btn-trailer" id="udTrailerBtn" onclick="playUpcomingTrailer()">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              Watch Trailer
+            </button>
+            <button class="ud-btn ud-btn-watchlist" id="udWatchlistBtn" onclick="handleUpcomingWatchlist()">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+              Add to Watchlist
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Trailer Embed -->
+      <div class="ud-trailer-section" id="udTrailerSection" style="display:none;">
+        <h3 class="ud-section-title">Official Trailer</h3>
+        <div class="ud-trailer-embed" id="udTrailerEmbed"></div>
+      </div>
+      
+      <!-- Cast -->
+      <div class="ud-cast-section" id="udCastSection" style="display:none;">
+        <h3 class="ud-section-title">Cast & Crew</h3>
+        <div class="ud-cast-grid" id="udCastGrid"></div>
+      </div>
+      
+      <!-- More Info -->
+      <div class="ud-extra-info" id="udExtraInfo"></div>
+    </div>
+  </div>
+</div>
+
+
+
 <!-- â”€â”€ FOOTER â”€â”€ -->
 <footer class="site-footer">
   <div class="footer-inner">
@@ -284,7 +341,7 @@
 <!-- â”€â”€ TOAST â”€â”€ -->
 <div id="toast"></div>
 
-<script src="moviezone.js" defer></script>
+<script src="moviezone.js?v=2.3" defer></script>
 <script>
 // INSTANT PERFORMANCE: Remove loader faster + mark page interactive
 document.addEventListener('DOMContentLoaded', () => {
