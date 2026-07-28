@@ -399,13 +399,13 @@
   </div>
 </div>
 
-<!-- â”€â”€ PWA INSTALL PROMPT â”€â”€ -->
+<!-- â”€â”€ PWA INSTALL PROMPT (Desktop / Android / Windows) â”€â”€ -->
 <div id="pwa-install-overlay">
   <div class="pwa-card" role="dialog" aria-modal="true" aria-labelledby="pwaTitle">
     <button class="pwa-close" id="pwaCloseBtn" aria-label="Close">&times;</button>
     <span class="pwa-badge">✦ Premium Experience</span>
     <h2 class="pwa-title" id="pwaTitle">Install <span>MovieZone</span> App</h2>
-    <p class="pwa-desc">Get instant access, offline viewing &amp; a faster, app-like experience. Install directly or scan the QR code with your phone.</p>
+    <p class="pwa-desc" id="pwaDesc">Get instant access, offline viewing &amp; a faster, app-like experience. Install directly or scan the QR code with your phone.</p>
 
     <div class="pwa-body">
       <div class="pwa-qr-wrap" id="pwaQrWrap"></div>
@@ -415,8 +415,43 @@
       </div>
     </div>
 
-    <div class="pwa-ios-steps" id="pwaIosSteps" style="display:none;">
-      On iPhone/iPad: tap <b>Share</b> <span aria-hidden="true">⬆️</span> in Safari, then select <b>“Add to Home Screen”</b>.
+    <!-- iOS animated visual guide (shown only on iOS, replaces the default body above) -->
+    <div class="pwa-ios-guide" id="pwaIosGuide" style="display:none;">
+      <div class="pwa-ios-step pwa-ios-step-1">
+        <div class="pwa-ios-icon-anim">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 3v12m0-12l-4 4m4-4l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="pwa-ios-step-text">
+          <span class="pwa-ios-step-num">1</span>
+          Tap the <b id="pwaIosShareLabel">Share</b> icon in your browser's toolbar
+        </div>
+      </div>
+      <div class="pwa-ios-step pwa-ios-step-2">
+        <div class="pwa-ios-icon-anim pwa-ios-icon-plus">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="3" y="3" width="18" height="18" rx="4" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M12 8v8m-4-4h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="pwa-ios-step-text">
+          <span class="pwa-ios-step-num">2</span>
+          Scroll down &amp; tap <b>“Add to Home Screen”</b>
+        </div>
+      </div>
+      <div class="pwa-ios-step pwa-ios-step-3">
+        <div class="pwa-ios-icon-anim">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="pwa-ios-step-text">
+          <span class="pwa-ios-step-num">3</span>
+          Tap <b>“Add”</b> — MovieZone appears on your Home Screen
+        </div>
+      </div>
     </div>
 
     <div class="pwa-platforms">
@@ -431,6 +466,18 @@
       <button class="pwa-btn-install" id="pwaInstallBtn">⬇ Install Now</button>
       <button class="pwa-btn-later" id="pwaLaterBtn">Maybe Later</button>
     </div>
+  </div>
+</div>
+
+<!-- â”€â”€ PWA INSTALL PROMPT (Smart TV — QR-only, remote-friendly) â”€â”€ -->
+<div id="pwa-install-tv-overlay">
+  <div class="pwa-tv-card">
+    <div class="pwa-tv-badge">✦ MovieZone Premium</div>
+    <h2 class="pwa-tv-title">Install on Your Phone</h2>
+    <p class="pwa-tv-desc">Point your phone's camera at this code to get MovieZone on your mobile device.</p>
+    <div class="pwa-tv-qr-wrap" id="pwaTvQrWrap"></div>
+    <p class="pwa-tv-hint">This code stays available while you browse on TV</p>
+    <button class="pwa-tv-dismiss" id="pwaTvDismissBtn" tabindex="0">OK, Got It</button>
   </div>
 </div>
 

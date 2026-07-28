@@ -410,10 +410,12 @@
    ========================================================================== */
 (function () {
   var STORAGE_KEY = 'mz_pwa_prompt_dismissed_at';
+  var TV_STORAGE_KEY = 'mz_pwa_tv_prompt_dismissed_at';
   var SHOW_DELAY_MS = 4000;
   var SNOOZE_DAYS = 7;
 
-  var overlay, installBtn, laterBtn, closeBtn, iosSteps, qrWrap;
+  var overlay, installBtn, laterBtn, closeBtn, iosGuide, iosShareLabel, pwaDesc, qrWrap;
+  var tvOverlay, tvQrWrap, tvDismissBtn;
   var deferredPrompt = null;
 
   function isStandalone() {
@@ -423,16 +425,28 @@
 
   function isTV() {
     var ua = navigator.userAgent.toLowerCase();
-    return /smart-tv|smarttv|googletv|appletv|hbbtv|netcast|viera|tizen.*tv|webos.*tv|tv.*webos/.test(ua);
+    return /smart-tv|smarttv|googletv|appletv|hbbtv|netcast|viera|tizen.*tv|webos.*tv|tv.*webos|aft[a-z]|crkey|roku/.test(ua);
   }
 
   function isIOS() {
     var ua = navigator.userAgent;
-    return /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+    // Covers iPhone/iPad Safari + Chrome/Firefox-on-iOS (all use WebKit, same install path)
+    // Also catches iPadOS 13+ which reports as "Macintosh" but has touch support.
+    var isAppleTouch = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+    var isIpadOS13 = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+    return isAppleTouch || isIpadOS13;
   }
 
-  function recentlyDismissed() {
-    var raw = localStorage.getItem(STORAGE_KEY);
+  function isIOSChrome() {
+    return /CriOS/.test(navigator.userAgent);
+  }
+
+  function isIOSFirefox() {
+    return /FxiOS/.test(navigator.userAgent);
+  }
+
+  function recentlyDismissed(key) {
+    var raw = localStorage.getItem(key);
     if (!raw) return false;
     var dismissedAt = parseInt(raw, 10);
     if (isNaN(dismissedAt)) return false;
@@ -440,8 +454,8 @@
     return elapsedDays < SNOOZE_DAYS;
   }
 
-  function markDismissed() {
-    try { localStorage.setItem(STORAGE_KEY, String(Date.now())); } catch (e) {}
+  function markDismissed(key) {
+    try { localStorage.setItem(key, String(Date.now())); } catch (e) {}
   }
 
   function openPopup() {
@@ -454,29 +468,55 @@
     if (!overlay) return;
     overlay.classList.remove('open');
     document.body.style.overflow = '';
-    if (remember) markDismissed();
+    if (remember) markDismissed(STORAGE_KEY);
   }
 
-  function renderQR() {
-    if (!qrWrap || !window.MiniQR) return;
+  function openTvPopup() {
+    if (!tvOverlay) return;
+    tvOverlay.classList.add('open');
+  }
+
+  function closeTvPopup(remember) {
+    if (!tvOverlay) return;
+    tvOverlay.classList.remove('open');
+    if (remember) markDismissed(TV_STORAGE_KEY);
+  }
+
+  function renderQRInto(el, opts) {
+    if (!el || !window.MiniQR) return;
     var canvas = document.createElement('canvas');
     try {
-      window.MiniQR.renderTo(canvas, window.location.origin + '/', {
+      window.MiniQR.renderTo(canvas, window.location.origin + '/', Object.assign({
         cellSize: 4, margin: 8, dark: '#0a0a12', light: '#ffffff', level: 'M'
-      });
-      qrWrap.innerHTML = '';
-      qrWrap.appendChild(canvas);
+      }, opts || {}));
+      el.innerHTML = '';
+      el.appendChild(canvas);
     } catch (e) {
-      qrWrap.innerHTML = '';
+      el.innerHTML = '';
     }
+  }
+
+  function setupIOSGuide() {
+    iosGuide.style.display = 'flex';
+    pwaDesc.style.display = 'none';
+    document.getElementById('pwaQrWrap').closest('.pwa-body').style.display = 'none';
+
+    // Chrome/Firefox on iOS use a different share icon location/wording than Safari.
+    if (isIOSChrome()) {
+      iosShareLabel.textContent = 'Share';
+    } else if (isIOSFirefox()) {
+      iosShareLabel.textContent = 'Share';
+    } else {
+      iosShareLabel.textContent = 'Share';
+    }
+
+    installBtn.textContent = 'Got it, thanks!';
+    installBtn.addEventListener('click', function () { closePopup(true); });
   }
 
   function setupInstallButton() {
     if (isIOS()) {
-      // iOS has no programmatic install — show manual instructions instead.
-      iosSteps.style.display = 'block';
-      installBtn.textContent = 'Got it';
-      installBtn.addEventListener('click', function () { closePopup(true); });
+      setupIOSGuide();
       return;
     }
 
@@ -501,7 +541,7 @@
   });
 
   window.addEventListener('appinstalled', function () {
-    markDismissed();
+    markDismissed(STORAGE_KEY);
     closePopup(false);
   });
 
@@ -510,15 +550,35 @@
     installBtn = document.getElementById('pwaInstallBtn');
     laterBtn = document.getElementById('pwaLaterBtn');
     closeBtn = document.getElementById('pwaCloseBtn');
-    iosSteps = document.getElementById('pwaIosSteps');
+    iosGuide = document.getElementById('pwaIosGuide');
+    iosShareLabel = document.getElementById('pwaIosShareLabel');
+    pwaDesc = document.getElementById('pwaDesc');
     qrWrap = document.getElementById('pwaQrWrap');
 
-    if (!overlay) return;
+    tvOverlay = document.getElementById('pwa-install-tv-overlay');
+    tvQrWrap = document.getElementById('pwaTvQrWrap');
+    tvDismissBtn = document.getElementById('pwaTvDismissBtn');
 
-    if (isStandalone() || isTV() || recentlyDismissed()) return;
+    if (isStandalone()) return;
+
+    /* ── Smart TV: dedicated full-screen QR-only view (remote-friendly, no native install) ── */
+    if (isTV()) {
+      if (!tvOverlay || recentlyDismissed(TV_STORAGE_KEY)) return;
+      renderQRInto(tvQrWrap, { cellSize: 6, margin: 12 });
+      tvDismissBtn.addEventListener('click', function () { closeTvPopup(true); });
+      tvDismissBtn.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') closeTvPopup(true);
+      });
+      setTimeout(openTvPopup, SHOW_DELAY_MS);
+      setTimeout(function () { tvDismissBtn.focus(); }, SHOW_DELAY_MS + 100);
+      return;
+    }
+
+    /* ── Everyone else: desktop / Android / Windows / iOS card ── */
+    if (!overlay || recentlyDismissed(STORAGE_KEY)) return;
 
     setupInstallButton();
-    renderQR();
+    renderQRInto(qrWrap);
 
     laterBtn.addEventListener('click', function () { closePopup(true); });
     closeBtn.addEventListener('click', function () { closePopup(true); });
