@@ -399,11 +399,47 @@
   </div>
 </div>
 
+<!-- â”€â”€ PWA INSTALL PROMPT â”€â”€ -->
+<div id="pwa-install-overlay">
+  <div class="pwa-card" role="dialog" aria-modal="true" aria-labelledby="pwaTitle">
+    <button class="pwa-close" id="pwaCloseBtn" aria-label="Close">&times;</button>
+    <span class="pwa-badge">✦ Premium Experience</span>
+    <h2 class="pwa-title" id="pwaTitle">Install <span>MovieZone</span> App</h2>
+    <p class="pwa-desc">Get instant access, offline viewing &amp; a faster, app-like experience. Install directly or scan the QR code with your phone.</p>
+
+    <div class="pwa-body">
+      <div class="pwa-qr-wrap" id="pwaQrWrap"></div>
+      <div class="pwa-qr-label">
+        <strong>Scan to install</strong>
+        Open your camera app and scan this code to install MovieZone on any smartphone or tablet.
+      </div>
+    </div>
+
+    <div class="pwa-ios-steps" id="pwaIosSteps" style="display:none;">
+      On iPhone/iPad: tap <b>Share</b> <span aria-hidden="true">⬆️</span> in Safari, then select <b>“Add to Home Screen”</b>.
+    </div>
+
+    <div class="pwa-platforms">
+      <span class="pwa-platform-chip">📱 Android</span>
+      <span class="pwa-platform-chip">🍎 iOS</span>
+      <span class="pwa-platform-chip">💻 Windows</span>
+      <span class="pwa-platform-chip">🖥️ macOS</span>
+      <span class="pwa-platform-chip">📺 Smart TV</span>
+    </div>
+
+    <div class="pwa-actions">
+      <button class="pwa-btn-install" id="pwaInstallBtn">⬇ Install Now</button>
+      <button class="pwa-btn-later" id="pwaLaterBtn">Maybe Later</button>
+    </div>
+  </div>
+</div>
+
 <!-- â”€â”€ TOAST â”€â”€ -->
 <div id="toast"></div>
 
 <script src="search-engine.js?v=1.1" defer></script>
 <script src="moviezone.js?v=3.5" defer></script>
+<script src="pwa-install.js?v=1.0" defer></script>
 <script>
 // INSTANT PERFORMANCE: Remove loader faster + mark page interactive
 document.addEventListener('DOMContentLoaded', () => {
@@ -423,6 +459,21 @@ if ('requestIdleCallback' in window) {
     document.querySelectorAll('img[loading="lazy"]').forEach((img, i) => {
       if (i < 4) img.loading = 'eager'; // First 4 images load immediately
     });
+  });
+}
+</script>
+
+<!-- â”€â”€ PWA: SERVICE WORKER REGISTRATION â”€â”€ -->
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then(reg => {
+        console.log('MovieZone SW registered:', reg.scope);
+      })
+      .catch(err => {
+        console.error('MovieZone SW registration failed:', err);
+      });
   });
 }
 </script>
