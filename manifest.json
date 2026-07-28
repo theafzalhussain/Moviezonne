@@ -1,0 +1,38 @@
+{
+  "name": "MovieZone - Premium Cinema",
+  "short_name": "MovieZone",
+  "description": "Your ultimate premium destination for movies and shows in HD, 4K quality",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#03030a",
+  "theme_color": "#f5c518",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "categories": ["entertainment"],
+  "screenshots": []
+}

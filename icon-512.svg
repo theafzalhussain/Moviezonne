@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a0a14"/>
+      <stop offset="40%" stop-color="#03030a"/>
+      <stop offset="100%" stop-color="#0d0d1a"/>
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd700"/>
+      <stop offset="25%" stop-color="#f5c518"/>
+      <stop offset="50%" stop-color="#ffcc00"/>
+      <stop offset="75%" stop-color="#ffaa00"/>
+      <stop offset="100%" stop-color="#f5c518"/>
+    </linearGradient>
+    <linearGradient id="shineGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fff8dc" stop-opacity="1"/>
+      <stop offset="40%" stop-color="#f5c518"/>
+      <stop offset="80%" stop-color="#cc8800"/>
+      <stop offset="100%" stop-color="#f5c518"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#e63946" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#7c3aed" stop-opacity="0.6"/>
+    </linearGradient>
+    <radialGradient id="spotGlow" cx="50%" cy="45%" r="35%">
+      <stop offset="0%" stop-color="#f5c518" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#f5c518" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="goldGlow">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feFlood flood-color="#f5c518" flood-opacity="0.3"/>
+      <feComposite operator="in" in2="blur"/>
+      <feComposite operator="over" in="SourceGraphic"/>
+    </filter>
+    <filter id="dropShadow">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="512" height="512" rx="100" ry="100" fill="url(#bgGrad)"/>
+  
+  <!-- Spotlight glow effect -->
+  <ellipse cx="256" cy="230" rx="180" ry="160" fill="url(#spotGlow)"/>
+  
+  <!-- Subtle border -->
+  <rect width="512" height="512" rx="100" ry="100" fill="none" stroke="#f5c518" stroke-opacity="0.12" stroke-width="2"/>
+  
+  <!-- Film strip perforations left -->
+  <rect x="32" y="70" width="28" height="18" rx="3" fill="#f5c518" fill-opacity="0.15"/>
+  <rect x="32" y="104" width="28" height="18" rx="3" fill="#f5c518" fill-opacity="0.15"/>
+  <rect x="32" y="138" width="28" height="18" rx="3" fill="#f5c518" fill-opacity="0.15"/>
+  <rect x="32" y="172" width="28" height="18" rx="3" fill="#f5c518" fill-opacity="0.15"/>
+  <rect x="32" y="322" width="28" height="18" rx="3" fill="#f5c518" fill-opacity="0.15"/>
+  <rect x="32" y="356" width="28" height="18" rx="3" fill="#f5c518" fill-opacity="0.15"/>
+  <rect x="32" y="390" width="28" height="18" rx="3" fill="#f5c518" fill-opacity="0.15"/>
+  <rect x="32" y="424" width="28" height="18" rx="3" fill="#f5c518" fill-opacity="0.15"/>
+  
+  <!-- Film strip perforations right -->
+  <rect x="452" y="70" width="28" height="18" rx="3" fill="#f5c518" fill-opacity="0.15"/>
+  <rect x="452" y="104" width="28" height="18" rx="3" fill="#f5c518" fill-opacity="0.15"/>
+  <rect x="452" y="138" width="28" height="18" rx="3" fill="#f5c518" fill-opacity="0.15"/>
+  <rect x="452" y="172" width="28" height="18" rx="3" fill="#f5c518" fill-opacity="0.15"/>
+  <rect x="452" y="322" width="28" height="18" rx="3" fill="#f5c518" fill-opacity="0.15"/>
+  <rect x="452" y="356" width="28" height="18" rx="3" fill="#f5c518" fill-opacity="0.15"/>
+  <rect x="452" y="390" width="28" height="18" rx="3" fill="#f5c518" fill-opacity="0.15"/>
+  <rect x="452" y="424" width="28" height="18" rx="3" fill="#f5c518" fill-opacity="0.15"/>
+  
+  <!-- Background play triangle (subtle cinema feel) -->
+  <polygon points="185,150 185,362 370,256" fill="url(#goldGrad)" opacity="0.06"/>
+  
+  <!-- Outer ring decoration -->
+  <circle cx="256" cy="256" r="155" fill="none" stroke="#f5c518" stroke-opacity="0.08" stroke-width="1.5" stroke-dasharray="8 12"/>
+  
+  <!-- Main "MZ" text with premium styling -->
+  <text x="256" y="290" font-size="165" font-weight="900" fill="url(#shineGrad)" text-anchor="middle" font-family="'Bebas Neue', 'Arial Black', sans-serif" letter-spacing="6" filter="url(#goldGlow)">MZ</text>
+  
+  <!-- Subtitle -->
+  <text x="256" y="355" font-size="28" font-weight="600" fill="#f5c518" fill-opacity="0.75" text-anchor="middle" font-family="'Outfit', sans-serif" letter-spacing="10">MOVIEZONE</text>
+  
+  <!-- Premium underline -->
+  <rect x="148" y="375" width="216" height="3" rx="1.5" fill="url(#goldGrad)" fill-opacity="0.5"/>
+  
+  <!-- Tagline -->
+  <text x="256" y="410" font-size="14" font-weight="400" fill="#ffffff" fill-opacity="0.4" text-anchor="middle" font-family="'Outfit', sans-serif" letter-spacing="3">PREMIUM CINEMA</text>
+  
+  <!-- Top star decoration -->
+  <polygon points="256,42 260,54 273,54 263,62 266,74 256,66 246,74 249,62 239,54 252,54" fill="#f5c518" fill-opacity="0.6"/>
+  
+  <!-- Side accent dots -->
+  <circle cx="110" cy="256" r="3" fill="#f5c518" fill-opacity="0.25"/>
+  <circle cx="402" cy="256" r="3" fill="#f5c518" fill-opacity="0.25"/>
+  <circle cx="256" cy="460" r="2.5" fill="#f5c518" fill-opacity="0.2"/>
+  
+  <!-- Corner accents (luxury feel) -->
+  <path d="M40,110 Q40,40 110,40" fill="none" stroke="url(#goldGrad)" stroke-opacity="0.2" stroke-width="1.5"/>
+  <path d="M472,110 Q472,40 402,40" fill="none" stroke="url(#goldGrad)" stroke-opacity="0.2" stroke-width="1.5"/>
+  <path d="M40,402 Q40,472 110,472" fill="none" stroke="url(#goldGrad)" stroke-opacity="0.2" stroke-width="1.5"/>
+  <path d="M472,402 Q472,472 402,472" fill="none" stroke="url(#goldGrad)" stroke-opacity="0.2" stroke-width="1.5"/>
+</svg>

@@ -14,9 +14,18 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700;900&family=Playfair+Display:ital,wght@0,700;1,400&display=swap" rel="stylesheet">
-<link rel="preload" href="moviezone.css?v=2.5" as="style">
-<link rel="preload" href="moviezone.js?v=2.5" as="script">
-<link rel="stylesheet" href="moviezone.css?v=2.5">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#f5c518">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MovieZone">
+<link rel="apple-touch-icon" sizes="180x180" href="icon-192.svg">
+<link rel="icon" type="image/svg+xml" sizes="192x192" href="icon-192.svg">
+<link rel="icon" type="image/svg+xml" sizes="512x512" href="icon-512.svg">
+<link rel="preload" href="moviezone.css?v=3.5" as="style">
+<link rel="preload" href="search-engine.js?v=1.1" as="script">
+<link rel="preload" href="moviezone.js?v=3.5" as="script">
+<link rel="stylesheet" href="moviezone.css?v=3.5">
 </head>
 <body>
 
@@ -72,6 +81,7 @@
     <li><a href="#" class="active" onclick="goHome(event)">Home</a></li>
     <!-- <li><a href="#movies-section" onclick="goHome(event)">Movies</a></li> -->
     <li><a href="#" onclick="filterCat('tv', event)">Web Series</a></li>
+    <li><a href="#" onclick="openCollectionsHub(event)">Collections</a></li>
     <li><a href="#upcoming" onclick="goHome(event)">Upcoming</a></li>
     <li><a href="#" onclick="filterCat('bollywood', event)">Bollywood</a></li>
     <li><a href="#" onclick="filterCat('hollywood', event)">Hollywood</a></li>
@@ -85,6 +95,10 @@
     <input type="text" id="searchInput" placeholder="Search for movies, shows..." autocomplete="off">
     <div class="search-results-dropdown" id="searchDropdown"></div>
   </div>
+  <button class="nav-install-btn" id="navInstallBtn" onclick="installPWA()" title="Install MovieZone App" style="display:none;">
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    <span>Install</span>
+  </button>
 
 </nav>
 
@@ -96,6 +110,19 @@
   </div>
   <div class="carousel-thumbs" id="carouselThumbs"></div>
 </section>
+
+
+<!-- CONTINUE WATCHING -->
+<section id="continue-watching" class="continue-watching-section" style="display:none;">
+  <div class="section-header">
+    <div class="section-title">
+      <div class="title-line"></div>
+      <h2>CONTINUE WATCHING</h2>
+    </div>
+  </div>
+  <div class="continue-watching-grid" id="continueWatchingGrid"></div>
+</section>
+
 
 <!-- â”€â”€ MAIN MOVIES SECTION â”€â”€ -->
 <div class="main-content" id="movies-section">
@@ -164,6 +191,28 @@
 </section>
 
 <!-- ── UPCOMING MOVIE DETAIL MODAL ── -->
+<!-- â”€â”€ COLLECTIONS HUB (Premium Universes) â”€â”€ -->
+<div id="collections-hub-overlay" class="collections-hub-overlay">
+  <div class="ch-topbar">
+    <button class="ch-back-btn" id="chBackBtn" onclick="handleCollectionsBack()" aria-label="Back">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+      <span id="chBackLabel">Close</span>
+    </button>
+    <div class="ch-topbar-title" id="chTopbarTitle">Collections &amp; Universes</div>
+  </div>
+  <div class="ch-scroll" id="chScroll">
+    <div class="ch-hub-view" id="chHubView">
+      <div class="ch-hero">
+        <div class="ch-hero-badge">MOVIEZONE ORIGINALS</div>
+        <h1>Collections &amp; Universes</h1>
+        <p>Explore every franchise in one premium hub — from the Marvel Cinematic Universe to Wizarding World, all perfectly organized in release order.</p>
+      </div>
+      <div class="ch-grid" id="chGrid"></div>
+    </div>
+    <div class="ch-detail-view" id="chDetailView"></div>
+  </div>
+</div>
+
 <div id="upcoming-detail-overlay" class="upcoming-detail-overlay">
   <div class="upcoming-detail-box">
     <button class="upcoming-detail-close" onclick="closeUpcomingDetail()" aria-label="Close">
@@ -353,7 +402,8 @@
 <!-- â”€â”€ TOAST â”€â”€ -->
 <div id="toast"></div>
 
-<script src="moviezone.js?v=2.5" defer></script>
+<script src="search-engine.js?v=1.1" defer></script>
+<script src="moviezone.js?v=3.5" defer></script>
 <script>
 // INSTANT PERFORMANCE: Remove loader faster + mark page interactive
 document.addEventListener('DOMContentLoaded', () => {
