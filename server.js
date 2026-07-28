@@ -7,7 +7,7 @@ const NodeCache = require('node-cache'); // 3. Advanced Caching
 const rateLimit = require('express-rate-limit'); // 4. Traffic Control
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 
 // Security Middleware: Secures Express apps by setting various HTTP headers
 app.use(helmet({

@@ -1,6 +1,33 @@
 ﻿﻿﻿﻿// Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
-const isTV = /SmartTV|WebOS|Tizen|NetCast|VIDAA|Roku|AppleTV|Android TV|BRAVIA|AFT/i.test(navigator.userAgent);
+const isTV = (() => {
+  const ua = navigator.userAgent;
+
+  // ANTI-FALSE-POSITIVE: If device is clearly a laptop/desktop/mobile, NEVER return true
+  // Windows, Mac, Linux desktops, ChromeOS, standard mobile — these are NEVER TVs
+  const isDesktopOS = /Windows NT|Macintosh|Mac OS X|CrOS|Ubuntu|Fedora|Linux x86_64|Linux i686/i.test(ua);
+  const isMobileDevice = /Mobi|Android(?!.*TV)|iPhone|iPad|iPod/i.test(ua);
+  if (isDesktopOS || isMobileDevice) return false;
+
+  // Signal 1: User-Agent detection ONLY for confirmed TV platforms
+  // These strings appear ONLY in actual Smart TV browsers, never in laptops
+  const tvUA = /SmartTV|Web0S|WebOS|Tizen|VIDAA|Roku|RokuOS|AppleTV|Apple TV|Android TV|AndroidTV|BRAVIA|AFTT|AFTS|AFTM|AFTB|AFTKMST|Fire TV|FireTV|CrKey|Chromecast|GoogleTV|Google TV|PlayStation|PS[45]|Xbox One|XBOX|SmartCast|PHILIPSTV|HbbTV|Opera TV|NETTV|Panasonic.*Viera|Vestel|DuneHD|Eltex|NetCast/i.test(ua);
+  if (tvUA) return true;
+
+  // Signal 2: navigator.userAgentData platform hints (Chromium-based TV browsers)
+  if (navigator.userAgentData) {
+    const platform = (navigator.userAgentData.platform || '').toLowerCase();
+    if (/smarttv|tizen|webos|android tv|googletv|chromecast|firetv/.test(platform)) return true;
+    const brands = navigator.userAgentData.brands || [];
+    const brandStr = brands.map(b => b.brand).join(' ').toLowerCase();
+    if (/tizen|webos|smarttv|googletv|firetv/.test(brandStr)) return true;
+  }
+
+  // NO screen heuristic fallback — too risky for false positives
+  // Only UA-based detection ensures laptop/desktop is NEVER wrongly identified as TV
+
+  return false;
+})();
 
 // Balanced Performance: Mobil/Tablet ko low-end manein, par Desktops/Laptops (bhale hi touch ho) ko full features dein
 const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
@@ -40,7 +67,7 @@ document.documentElement.style.colorScheme = 'dark';
 
 // Vercel par frontend + backend ek sath deploy ke liye relative path use karein:
 const LIVE_BACKEND_URL = '/api/tmdb';
-const BASE = isLocalhost ? 'http://localhost:3000/api/tmdb' : LIVE_BACKEND_URL;
+const BASE = isLocalhost ? 'http://localhost:3001/api/tmdb' : LIVE_BACKEND_URL;
 const IMG = 'https://image.tmdb.org/t/p/w342'; // Optimized: w500 is too heavy for thumbnails
 
 // NETWORK-AWARE IMAGE LOADING
@@ -61,6 +88,7 @@ function getResponsiveBackdrop(path) {
 // Tag <html> early so CSS can strip expensive effects (backdrop-filter, film grain, Ken Burns, etc.)
 // Apply to ALL mobiles and TVs - even mid-range phones lag with these effects
 if (isTV) document.documentElement.classList.add('tv-mode');
+console.log('[MovieZone] TV Detection:', isTV, '| UA:', navigator.userAgent.substring(0, 80));
 if (isMobile) document.documentElement.classList.add('low-end-mode');
  
 // -- PERFORMANCE BOOST STYLES --
@@ -143,7 +171,7 @@ perfStyle.textContent = `
     .movie-card, .upcoming-card, .cat-tab, button { min-height: 48px; }
   }
   
-  /* === TV MODE: Strip ALL heavy effects (TVs need zero visual overhead) === */
+  /* === TV MODE: Strip heavy effects but KEEP smooth focus transitions === */
   .tv-mode *, .tv-mode *::before, .tv-mode *::after {
     box-shadow: none !important;
     backdrop-filter: none !important;
@@ -151,7 +179,23 @@ perfStyle.textContent = `
     text-shadow: none !important;
     filter: none !important;
     animation: none !important;
-    transition: none !important;
+    transition: transform 0.15s ease, outline 0.1s ease, outline-offset 0.1s ease, opacity 0.15s ease !important;
+  }
+  .tv-mode .movie-card:focus, .tv-mode .upcoming-card:focus,
+  .tv-mode .cat-tab:focus, .tv-mode .btn-play:focus,
+  .tv-mode .btn-info:focus, .tv-mode .player-chip:focus,
+  .tv-mode .nav-links a:focus {
+    outline: 3px solid gold !important;
+    outline-offset: 3px !important;
+    transform: scale(1.05) !important;
+    will-change: transform !important;
+    z-index: 50 !important;
+  }
+  .tv-mode .movie-card, .tv-mode .upcoming-card, .tv-mode .cat-tab,
+  .tv-mode .btn-play, .tv-mode .btn-info, .tv-mode .player-chip,
+  .tv-mode .nav-links a {
+    cursor: pointer;
+    min-height: 48px;
   }
   /* === LOW-END / MOBILE MODE: Strip effects but KEEP short transitions for smooth UI === */
   .low-end-mode *, .low-end-mode *::before, .low-end-mode *::after {
@@ -543,7 +587,7 @@ function setupUpcomingInfiniteScroll() {
  
 // -- CAROUSEL (PROFESSIONAL DISCOVERY ALGORITHM)
 // Netflix/Hotstar-grade weighted scoring: fetches from ALL categories and ranks by composite score
-// Score = (rating_weight) + (popularity_weight) + (recency_boost) + (trending_velocity) + (vote_confidence)
+// Score = (rating_weight) + (popularity_weight) + (recency_boost) + (trending_velocity) + (vote_confidence) + (quality_upgrade_boost)
 
 function calculateMovieScore(movie) {
   const now = Date.now();
@@ -578,7 +622,35 @@ function calculateMovieScore(movie) {
   // 6. Now Playing / In Theaters bonus
   const nowPlayingBonus = (daysSinceRelease <= 45 && daysSinceRelease >= 0) ? 25 : 0;
   
-  return ratingScore + popularityScore + recencyBoost + trendingVelocity + voteConfidence + nowPlayingBonus;
+  // 7. QUALITY UPGRADE BOOST (Netflix-style "Newly Available in HD/4K")
+  // Jab movie theater se OTT/digital par aati hai (75-130 days), usko massive re-boost milta hai
+  // Isse purani movies wapas top par aa jaati hain jab unki HD/FHD/4K quality available hoti hai
+  let qualityUpgradeBoost = 0;
+  const mediaType = movie.media_type || (movie.name && !movie.title ? 'tv' : 'movie');
+  if (mediaType === 'movie') {
+    if (daysSinceRelease > 75 && daysSinceRelease <= 100) {
+      // JUST hit digital/OTT release (HD available) — treat as "newly available"
+      qualityUpgradeBoost = 70; // Almost as strong as a new release!
+    } else if (daysSinceRelease > 100 && daysSinceRelease <= 130) {
+      // FHD window — still fresh on digital platforms
+      qualityUpgradeBoost = 55;
+    } else if (daysSinceRelease > 130 && daysSinceRelease <= 160) {
+      // Late FHD / early 4K window — fading but still relevant
+      qualityUpgradeBoost = 35;
+    } else if (daysSinceRelease > 200 && daysSinceRelease <= 230) {
+      // 4K/Blu-ray just dropped — another small re-boost
+      qualityUpgradeBoost = 25;
+    }
+    // Extra boost for high-rated movies in quality upgrade window (blockbusters get more visibility)
+    if (qualityUpgradeBoost > 0 && rating >= 7.0) {
+      qualityUpgradeBoost += 15;
+    }
+    if (qualityUpgradeBoost > 0 && popularity >= 100) {
+      qualityUpgradeBoost += 10;
+    }
+  }
+  
+  return ratingScore + popularityScore + recencyBoost + trendingVelocity + voteConfidence + nowPlayingBonus + qualityUpgradeBoost;
 }
 
 async function loadCarousel() {
@@ -619,7 +691,7 @@ async function loadCarousel() {
     }
   });
 
-  const realToday = new Date().toISOString().split('T')[0];
+  const realToday = new Date(Date.now() + (5.5 * 60 * 60 * 1000)).toISOString().split('T')[0]; // IST date
   
   // Two pools: 
   // 1. candidates = movies with BOTH backdrop + poster (for premium carousel display)
@@ -627,7 +699,8 @@ async function loadCarousel() {
   const allReleased = Array.from(movieMap.values()).filter(m => {
     if (!m.poster_path) return false;
     const rDate = m.release_date || m.first_air_date;
-    if (rDate && rDate > realToday) return false;
+    if (!rDate) return (m.vote_count > 50); // No date = only allow if clearly already released
+    if (rDate > realToday) return false;
     return true;
   });
   
@@ -1279,13 +1352,15 @@ async function loadMovies(cat, isLoadMore = false) {
     }
   } catch(e) { console.warn(e); }
  
-  const realToday = new Date().toISOString().split('T')[0];
+  const realToday = new Date(Date.now() + (5.5 * 60 * 60 * 1000)).toISOString().split('T')[0]; // IST date for accurate filtering
   // LATEST MOVIES ONLY & BLOCK UPCOMING GLOBALLY
   movies = movies.filter(m => {
     if (!m.poster_path) return false;
     const rDate = m.release_date || m.first_air_date;
+    // Agar release date hi nahi hai, toh bhi sirf popular + high votes wali movies pass karein (already released)
+    if (!rDate) return (m.vote_count > 50);
     // Agar date future ki hai, toh isko normal list se strict block kar do
-    if (rDate && rDate > realToday) return false;
+    if (rDate > realToday) return false;
     return true;
   });
 
@@ -1405,6 +1480,8 @@ function renderMovies(movies, append = false) {
       if (daysOld >= 0 && daysOld <= 3) freshBadge = '<div class="card-fresh card-fresh-today">TODAY</div>';
       else if (daysOld <= 7) freshBadge = '<div class="card-fresh card-fresh-new">NEW</div>';
       else if (daysOld <= 14) freshBadge = '<div class="card-fresh card-fresh-recent">THIS WEEK</div>';
+      // Quality Upgrade: Movie just hit digital/OTT — show as "NEW" again (Netflix-style)
+      else if (type === 'movie' && daysOld > 75 && daysOld <= 100) freshBadge = '<div class="card-fresh card-fresh-new">NEW</div>';
     }
     // -- HINDI DUBBED BADGE: Show on Hollywood/Japanese/Korean movies (likely dubbed)
     const dubbedLangs = ['en', 'ja', 'ko', 'fr', 'es', 'de']; // Languages that are commonly dubbed to Hindi
@@ -3675,48 +3752,184 @@ function showToast(msg) {
   setTimeout(() => { t.classList.remove('show'); }, 3000);
 }
  
-// -- TV REMOTE NAVIGATION --
-document.addEventListener('keydown', (e) => {
-  // TV Enter/OK key: Simulate click on custom focusable elements (cards, tabs, etc.)
-  if ((e.key === 'Enter' || e.key === ' ') && document.activeElement) {
-    const tag = document.activeElement.tagName;
-    if (tag !== 'BUTTON' && tag !== 'A' && tag !== 'INPUT') {
-      document.activeElement.click();
-      e.preventDefault();
-    }
-  }
-  
-  // Smart TV dedicated Hardware Play/Pause remote button
-  if (e.key === 'MediaPlayPause' || e.key === 'MediaPlay' || e.keyCode === 179 || e.keyCode === 415) {
-    const playBtn = document.querySelector('.play-big') || document.querySelector('.premium-play-btn');
-    if (playBtn) { playBtn.click(); e.preventDefault(); }
+// -- TV REMOTE NAVIGATION: Full D-Pad Spatial Navigation System --
+(function initTVNavigation() {
+  const TV_FOCUSABLE_SELECTORS = '.movie-card, .upcoming-card, .cat-tab, .btn-play, .btn-info, .player-chip, .nav-links a, .carousel-arrow, button[tabindex]';
+
+  // 1. Add tabindex=0 to all focusable TV elements
+  function markFocusable() {
+    if (!isTV) return;
+    document.querySelectorAll(TV_FOCUSABLE_SELECTORS).forEach(el => {
+      if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
+    });
   }
 
-  // TV Back keys: Android (Escape/Backspace), WebOS (461), Tizen (10009)
-  const isBackKey = e.key === 'Escape' || e.keyCode === 27 || e.keyCode === 10009 || e.keyCode === 461 || (e.key === 'Backspace' && document.activeElement.tagName !== 'INPUT');
-  
-  if (isBackKey) {
-    const overlay = document.getElementById('modal-overlay');
-    if (overlay && overlay.classList.contains('open')) {
-      closeModal();
-      e.preventDefault();
-    } else {
-      const dd = document.getElementById('searchDropdown');
-      if (dd && dd.classList.contains('open')) { closeDropdown(); e.preventDefault(); }
-    }
+  // Run on DOMContentLoaded
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', markFocusable);
+  } else {
+    markFocusable();
   }
-});
 
-// Auto-Scroll into center for TV spatial navigation (Prevents focus moving off-screen)
-if (isTV) {
-  document.addEventListener('focus', (e) => {
-    const overlay = document.getElementById('modal-overlay');
-    // Sirf main page items ke liye auto-center karein (modal me default theek rehta hai)
-    if (e.target && e.target.scrollIntoView && (!overlay || !overlay.classList.contains('open'))) {
-      e.target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // Re-run when new cards are rendered (MutationObserver)
+  if (isTV) {
+    const observer = new MutationObserver((mutations) => {
+      let hasNewNodes = false;
+      for (const m of mutations) {
+        if (m.addedNodes.length > 0) { hasNewNodes = true; break; }
+      }
+      if (hasNewNodes) markFocusable();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+
+  // 2. Spatial navigation: find nearest element in direction
+  function getVisibleFocusables() {
+    const els = document.querySelectorAll(TV_FOCUSABLE_SELECTORS);
+    return Array.from(els).filter(el => {
+      if (el.offsetParent === null && getComputedStyle(el).position !== 'fixed') return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    });
+  }
+
+  function findNearest(current, direction) {
+    const focusables = getVisibleFocusables();
+    const currentRect = current.getBoundingClientRect();
+    const cx = currentRect.left + currentRect.width / 2;
+    const cy = currentRect.top + currentRect.height / 2;
+
+    let best = null;
+    let bestDist = Infinity;
+
+    for (const el of focusables) {
+      if (el === current) continue;
+      const r = el.getBoundingClientRect();
+      const ex = r.left + r.width / 2;
+      const ey = r.top + r.height / 2;
+      const dx = ex - cx;
+      const dy = ey - cy;
+
+      // Filter by direction
+      let inDirection = false;
+      switch (direction) {
+        case 'left':  inDirection = dx < -10; break;
+        case 'right': inDirection = dx > 10; break;
+        case 'up':    inDirection = dy < -10; break;
+        case 'down':  inDirection = dy > 10; break;
+      }
+      if (!inDirection) continue;
+
+      // Weighted distance: heavily penalize perpendicular offset
+      let primaryDist, crossDist;
+      if (direction === 'left' || direction === 'right') {
+        primaryDist = Math.abs(dx);
+        crossDist = Math.abs(dy);
+      } else {
+        primaryDist = Math.abs(dy);
+        crossDist = Math.abs(dx);
+      }
+      const dist = primaryDist + crossDist * 3;
+
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = el;
+      }
     }
-  }, true);
-}
+    return best;
+  }
+
+  // 3. Main keydown handler for TV
+  document.addEventListener('keydown', (e) => {
+    if (!isTV) {
+      // Non-TV: basic Enter/Space click for custom focusable elements
+      if ((e.key === 'Enter' || e.key === ' ') && document.activeElement) {
+        const tag = document.activeElement.tagName;
+        if (tag !== 'BUTTON' && tag !== 'A' && tag !== 'INPUT') {
+          document.activeElement.click();
+          e.preventDefault();
+        }
+      }
+      return;
+    }
+
+    const key = e.key;
+    const keyCode = e.keyCode || e.which;
+
+    // D-Pad Arrow Navigation
+    const directionMap = {
+      'ArrowLeft': 'left', 'ArrowRight': 'right',
+      'ArrowUp': 'up', 'ArrowDown': 'down'
+    };
+    if (directionMap[key]) {
+      e.preventDefault();
+      const active = document.activeElement;
+      if (!active || active === document.body) {
+        // No focus yet — focus first visible element
+        const first = getVisibleFocusables()[0];
+        if (first) first.focus();
+        return;
+      }
+      const target = findNearest(active, directionMap[key]);
+      if (target) {
+        target.focus();
+        // Smooth scroll to center
+        target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+      }
+      return;
+    }
+
+    // Enter/Space: Click focused element
+    if (key === 'Enter' || key === ' ' || keyCode === 13 || keyCode === 32) {
+      if (document.activeElement && document.activeElement !== document.body) {
+        document.activeElement.click();
+        e.preventDefault();
+      }
+      return;
+    }
+
+    // Back keys: Escape, Tizen (10009), WebOS (461), Backspace
+    const isBackKey = key === 'Escape' || keyCode === 27 || keyCode === 10009 || keyCode === 461 ||
+      (key === 'Backspace' && document.activeElement && document.activeElement.tagName !== 'INPUT');
+    if (isBackKey) {
+      const overlay = document.getElementById('modal-overlay');
+      if (overlay && overlay.classList.contains('open')) {
+        if (typeof closeModal === 'function') closeModal();
+        e.preventDefault();
+      } else {
+        const dd = document.getElementById('searchDropdown');
+        if (dd && dd.classList.contains('open')) {
+          if (typeof closeDropdown === 'function') closeDropdown();
+          e.preventDefault();
+        }
+      }
+      return;
+    }
+
+    // Media keys: Play/Pause, Stop, FastForward, Rewind
+    const mediaKeys = ['MediaPlayPause', 'MediaPlay', 'MediaPause', 'MediaStop',
+                       'MediaFastForward', 'MediaRewind', 'MediaTrackNext', 'MediaTrackPrevious'];
+    const mediaKeyCodes = [179, 415, 19, 413, 417, 412, 176, 177];
+    if (mediaKeys.includes(key) || mediaKeyCodes.includes(keyCode)) {
+      e.preventDefault();
+      if (key === 'MediaPlayPause' || key === 'MediaPlay' || key === 'MediaPause' || keyCode === 179 || keyCode === 415 || keyCode === 19) {
+        const playBtn = document.querySelector('.play-big') || document.querySelector('.premium-play-btn') || document.querySelector('.btn-play');
+        if (playBtn) playBtn.click();
+      }
+      return;
+    }
+  });
+
+  // 6. Auto-scroll focused element to center (for focus via Tab or programmatic focus)
+  if (isTV) {
+    document.addEventListener('focus', (e) => {
+      const overlay = document.getElementById('modal-overlay');
+      if (e.target && e.target.scrollIntoView && (!overlay || !overlay.classList.contains('open'))) {
+        e.target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+      }
+    }, true);
+  }
+})();
  
 function goHome(e) {
   let isHash = false;
@@ -3768,8 +3981,11 @@ function goHome(e) {
     showToast('Right-click is disabled for security.');
   });
 
-  // 2. Disable Keyboard Shortcuts (F12, Ctrl+U, Ctrl+Shift+I, etc.)
+  // 2. Disable Keyboard Shortcuts (F12, Ctrl+U, Ctrl+Shift+I, etc.) — Skip on TV mode
   document.addEventListener('keydown', (e) => {
+    // Skip all blocking on TV — remote keys must pass through
+    if (isTV) return;
+
     // Block F12
     if (e.key === 'F12' || e.keyCode === 123) {
       e.preventDefault();
@@ -3939,11 +4155,16 @@ setTimeout(extractTopKeywords, 3000);
     if (delta > 100) {
       lowFPSCount++;
       if (lowFPSCount > 3 && !document.documentElement.classList.contains('tv-mode')) {
-        // Auto-enable tv-mode to save the device — most aggressive performance mode
-        document.documentElement.classList.add('tv-mode');
+        // Only auto-enable tv-mode on devices that are NOT desktop/laptop
+        // Desktop/laptop must ALWAYS keep premium look — only strip particles for perf
+        const isDesktopDevice = /Windows NT|Macintosh|Mac OS X|CrOS|Linux x86_64/i.test(navigator.userAgent);
+        if (!isDesktopDevice) {
+          document.documentElement.classList.add('tv-mode');
+          console.warn('Performance: Auto-enabled tv-mode due to low FPS');
+        }
+        // On ALL devices: remove heavy particles to recover FPS
         const particles = document.querySelector('.ambient-particles');
         if (particles) particles.remove();
-        console.warn('Performance: Auto-enabled tv-mode due to low FPS');
       }
     } else {
       lowFPSCount = Math.max(0, lowFPSCount - 1);

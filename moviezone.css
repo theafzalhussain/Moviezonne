@@ -4422,7 +4422,72 @@ body.cursor-hover #cursor-dot {
    EXTREME PERFORMANCE OPTIMIZATION FOR TV + MOBILE
    ═══════════════════════════════════════════════════════════════ */
 
-.tv-mode *,
+/* === TV MODE: Remove heavy effects, keep smooth focus transitions === */
+.tv-mode * {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  text-shadow: none !important;
+  filter: none !important;
+  animation: none !important;
+  box-shadow: none !important;
+}
+
+.tv-mode *:not(:focus) {
+  will-change: auto !important;
+}
+
+/* GPU-accelerated focus transition for smooth D-pad movement */
+.tv-mode .movie-card, .tv-mode .upcoming-card,
+.tv-mode .cat-tab, .tv-mode .btn-play,
+.tv-mode .btn-info, .tv-mode .player-chip,
+.tv-mode .nav-links a, .tv-mode .carousel-arrow,
+.tv-mode button {
+  transition: transform 0.15s ease, outline 0.1s ease, outline-offset 0.1s ease, background-color 0.15s ease !important;
+  min-height: 48px;
+  cursor: pointer;
+}
+
+/* Large focus outline for TV viewing distance */
+.tv-mode .movie-card:focus,
+.tv-mode .movie-card:focus-visible,
+.tv-mode .upcoming-card:focus,
+.tv-mode .upcoming-card:focus-visible,
+.tv-mode .cat-tab:focus,
+.tv-mode .cat-tab:focus-visible,
+.tv-mode .btn-play:focus,
+.tv-mode .btn-info:focus,
+.tv-mode .player-chip:focus,
+.tv-mode .nav-links a:focus,
+.tv-mode .carousel-arrow:focus,
+.tv-mode button:focus {
+  outline: 3px solid gold !important;
+  outline-offset: 3px !important;
+  transform: scale(1.05) !important;
+  will-change: transform !important;
+  z-index: 50 !important;
+  background-color: rgba(255, 215, 0, 0.08) !important;
+}
+
+/* TV hover = focus (since TV remotes simulate hover on focus) */
+.tv-mode .movie-card:hover,
+.tv-mode .upcoming-card:hover {
+  outline: 3px solid gold !important;
+  outline-offset: 3px !important;
+  transform: scale(1.05) !important;
+  will-change: transform !important;
+  z-index: 50 !important;
+  background-color: rgba(255, 215, 0, 0.08) !important;
+}
+
+/* Increase font sizes for TV viewing distance (10-foot UI) */
+.tv-mode body { font-size: 1.1rem !important; }
+.tv-mode .slide-title { font-size: 2.8rem !important; }
+.tv-mode .slide-desc { font-size: 1.2rem !important; }
+.tv-mode .card-title { font-size: 1.05rem !important; }
+.tv-mode .cat-tab { font-size: 1.05rem !important; padding: 12px 20px !important; }
+.tv-mode .nav-links a { font-size: 1.1rem !important; }
+
+/* === LOW-END MODE styles remain unchanged === */
 .low-end-mode * {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
