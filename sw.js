@@ -1,19 +1,24 @@
-const CACHE_NAME = 'moviezone-v9';
+const CACHE_NAME = 'moviezone-v16';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/moviezone.css',
-  '/search-engine.js',
-  '/moviezone.js',
-  '/pwa-install.js',
+  '/moviezone.css?v=3.5',
+  '/search-engine.js?v=1.1',
+  '/moviezone.js?v=3.7',
+  '/pwa-install.js?v=1.4',
   '/manifest.json',
   '/icon-192.svg',
-  '/icon-512.svg'
+  '/icon-512.svg',
+  '/icon-192.png',
+  '/icon-512.png'
 ];
 
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC_ASSETS)));
-  self.skipWaiting();
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then(cache => cache.addAll(STATIC_ASSETS))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', event => {
@@ -43,7 +48,12 @@ self.addEventListener('fetch', event => {
           return response;
         })
         .catch(async () => {
-          const cached = await caches.match(event.request);
+          // Try exact match first, then try stripping query string for pre-cached assets
+          let cached = await caches.match(event.request);
+          if (!cached && url.search) {
+            cached = await caches.match(url.pathname + url.search, { ignoreSearch: false });
+            if (!cached) cached = await caches.match(url.pathname);
+          }
           if (cached) return cached;
           if (event.request.mode === 'navigate') return caches.match('/index.html');
           throw new Error('Offline asset unavailable');
@@ -53,13 +63,22 @@ self.addEventListener('fetch', event => {
   }
 
   event.respondWith(
-    caches.match(event.request).then(cached => cached || fetch(event.request).then(response => {
-      if (response.ok && response.type === 'basic') {
-        const copy = response.clone();
-        event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy)));
-      }
-      return response;
-    }))
+    caches.match(event.request).then(cached => {
+      if (cached) return cached;
+      // Fallback: try ignoring search params for pre-cached assets
+      const reqUrl = new URL(event.request.url);
+      return (reqUrl.search ? caches.match(reqUrl.pathname) : Promise.resolve(null))
+        .then(altCached => {
+          if (altCached) return altCached;
+          return fetch(event.request).then(response => {
+            if (response.ok && response.type === 'basic') {
+              const copy = response.clone();
+              event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy)));
+            }
+            return response;
+          });
+        });
+    })
   );
 });
 

@@ -7,6 +7,82 @@ const NodeCache = require('node-cache'); // 3. Advanced Caching
 const rateLimit = require('express-rate-limit'); // 4. Traffic Control
 const webPush = require('web-push'); // 5. Push Notifications
 const { MongoClient } = require('mongodb'); // 6. Database
+const https = require('https');
+const path = require('path'); // 9. Filesystem paths (PWA manifest / service worker)
+const fs = require('fs');     // 10. Startup sanity checks
+const axios = require('axios'); // 7. Robust HTTP Client
+const axiosRetry = require('axios-retry').default; // 8. Automatic Retry with Backoff
+
+// ══════════════════════════════════════════════════════════════
+//  TMDB API CLIENT — Axios with Keep-Alive, Retry & Backoff
+// ══════════════════════════════════════════════════════════════
+
+// Persistent HTTPS Agent — reuses TCP connections (prevents ECONNRESET)
+const keepAliveAgent = new https.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 30000,
+  maxSockets: 15,
+  maxFreeSockets: 5,
+  timeout: 20000,
+  scheduling: 'fifo'
+});
+
+// Create dedicated axios instance for TMDB
+const tmdbClient = axios.create({
+  baseURL: 'https://api.themoviedb.org/3',
+  timeout: 15000,
+  httpsAgent: keepAliveAgent,
+  headers: {
+    'User-Agent': 'MovieZone/1.0 (Premium Cinema App)',
+    'Accept': 'application/json',
+    'Accept-Encoding': 'gzip, deflate',
+    'Connection': 'keep-alive'
+  }
+});
+
+// Axios Retry Interceptor — exponential backoff with jitter
+axiosRetry(tmdbClient, {
+  retries: 5,
+  retryDelay: (retryCount) => {
+    // Exponential backoff: 300ms, 600ms, 1200ms, 2400ms, 4800ms + random jitter
+    const delay = Math.min(300 * Math.pow(2, retryCount - 1), 5000);
+    const jitter = Math.random() * 200;
+    return delay + jitter;
+  },
+  retryCondition: (error) => {
+    // Retry on network errors and specific codes
+    if (!error.response) {
+      // Network error (ECONNRESET, ETIMEDOUT, EPIPE, etc.)
+      return true;
+    }
+    // Retry on 429 (rate limit), 500, 502, 503, 504
+    return [429, 500, 502, 503, 504].includes(error.response.status);
+  },
+  onRetry: (retryCount, error) => {
+    if (retryCount >= 3) {
+      console.warn(`⚠️ TMDB retry ${retryCount}/5 (${error.code || error.message})`);
+    }
+  }
+});
+
+// Simple wrapper to match previous fetchWithRetry interface
+async function fetchWithRetry(url, options = {}) {
+  const parsed = new URL(url);
+  // Strip /3 prefix since axios baseURL already includes it
+  let path = parsed.pathname + parsed.search;
+  if (path.startsWith('/3/')) path = path.slice(2); // /3/trending -> /trending
+  
+  const response = await tmdbClient.get(path, {
+    headers: options.headers || {}
+  });
+  return {
+    ok: response.status >= 200 && response.status < 300,
+    status: response.status,
+    statusText: response.statusText,
+    text: () => Promise.resolve(typeof response.data === 'string' ? response.data : JSON.stringify(response.data)),
+    json: () => Promise.resolve(response.data)
+  };
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -27,27 +103,131 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
+// ── PWA asset resolution ───────────────────────────────────────────────────
+// Files currently live in the project root, but resolve through a candidate list so
+// moving them into public/ or dist/ later needs no code change.
+const ASSET_DIRS = [__dirname, path.join(__dirname, 'public'), path.join(__dirname, 'dist')];
+
+function resolveAsset(fileName) {
+  for (const dir of ASSET_DIRS) {
+    const candidate = path.join(dir, fileName);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+// Last-resort manifest: served inline if manifest.json is missing, unreadable, or
+// invalid, so Chrome never reports "No manifest detected" because of a bad file.
+const FALLBACK_MANIFEST = {
+  name: 'MovieZone - Premium Cinema',
+  short_name: 'MovieZone',
+  description: 'Your ultimate premium destination for movies and shows in HD, 4K quality',
+  start_url: '/',
+  scope: '/',
+  id: '/',
+  display: 'standalone',
+  display_override: ['standalone', 'minimal-ui'],
+  background_color: '#03030a',
+  theme_color: '#f5c518',
+  orientation: 'any',
+  lang: 'en',
+  dir: 'ltr',
+  icons: [
+    { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+    { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+    { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+  ],
+  categories: ['entertainment'],
+  prefer_related_applications: false
+};
+
+const MANIFEST_REQUIRED = ['name', 'short_name', 'start_url', 'display', 'icons'];
+
+// Reads + validates manifest.json, falling back to the inline copy on any problem.
+async function loadManifest() {
+  const file = resolveAsset('manifest.json');
+  if (!file) {
+    console.warn('⚠️  manifest.json not found in', ASSET_DIRS.join(' | '), '— serving inline fallback');
+    return { manifest: FALLBACK_MANIFEST, source: 'inline-fallback' };
+  }
+  try {
+    const parsed = JSON.parse(await fs.promises.readFile(file, 'utf8'));
+    const missing = MANIFEST_REQUIRED.filter(k => !parsed[k]);
+    if (missing.length) throw new Error('missing required field(s): ' + missing.join(', '));
+    if (!Array.isArray(parsed.icons) || parsed.icons.length === 0) throw new Error('icons[] is empty');
+    return { manifest: parsed, source: file };
+  } catch (err) {
+    console.warn(`⚠️  manifest.json unusable (${err.message}) — serving inline fallback`);
+    return { manifest: FALLBACK_MANIFEST, source: 'inline-fallback' };
+  }
+}
+
+// ── PWA: manifest + service worker MUST be served fresh, with exact MIME types ──
+// These are declared BEFORE express.static so the static middleware's long
+// `immutable` cache never applies to them (a cached/404'd manifest is what makes
+// Chrome DevTools report "No manifest detected").
+app.get(['/manifest.json', '/manifest.webmanifest'], async (req, res) => {
+  const { manifest, source } = await loadManifest();
+  res.set({
+    'Content-Type': 'application/manifest+json; charset=utf-8',
+    'Cache-Control': 'public, max-age=0, must-revalidate',
+    'X-Manifest-Source': source === 'inline-fallback' ? 'inline-fallback' : 'disk'
+  });
+  res.status(200).send(JSON.stringify(manifest, null, 2));
+});
+
+app.get('/sw.js', (req, res) => {
+  const file = resolveAsset('sw.js');
+  res.type('application/javascript');
+  res.setHeader('Service-Worker-Allowed', '/');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  if (!file) {
+    console.error('❌ sw.js not found in', ASSET_DIRS.join(' | '));
+    // A no-op worker keeps registration from throwing; PWA install still works
+    // from the manifest alone once the real file is restored.
+    return res.status(200).send('/* sw.js missing on server — no-op worker */\nself.addEventListener("fetch", () => {});');
+  }
+  res.sendFile(file, (err) => {
+    if (err) {
+      console.error('❌ sw.js could not be served:', err.message);
+      if (!res.headersSent) res.status(500).send('// service worker unavailable');
+    }
+  });
+});
+
 // Frontend files (index.html, css, js) ko browser mein dikhane ke liye
 app.use(express.static(__dirname, { 
   maxAge: '30d',
   etag: true,
   lastModified: true,
-  immutable: true,
-  setHeaders: (res, path) => {
+  setHeaders: (res, filePath) => {
     // CSS/JS ko 5 min cache (allows SW updates)
-    if (path.endsWith('.css') || path.endsWith('.js')) {
+    if (filePath.endsWith('.css') || filePath.endsWith('.js')) {
       res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
     }
     // Images ko 60 days cache
-    if (/\.(jpg|jpeg|png|gif|svg|webp|ico)$/.test(path)) {
+    if (/\.(jpg|jpeg|png|gif|svg|webp|ico)$/.test(filePath)) {
       res.setHeader('Cache-Control', 'public, max-age=5184000, immutable');
     }
     // HTML ko short cache (fresh content milta rahe)
-    if (path.endsWith('.html')) {
+    if (filePath.endsWith('.html')) {
       res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
+    }
+    // Manifest: correct MIME + always revalidate
+    if (filePath.endsWith('manifest.json') || filePath.endsWith('.webmanifest')) {
+      res.setHeader('Content-Type', 'application/manifest+json');
+      res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
     }
   }
 }));
+
+// If the frontend is ever moved into public/ or dist/, serve those roots too.
+ASSET_DIRS.slice(1).forEach((dir) => {
+  if (fs.existsSync(dir)) {
+    console.log(`📁 Also serving static assets from ${path.basename(dir)}/`);
+    app.use(express.static(dir, { maxAge: '30d', etag: true, lastModified: true }));
+  }
+});
 
 // API Rate Limiter: Bura traffic aur DDOS attacks block karega (Luxury stability)
 const apiLimiter = rateLimit({
@@ -59,6 +239,11 @@ const apiLimiter = rateLimit({
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const TMDB_TOKEN = process.env.TMDB_TOKEN;
+
+// Set TMDB auth token on the axios client
+if (TMDB_TOKEN) {
+  tmdbClient.defaults.headers.common['Authorization'] = `Bearer ${TMDB_TOKEN}`;
+}
 
 // ── WEB PUSH NOTIFICATIONS SETUP ──
 const VAPID_PUBLIC = process.env.VAPID_PUBLIC_KEY;
@@ -407,10 +592,7 @@ app.use('/api/tmdb', apiLimiter, async (req, res) => {
       return res.json(cachedData);
     }
 
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: { 'Authorization': `Bearer ${TMDB_TOKEN}` }
-    });
+    const response = await fetchWithRetry(url);
 
     // Agar TMDB se error aaye, toh error bhejo aur cache headers mat lagao (bura data cache nahi hoga)
     if (!response.ok) {
@@ -429,8 +611,26 @@ app.use('/api/tmdb', apiLimiter, async (req, res) => {
 
     res.json(data);
   } catch (error) {
-    console.error('TMDB Proxy Error:', error);
-    res.status(500).json({ error: 'Failed to fetch data' });
+    // Axios error handling
+    const code = error.code || error.response?.status || 'UNKNOWN';
+    const msg = error.message || 'Unknown error';
+    console.error(`TMDB Proxy Error [${code}]: ${msg}`);
+    
+    if (error.response) {
+      // TMDB returned an error response (after all retries)
+      return res.status(error.response.status).json({ error: 'TMDB API error', detail: error.response.statusText });
+    }
+    
+    const isTimeout = error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT';
+    const isNetwork = error.code === 'ECONNRESET' || error.code === 'ENOTFOUND' || error.code === 'EPIPE';
+    
+    if (isTimeout) {
+      return res.status(504).json({ error: 'TMDB request timed out. Please retry.' });
+    }
+    if (isNetwork) {
+      return res.status(503).json({ error: 'TMDB temporarily unreachable. Please retry in a moment.' });
+    }
+    res.status(500).json({ error: 'Failed to fetch data from TMDB' });
   }
 });
 
@@ -441,7 +641,7 @@ async function warmupCache() {
   if (!TMDB_TOKEN) return;
   const trendingUrl = `${TMDB_BASE_URL}/trending/all/week?language=en-US&page=1`;
   try {
-    const response = await fetch(trendingUrl, { headers: { 'Authorization': `Bearer ${TMDB_TOKEN}` } });
+    const response = await fetchWithRetry(trendingUrl);
     if (response.ok) {
       const data = await response.json();
       apiCache.set(trendingUrl, data);
@@ -450,14 +650,44 @@ async function warmupCache() {
   } catch (err) { console.error('Cache warmup failed:', err.message); }
 }
 
+// PWA sanity check — a missing file here is exactly what makes Chrome DevTools
+// report "No manifest detected", so surface it at boot instead of failing silently.
+function verifyPwaAssets() {
+  const required = ['manifest.json', 'sw.js', 'index.html', 'icon-192.png', 'icon-512.png'];
+  const missing = required.filter(f => !resolveAsset(f));
+  if (missing.length) {
+    console.warn(`⚠️  PWA assets MISSING (searched: ${ASSET_DIRS.join(' | ')}): ${missing.join(', ')}`);
+    return false;
+  }
+  try {
+    const m = JSON.parse(fs.readFileSync(resolveAsset('manifest.json'), 'utf8'));
+    const needed = ['name', 'short_name', 'start_url', 'display', 'icons'];
+    const absent = needed.filter(k => !m[k]);
+    if (absent.length) {
+      console.warn(`⚠️  manifest.json is missing required fields: ${absent.join(', ')} — inline fallback will be served`);
+      return false;
+    }
+    const badIcons = (m.icons || []).filter(i => !resolveAsset(i.src.replace(/^\//, '')));
+    if (badIcons.length) {
+      console.warn(`⚠️  manifest icons not found on disk: ${badIcons.map(i => i.src).join(', ')}`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('⚠️  manifest.json is not valid JSON:', err.message);
+    return false;
+  }
+}
+
 // Server ko start karne ke liye (Local + Render support)
 if (require.main === module) {
   const server = app.listen(PORT, () => {
+    const pwaOk = verifyPwaAssets();
     console.log(`🚀 Proxy server is running on port ${PORT} | Worker PID: ${process.pid}`);
     console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     console.log(`✅ Features Active:`);
     console.log(`   🎬 Continue Watching    — Ready (localStorage)`);
-    console.log(`   📱 PWA + Install        — Ready (sw.js + manifest.json)`);
+    console.log(`   📱 PWA + Install        — ${pwaOk ? 'Ready (sw.js + manifest.json verified)' : 'CHECK WARNINGS ABOVE'}`);
     console.log(`   🔔 Notify Me            — Ready (Web Push + VAPID)`);
     console.log(`   🌓 Dark/Light Theme     — Ready (Toggle in Navbar)`);
     console.log(`   🎯 Collections          — Ready (10 Universes: MCU, DC, HP...)`);

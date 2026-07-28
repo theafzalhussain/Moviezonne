@@ -7,7 +7,15 @@
       "use": "@vercel/node"
     },
     {
-      "src": "**/*.{html,css,js,svg,png,jpg,jpeg}",
+      "src": "*.{html,css,svg,png,jpg,jpeg}",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "{search-engine,moviezone,moviezone.min,pwa-install,sw}.js",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "manifest.json",
       "use": "@vercel/static"
     }
   ],
@@ -15,6 +23,23 @@
     {
       "source": "/api/(.*)",
       "destination": "/server.js"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/manifest.json",
+      "headers": [
+        { "key": "Content-Type", "value": "application/manifest+json" },
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/sw.js",
+      "headers": [
+        { "key": "Content-Type", "value": "application/javascript; charset=utf-8" },
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
+        { "key": "Service-Worker-Allowed", "value": "/" }
+      ]
     }
   ]
 }

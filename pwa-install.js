@@ -1,11 +1,28 @@
-/* ==========================================================================
-   MovieZone — Premium PWA Install Prompt
-   - Shows a delayed, luxury install popup with QR code
-   - Handles Android/Windows/Desktop (beforeinstallprompt), iOS (manual steps),
-     and hides gracefully on unsupported platforms (Smart TVs, already-installed)
-   - QR code is generated fully client-side (qrcode-generator, MIT licensed,
-     inlined below) — no third-party network requests, no user data leaves device
-   ========================================================================== */
+
+(function () {
+  if (window.__mzPromptCaptureReady) return; // already installed by the inline head snippet
+  window.__mzPromptCaptureReady = true;
+
+  var _prompt = null;
+  function makeAlias(name) {
+    try {
+      Object.defineProperty(window, name, {
+        configurable: true,
+        get: function () { return _prompt; },
+        set: function (v) { _prompt = v; }
+      });
+    } catch (e) { window[name] = null; }
+  }
+  makeAlias('deferredPrompt');
+  makeAlias('__mzDeferredPrompt');
+
+  window.addEventListener('beforeinstallprompt', function (e) {
+    e.preventDefault();                 // stop Chrome's own mini-infobar
+    window.deferredPrompt = e;          // stash for our custom button
+    console.log('[MovieZone PWA] ✅ beforeinstallprompt captured — native install ready.');
+    window.dispatchEvent(new CustomEvent('mz:installready'));
+  });
+})();
 
 /* ---- Minimal QR Code Generator (MIT License, kazuhikoarase/qrcode-generator) ----
    Trimmed build: numeric/alphanumeric/byte mode, auto error-correction level M.
@@ -19,29 +36,30 @@
       this.data = data;
       this.parsedData = [];
       for (var i = 0, l = this.data.length; i < l; i++) {
-        var byteArray = [];
-        var code = this.data.charCodeAt(i);
-        if (code > 0x10000) {
-          byteArray[0] = 0xF0 | ((code & 0x1C0000) >>> 18);
-          byteArray[1] = 0x80 | ((code & 0x3F000) >>> 12);
-          byteArray[2] = 0x80 | ((code & 0xFC0) >>> 6);
-          byteArray[3] = 0x80 | (code & 0x3F);
-        } else if (code > 0x800) {
-          byteArray[0] = 0xE0 | ((code & 0xF000) >>> 12);
-          byteArray[1] = 0x80 | ((code & 0xFC0) >>> 6);
-          byteArray[2] = 0x80 | (code & 0x3F);
-        } else if (code > 0x80) {
-          byteArray[0] = 0xC0 | ((code & 0x7C0) >>> 6);
-          byteArray[1] = 0x80 | (code & 0x3F);
+        var codePoint = this.data.codePointAt(i);
+        if (codePoint > 0xFFFF) i++; // consume the low surrogate
+
+        if (codePoint <= 0x7F) {
+          this.parsedData.push(codePoint);
+        } else if (codePoint <= 0x7FF) {
+          this.parsedData.push(
+            0xC0 | (codePoint >>> 6),
+            0x80 | (codePoint & 0x3F)
+          );
+        } else if (codePoint <= 0xFFFF) {
+          this.parsedData.push(
+            0xE0 | (codePoint >>> 12),
+            0x80 | ((codePoint >>> 6) & 0x3F),
+            0x80 | (codePoint & 0x3F)
+          );
         } else {
-          byteArray[0] = code;
+          this.parsedData.push(
+            0xF0 | (codePoint >>> 18),
+            0x80 | ((codePoint >>> 12) & 0x3F),
+            0x80 | ((codePoint >>> 6) & 0x3F),
+            0x80 | (codePoint & 0x3F)
+          );
         }
-        this.parsedData.push.apply(this.parsedData, byteArray);
-      }
-      if (this.parsedData.length >= 2) {
-        this.parsedData.splice(this.parsedData.length - 2, 2);
-      } else {
-        this.parsedData = [];
       }
     }
     QR8bitByte.prototype = {
@@ -411,12 +429,13 @@
 (function () {
   var STORAGE_KEY = 'mz_pwa_prompt_dismissed_at';
   var TV_STORAGE_KEY = 'mz_pwa_tv_prompt_dismissed_at';
-  var SHOW_DELAY_MS = 4000;
+  var SHOW_DELAY_MS = 30000;
+  var popupTimer = null;
   var SNOOZE_DAYS = 7;
 
   var overlay, installBtn, laterBtn, closeBtn, iosGuide, iosShareLabel, pwaDesc, qrWrap;
   var tvOverlay, tvQrWrap, tvDismissBtn;
-  var deferredPrompt = null;
+  // NOTE: the prompt event lives only on `window.deferredPrompt` (single source of truth).
 
   function isStandalone() {
     return window.matchMedia('(display-mode: standalone)').matches ||
@@ -464,6 +483,9 @@
     document.body.style.overflow = 'hidden';
   }
 
+  // Expose globally so navbar Install button can trigger it
+  window.__mzOpenInstallPopup = openPopup;
+
   function closePopup(remember) {
     if (!overlay) return;
     overlay.classList.remove('open');
@@ -482,13 +504,34 @@
     if (remember) markDismissed(TV_STORAGE_KEY);
   }
 
-  function renderQRInto(el, opts) {
+  /* ── QR CODE ─────────────────────────────────────────────────────────────
+     Always encodes the CURRENT page URL (window.location.href), rendered as a real
+     <img> from the goQR API. If the network call fails (offline / blocked / CSP),
+     we silently fall back to the inlined client-side generator. ── */
+
+  var QR_API = 'https://api.qrserver.com/v1/create-qr-code/';
+
+  function qrApiUrl(text, size) {
+    return QR_API + '?size=' + size + 'x' + size +
+      '&ecc=M&qzone=1&format=png&data=' + encodeURIComponent(text);
+  }
+
+  function currentUrl() {
+    return window.location.href;
+  }
+
+  function renderQRFallback(el, text, opts) {
     if (!el || !window.MiniQR) return;
     var canvas = document.createElement('canvas');
     try {
-      window.MiniQR.renderTo(canvas, window.location.origin + '/', Object.assign({
-        cellSize: 4, margin: 8, dark: '#0a0a12', light: '#ffffff', level: 'M'
-      }, opts || {}));
+      window.MiniQR.renderTo(canvas, text, {
+        cellSize: (opts && opts.cellSize) || 4,
+        margin: (opts && opts.margin) || 8,
+        dark: '#0a0a12', light: '#ffffff', level: 'M'
+      });
+      canvas.style.cssText = 'display:block;border-radius:10px;max-width:100%;height:auto;';
+      canvas.setAttribute('role', 'img');
+      canvas.setAttribute('aria-label', 'QR code for ' + text);
       el.innerHTML = '';
       el.appendChild(canvas);
     } catch (e) {
@@ -496,56 +539,634 @@
     }
   }
 
+  function renderQRInto(el, opts) {
+    if (!el) return;
+    opts = opts || {};
+    var size = opts.size || 200;
+    var url = currentUrl();
+
+    var img = document.createElement('img');
+    img.width = size;
+    img.height = size;
+    img.alt = 'QR code that opens ' + url;
+    img.decoding = 'async';
+    img.loading = 'eager';
+    img.referrerPolicy = 'no-referrer';
+    img.style.cssText = 'display:block;width:' + size + 'px;height:' + size +
+      'px;max-width:100%;border-radius:10px;background:#fff;';
+    img.onerror = function () { renderQRFallback(el, url, opts); };
+    img.src = qrApiUrl(url, size);
+
+    el.innerHTML = '';
+    el.appendChild(img);
+  }
+
+  // Keep the QR in sync with SPA-style URL changes so it never points at a stale page.
+  function refreshAllQR() {
+    if (qrWrap) renderQRInto(qrWrap, { size: 200 });
+    if (tvQrWrap) renderQRInto(tvQrWrap, { size: 260, cellSize: 6, margin: 12 });
+    var helpQr = document.getElementById('mzHelpQr');
+    if (helpQr) renderQRInto(helpQr, { size: 160 });
+  }
+  window.addEventListener('hashchange', refreshAllQR);
+  window.addEventListener('popstate', refreshAllQR);
+
   function setupIOSGuide() {
-    iosGuide.style.display = 'flex';
-    pwaDesc.style.display = 'none';
-    document.getElementById('pwaQrWrap').closest('.pwa-body').style.display = 'none';
+    if (iosGuide) iosGuide.style.display = 'flex';
+    if (pwaDesc) pwaDesc.style.display = 'none';
+    var body = qrWrap && qrWrap.closest ? qrWrap.closest('.pwa-body') : null;
+    if (body) body.style.display = 'none';
 
     // Chrome/Firefox on iOS use a different share icon location/wording than Safari.
-    if (isIOSChrome()) {
-      iosShareLabel.textContent = 'Share';
-    } else if (isIOSFirefox()) {
-      iosShareLabel.textContent = 'Share';
-    } else {
-      iosShareLabel.textContent = 'Share';
+    if (iosShareLabel) iosShareLabel.textContent = 'Share';
+
+    if (installBtn) {
+      installBtn.textContent = 'Got it, thanks!';
+      installBtn.addEventListener('click', function () { closePopup(true); });
+    }
+  }
+
+  /* ── Install button state ─────────────────────────────────────────────── */
+  var DEFAULT_BTN_LABEL = '⬇ Install Now';
+  var clickBusy = false;
+
+  function setBtn(label, opts) {
+    if (!installBtn) return;
+    opts = opts || {};
+    installBtn.textContent = label;
+    installBtn.disabled = !!opts.disabled;
+    installBtn.style.opacity = opts.disabled ? '0.75' : '1';
+    installBtn.style.cursor = opts.disabled ? 'progress' : 'pointer';
+    if (opts.background) installBtn.style.background = opts.background;
+  }
+
+  function resetBtn() {
+    if (!installBtn) return;
+    installBtn.disabled = false;
+    installBtn.textContent = DEFAULT_BTN_LABEL;
+    installBtn.style.opacity = '1';
+    installBtn.style.cursor = 'pointer';
+    installBtn.style.background = '';
+  }
+
+  function toast(msg) {
+    if (typeof window.showToast === 'function') window.showToast(msg);
+  }
+
+  /* ── Service Worker / installability bootstrap ─────────────────────────
+     If beforeinstallprompt hasn't fired, the most common cause is that Chrome hasn't
+     finished validating installability yet (no active SW, or manifest still loading).
+     We register/activate the SW on demand, then wait briefly for the event. ── */
+  function ensureServiceWorker() {
+    if (!('serviceWorker' in navigator)) return Promise.resolve(false);
+
+    var readyPromise = window.__mzServiceWorkerReady;
+    if (!readyPromise) {
+      // Defensive fallback for pages that load this script without index.html.
+      readyPromise = navigator.serviceWorker.getRegistration()
+        .then(function (reg) {
+          return reg || navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' });
+        })
+        .then(function () { return navigator.serviceWorker.ready; });
     }
 
-    installBtn.textContent = 'Got it, thanks!';
-    installBtn.addEventListener('click', function () { closePopup(true); });
+    return Promise.resolve(readyPromise)
+      .then(function () {
+        if (navigator.serviceWorker.controller) return true;
+        if (typeof window.__mzAcquireServiceWorkerControl === 'function') {
+          return window.__mzAcquireServiceWorkerControl();
+        }
+        return false;
+      })
+      .catch(function (err) {
+        console.warn('[MovieZone PWA] SW bootstrap failed:', err);
+        return false;
+      });
+  }
+
+  // Resolves as soon as beforeinstallprompt lands, or after `timeout` ms.
+  function waitForPrompt(timeout) {
+    if (window.deferredPrompt) return Promise.resolve(window.deferredPrompt);
+    return new Promise(function (resolve) {
+      var done = false;
+      function finish() {
+        if (done) return;
+        done = true;
+        window.removeEventListener('mz:installready', finish);
+        clearTimeout(timer);
+        resolve(window.deferredPrompt || null);
+      }
+      var timer = setTimeout(finish, timeout);
+      window.addEventListener('mz:installready', finish);
+    });
+  }
+
+  /* ── Native Chrome/Edge install dialog ── */
+  async function triggerNativePrompt() {
+    var promptEvent = window.deferredPrompt;
+    if (!promptEvent) return false;
+
+    setBtn('⏳ Opening installer…', { disabled: true });
+    try {
+      await promptEvent.prompt();                    // native popup appears here
+      var choice = await promptEvent.userChoice;     // { outcome, platform }
+      console.log('[MovieZone PWA] Install choice:', choice && choice.outcome);
+
+      window.deferredPrompt = null;                  // a prompt can only be used once
+
+      if (choice && choice.outcome === 'accepted') {
+        setBtn('✓ Installing…', { disabled: true, background: '#4ade80' });
+        toast('MovieZone is installing! 🎬');
+        markDismissed(STORAGE_KEY);
+        setTimeout(function () { closePopup(false); }, 1200);
+      } else {
+        resetBtn();
+        toast('Install cancelled — you can install any time.');
+      }
+      return true;
+    } catch (err) {
+      console.warn('[MovieZone PWA] prompt() failed:', err);
+      window.deferredPrompt = null;
+      resetBtn();
+      return false;
+    }
+  }
+
+  /* ── Fallback: no beforeinstallprompt available ──
+     Never dead-ends with "use the address bar icon". Instead: bootstrap the SW,
+     retry the native prompt, and only then show an actionable guide. ── */
+  async function runFallbackInstallFlow() {
+    if (isStandalone() || await alreadyInstalled()) {
+      setBtn('✓ Already Installed', { disabled: true, background: '#4ade80' });
+      setTimeout(function () { closePopup(true); }, 1500);
+      return;
+    }
+
+    setBtn('⏳ Preparing install…', { disabled: true });
+    await ensureServiceWorker();
+
+    var promptEvent = await waitForPrompt(2500);
+
+    if (promptEvent) {
+      // The event arrived after asynchronous preparation, so transient user activation
+      // may have expired. Never call prompt() here: require one fresh direct click.
+      setBtn('⬇ Ready — tap to install');
+      toast('Installer ready — tap Install Now once more.');
+      return;
+    }
+
+    resetBtn();
+    showInstallHelp();
+  }
+
+  // getInstalledRelatedApps() is Chromium-only; treat any failure as "not installed".
+  function alreadyInstalled() {
+    if (!navigator.getInstalledRelatedApps) return Promise.resolve(false);
+    return navigator.getInstalledRelatedApps()
+      .then(function (apps) { return Array.isArray(apps) && apps.length > 0; })
+      .catch(function () { return false; });
+  }
+
+  /* ── Installability diagnostics ───────────────────────────────────────
+     Chrome never says WHY beforeinstallprompt didn't fire, so we re-check every
+     documented install criterion ourselves and report exactly which one fails. ── */
+  function probeImage(url) {
+    return new Promise(function (resolve) {
+      var img = new Image();
+      img.onload = function () { resolve({ ok: true, w: img.naturalWidth, h: img.naturalHeight }); };
+      img.onerror = function () { resolve({ ok: false, w: 0, h: 0 }); };
+      img.src = url + (url.indexOf('?') > -1 ? '&' : '?') + 'mzdiag=' + Date.now();
+    });
+  }
+
+  async function runInstallDiagnostics() {
+    var rows = [];
+    function add(check, ok, detail, status) {
+      rows.push({
+        check: check,
+        ok: !!ok,
+        detail: detail || '',
+        status: status || (ok ? 'pass' : 'fail')
+      });
+    }
+
+    add('Secure context (HTTPS or localhost)', window.isSecureContext,
+      location.protocol + '//' + location.host);
+
+    var link = document.querySelector('link[rel="manifest"]');
+    add('<link rel="manifest"> in <head>', !!link, link ? link.getAttribute('href') : 'MISSING');
+
+    var manifest = null;
+    if (link) {
+      try {
+        var res = await fetch(link.href, { cache: 'no-store' });
+        add('Manifest HTTP fetch', res.ok,
+          res.status + ' · ' + (res.headers.get('content-type') || 'no content-type'));
+        if (res.ok) {
+          try {
+            manifest = await res.json();
+            add('Manifest is valid JSON', true, Object.keys(manifest).length + ' keys');
+          } catch (e) { add('Manifest is valid JSON', false, e.message); }
+        }
+      } catch (e) { add('Manifest HTTP fetch', false, e.message); }
+    }
+
+    if (manifest) {
+      ['name', 'short_name', 'start_url', 'display', 'icons'].forEach(function (k) {
+        add('manifest.' + k, !!manifest[k], manifest[k] ? String(
+          Array.isArray(manifest[k]) ? manifest[k].length + ' entries' : manifest[k]
+        ) : 'MISSING');
+      });
+
+      var displayOk = ['standalone', 'fullscreen', 'minimal-ui'].indexOf(manifest.display) > -1;
+      add('display is app-like', displayOk, manifest.display || '—');
+
+      // Chrome needs a fetchable 192px AND 512px any-purpose icon.
+      var icons = (manifest.icons || []).filter(function (i) {
+        return !i.purpose || i.purpose.split(' ').indexOf('any') > -1;
+      });
+      var probes = await Promise.all(icons.map(function (i) {
+        return probeImage(new URL(i.src, link.href).href).then(function (r) {
+          return { src: i.src, declared: i.sizes, real: r };
+        });
+      }));
+      probes.forEach(function (p) {
+        add('icon ' + p.src, p.real.ok, p.real.ok ? p.real.w + '×' + p.real.h + ' (declared ' + p.declared + ')' : 'FAILED TO LOAD');
+      });
+      var has192 = probes.some(function (p) { return p.real.ok && p.real.w >= 192; });
+      var has512 = probes.some(function (p) { return p.real.ok && p.real.w >= 512; });
+      add('icon ≥192px usable', has192);
+      add('icon ≥512px usable', has512);
+    }
+
+    if ('serviceWorker' in navigator) {
+      var reg = await navigator.serviceWorker.getRegistration();
+      add('Service worker registered', !!reg, reg ? 'scope ' + reg.scope : 'none');
+      add('Service worker active', !!(reg && reg.active), reg && reg.active ? reg.active.state : '—');
+      add('Page is SW-controlled', !!navigator.serviceWorker.controller,
+        navigator.serviceWorker.controller ? 'yes' : 'no — reload once after first install');
+    } else {
+      add('Service worker API', false, 'unsupported');
+    }
+
+    var installedApps = [];
+    if (navigator.getInstalledRelatedApps) {
+      try { installedApps = await navigator.getInstalledRelatedApps(); } catch (e) {}
+    }
+    add('App NOT already installed', installedApps.length === 0,
+      installedApps.length
+        ? 'ALREADY INSTALLED → Chrome suppresses the prompt'
+        : 'not reported as installed (Chrome may still track an existing desktop install)');
+    add('Running in a browser tab', !isStandalone(),
+      isStandalone() ? 'already standalone' : 'browser tab');
+    add('beforeinstallprompt received', !!window.deferredPrompt,
+      window.deferredPrompt
+        ? 'ready'
+        : 'waiting — Chrome may withhold it for engagement threshold, dismissal cooldown, private/guest mode, or browser policy',
+      window.deferredPrompt ? 'pass' : 'pending');
+    add('Browser-controlled install policy', true,
+      'JavaScript cannot synthesize the native prompt or detect every suppression reason',
+      'info');
+
+    console.table(rows);
+    return rows;
+  }
+
+  window.mzInstallDiagnostics = runInstallDiagnostics;
+
+  function renderDiagnostics(rows) {
+    var host = document.getElementById('mzHelpDiag');
+    if (!host) return;
+    var failed = rows.filter(function (r) { return r.status === 'fail'; });
+    var pending = rows.filter(function (r) { return r.status === 'pending'; });
+    var verdict;
+    if (failed.length) {
+      verdict = '<b>' + failed.length + ' blocking check' + (failed.length > 1 ? 's' : '') + ' failed.</b> Resolve ' +
+        (failed.length > 1 ? 'these' : 'this') + ' before installation can work.';
+    } else if (pending.length) {
+      verdict = '<b>Install requirements pass.</b> Chrome has not exposed the native prompt yet.';
+    } else {
+      verdict = '<b>All install criteria pass.</b> The native installer is ready.';
+    }
+    host.innerHTML =
+      '<div class="mz-diag"><p class="mz-diag-verdict">' + verdict + '</p><ul>' +
+      rows.map(function (r) {
+        var symbol = r.status === 'pass' ? '✓' : (r.status === 'fail' ? '✕' : (r.status === 'pending' ? '…' : 'i'));
+        return '<li class="' + r.status + '"><span>' + symbol + '</span>' +
+          '<span>' + r.check + (r.detail ? ' <em>' + r.detail + '</em>' : '') + '</span></li>';
+      }).join('') +
+      '</ul><p class="mz-help-note">Full table also logged to the DevTools console.</p></div>';
+  }
+
+  /* ── Manual install guide (browser-aware) ─────────────────────────────── */
+  function detectBrowser() {
+    var ua = navigator.userAgent;
+    var isAndroid = /Android/.test(ua);
+    if (/Edg\//.test(ua)) return { name: 'Edge', key: 'edge', android: isAndroid };
+    if (/OPR\//.test(ua) || /Opera/.test(ua)) return { name: 'Opera', key: 'opera', android: isAndroid };
+    if (/SamsungBrowser/.test(ua)) return { name: 'Samsung Internet', key: 'samsung', android: isAndroid };
+    if (/Firefox\//.test(ua)) return { name: 'Firefox', key: 'firefox', android: isAndroid };
+    if (/Chrome\//.test(ua)) return { name: 'Chrome', key: 'chrome', android: isAndroid };
+    if (/Safari\//.test(ua)) return { name: 'Safari', key: 'safari', android: false };
+    return { name: 'your browser', key: 'other', android: isAndroid };
+  }
+
+  function installSteps(b) {
+    if (b.android) {
+      return [
+        'Tap the <b>⋮</b> menu (top-right of ' + b.name + ')',
+        'Choose <b>“Add to Home screen”</b> or <b>“Install app”</b>',
+        'Confirm with <b>Install</b> — MovieZone lands on your home screen'
+      ];
+    }
+    switch (b.key) {
+      case 'edge':
+        return [
+          'Open the <b>⋯</b> menu (top-right)',
+          'Go to <b>Apps → Install this site as an app</b>',
+          'Click <b>Install</b>'
+        ];
+      case 'chrome':
+        return [
+          'Open the <b>⋮</b> menu (top-right)',
+          'Choose <b>Cast, save and share → Install page as app</b><br><span class="mz-help-note">(older Chrome: <b>Save and share → Install page as app</b>)</span>',
+          'Click <b>Install</b>'
+        ];
+      case 'opera':
+        return [
+          'Open the <b>Opera</b> menu',
+          'Choose <b>Install MovieZone…</b> or <b>Add to… → Install as app</b>',
+          'Confirm the install'
+        ];
+      case 'safari':
+        return [
+          'Open the <b>File</b> menu',
+          'Choose <b>Add to Dock…</b>',
+          'Click <b>Add</b>'
+        ];
+      case 'firefox':
+        return [
+          'Firefox on desktop can’t install web apps yet',
+          'Scan the QR code with your phone to install there, or',
+          'Reopen this page in <b>Chrome</b> or <b>Edge</b> to install on this device'
+        ];
+      default:
+        return [
+          'Open your browser’s main menu',
+          'Look for <b>Install app</b> or <b>Add to Home screen</b>',
+          'Or scan the QR code to install on your phone'
+        ];
+    }
+  }
+
+  function injectHelpStyles() {
+    if (document.getElementById('mz-install-help-styles')) return;
+    var s = document.createElement('style');
+    s.id = 'mz-install-help-styles';
+    s.textContent = [
+      '#mzInstallHelp{position:fixed;inset:0;z-index:100000;display:none;align-items:center;justify-content:center;',
+      'background:rgba(3,3,10,.82);backdrop-filter:blur(8px);padding:20px;overflow-y:auto;}',
+      '#mzInstallHelp.open{display:flex;}',
+      '#mzInstallHelp .mz-help-card{position:relative;width:100%;max-width:460px;background:#0d0d18;',
+      'border:1px solid rgba(245,197,24,.28);border-radius:18px;padding:26px 24px;color:#f2f2f5;',
+      'box-shadow:0 30px 80px rgba(0,0,0,.6);font-family:inherit;}',
+      '#mzInstallHelp h3{margin:0 0 6px;font-size:1.18rem;color:#f5c518;}',
+      '#mzInstallHelp p{margin:0 0 16px;font-size:.9rem;line-height:1.55;color:#b9b9c6;}',
+      '#mzInstallHelp ol{margin:0 0 18px;padding-left:0;list-style:none;counter-reset:mzstep;}',
+      '#mzInstallHelp ol li{counter-increment:mzstep;position:relative;padding:10px 0 10px 40px;font-size:.9rem;',
+      'line-height:1.5;border-bottom:1px solid rgba(255,255,255,.06);}',
+      '#mzInstallHelp ol li:last-child{border-bottom:0;}',
+      '#mzInstallHelp ol li::before{content:counter(mzstep);position:absolute;left:0;top:9px;width:26px;height:26px;',
+      'border-radius:50%;background:rgba(245,197,24,.14);color:#f5c518;font-size:.78rem;font-weight:700;',
+      'display:flex;align-items:center;justify-content:center;}',
+      '#mzInstallHelp .mz-help-note{color:#8f8fa0;font-size:.78rem;}',
+      '#mzInstallHelp .mz-help-qr{display:flex;gap:14px;align-items:center;background:rgba(255,255,255,.04);',
+      'border-radius:12px;padding:12px;margin-bottom:18px;}',
+      '#mzInstallHelp .mz-help-qr span{font-size:.8rem;color:#b9b9c6;line-height:1.45;}',
+      '#mzInstallHelp .mz-help-actions{display:flex;gap:10px;flex-wrap:wrap;}',
+      '#mzInstallHelp button{flex:1 1 140px;padding:12px 16px;border-radius:10px;font-size:.88rem;font-weight:600;',
+      'cursor:pointer;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:#f2f2f5;}',
+      '#mzInstallHelp button.mz-help-primary{background:linear-gradient(135deg,#f5c518,#e0a800);color:#1a1400;border:0;}',
+      '#mzInstallHelp button:focus-visible{outline:2px solid #f5c518;outline-offset:2px;}',
+      '#mzInstallHelp .mz-help-close{position:absolute;top:12px;right:12px;flex:0 0 auto;width:34px;height:34px;',
+      'padding:0;border-radius:50%;font-size:1.1rem;line-height:1;}',
+      '#mzInstallHelp .mz-diag{margin-top:16px;border-top:1px solid rgba(255,255,255,.08);padding-top:14px;}',
+      '#mzInstallHelp .mz-diag-verdict{font-size:.85rem;color:#e6e6ee;margin-bottom:10px;}',
+      '#mzInstallHelp .mz-diag ul{list-style:none;margin:0 0 8px;padding:0;counter-reset:none;',
+      'max-height:220px;overflow-y:auto;}',
+      '#mzInstallHelp .mz-diag li{display:flex;gap:8px;align-items:flex-start;padding:5px 0;font-size:.8rem;',
+      'border:0;line-height:1.4;}',
+      '#mzInstallHelp .mz-diag li::before{content:none;}',
+      '#mzInstallHelp .mz-diag li.pass>span:first-child{color:#4ade80;}',
+      '#mzInstallHelp .mz-diag li.fail>span:first-child{color:#f87171;}',
+      '#mzInstallHelp .mz-diag li.fail{color:#fca5a5;}',
+      '#mzInstallHelp .mz-diag li.pending>span:first-child{color:#f5c518;}',
+      '#mzInstallHelp .mz-diag li.pending{color:#fde68a;}',
+      '#mzInstallHelp .mz-diag li.info>span:first-child{color:#60a5fa;}',
+      '#mzInstallHelp .mz-diag em{color:#8f8fa0;font-style:normal;}'
+    ].join('');
+    document.head.appendChild(s);
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (resolve, reject) {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.cssText = 'position:fixed;opacity:0;pointer-events:none;';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        resolve();
+      } catch (e) { reject(e); }
+    });
+  }
+
+  function closeHelp() {
+    var panel = document.getElementById('mzInstallHelp');
+    if (panel) panel.classList.remove('open');
+    document.body.style.overflow = '';
+  }
+
+  function showInstallHelp() {
+    injectHelpStyles();
+    var b = detectBrowser();
+    var insecure = location.protocol !== 'https:' &&
+      location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
+
+    var panel = document.getElementById('mzInstallHelp');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'mzInstallHelp';
+      panel.setAttribute('role', 'dialog');
+      panel.setAttribute('aria-modal', 'true');
+      panel.setAttribute('aria-labelledby', 'mzHelpTitle');
+      document.body.appendChild(panel);
+    }
+
+    var steps = installSteps(b).map(function (s) { return '<li>' + s + '</li>'; }).join('');
+    var warning = insecure
+      ? '<p class="mz-help-note">⚠ This page is served over <b>' + location.protocol +
+        '</b>. Browsers only allow app install over <b>HTTPS</b> (or localhost).</p>'
+      : '';
+
+    panel.innerHTML =
+      '<div class="mz-help-card">' +
+        '<button class="mz-help-close" id="mzHelpClose" aria-label="Close">&times;</button>' +
+        '<h3 id="mzHelpTitle">Install MovieZone on ' + b.name + '</h3>' +
+        '<p>Your browser didn’t offer the one-click installer for this page. It takes two taps instead:</p>' +
+        '<ol>' + steps + '</ol>' +
+        warning +
+        '<div class="mz-help-qr"><div id="mzHelpQr"></div>' +
+          '<span><b>Or install on your phone</b><br>Scan this code to open this exact page on mobile, then tap “Install app”.</span>' +
+        '</div>' +
+        '<div class="mz-help-actions">' +
+          '<button class="mz-help-primary" id="mzHelpRetry">↻ Retry one-click install</button>' +
+          '<button id="mzHelpDiagBtn">🔍 Why not?</button>' +
+          '<button id="mzHelpApps">Copy chrome://apps</button>' +
+        '</div>' +
+        '<div id="mzHelpDiag"></div>' +
+      '</div>';
+
+    renderQRInto(document.getElementById('mzHelpQr'), { size: 160, cellSize: 3, margin: 6 });
+
+    document.getElementById('mzHelpClose').addEventListener('click', closeHelp);
+    panel.addEventListener('click', function (e) { if (e.target === panel) closeHelp(); });
+
+    // Retry uses a strict two-phase flow: if Chrome already exposed the event,
+    // prompt immediately in this click. If it arrives after async checks, ask for
+    // one more click so transient user activation is guaranteed.
+    document.getElementById('mzHelpRetry').addEventListener('click', async function () {
+      var btn = this;
+
+      if (window.deferredPrompt) {
+        closeHelp();
+        await triggerNativePrompt();
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = '⏳ Checking installer…';
+      await ensureServiceWorker();
+      var p = await waitForPrompt(2500);
+      if (p) {
+        btn.disabled = false;
+        btn.textContent = '✓ Ready — click to install';
+        toast('Native installer ready — click the button once more.');
+      } else {
+        btn.disabled = false;
+        btn.textContent = '↻ Retry one-click install';
+        var rows = await runInstallDiagnostics();
+        renderDiagnostics(rows);
+        toast('Chrome is still withholding the native prompt; see the policy details below.');
+      }
+    });
+
+    // Report exactly which installability criterion is failing.
+    document.getElementById('mzHelpDiagBtn').addEventListener('click', async function () {
+      var btn = this;
+      btn.disabled = true;
+      btn.textContent = '🔍 Checking…';
+      try {
+        var rows = await runInstallDiagnostics();
+        renderDiagnostics(rows);
+      } catch (e) {
+        console.warn('[MovieZone PWA] Diagnostics failed:', e);
+      }
+      btn.disabled = false;
+      btn.textContent = '🔍 Why not?';
+    });
+
+    // Browsers block scripted navigation to chrome:// URLs, so hand the user the
+    // address instead: one paste in the address bar opens the installed-apps page.
+    document.getElementById('mzHelpApps').addEventListener('click', function () {
+      var btn = this;
+      copyText('chrome://apps').then(function () {
+        btn.textContent = '✓ Copied — paste in address bar';
+        toast('Paste chrome://apps in the address bar to manage installed apps.');
+      }).catch(function () {
+        btn.textContent = 'Open chrome://apps manually';
+      });
+    });
+
+    document.addEventListener('keydown', function onEsc(e) {
+      if (e.key === 'Escape' && panel.classList.contains('open')) {
+        closeHelp();
+        document.removeEventListener('keydown', onEsc);
+      }
+    });
+
+    panel.classList.add('open');
+    var retry = document.getElementById('mzHelpRetry');
+    if (retry) retry.focus();
+  }
+
+  /* ── Click handler ── */
+  async function handleInstallClick() {
+    if (clickBusy) return;
+    clickBusy = true;
+    try {
+      if (window.deferredPrompt) {
+        var ok = await triggerNativePrompt();
+        if (!ok) await runFallbackInstallFlow();
+      } else {
+        await runFallbackInstallFlow();
+      }
+    } catch (err) {
+      console.warn('[MovieZone PWA] Install flow error:', err);
+      resetBtn();
+      showInstallHelp();
+    } finally {
+      clickBusy = false;
+    }
   }
 
   function setupInstallButton() {
+    if (!installBtn) return;
+
     if (isIOS()) {
       setupIOSGuide();
       return;
     }
 
-    installBtn.addEventListener('click', function () {
-      if (deferredPrompt) {
-        deferredPrompt.prompt();
-        deferredPrompt.userChoice.then(function () {
-          deferredPrompt = null;
-          closePopup(true);
-        });
-      } else {
-        // No native prompt available (already installed, unsupported browser,
-        // or criteria not met yet) — keep popup open with QR fallback visible.
-        closePopup(true);
-      }
-    });
+    installBtn.addEventListener('click', handleInstallClick);
   }
 
-  window.addEventListener('beforeinstallprompt', function (e) {
-    e.preventDefault();
-    deferredPrompt = e;
+  // Any external caller (navbar button, banner) routes through the same flow.
+  window.__mzTriggerInstall = handleInstallClick;
+  window.__mzShowInstallHelp = showInstallHelp;
+
+  window.addEventListener('mz:installready', function () {
+    if (installBtn && !clickBusy && !isIOS()) resetBtn();
+    if (popupTimer) {
+      clearTimeout(popupTimer);
+      popupTimer = null;
+    }
+    if (overlay && !isStandalone() && !recentlyDismissed(STORAGE_KEY)) {
+      setTimeout(openPopup, 250);
+    }
   });
 
   window.addEventListener('appinstalled', function () {
     markDismissed(STORAGE_KEY);
     closePopup(false);
+    closeHelp();
+    window.deferredPrompt = null;
+    toast('MovieZone installed! 🎬');
+    // Hide navbar install button
+    var navBtn = document.getElementById('navInstallBtn');
+    if (navBtn) navBtn.style.display = 'none';
+    // Remove banner if exists
+    var banner = document.getElementById('pwa-install-banner');
+    if (banner) banner.remove();
   });
 
-  document.addEventListener('DOMContentLoaded', function () {
+  function init() {
     overlay = document.getElementById('pwa-install-overlay');
     installBtn = document.getElementById('pwaInstallBtn');
     laterBtn = document.getElementById('pwaLaterBtn');
@@ -559,12 +1180,13 @@
     tvQrWrap = document.getElementById('pwaTvQrWrap');
     tvDismissBtn = document.getElementById('pwaTvDismissBtn');
 
-    if (isStandalone()) return;
+    if (isStandalone()) { console.log('[MovieZone PWA] Popup skipped: app is already running in standalone/installed mode.'); return; }
 
     /* ── Smart TV: dedicated full-screen QR-only view (remote-friendly, no native install) ── */
     if (isTV()) {
-      if (!tvOverlay || recentlyDismissed(TV_STORAGE_KEY)) return;
-      renderQRInto(tvQrWrap, { cellSize: 6, margin: 12 });
+      if (!tvOverlay) { console.log('[MovieZone PWA] TV overlay element not found in DOM.'); return; }
+      if (recentlyDismissed(TV_STORAGE_KEY)) { console.log('[MovieZone PWA] TV popup skipped: dismissed recently.'); return; }
+      renderQRInto(tvQrWrap, { size: 260, cellSize: 6, margin: 12 });
       tvDismissBtn.addEventListener('click', function () { closeTvPopup(true); });
       tvDismissBtn.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.key === ' ') closeTvPopup(true);
@@ -575,13 +1197,15 @@
     }
 
     /* ── Everyone else: desktop / Android / Windows / iOS card ── */
-    if (!overlay || recentlyDismissed(STORAGE_KEY)) return;
+    if (!overlay) { console.log('[MovieZone PWA] Popup overlay element not found in DOM.'); return; }
 
+    // ALWAYS setup buttons and QR (so they work from navbar button too)
     setupInstallButton();
-    renderQRInto(qrWrap);
+    renderQRInto(qrWrap, { size: 200 });
 
-    laterBtn.addEventListener('click', function () { closePopup(true); });
-    closeBtn.addEventListener('click', function () { closePopup(true); });
+    // Attach button event listeners ALWAYS (regardless of dismiss state)
+    if (laterBtn) laterBtn.addEventListener('click', function () { closePopup(true); });
+    if (closeBtn) closeBtn.addEventListener('click', function () { closePopup(true); });
     overlay.addEventListener('click', function (e) {
       if (e.target === overlay) closePopup(true);
     });
@@ -589,6 +1213,20 @@
       if (e.key === 'Escape' && overlay.classList.contains('open')) closePopup(true);
     });
 
-    setTimeout(openPopup, SHOW_DELAY_MS);
-  });
+    // Only AUTO-OPEN popup if NOT recently dismissed
+    if (recentlyDismissed(STORAGE_KEY)) {
+      console.log('[MovieZone PWA] Auto-popup skipped (dismissed recently). Navbar button still works.');
+      return;
+    }
+
+    console.log('[MovieZone PWA] Popup will auto-open in ' + (SHOW_DELAY_MS / 1000) + ' seconds.');
+    popupTimer = setTimeout(openPopup, SHOW_DELAY_MS);
+  }
+
+  // Script is loaded with `defer`, but run immediately if the DOM is already parsed.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
 })();

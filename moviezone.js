@@ -4514,91 +4514,65 @@ init();
 
 // === PWA INSTALL & NOTIFY ME SYSTEM ===
 (function initPWA() {
-  // 1. Register Service Worker
+  // 1. Service Worker is registered by the inline <head> PWA bootstrap.
+  // Consume its shared readiness promise here; do not create duplicate registrations.
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then(reg => {
-      console.log('[MovieZone] Service Worker registered:', reg.scope);
-      reg.update(); // Force check for new SW
-    }).catch(err => console.warn('[MovieZone] SW registration failed:', err));
+    const swReady = window.__mzServiceWorkerReady || navigator.serviceWorker.ready;
+    Promise.resolve(swReady).then(reg => {
+      if (reg) console.log('[MovieZone] Service Worker ready:', reg.scope);
+    }).catch(err => console.warn('[MovieZone] SW readiness failed:', err));
   }
 
-  // 2. PWA Install Prompt
-  let deferredPrompt = null;
+  // 2. PWA Install Prompt — Handled by pwa-install.js (luxury popup)
+  // Navbar install button shows only when the native prompt is available or after
+  // a grace period (so manual install flow remains accessible).
   const navInstallBtn = document.getElementById('navInstallBtn');
-
-  // Check if app is already installed
   const isInstalled = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
 
-  window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    deferredPrompt = e;
-    // Show navbar install button
-    if (navInstallBtn) navInstallBtn.style.display = 'flex';
-    // Show banner after 2 seconds
-    setTimeout(showInstallBanner, 2000);
-  });
-
-  // If not installed and no prompt yet, still show button (for awareness)
-  if (!isInstalled) {
-    setTimeout(() => {
-      if (navInstallBtn && navInstallBtn.style.display !== 'flex') {
+  if (!isInstalled && navInstallBtn) {
+    // Show immediately if native prompt already captured
+    if (window.deferredPrompt) {
+      navInstallBtn.style.display = 'flex';
+      navInstallBtn.classList.add('mz-install-native-ready');
+    } else {
+      // Show when native prompt arrives (with a visual pulse)
+      window.addEventListener('mz:installready', function () {
         navInstallBtn.style.display = 'flex';
-      }
-      // Show banner after 4 seconds regardless (for user awareness)
-      if (!document.getElementById('pwa-install-banner') && !sessionStorage.getItem('mz_banner_closed')) {
-        showInstallBanner();
-      }
-    }, 4000);
+        navInstallBtn.classList.add('mz-install-native-ready');
+      });
+      // Fallback: show after 35s regardless (for manual install access)
+      setTimeout(function () {
+        if (!isInstalled) navInstallBtn.style.display = 'flex';
+      }, 35000);
+    }
   }
 
-  function showInstallBanner() {
-    if (document.getElementById('pwa-install-banner')) return;
-    if (isInstalled) return;
-    if (sessionStorage.getItem('mz_banner_closed')) return;
-    const banner = document.createElement('div');
-    banner.id = 'pwa-install-banner';
-    banner.innerHTML = `
-      <div class="pwa-banner-content">
-        <div class="pwa-banner-icon">MZ</div>
-        <div class="pwa-banner-text">
-          <strong>Install MovieZone</strong>
-          <span>Get app-like experience with notifications</span>
-        </div>
-        <button class="pwa-banner-btn" onclick="installPWA()">Install</button>
-        <button class="pwa-banner-close" onclick="closePWABanner()">&times;</button>
-      </div>
-    `;
-    document.body.appendChild(banner);
-  }
+  // Global install function — called from navbar button and banner.
+  // pwa-install.js owns the ONLY native prompt path, preserving direct-click semantics.
+  window.installPWA = function() {
+    if (typeof window.__mzTriggerInstall === 'function') {
+      if (!window.deferredPrompt && window.__mzOpenInstallPopup) window.__mzOpenInstallPopup();
+      return window.__mzTriggerInstall();
+    }
+
+    // Defensive UI fallback if the dedicated install controller failed to load.
+    if (window.__mzOpenInstallPopup) {
+      window.__mzOpenInstallPopup();
+      return;
+    }
+    const overlay = document.getElementById('pwa-install-overlay');
+    if (overlay) {
+      overlay.classList.add('open');
+      document.body.style.overflow = 'hidden';
+    } else if (typeof showToast === 'function') {
+      showToast('Install controls are still loading. Please try again.');
+    }
+  };
 
   window.closePWABanner = function() {
     const banner = document.getElementById('pwa-install-banner');
     if (banner) banner.remove();
     sessionStorage.setItem('mz_banner_closed', '1');
-  };
-
-  window.installPWA = async function() {
-    if (deferredPrompt) {
-      deferredPrompt.prompt();
-      const result = await deferredPrompt.userChoice;
-      if (result.outcome === 'accepted') {
-        if (typeof showToast === 'function') showToast('MovieZone installed successfully! 🎬');
-        if (navInstallBtn) navInstallBtn.style.display = 'none';
-      }
-      deferredPrompt = null;
-      const banner = document.getElementById('pwa-install-banner');
-      if (banner) banner.remove();
-    } else {
-      // Fallback: Guide user to install manually
-      if (typeof showToast === 'function') {
-        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-        if (isIOS) {
-          showToast('Tap Share button ⬆️ then "Add to Home Screen"');
-        } else {
-          showToast('Click the install icon ⊕ in your browser address bar');
-        }
-      }
-    }
   };
 
   // 3. NOTIFY ME System
