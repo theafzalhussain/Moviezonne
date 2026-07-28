@@ -71,7 +71,7 @@ async function fetchWithRetry(url, options = {}) {
   // Strip /3 prefix since axios baseURL already includes it
   let path = parsed.pathname + parsed.search;
   if (path.startsWith('/3/')) path = path.slice(2); // /3/trending -> /trending
-  
+
   const response = await tmdbClient.get(path, {
     headers: options.headers || {}
   });
@@ -196,7 +196,7 @@ app.get('/sw.js', (req, res) => {
 });
 
 // Frontend files (index.html, css, js) ko browser mein dikhane ke liye
-app.use(express.static(__dirname, { 
+app.use(express.static(__dirname, {
   maxAge: '30d',
   etag: true,
   lastModified: true,
@@ -615,15 +615,15 @@ app.use('/api/tmdb', apiLimiter, async (req, res) => {
     const code = error.code || error.response?.status || 'UNKNOWN';
     const msg = error.message || 'Unknown error';
     console.error(`TMDB Proxy Error [${code}]: ${msg}`);
-    
+
     if (error.response) {
       // TMDB returned an error response (after all retries)
       return res.status(error.response.status).json({ error: 'TMDB API error', detail: error.response.statusText });
     }
-    
+
     const isTimeout = error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT';
     const isNetwork = error.code === 'ECONNRESET' || error.code === 'ENOTFOUND' || error.code === 'EPIPE';
-    
+
     if (isTimeout) {
       return res.status(504).json({ error: 'TMDB request timed out. Please retry.' });
     }

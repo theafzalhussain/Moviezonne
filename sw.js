@@ -1,11 +1,11 @@
-const CACHE_NAME = 'moviezone-v16';
+const CACHE_NAME = 'moviezone-v20';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/moviezone.css?v=3.5',
+  '/moviezone.css?v=3.8',
   '/search-engine.js?v=1.1',
-  '/moviezone.js?v=3.7',
-  '/pwa-install.js?v=1.4',
+  '/moviezone.js?v=3.8',
+  '/pwa-install.js?v=1.7',
   '/manifest.json',
   '/icon-192.svg',
   '/icon-512.svg',

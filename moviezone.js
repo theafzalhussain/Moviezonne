@@ -4527,7 +4527,10 @@ init();
   // Navbar install button shows only when the native prompt is available or after
   // a grace period (so manual install flow remains accessible).
   const navInstallBtn = document.getElementById('navInstallBtn');
-  const isInstalled = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+  let hasInstalledMarker = false;
+  try { hasInstalledMarker = localStorage.getItem('mz_pwa_installed') === '1'; } catch (err) {}
+  const isInstalled = window.matchMedia('(display-mode: standalone)').matches ||
+    window.navigator.standalone || hasInstalledMarker;
 
   if (!isInstalled && navInstallBtn) {
     // Show immediately if native prompt already captured

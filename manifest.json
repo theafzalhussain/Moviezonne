@@ -39,5 +39,11 @@
     }
   ],
   "categories": ["entertainment"],
+  "related_applications": [
+    {
+      "platform": "webapp",
+      "url": "/manifest.json"
+    }
+  ],
   "prefer_related_applications": false
 }
