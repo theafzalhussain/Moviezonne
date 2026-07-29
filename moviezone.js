@@ -213,7 +213,7 @@ perfStyle.textContent = `
     * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
   }
   
-  /* === TV MODE: Strip heavy effects but KEEP smooth focus transitions === */
+  /* === TV MODE: Ultra-lightweight — zero animations, minimal transitions === */
   .tv-mode *, .tv-mode *::before, .tv-mode *::after {
     box-shadow: none !important;
     backdrop-filter: none !important;
@@ -221,23 +221,23 @@ perfStyle.textContent = `
     text-shadow: none !important;
     filter: none !important;
     animation: none !important;
-    transition: transform 0.15s ease, outline 0.1s ease, outline-offset 0.1s ease, opacity 0.15s ease !important;
+    transition: outline 0.08s ease, outline-offset 0.08s ease !important;
+    will-change: auto !important;
   }
   .tv-mode .movie-card:focus, .tv-mode .upcoming-card:focus,
   .tv-mode .cat-tab:focus, .tv-mode .btn-play:focus,
   .tv-mode .btn-info:focus, .tv-mode .player-chip:focus,
-  .tv-mode .nav-links a:focus {
-    outline: 3px solid gold !important;
-    outline-offset: 3px !important;
-    transform: scale(1.05) !important;
-    will-change: transform !important;
-    z-index: 50 !important;
+  .tv-mode .nav-links a:focus, .tv-mode .carousel-arrow:focus {
+    outline: 2px solid gold !important;
+    outline-offset: 2px !important;
+    transform: none !important;
+    z-index: 10 !important;
   }
   .tv-mode .movie-card, .tv-mode .upcoming-card, .tv-mode .cat-tab,
   .tv-mode .btn-play, .tv-mode .btn-info, .tv-mode .player-chip,
   .tv-mode .nav-links a {
     cursor: pointer;
-    min-height: 48px;
+    min-height: 44px;
   }
   /* === LOW-END / MOBILE MODE: Strip effects but KEEP short transitions for smooth UI === */
   .low-end-mode *, .low-end-mode *::before, .low-end-mode *::after {
