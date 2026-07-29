@@ -33,8 +33,8 @@ check('index registers SW early', html.indexOf(".register('/sw.js'") > -1 && htm
 check('index has no forced reload loop', !html.includes('window.location.reload') && !html.includes('reloadOnceForControl'));
 check('index waits for controllerchange', html.includes("addEventListener('controllerchange'"));
 check('index loads pwa-install v1.6', html.includes('pwa-install.js?v=1.6') && !html.includes('pwa-install.js?v=1.5'));
-check('index loads moviezone v4.7', html.includes('moviezone.js?v=4.7') && !html.includes('moviezone.js?v=4.6'));
-check('index loads moviezone styles v4.1', html.includes('moviezone.css?v=4.1') && !html.includes('moviezone.css?v=4.0'));
+check('index loads moviezone v4.8', html.includes('moviezone.js?v=4.8') && !html.includes('moviezone.js?v=4.7'));
+check('index loads moviezone styles v4.2', html.includes('moviezone.css?v=4.2') && !html.includes('moviezone.css?v=4.1'));
 check('index declares modern mobile PWA capability', html.includes('<meta name="mobile-web-app-capable" content="yes">'));
 check('collections catalog contains all configured universes', collectionsCatalog && collectionsCatalog.universes && Object.keys(collectionsCatalog.universes).length >= 18);
 check('collections loader uses deployed absolute v2 asset', moviezone.includes("fetch('/collections-catalog.json?v=2'"));
@@ -130,6 +130,34 @@ check('TV CSS preserves containment and root instant scrolling',
   !css.includes('content-visibility: visible !important') &&
   /\.tv-mode\s*\{\s*scroll-behavior:\s*auto\s*!important;/.test(css));
 
+
+const tvHiddenNavItems = html.match(/<li data-tv-hide><a[^>]+filterCat\('(hollywood|south)'/g) || [];
+check('exactly Hollywood and South navbar links are marked TV-only hidden',
+  tvHiddenNavItems.length === 2 && html.includes("filterCat('hollywood'") && html.includes("filterCat('south'"));
+check('TV-only nav CSS hides marked links without changing desktop markup',
+  /\.tv-mode\s+\[data-tv-hide\]\s*\{[^}]*display:\s*none\s*!important;/.test(css));
+check('compact/mobile nav clone preserves TV-hide markers',
+  moviezone.includes("a.closest('[data-tv-hide]') ? ' data-tv-hide' : ''"));
+check('TV D-pad has vertical page-scroll fallback at focus boundary',
+  moviezone.includes("else if (direction === 'up' || direction === 'down')") &&
+  moviezone.includes("scrollTVPage(direction === 'down' ? 1 : -1)"));
+check('TV Page and Channel remote keys scroll both directions',
+  moviezone.includes("key === 'PageDown'") && moviezone.includes("key === 'PageUp'") &&
+  moviezone.includes("key === 'ChannelDown'") && moviezone.includes("key === 'ChannelUp'") &&
+  moviezone.includes('keyCode === 428') && moviezone.includes('keyCode === 427'));
+check('TV scrolling supports old browsers and overlay-owned scroll surfaces',
+  moviezone.includes('function getTVScrollContainer()') &&
+  moviezone.includes("document.getElementById('chScroll') || collections") &&
+  moviezone.includes('window.scrollBy(0, amount)') &&
+  moviezone.includes('scroller.scrollTop += amount'));
+check('TV focus reveal supports legacy scrollIntoView signature',
+  moviezone.includes('function focusAndRevealTVTarget') &&
+  moviezone.includes("target.scrollIntoView(direction !== 'up')"));
+check('infinite-scroll sentinels remain scroll-driven with preload margin',
+  moviezone.includes("document.getElementById('infiniteScrollTrigger')") &&
+  moviezone.includes("document.getElementById('infiniteScrollTriggerUpcoming')") &&
+  moviezone.includes("rootMargin: '400px'"));
+
 const playerSandbox = moviezone.match(/iframe\.setAttribute\('sandbox', '([^']+)'\)/);
 check('player iframe sandbox blocks top navigation and popups',
   playerSandbox && playerSandbox[1].includes('allow-scripts') &&
@@ -139,8 +167,8 @@ check('player iframe sandbox blocks top navigation and popups',
 check('legacy beforeunload redirect trap is removed',
   !moviezone.includes("window.addEventListener('beforeunload'"));
 
-check('SW cache is v33', sw.includes("CACHE_NAME = 'moviezone-v33'"));
-check('SW caches moviezone v4.7', sw.includes("'/moviezone.js?v=4.7'"));
+check('SW cache is v34', sw.includes("CACHE_NAME = 'moviezone-v34'"));
+check('SW caches moviezone v4.8', sw.includes("'/moviezone.js?v=4.8'"));
 check('SW caches pwa-install v1.6', sw.includes("'/pwa-install.js?v=1.6'"));
 check('SW treats collections catalog as optional', sw.includes('const OPTIONAL_ASSETS') && sw.includes("'/collections-catalog.json?v=2'") && sw.includes('Promise.allSettled'));
 check('SW uses skipWaiting and clients.claim', sw.includes('self.skipWaiting()') && sw.includes('self.clients.claim()'));

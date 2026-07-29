@@ -4063,7 +4063,7 @@ window.addEventListener('scroll', () => {
       </div>
       <nav class="mz-mp-links">
         ${Array.from(navLinksOriginal.querySelectorAll('a')).map((a, i) => 
-          `<a href="${a.getAttribute('href') || '#'}" class="mz-mp-link${a.classList.contains('active') ? ' active' : ''}" data-idx="${i}" style="--i:${i}">${a.textContent}</a>`
+          `<a href="${a.getAttribute('href') || '#'}" class="mz-mp-link${a.classList.contains('active') ? ' active' : ''}" data-idx="${i}"${a.closest('[data-tv-hide]') ? ' data-tv-hide' : ''} style="--i:${i}">${a.textContent}</a>`
         ).join('')}
       </nav>
       <div class="mz-mp-footer">
@@ -4213,6 +4213,52 @@ function showToast(msg) {
     return best;
   }
 
+  // Scroll the active TV surface. Overlays keep ownership of their own scroll;
+  // the movie page scrolls only when no modal/collections surface is open.
+  function getTVScrollContainer() {
+    const collections = document.getElementById('collections-hub-overlay');
+    if (collections && collections.classList.contains('open')) {
+      return document.getElementById('chScroll') || collections;
+    }
+
+    for (const id of ['upcoming-detail-overlay', 'modal-overlay', 'pwa-install-overlay']) {
+      const overlay = document.getElementById(id);
+      if (overlay && overlay.classList.contains('open')) return overlay;
+    }
+
+    return document.scrollingElement || document.documentElement;
+  }
+
+  function scrollTVPage(direction) {
+    const scroller = getTVScrollContainer();
+    if (!scroller) return;
+    const isPage = scroller === document.scrollingElement ||
+      scroller === document.documentElement || scroller === document.body;
+    const viewportHeight = isPage ? window.innerHeight : scroller.clientHeight;
+    const amount = Math.max(240, Math.round((viewportHeight || window.innerHeight) * 0.78)) * direction;
+
+    if (isPage) {
+      try { window.scrollBy({ top: amount, left: 0, behavior: 'auto' }); }
+      catch (error) { window.scrollBy(0, amount); }
+    } else if (typeof scroller.scrollBy === 'function') {
+      try { scroller.scrollBy({ top: amount, left: 0, behavior: 'auto' }); }
+      catch (error) { scroller.scrollTop += amount; }
+    } else {
+      scroller.scrollTop += amount;
+    }
+  }
+
+  function focusAndRevealTVTarget(target, direction) {
+    try { target.focus({ preventScroll: true }); }
+    catch (error) { target.focus(); }
+    try {
+      target.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
+    } catch (error) {
+      // Legacy Tizen/WebOS browsers may support only the boolean signature.
+      target.scrollIntoView(direction !== 'up');
+    }
+  }
+
   // 3. Main keydown handler for TV
   document.addEventListener('keydown', (e) => {
     // Genuine TV detection and explicit ?tv=1 share the same navigation behavior.
@@ -4233,6 +4279,18 @@ function showToast(msg) {
     const key = e.key;
     const keyCode = e.keyCode || e.which;
 
+    // Dedicated page/channel keys provide predictable long-page scrolling on TVs.
+    const pageDirection = (key === 'PageDown' || key === 'ChannelDown' || keyCode === 34 || keyCode === 428)
+      ? 1
+      : ((key === 'PageUp' || key === 'ChannelUp' || keyCode === 33 || keyCode === 427) ? -1 : 0);
+    if (pageDirection) {
+      e.preventDefault();
+      tvPageReady = true;
+      detailActivationGuard.tvActivationArmed = true;
+      scrollTVPage(pageDirection);
+      return;
+    }
+
     // D-Pad Arrow Navigation
     const directionMap = {
       'ArrowLeft': 'left', 'ArrowRight': 'right',
@@ -4250,11 +4308,14 @@ function showToast(msg) {
         if (first) first.focus();
         return;
       }
-      const target = findNearest(active, directionMap[key]);
+      const direction = directionMap[key];
+      const target = findNearest(active, direction);
       if (target) {
-        target.focus();
-        // Smooth scroll to center
-        target.scrollIntoView({ behavior: isTVLikeMode() ? 'auto' : 'smooth', block: 'center', inline: 'center' });
+        focusAndRevealTVTarget(target, direction);
+      } else if (direction === 'up' || direction === 'down') {
+        // At the edge of currently rendered cards, keep moving the page. This also
+        // brings the infinite-scroll sentinel into range so the next batch can load.
+        scrollTVPage(direction === 'down' ? 1 : -1);
       }
       return;
     }

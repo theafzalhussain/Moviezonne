@@ -4938,7 +4938,7 @@ body.cursor-hover #cursor-dot {
 }
 
 /* --- TV Navbar: Wider, smaller text, no overlap --- */
-.tv-mode .nav-links li[data-tv-hide] {
+.tv-mode [data-tv-hide] {
   display: none !important;
 }
 
