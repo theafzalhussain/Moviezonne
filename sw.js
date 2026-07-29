@@ -1,4 +1,4 @@
-const CACHE_NAME = 'moviezone-v24';
+const CACHE_NAME = 'moviezone-v26';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

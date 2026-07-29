@@ -4868,22 +4868,40 @@ body.cursor-hover #cursor-dot {
 }
 
 .tv-mode #modal-overlay {
-  overflow-y: auto !important;
+  overflow-y: scroll !important;
+  overflow-x: hidden !important;
   -webkit-overflow-scrolling: touch;
-  height: 100vh;
+  height: 100% !important;
+  max-height: 100vh !important;
+  display: block !important;
   overscroll-behavior: contain;
+  scrollbar-width: thin !important;
+}
+
+.tv-mode #modal-overlay.open {
+  display: block !important;
 }
 
 .tv-mode .modal-box {
-  overflow-y: auto !important;
-  overflow-x: hidden !important;
+  overflow: visible !important;
   height: auto !important;
   max-height: none !important;
-  min-height: auto;
+  min-height: auto !important;
+  position: relative !important;
+}
+
+.tv-mode .modal-content-wrapper {
+  overflow: visible !important;
+  height: auto !important;
 }
 
 .tv-mode .modal-info {
   overflow: visible !important;
+  height: auto !important;
+}
+
+.tv-mode .modal-top {
+  min-height: auto !important;
   height: auto !important;
 }
 

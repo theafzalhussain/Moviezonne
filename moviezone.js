@@ -4582,9 +4582,16 @@ init();
   // Navbar install button shows only when the native prompt is available or after
   // a grace period (so manual install flow remains accessible).
   const navInstallBtn = document.getElementById('navInstallBtn');
-  const isInstalled = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+  const isInstalled = window.matchMedia('(display-mode: standalone)').matches || 
+    window.matchMedia('(display-mode: fullscreen)').matches ||
+    window.navigator.standalone === true ||
+    localStorage.getItem('mz_app_installed') === '1';
 
-  if (!isInstalled && navInstallBtn) {
+  // If already installed as app, NEVER show install button or popup
+  if (isInstalled) {
+    if (navInstallBtn) navInstallBtn.style.display = 'none';
+    console.log('[MovieZone] App is installed - hiding install UI');
+  } else if (navInstallBtn) {
     // Show immediately if native prompt already captured
     if (window.deferredPrompt) {
       navInstallBtn.style.display = 'flex';
@@ -4770,6 +4777,15 @@ init();
       if (!subscription) throw new Error('Notification permission or push subscription is unavailable');
 
       const movie = { id: movieId, title: movieTitle, releaseDate, addedAt: Date.now() };
+      
+      // TV local-only mode: save locally without server push
+      if (subscription === 'local-only') {
+        list.push(movie);
+        localStorage.setItem(NOTIFY_KEY, JSON.stringify(list));
+        if (typeof showToast === 'function') showToast('🔔 Reminder saved for ' + movieTitle + '! You\'ll see it on your next visit.');
+        return true;
+      }
+
       const result = await saveNotifyMovie(subscription, movie, true);
       list.push(movie);
       localStorage.setItem(NOTIFY_KEY, JSON.stringify(list));
@@ -4792,7 +4808,12 @@ init();
   };
 
   async function requestNotificationPermission() {
-    if (!('Notification' in window)) {
+    if (!('Notification' in window) || !('PushManager' in window)) {
+      // TV fallback: Push not supported, use local-only notify (reminder on next visit)
+      if (isTV || document.documentElement.classList.contains('tv-mode')) {
+        console.log('[MovieZone] TV mode: using local-only notifications');
+        return 'local-only';
+      }
       if (typeof showToast === 'function') showToast('Notifications are not supported in this browser');
       return null;
     }

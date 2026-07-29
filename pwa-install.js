@@ -1162,6 +1162,8 @@
     closeHelp();
     window.deferredPrompt = null;
     toast('MovieZone installed! 🎬');
+    // Mark as installed permanently
+    try { localStorage.setItem('mz_app_installed', '1'); } catch(e) {}
     // Hide navbar install button
     var navBtn = document.getElementById('navInstallBtn');
     if (navBtn) navBtn.style.display = 'none';
@@ -1183,7 +1185,10 @@
     // Check 2: display-mode fullscreen (some PWAs use this)
     if (window.matchMedia('(display-mode: fullscreen)').matches) return Promise.resolve(true);
 
-    // Check 3: Chromium's getInstalledRelatedApps API
+    // Check 3: Previously installed (localStorage flag)
+    try { if (localStorage.getItem('mz_app_installed') === '1') return Promise.resolve(true); } catch(e) {}
+
+    // Check 4: Chromium's getInstalledRelatedApps API
     if (navigator.getInstalledRelatedApps) {
       return navigator.getInstalledRelatedApps()
         .then(function (apps) { return Array.isArray(apps) && apps.length > 0; })
