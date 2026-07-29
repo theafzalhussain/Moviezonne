@@ -2885,20 +2885,14 @@ function closeModal() {
 // TV / Phone Back Button Navigation for Watch Page
 window.addEventListener('popstate', (e) => {
   const overlay = document.getElementById('modal-overlay');
+  // Only handle #watch hash if modal is already open (user went back/forward within session)
   if (window.location.hash.startsWith('#watch-')) {
-    const parts = window.location.hash.split('-');
-    if (parts.length === 3) openModal(parts[2], parts[1]);
+    // Do NOT auto-open modal from hash — just clean it up if modal isn't open
+    if (!overlay || !overlay.classList.contains('open')) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
   } else if (overlay && overlay.classList.contains('open')) {
     closeModal();
-  }
-  
-  // SHIFT + N for quick Next Episode in Fullscreen
-  if (e.shiftKey && e.key.toLowerCase() === 'n') {
-    const overlay = document.getElementById('modal-overlay');
-    if (overlay && overlay.classList.contains('open') && currentModalMovie && currentModalMovie.media_type === 'tv') {
-      playNextEpisode();
-      e.preventDefault();
-    }
   }
 });
  
@@ -3861,13 +3855,12 @@ document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
 document.addEventListener('mozfullscreenchange', handleFullscreenChange);
 document.addEventListener('MSFullscreenChange', handleFullscreenChange);
  
-// Direct link URL load handle karo (agar kisi ne URL bheji ho toh direct khul jaye)
+// Direct link URL — only open if user explicitly navigated (not on page reload/resize)
+// Disabled auto-open to prevent redirect issues on TV and responsive testing
 window.addEventListener('DOMContentLoaded', () => {
+  // Clean up stale #watch hash on fresh page load to prevent unwanted modal popup
   if (window.location.hash.startsWith('#watch-')) {
-    const parts = window.location.hash.split('-');
-    if (parts.length === 3) {
-      setTimeout(() => { openModal(parts[2], parts[1]); }, 500);
-    }
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
   }
 });
  
@@ -5062,10 +5055,18 @@ window.handleNotifyMe = async function(btn) {
         }
         const postersEl = document.getElementById('chPosters-' + universe.slug);
         if (postersEl) {
-          const allItems = [...movies, ...tvSeries].filter(m => m.poster_path);
-          postersEl.innerHTML = allItems.slice(0, 4).map(m =>
-            '<img src="' + IMG + m.poster_path + '" alt="" loading="lazy">'
-          ).join('') || '<div class="ch-card-empty">Coming soon</div>';
+          const allItems = [...movies, ...tvSeries].filter(m => m.backdrop_path || m.poster_path);
+          // Use single cinematic backdrop for premium look (like Disney+/JioHotstar)
+          const heroItem = allItems.find(m => m.backdrop_path) || allItems[0];
+          if (heroItem && heroItem.backdrop_path) {
+            postersEl.innerHTML = '<img src="https://image.tmdb.org/t/p/w780' + heroItem.backdrop_path + '" alt="" loading="lazy" class="ch-card-backdrop">';
+          } else if (allItems.length > 0) {
+            postersEl.innerHTML = allItems.slice(0, 3).map(m =>
+              '<img src="' + IMG + m.poster_path + '" alt="" loading="lazy">'
+            ).join('');
+          } else {
+            postersEl.innerHTML = '<div class="ch-card-empty">Coming soon</div>';
+          }
         }
         // Update global title count
         const statTitles = document.getElementById('chStatTitles');
@@ -5371,7 +5372,7 @@ window.handleNotifyMe = async function(btn) {
     activeUniverseSlug = null;
     stopParticles();
     if (!(options && options.skipHistory) && window.location.hash.startsWith('#collections')) {
-      window.history.back();
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
     }
   };
 
@@ -5402,18 +5403,10 @@ window.handleNotifyMe = async function(btn) {
     }
   });
 
-  // Deep-link support
+  // Deep-link support — clean up stale #collections hash on page load to prevent loop
   if (window.location.hash.startsWith('#collections')) {
     document.addEventListener('DOMContentLoaded', () => {
-      const hash = window.location.hash;
-      if (hash === '#collections') openCollectionsHubOverlay({ skipHistory: true });
-      else {
-        const slug = hash.replace('#collections-', '');
-        if (getUniverse(slug)) {
-          openCollectionsHubOverlay({ skipHistory: true });
-          openUniverse(slug, { skipHistory: true });
-        }
-      }
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
     });
   }
 })();
