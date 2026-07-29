@@ -382,7 +382,7 @@ if (!isTV && !isTouchOnly && !isMobile) {
 // -- SERVER PRECONNECT (FAST STREAMING) --
 // Background me sabhi servers se pehle se secure connection bana ke rakho jisse fetching instant ho
 (function preconnectServers() {
-  const servers = ['https://www.viduki.net', 'https://cinextream.net', 'https://www.2embed.stream', 'https://vidnest.fun', 'https://vidsrc.sbs', 'https://vidcore.org', 'https://multiembed.mov', 'https://autoembed.co'];
+  const servers = ['https://www.viduki.net', 'https://cinextream.net', 'https://www.2embed.stream', 'https://vidnest.fun', 'https://vidsrc.sbs', 'https://multiembed.mov', 'https://autoembed.co'];
   servers.forEach(url => {
     const dns = document.createElement('link');
     dns.rel = 'dns-prefetch';
@@ -3226,7 +3226,7 @@ const playerSources = [
     // #6: AutoEmbed — India ke networks par blockage kam aati hai
     return (type === 'tv' ? `https://autoembed.co/tv/tmdb/${id}-${s}-${e}` : 'https://autoembed.co/movie/tmdb/' + id) + `?lang=${lang}`;
   }},
-  { name: 'VidCore', dubbed: true, url: (id, lang, type, s, e) => {
+    { name: 'VidCore', dubbed: true, url: (id, lang, type, s, e) => {
     // #7: VidCore — 14 servers, subtitle support
     return type === 'tv'
       ? `https://vidcore.org/embed/tv/${id}/${s}/${e}`

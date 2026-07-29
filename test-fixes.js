@@ -20,6 +20,7 @@ for (const icon of manifest.icons) check(`icon exists: ${icon.src}`, fs.existsSy
 const html = read('index.html');
 const pwa = read('pwa-install.js');
 const moviezone = read('moviezone.js');
+const css = read('moviezone.css');
 const min = read('moviezone.min.js');
 const sw = read('sw.js');
 const server = read('server.js');
@@ -31,7 +32,8 @@ check('index registers SW early', html.indexOf(".register('/sw.js'") > -1 && htm
 check('index has no forced reload loop', !html.includes('window.location.reload') && !html.includes('reloadOnceForControl'));
 check('index waits for controllerchange', html.includes("addEventListener('controllerchange'"));
 check('index loads pwa-install v1.5', html.includes('pwa-install.js?v=1.5'));
-check('index loads fixed moviezone v4.3', html.includes('moviezone.js?v=4.3') && !html.includes('moviezone.js?v=4.2'));
+check('index loads moviezone v4.4', html.includes('moviezone.js?v=4.4') && !html.includes('moviezone.js?v=4.3'));
+check('index keeps moviezone styles v4.0', html.includes('moviezone.css?v=4.0') && !html.includes('moviezone.css?v=4.1'));
 
 check('pwa-install has no BOM', pwa.charCodeAt(0) !== 0xFEFF);
 check('pwa-install keeps one deferred prompt source', pwa.includes('window.deferredPrompt'));
@@ -57,6 +59,11 @@ check('moviezone has no second prompt() implementation', !moviezone.includes('.p
 check('moviezone delegates to canonical trigger', moviezone.includes('__mzTriggerInstall'));
 check('min bundle regenerated from canonical trigger', min.includes('__mzTriggerInstall'));
 
+// VidCore and the abandoned provider panel must both stay removed.
+check('VidCore embed and preconnect are removed', !moviezone.includes('VidCore') && !moviezone.includes('vidcore.org'));
+check('official OTT provider panel is removed', !moviezone.includes('/watch/providers') && !moviezone.includes('officialWatchProvider') && !css.includes('.official-watch'));
+check('min bundle contains neither VidCore nor provider panel', !min.includes('vidcore.org') && !min.includes('watch/providers') && !min.includes('JustWatch via TMDB'));
+
 // Detail/watch-page navigation must require a fresh, explicit activation.
 check('detail activation guard exists', moviezone.includes('function claimExplicitDetailActivation(event)'));
 check('viewport resize blocks detail activation', moviezone.includes("window.addEventListener('resize', blockDetailActivationForViewportChange") && moviezone.includes('DETAIL_VIEWPORT_SETTLE_MS'));
@@ -67,8 +74,8 @@ check('TV launch key requires release or deliberate navigation', moviezone.inclu
 check('stale watch hash is cleaned without auto-open', moviezone.includes("if (window.location.hash.startsWith('#watch-'))") && moviezone.includes('Disabled auto-open'));
 check('all detail callsites propagate activation evidence', !moviezone.includes('openModal(m.id, type);') && !moviezone.includes('openModal(item.id, type);') && !moviezone.includes('openUpcomingDetail(m.id);'));
 
-check('SW cache is v29', sw.includes("CACHE_NAME = 'moviezone-v29'"));
-check('SW caches fixed moviezone v4.3', sw.includes("'/moviezone.js?v=4.3'"));
+check('SW cache is v30', sw.includes("CACHE_NAME = 'moviezone-v30'"));
+check('SW caches moviezone v4.4', sw.includes("'/moviezone.js?v=4.4'"));
 check('SW caches pwa-install v1.5', sw.includes("'/pwa-install.js?v=1.5'"));
 check('SW uses skipWaiting and clients.claim', sw.includes('self.skipWaiting()') && sw.includes('self.clients.claim()'));
 check('server manifest MIME configured', server.includes('application/manifest+json'));
