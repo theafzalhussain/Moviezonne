@@ -1828,7 +1828,9 @@ async function openUpcomingDetail(id, type) {
   
   // Open overlay instantly
   overlay.classList.add('open');
-  document.body.style.overflow = 'hidden';
+  if (!isTV && !document.documentElement.classList.contains('tv-mode')) {
+    document.body.style.overflow = 'hidden';
+  }
   overlay.scrollTop = 0;
   
   // Show loading state
@@ -2408,7 +2410,9 @@ async function openModal(id, type = 'movie') {
  
   // 1. INSTANT UI OPEN (Bina backend wait kiye instantly page open karo)
   overlay.classList.add('open');
-  document.body.style.overflow = 'hidden';
+  if (!isTV && !document.documentElement.classList.contains('tv-mode')) {
+    document.body.style.overflow = 'hidden';
+  }
   overlay.scrollTop = 0;
  
   const titleEl = document.getElementById('modalTitle');
@@ -4605,7 +4609,9 @@ init();
     const overlay = document.getElementById('pwa-install-overlay');
     if (overlay) {
       overlay.classList.add('open');
-      document.body.style.overflow = 'hidden';
+      if (!isTV && !document.documentElement.classList.contains('tv-mode')) {
+        document.body.style.overflow = 'hidden';
+      }
     } else if (typeof showToast === 'function') {
       showToast('Install controls are still loading. Please try again.');
     }
@@ -5031,7 +5037,9 @@ window.handleNotifyMe = async function(btn) {
     const overlay = document.getElementById('collections-hub-overlay');
     if (!overlay) return;
     overlay.classList.add('open');
-    document.body.style.overflow = 'hidden';
+    if (!isTV && !document.documentElement.classList.contains('tv-mode')) {
+      document.body.style.overflow = 'hidden';
+    }
     renderHubGrid();
     if (!(options && options.skipHistory) && !window.location.hash.startsWith('#collections')) {
       window.history.pushState({ collectionsHub: true }, '', '#collections');
