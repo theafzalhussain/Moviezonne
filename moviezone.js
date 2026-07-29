@@ -90,6 +90,26 @@ function getResponsiveBackdrop(path) {
 if (isTV) document.documentElement.classList.add('tv-mode');
 console.log('[MovieZone] TV Detection:', isTV, '| UA:', navigator.userAgent.substring(0, 80));
 if (isMobile) document.documentElement.classList.add('low-end-mode');
+
+// -- TV SCREEN PERFORMANCE: Large screen optimizations (even without TV UA detection) --
+// When screen is 1920px+ and NOT a desktop OS with mouse pointer, likely a TV via Cast/HDMI
+(function tvScreenPerf() {
+  if (isTV) return; // Already handled above
+  const isLargeScreen = window.innerWidth >= 1920;
+  const isTouch = window.matchMedia('(pointer: coarse)').matches;
+  const noFinePointer = !window.matchMedia('(pointer: fine)').matches;
+  
+  // If large screen + touch-only (no mouse) = likely TV via Cast
+  if (isLargeScreen && isTouch && noFinePointer) {
+    document.documentElement.classList.add('tv-mode');
+    console.log('[MovieZone] TV mode activated via screen heuristic (large + touch-only)');
+  }
+  
+  // For all large screens (1920px+): reduce GPU-heavy effects for smoother rendering
+  if (isLargeScreen) {
+    document.documentElement.classList.add('large-screen-mode');
+  }
+})();
  
 // -- PERFORMANCE BOOST STYLES --
 const perfStyle = document.createElement('style');
@@ -169,6 +189,12 @@ perfStyle.textContent = `
     .movie-grid { contain: layout style paint; }
     .ambient-particles .particle:nth-child(n+15) { display: none !important; }
     .movie-card, .upcoming-card, .cat-tab, button { min-height: 48px; }
+    /* Reduce repaints on large screens */
+    .movie-card, .upcoming-card { will-change: auto; transform: translateZ(0); }
+    .carousel-slide { will-change: transform; }
+    /* Smoother scrolling */
+    html { scroll-behavior: smooth; }
+    * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
   }
   
   /* === TV MODE: Strip heavy effects but KEEP smooth focus transitions === */

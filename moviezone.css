@@ -4524,12 +4524,19 @@ body.cursor-hover #cursor-dot {
   .modal-cast-char { max-width: 110px; }
 }
 
-/* ═══ TV / Ultra Wide ═══ */
+/* ═══ TV / Ultra Wide (1800px+) ═══ */
 @media (min-width: 1800px) {
   html { font-size: 115%; }
-  #navbar { width: min(1620px, calc(100% - 2rem)); }
+  #navbar { 
+    width: min(92%, calc(100% - 2.5rem));
+    max-width: 1800px;
+    padding: 0.8rem 1.6rem;
+    gap: 1rem;
+  }
   .nav-logo { font-size: 2.2rem; }
-  .nav-links a { font-size: 0.95rem; }
+  .nav-links { gap: 0.5rem; }
+  .nav-links a { font-size: 0.95rem; padding: 0.55rem 1rem; }
+  .nav-search { max-width: 340px; }
   .movie-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1.8rem; }
   .movie-card { border-radius: 24px; }
   .upcoming-grid { grid-template-columns: repeat(auto-fill, minmax(345px, 1fr)); gap: 1.8rem; }
@@ -4538,9 +4545,37 @@ body.cursor-hover #cursor-dot {
   .slide-title { font-size: clamp(4rem, 6vw, 7.5rem); }
 }
 
+/* ═══ Full HD TV (1920px / 43inch+) ═══ */
+@media (min-width: 1920px) {
+  #navbar {
+    width: min(93%, calc(100% - 2rem));
+    max-width: 1850px;
+    padding: 0.85rem 1.8rem;
+    gap: 1.2rem;
+  }
+  .nav-links { gap: 0.5rem; }
+  .nav-links a { 
+    font-size: 0.95rem; 
+    padding: 0.55rem 1.1rem;
+    white-space: nowrap;
+  }
+  .nav-search { max-width: 350px; flex: 0 1 350px; }
+  .movie-grid { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 1.6rem; }
+  .upcoming-grid { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1.6rem; }
+  .main-content, #upcoming { padding-left: 3%; padding-right: 3%; }
+}
+
 @media (min-width: 2500px) {
   html { font-size: 140%; }
-  #navbar { width: min(2200px, calc(100% - 3rem)); }
+  #navbar { 
+    width: min(92%, calc(100% - 3rem));
+    max-width: 2400px;
+    padding: 1rem 2rem;
+    gap: 1.5rem;
+  }
+  .nav-links { gap: 0.7rem; }
+  .nav-links a { font-size: 1.05rem; padding: 0.6rem 1.2rem; }
+  .nav-search { max-width: 420px; }
   .movie-grid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 2.5rem; }
   .upcoming-grid { grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 2.5rem; }
   .modal-info { max-width: 2000px; padding: 6rem 8%; }
@@ -4768,6 +4803,279 @@ body.cursor-hover #cursor-dot {
 /* Progress bar / dot glow are tiny — keep, but drop the pulsing glow animation */
 .tv-mode .dot.active, .low-end-mode .dot.active { animation: none !important; box-shadow: none !important; }
 .tv-mode .slide-title, .low-end-mode .slide-title { animation: none !important; }
+
+/* ═══════════════════════════════════════════════════════════════
+   TV SCREEN RESPONSIVE LAYOUT (43inch+ / 1920px+)
+   Fixes navbar overlap, optimizes spacing for 10-foot UI
+   Only applies when tv-mode class is present (detected via JS)
+   ═══════════════════════════════════════════════════════════════ */
+
+/* --- Large Screen Performance (1920px+ regardless of TV detection) --- */
+.large-screen-mode #navbar::before,
+.large-screen-mode #navbar::after {
+  display: none !important;
+}
+
+.large-screen-mode .ambient-particles .particle:nth-child(n+10) {
+  display: none !important;
+}
+
+.large-screen-mode .movie-card::before,
+.large-screen-mode .movie-card::after {
+  display: none !important;
+}
+
+.large-screen-mode #navbar {
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+}
+
+/* Reduce paint complexity on large screens for smooth scroll */
+.large-screen-mode .movie-card,
+.large-screen-mode .upcoming-card {
+  contain: layout style paint;
+  content-visibility: auto;
+}
+
+.large-screen-mode .movie-card:hover {
+  transform: translateY(-6px) !important;
+  transition: transform 0.2s ease !important;
+}
+
+/* --- TV Navbar: Fix overlap by increasing width and spacing --- */
+.tv-mode #navbar {
+  width: min(95%, calc(100% - 2.5rem)) !important;
+  max-width: 1850px;
+  padding: 0.9rem 1.8rem;
+  gap: 1rem;
+  border-radius: 28px;
+  background: rgba(5, 5, 12, 0.97) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+.tv-mode .nav-links {
+  gap: 0.5rem !important;
+  flex-wrap: nowrap;
+  overflow: visible;
+}
+
+.tv-mode .nav-links a {
+  font-size: 1.05rem !important;
+  padding: 0.6rem 1.1rem !important;
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+}
+
+.tv-mode .nav-logo-mark {
+  width: 2.8rem;
+  height: 2.8rem;
+  border-radius: 14px;
+  font-size: 0.9rem;
+}
+
+.tv-mode .nav-logo-main {
+  font-size: 1.6rem;
+  letter-spacing: 2.5px;
+}
+
+.tv-mode .nav-logo-sub {
+  font-size: 0.62rem;
+  letter-spacing: 2.2px;
+}
+
+.tv-mode .nav-search {
+  max-width: 320px;
+  flex: 0 1 320px;
+}
+
+.tv-mode .nav-search input {
+  font-size: 1rem;
+  padding: 0.7rem 1rem 0.7rem 2.8rem;
+  min-height: 44px;
+}
+
+/* --- TV Hero Section --- */
+.tv-mode #hero {
+  height: 80vh;
+  margin-top: 90px;
+}
+
+.tv-mode .slide-content {
+  left: 4%;
+  bottom: 12%;
+  max-width: 55%;
+}
+
+.tv-mode .slide-title {
+  font-size: clamp(2.8rem, 4.5vw, 5rem) !important;
+  line-height: 1.1;
+}
+
+.tv-mode .slide-desc {
+  font-size: 1.15rem !important;
+  line-height: 1.5;
+  -webkit-line-clamp: 3;
+  max-width: 90%;
+}
+
+.tv-mode .slide-meta {
+  font-size: 1rem;
+  gap: 1rem;
+}
+
+.tv-mode .slide-badge {
+  font-size: 0.75rem;
+  padding: 0.35rem 1rem;
+}
+
+.tv-mode .slide-actions .btn-play,
+.tv-mode .slide-actions .btn-info {
+  padding: 1rem 2rem;
+  font-size: 1.1rem;
+  border-radius: 14px;
+  min-height: 52px;
+}
+
+/* --- TV Movie Grid --- */
+.tv-mode .movie-grid {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1.5rem;
+}
+
+.tv-mode .upcoming-grid {
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1.5rem;
+}
+
+.tv-mode .main-content,
+.tv-mode #upcoming {
+  padding-left: 3%;
+  padding-right: 3%;
+}
+
+/* --- TV Section Headers --- */
+.tv-mode .section-title {
+  font-size: 1.8rem;
+}
+
+.tv-mode .section-subtitle {
+  font-size: 1rem;
+}
+
+/* --- TV Category Tabs --- */
+.tv-mode .cat-tabs {
+  gap: 0.6rem;
+}
+
+.tv-mode .cat-tab {
+  font-size: 1rem !important;
+  padding: 0.7rem 1.4rem !important;
+  min-height: 48px;
+  border-radius: 12px;
+}
+
+/* --- TV Card Titles --- */
+.tv-mode .card-title {
+  font-size: 1rem !important;
+  line-height: 1.3;
+}
+
+.tv-mode .card-year,
+.tv-mode .card-rating {
+  font-size: 0.85rem;
+}
+
+/* --- TV Modal --- */
+.tv-mode .modal-info {
+  max-width: 1600px;
+  padding: 4rem 5%;
+}
+
+.tv-mode .modal-title {
+  font-size: 3rem;
+}
+
+.tv-mode .modal-desc {
+  font-size: 1.1rem;
+  line-height: 1.6;
+}
+
+/* --- TV Footer --- */
+.tv-mode footer {
+  padding: 3rem 4%;
+}
+
+.tv-mode .footer-inner {
+  max-width: 1600px;
+}
+
+/* --- TV Carousel --- */
+.tv-mode .carousel-arrow {
+  width: 52px;
+  height: 52px;
+  font-size: 1.3rem;
+}
+
+.tv-mode .carousel-thumbs img {
+  width: 90px;
+  height: 135px;
+  border-radius: 10px;
+}
+
+/* --- TV: Extra large screens (4K / 55inch+) --- */
+@media (min-width: 2500px) {
+  .tv-mode #navbar {
+    max-width: 2400px;
+    padding: 1.1rem 2.2rem;
+    gap: 1.5rem;
+  }
+  
+  .tv-mode .nav-links {
+    gap: 0.8rem !important;
+  }
+  
+  .tv-mode .nav-links a {
+    font-size: 1.2rem !important;
+    padding: 0.75rem 1.4rem !important;
+  }
+  
+  .tv-mode .nav-logo-main {
+    font-size: 1.9rem;
+  }
+  
+  .tv-mode .nav-logo-mark {
+    width: 3.2rem;
+    height: 3.2rem;
+  }
+  
+  .tv-mode .nav-search {
+    max-width: 400px;
+    flex: 0 1 400px;
+  }
+  
+  .tv-mode .movie-grid {
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 2rem;
+  }
+  
+  .tv-mode .upcoming-grid {
+    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    gap: 2rem;
+  }
+  
+  .tv-mode .slide-title {
+    font-size: clamp(4rem, 5vw, 7rem) !important;
+  }
+  
+  .tv-mode .slide-desc {
+    font-size: 1.4rem !important;
+  }
+  
+  .tv-mode .cat-tab {
+    font-size: 1.15rem !important;
+    padding: 0.85rem 1.8rem !important;
+  }
+}
 
 /* ═══════════════════════════════════════════════════════════════
    REDUCED MOTION — Accessibility
