@@ -109,10 +109,10 @@
 <meta name="apple-mobile-web-app-title" content="MovieZone">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
-<link rel="preload" href="moviezone.css?v=3.5" as="style">
+<link rel="preload" href="moviezone.css?v=4.0" as="style">
 <link rel="preload" href="search-engine.js?v=1.1" as="script">
-<link rel="preload" href="moviezone.js?v=3.7" as="script">
-<link rel="stylesheet" href="moviezone.css?v=3.5">
+<link rel="preload" href="moviezone.js?v=4.1" as="script">
+<link rel="stylesheet" href="moviezone.css?v=4.0">
 </head>
 <body>
 
@@ -292,6 +292,10 @@
   <div class="ch-scroll" id="chScroll">
     <div class="ch-hub-view" id="chHubView">
       <div class="ch-hero">
+        <div class="ch-hero-mosaic" id="chHeroMosaic" aria-hidden="true">
+          <div class="ch-hero-mosaic-grid" id="chHeroMosaicGrid"></div>
+          <div class="ch-hero-mosaic-veil"></div>
+        </div>
         <div class="ch-hero-glow"></div>
         <div class="ch-hero-badge">&#10022; MOVIEZONE PREMIUM</div>
         <h1>Cinematic <span class="ch-hero-gradient-text">Universes</span></h1>
@@ -308,6 +312,7 @@
         <button class="ch-cat-tab" data-cat="scifi">Sci-Fi</button>
         <button class="ch-cat-tab" data-cat="fantasy">Fantasy</button>
         <button class="ch-cat-tab" data-cat="action">Action</button>
+        <button class="ch-cat-tab" data-cat="horror">Horror</button>
         <button class="ch-cat-tab" data-cat="animation">Animation</button>
       </div>
       <div class="ch-grid" id="chGrid"></div>
@@ -588,7 +593,7 @@
 <div id="toast"></div>
 
 <script src="search-engine.js?v=1.1" defer></script>
-<script src="moviezone.js?v=3.7" defer></script>
+<script src="moviezone.js?v=4.1" defer></script>
 <script src="pwa-install.js?v=1.4" defer></script>
 <script>
 // INSTANT PERFORMANCE: Remove loader faster + mark page interactive
