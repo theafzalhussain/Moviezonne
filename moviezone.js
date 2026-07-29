@@ -492,7 +492,13 @@ document.addEventListener('keydown', (event) => {
 
   const now = detailNow();
   if (event.repeat) return;
-  if (isTVLikeMode() && (!detailActivationGuard.tvActivationArmed || now < detailActivationGuard.tvActivationAllowedAt)) return;
+  // Always record the trusted activation time (needed for TV search fallback)
+  // But only fully arm if TV activation is ready
+  if (isTVLikeMode() && (!detailActivationGuard.tvActivationArmed || now < detailActivationGuard.tvActivationAllowedAt)) {
+    // Still record the time so tvSearchFallback can use it
+    detailActivationGuard.lastTrustedActivationAt = now;
+    return;
+  }
   if (now < detailActivationGuard.viewportBlockedUntil) return;
   detailActivationGuard.lastTrustedActivationAt = now;
 }, true);
@@ -580,8 +586,14 @@ function claimExplicitDetailActivation(event) {
     tvActivationReady;
   const hasRecentTrustedInput = tvActivationReady &&
     now - detailActivationGuard.lastTrustedActivationAt <= DETAIL_ACTIVATION_MAX_AGE_MS;
+  
+  // On TV: Allow activation if user has active navigator.userActivation (proves recent real interaction)
+  // This handles the case where search dropdown item.click() is called from searchInput's Enter handler
+  const tvSearchFallback = isTVLikeMode() && !trustedAccessibleClick && !trustedDirectKey && !hasRecentTrustedInput &&
+    navigator.userActivation && navigator.userActivation.isActive &&
+    now - detailActivationGuard.lastTrustedActivationAt <= 3000;
 
-  if (!trustedAccessibleClick && !trustedDirectKey && !hasRecentTrustedInput) return false;
+  if (!trustedAccessibleClick && !trustedDirectKey && !hasRecentTrustedInput && !tvSearchFallback) return false;
   detailActivationGuard.lastTrustedActivationAt = -Infinity; // one activation opens at most one detail page
   return true;
 }
@@ -3005,12 +3017,18 @@ async function openModal(id, type = 'movie', activationEvent) {
   } catch(e) { console.warn('Modal error', e); }
 }
  
-function closeModal() {
-  if (window.location.hash.startsWith('#watch-')) {
-    window.history.replaceState(null, '', window.location.pathname + window.location.search);
-  }
+// Flag to prevent double-close when history.back() triggers popstate
+let _mzModalClosing = false;
+
+function closeModal(fromPopstate) {
+  // Prevent double-close (keydown handler calls closeModal → history.back() → popstate → closeModal again)
+  if (_mzModalClosing) return;
+  
   const overlay = document.getElementById('modal-overlay');
-  if (overlay) overlay.classList.remove('open');
+  if (!overlay || !overlay.classList.contains('open')) return;
+  
+  // Close the modal UI
+  overlay.classList.remove('open');
   document.body.style.overflow = '';
   const embedEl = document.getElementById('videoEmbed');
   if (embedEl) {
@@ -3019,9 +3037,26 @@ function closeModal() {
   }
   isPlayerFullscreen = false;
   currentModalMovie = null;
-  activeTrailerStopper = null; // Unregister trailer stopper on close
+  activeTrailerStopper = null;
   const relSec = document.getElementById('relatedMoviesSection');
   if (relSec) relSec.style.display = 'none';
+  
+  // Handle history navigation
+  if (!fromPopstate && window.location.hash.startsWith('#watch-')) {
+    // Called from close button or TV back key — go back in history properly
+    _mzModalClosing = true;
+    window.history.back();
+    setTimeout(() => { _mzModalClosing = false; }, 300);
+  } else if (fromPopstate && window.location.hash.startsWith('#watch-')) {
+    // Edge case: popstate fired but hash still present (forward navigation)
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
+  
+  // If we were in search results mode, reset to home page on TV
+  if (isTVLikeMode() && isSearchResultsMode) {
+    isSearchResultsMode = false;
+    goHome();
+  }
   
   if (isTV && lastFocusedElement) {
     setTimeout(() => lastFocusedElement.focus(), 100);
@@ -3030,6 +3065,9 @@ function closeModal() {
  
 // TV / Phone Back Button Navigation for Watch Page
 window.addEventListener('popstate', (e) => {
+  // If closeModal triggered this popstate via history.back(), don't close again
+  if (_mzModalClosing) return;
+  
   const overlay = document.getElementById('modal-overlay');
   // Only handle #watch hash if modal is already open (user went back/forward within session)
   if (window.location.hash.startsWith('#watch-')) {
@@ -3038,7 +3076,8 @@ window.addEventListener('popstate', (e) => {
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
     }
   } else if (overlay && overlay.classList.contains('open')) {
-    closeModal();
+    // User pressed browser back button — close modal (pass fromPopstate=true)
+    closeModal(true);
   }
 });
  
@@ -4378,6 +4417,15 @@ function showToast(msg) {
       'ArrowUp': 'up', 'ArrowDown': 'down'
     };
     if (directionMap[key]) {
+      // Don't intercept arrow keys when search input is focused and dropdown is open
+      const searchDropdown = document.getElementById('searchDropdown');
+      if (document.activeElement && document.activeElement.id === 'searchInput' && 
+          searchDropdown && searchDropdown.classList.contains('open') &&
+          (key === 'ArrowUp' || key === 'ArrowDown')) {
+        // Let the search input's own handler manage dropdown navigation
+        armTVDetailActivation(false);
+        return;
+      }
       e.preventDefault();
       tvPageReady = true; // D-pad movement proves this is a deliberate post-launch interaction
       armTVDetailActivation(false);
@@ -4403,6 +4451,12 @@ function showToast(msg) {
 
     // Enter/Space: Click focused element
     if (key === 'Enter' || key === ' ' || keyCode === 13 || keyCode === 32) {
+      // Let search input handle its own Enter key (for dropdown item selection)
+      if (document.activeElement && document.activeElement.id === 'searchInput') {
+        // Don't interfere - the search input's own keydown handler will handle this
+        armTVDetailActivation(false);
+        return;
+      }
       // Ignore synthetic, repeated, carried launch keys and post-keyup bounce.
       const activationNow = detailNow();
       if (!e.isTrusted || e.repeat || !tvPageReady || !detailActivationGuard.tvActivationArmed ||
@@ -4443,7 +4497,15 @@ function showToast(msg) {
         if (dd && dd.classList.contains('open')) {
           if (typeof closeDropdown === 'function') closeDropdown();
           e.preventDefault();
+        } else if (isSearchResultsMode || isFullViewMovies || isFullViewUpcoming) {
+          // User is in search results or filtered view — go back to home page
+          e.preventDefault();
+          if (typeof goHome === 'function') goHome();
+          // Clear search input
+          const si = document.getElementById('searchInput');
+          if (si) si.value = '';
         }
+        // If already on home page, let the browser handle back (exit/previous page)
       }
       return;
     }
