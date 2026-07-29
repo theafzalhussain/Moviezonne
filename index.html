@@ -6,7 +6,8 @@
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="color-scheme" content="dark">
 <title>MovieZone</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>M</text></svg>">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
 <link rel="dns-prefetch" href="https://image.tmdb.org">
 <link rel="dns-prefetch" href="https://fonts.googleapis.com">
 <link rel="dns-prefetch" href="https://fonts.gstatic.com">
@@ -51,22 +52,8 @@
 
   if (!('serviceWorker' in navigator)) return;
 
-  var SW_CONTROL_RELOAD_KEY = 'mz_sw_control_reload_v3';
-  function reloadOnceIfUncontrolled() {
-    if (navigator.serviceWorker.controller) {
-      try { sessionStorage.removeItem(SW_CONTROL_RELOAD_KEY); } catch (e) {}
-      return;
-    }
-    var alreadyReloaded = false;
-    try { alreadyReloaded = sessionStorage.getItem(SW_CONTROL_RELOAD_KEY) === '1'; } catch (e) {}
-    if (alreadyReloaded) return;
-    try { sessionStorage.setItem(SW_CONTROL_RELOAD_KEY, '1'); } catch (e) {}
-    console.info('[MovieZone PWA] Reloading once so the active service worker controls this tab.');
-    setTimeout(function () { window.location.reload(); }, 120);
-  }
-
-  // The SW calls clients.claim() on activate; the guarded reload handles browsers
-  // that do not attach the new controller to the current navigation immediately.
+  // The SW calls clients.claim() on activate, which makes this page controlled
+  // WITHOUT a reload. This preserves Chrome's engagement timer.
   window.__mzAcquireServiceWorkerControl = function () {
     if (navigator.serviceWorker.controller || window.deferredPrompt) {
       return Promise.resolve(true);
@@ -86,9 +73,7 @@
           function onChange() { finish(!!navigator.serviceWorker.controller); }
           navigator.serviceWorker.addEventListener('controllerchange', onChange);
           var timer = setTimeout(function () {
-            var controlled = !!navigator.serviceWorker.controller;
-            if (!controlled) reloadOnceIfUncontrolled();
-            finish(controlled);
+            finish(!!navigator.serviceWorker.controller);
           }, 1500);
         });
       })
@@ -98,10 +83,9 @@
       });
   };
 
+  // When the SW claims this client, log it. No reload needed.
   navigator.serviceWorker.addEventListener('controllerchange', function () {
-    try { sessionStorage.removeItem(SW_CONTROL_RELOAD_KEY); } catch (e) {}
-    console.log('[MovieZone PWA] Page is now controlled by service worker.');
-    window.dispatchEvent(new CustomEvent('mz:swcontrolled'));
+    console.log('[MovieZone PWA] Page is now controlled by service worker (no reload needed).');
   });
 
   window.__mzServiceWorkerReady = navigator.serviceWorker
@@ -111,11 +95,6 @@
       return navigator.serviceWorker.ready;
     })
     .then(function (registration) {
-      if (navigator.serviceWorker.controller) {
-        try { sessionStorage.removeItem(SW_CONTROL_RELOAD_KEY); } catch (e) {}
-      } else {
-        setTimeout(reloadOnceIfUncontrolled, 1600);
-      }
       return registration;
     })
     .catch(function (err) {
@@ -128,13 +107,12 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="MovieZone">
-<link rel="apple-touch-icon" sizes="192x192" href="/icon-192.png">
-<link rel="icon" type="image/svg+xml" sizes="192x192" href="icon-192.svg">
-<link rel="icon" type="image/svg+xml" sizes="512x512" href="icon-512.svg">
-<link rel="preload" href="moviezone.css?v=3.8" as="style">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+<link rel="preload" href="moviezone.css?v=3.5" as="style">
 <link rel="preload" href="search-engine.js?v=1.1" as="script">
-<link rel="preload" href="moviezone.js?v=3.8" as="script">
-<link rel="stylesheet" href="moviezone.css?v=3.8">
+<link rel="preload" href="moviezone.js?v=3.7" as="script">
+<link rel="stylesheet" href="moviezone.css?v=3.5">
 </head>
 <body>
 
@@ -508,68 +486,74 @@
   </div>
 </div>
 
-<!-- PWA INSTALL PROMPT — responsive desktop/mobile/tablet experience -->
-<div id="pwa-install-overlay" aria-hidden="true">
-  <section class="pwa-card" role="dialog" aria-modal="true" aria-labelledby="pwaTitle" aria-describedby="pwaDesc" tabindex="-1">
-    <button type="button" class="pwa-close" id="pwaCloseBtn" aria-label="Close install dialog">&times;</button>
-
-    <div class="pwa-hero">
-      <div class="pwa-app-mark" aria-hidden="true"><img src="/icon-192.png" alt=""></div>
-      <div class="pwa-hero-copy">
-        <span class="pwa-badge">✦ Premium cinema app</span>
-        <h2 class="pwa-title" id="pwaTitle">Install <span>MovieZone</span></h2>
-        <p class="pwa-desc" id="pwaDesc">Faster launch, a focused app window and reliable access from your home screen or desktop.</p>
-      </div>
-    </div>
-
-    <div class="pwa-benefits" aria-label="App benefits">
-      <span>⚡ Fast launch</span>
-      <span>🎬 App-like view</span>
-      <span>🔔 Movie alerts</span>
-    </div>
+<!-- â”€â”€ PWA INSTALL PROMPT (Desktop / Android / Windows) â”€â”€ -->
+<div id="pwa-install-overlay">
+  <div class="pwa-card" role="dialog" aria-modal="true" aria-labelledby="pwaTitle">
+    <button class="pwa-close" id="pwaCloseBtn" aria-label="Close">&times;</button>
+    <span class="pwa-badge">✦ Premium Experience</span>
+    <h2 class="pwa-title" id="pwaTitle">Install <span>MovieZone</span> App</h2>
+    <p class="pwa-desc" id="pwaDesc">Get instant access, offline viewing &amp; a faster, app-like experience. Install directly or scan the QR code with your phone.</p>
 
     <div class="pwa-body">
-      <div class="pwa-qr-wrap" id="pwaQrWrap" aria-live="polite"></div>
+      <div class="pwa-qr-wrap" id="pwaQrWrap"></div>
       <div class="pwa-qr-label">
-        <strong>Scan → Open → Install</strong>
-        <span>Scan with your phone camera. Open this exact MovieZone page, then choose <b>Install app</b> or <b>Add to Home Screen</b>.</span>
-        <small id="pwaQrStatus">QR links to this page securely.</small>
+        <strong>Scan to install</strong>
+        Open your camera app and scan this code to install MovieZone on any smartphone or tablet.
       </div>
     </div>
 
-    <!-- iOS animated visual guide (shown only on iOS, replaces the QR body) -->
+    <!-- iOS animated visual guide (shown only on iOS, replaces the default body above) -->
     <div class="pwa-ios-guide" id="pwaIosGuide" style="display:none;">
       <div class="pwa-ios-step pwa-ios-step-1">
-        <div class="pwa-ios-icon-anim" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3v12m0-12l-4 4m4-4l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div class="pwa-ios-icon-anim">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 3v12m0-12l-4 4m4-4l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
         </div>
-        <div class="pwa-ios-step-text"><span class="pwa-ios-step-num">1</span>Tap the <b id="pwaIosShareLabel">Share</b> icon in your browser toolbar</div>
+        <div class="pwa-ios-step-text">
+          <span class="pwa-ios-step-num">1</span>
+          Tap the <b id="pwaIosShareLabel">Share</b> icon in your browser's toolbar
+        </div>
       </div>
       <div class="pwa-ios-step pwa-ios-step-2">
-        <div class="pwa-ios-icon-anim pwa-ios-icon-plus" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="3" width="18" height="18" rx="4" stroke="currentColor" stroke-width="1.8"/><path d="M12 8v8m-4-4h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <div class="pwa-ios-icon-anim pwa-ios-icon-plus">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="3" y="3" width="18" height="18" rx="4" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M12 8v8m-4-4h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
         </div>
-        <div class="pwa-ios-step-text"><span class="pwa-ios-step-num">2</span>Scroll down and tap <b>“Add to Home Screen”</b></div>
+        <div class="pwa-ios-step-text">
+          <span class="pwa-ios-step-num">2</span>
+          Scroll down &amp; tap <b>“Add to Home Screen”</b>
+        </div>
       </div>
       <div class="pwa-ios-step pwa-ios-step-3">
-        <div class="pwa-ios-icon-anim" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-        <div class="pwa-ios-step-text"><span class="pwa-ios-step-num">3</span>Tap <b>“Add”</b> — MovieZone appears on your Home Screen</div>
+        <div class="pwa-ios-icon-anim">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="pwa-ios-step-text">
+          <span class="pwa-ios-step-num">3</span>
+          Tap <b>“Add”</b> — MovieZone appears on your Home Screen
+        </div>
       </div>
     </div>
 
-    <div class="pwa-platforms" aria-label="Supported platforms">
+    <div class="pwa-platforms">
       <span class="pwa-platform-chip">📱 Android</span>
       <span class="pwa-platform-chip">🍎 iOS</span>
       <span class="pwa-platform-chip">💻 Windows</span>
       <span class="pwa-platform-chip">🖥️ macOS</span>
+      <span class="pwa-platform-chip">📺 Smart TV</span>
     </div>
 
     <div class="pwa-actions">
-      <button type="button" class="pwa-btn-install" id="pwaInstallBtn">⬇ Install Now</button>
-      <button type="button" class="pwa-btn-later" id="pwaLaterBtn">Maybe Later</button>
+      <button class="pwa-btn-install" id="pwaInstallBtn">⬇ Install Now</button>
+      <button class="pwa-btn-later" id="pwaLaterBtn">Maybe Later</button>
     </div>
-    <p class="pwa-privacy-note">No app store required · Install or remove anytime</p>
-  </section>
+  </div>
 </div>
 
 <!-- â”€â”€ PWA INSTALL PROMPT (Smart TV — QR-only, remote-friendly) â”€â”€ -->
@@ -588,8 +572,8 @@
 <div id="toast"></div>
 
 <script src="search-engine.js?v=1.1" defer></script>
-<script src="moviezone.js?v=3.8" defer></script>
-<script src="pwa-install.js?v=1.7" defer></script>
+<script src="moviezone.js?v=3.7" defer></script>
+<script src="pwa-install.js?v=1.4" defer></script>
 <script>
 // INSTANT PERFORMANCE: Remove loader faster + mark page interactive
 document.addEventListener('DOMContentLoaded', () => {

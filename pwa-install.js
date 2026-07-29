@@ -428,15 +428,13 @@
    ========================================================================== */
 (function () {
   var STORAGE_KEY = 'mz_pwa_prompt_dismissed_at';
-  var INSTALL_MARKER_KEY = 'mz_pwa_installed';
   var TV_STORAGE_KEY = 'mz_pwa_tv_prompt_dismissed_at';
-  var SHOW_DELAY_MS = 10000;
+  var SHOW_DELAY_MS = 20000; // 20 seconds delay before showing popup
   var popupTimer = null;
-  var SNOOZE_DAYS = 7;
+  var SNOOZE_DAYS = 7; // kept for TV overlay only
 
   var overlay, installBtn, laterBtn, closeBtn, iosGuide, iosShareLabel, pwaDesc, qrWrap;
   var tvOverlay, tvQrWrap, tvDismissBtn;
-  var lastFocusedElement = null;
   // NOTE: the prompt event lives only on `window.deferredPrompt` (single source of truth).
 
   function isStandalone() {
@@ -479,25 +477,10 @@
     try { localStorage.setItem(key, String(Date.now())); } catch (e) {}
   }
 
-  function markInstalled() {
-    try { localStorage.setItem(INSTALL_MARKER_KEY, '1'); } catch (e) {}
-  }
-
-  function hasInstalledMarker() {
-    try { return localStorage.getItem(INSTALL_MARKER_KEY) === '1'; }
-    catch (e) { return false; }
-  }
-
   function openPopup() {
     if (!overlay) return;
-    lastFocusedElement = document.activeElement;
     overlay.classList.add('open');
-    overlay.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
-    requestAnimationFrame(function () {
-      var target = installBtn || overlay.querySelector('.pwa-card');
-      if (target && target.focus) target.focus({ preventScroll: true });
-    });
   }
 
   // Expose globally so navbar Install button can trigger it
@@ -506,10 +489,8 @@
   function closePopup(remember) {
     if (!overlay) return;
     overlay.classList.remove('open');
-    overlay.setAttribute('aria-hidden', 'true');
     document.body.style.overflow = '';
     if (remember) markDismissed(STORAGE_KEY);
-    if (lastFocusedElement && lastFocusedElement.focus) lastFocusedElement.focus({ preventScroll: true });
   }
 
   function openTvPopup() {
@@ -539,29 +520,6 @@
     return window.location.href;
   }
 
-  function qrContext() {
-    var url = new URL(currentUrl());
-    var localOnly = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]';
-    return {
-      url: url.href,
-      host: url.host,
-      localOnly: localOnly,
-      secure: url.protocol === 'https:'
-    };
-  }
-
-  function updateQrGuidance(elementId) {
-    var el = document.getElementById(elementId);
-    if (!el) return;
-    var context = qrContext();
-    el.classList.toggle('local', context.localOnly || !context.secure);
-    el.textContent = context.localOnly
-      ? 'Local preview only — phone scanning works after this site is deployed on HTTPS.'
-      : (!context.secure
-          ? 'Open the secure HTTPS deployment before sharing this QR for installation.'
-          : 'Verified destination: ' + context.host);
-  }
-
   function renderQRFallback(el, text, opts) {
     if (!el || !window.MiniQR) return;
     var canvas = document.createElement('canvas');
@@ -571,7 +529,7 @@
         margin: (opts && opts.margin) || 8,
         dark: '#0a0a12', light: '#ffffff', level: 'M'
       });
-      canvas.style.cssText = 'display:block;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;';
+      canvas.style.cssText = 'display:block;border-radius:6px;width:100%;height:100%;object-fit:contain;';
       canvas.setAttribute('role', 'img');
       canvas.setAttribute('aria-label', 'QR code for ' + text);
       el.innerHTML = '';
@@ -594,26 +552,20 @@
     img.decoding = 'async';
     img.loading = 'eager';
     img.referrerPolicy = 'no-referrer';
-    img.style.cssText = 'display:block;width:100%;height:100%;max-width:100%;object-fit:contain;border-radius:8px;background:#fff;';
+    img.style.cssText = 'display:block;width:100%;height:100%;max-width:100%;border-radius:6px;background:#fff;object-fit:contain;';
     img.onerror = function () { renderQRFallback(el, url, opts); };
     img.src = qrApiUrl(url, size);
 
-    el.dataset.qrPayload = url;
-    el.title = 'Scan to open ' + url;
     el.innerHTML = '';
     el.appendChild(img);
   }
 
-  // Keep QR codes and their visible destination labels in sync with SPA URL changes.
+  // Keep the QR in sync with SPA-style URL changes so it never points at a stale page.
   function refreshAllQR() {
-    if (qrWrap) renderQRInto(qrWrap, { size: 240 });
-    if (tvQrWrap) renderQRInto(tvQrWrap, { size: 300, cellSize: 6, margin: 12 });
+    if (qrWrap) renderQRInto(qrWrap, { size: 200 });
+    if (tvQrWrap) renderQRInto(tvQrWrap, { size: 260, cellSize: 6, margin: 12 });
     var helpQr = document.getElementById('mzHelpQr');
-    if (helpQr) renderQRInto(helpQr, { size: 240 });
-    var helpHost = document.getElementById('mzHelpQrHost');
-    if (helpHost) helpHost.textContent = qrContext().url;
-    updateQrGuidance('pwaQrStatus');
-    updateQrGuidance('mzHelpQrStatus');
+    if (helpQr) renderQRInto(helpQr, { size: 160 });
   }
   window.addEventListener('hashchange', refreshAllQR);
   window.addEventListener('popstate', refreshAllQR);
@@ -763,20 +715,14 @@
     }
 
     resetBtn();
-    closePopup(false);
     showInstallHelp();
   }
 
   // getInstalledRelatedApps() is Chromium-only; treat any failure as "not installed".
   function alreadyInstalled() {
-    if (hasInstalledMarker()) return Promise.resolve(true);
     if (!navigator.getInstalledRelatedApps) return Promise.resolve(false);
     return navigator.getInstalledRelatedApps()
-      .then(function (apps) {
-        var installed = Array.isArray(apps) && apps.length > 0;
-        if (installed) markInstalled();
-        return installed;
-      })
+      .then(function (apps) { return Array.isArray(apps) && apps.length > 0; })
       .catch(function () { return false; });
   }
 
@@ -854,12 +800,10 @@
 
     if ('serviceWorker' in navigator) {
       var reg = await navigator.serviceWorker.getRegistration();
-      var swActive = !!(reg && reg.active);
       add('Service worker registered', !!reg, reg ? 'scope ' + reg.scope : 'none');
-      add('Service worker active', swActive, swActive ? reg.active.state : '—');
+      add('Service worker active', !!(reg && reg.active), reg && reg.active ? reg.active.state : '—');
       add('Page is SW-controlled', !!navigator.serviceWorker.controller,
-        navigator.serviceWorker.controller ? 'yes' : 'active worker is attaching; one automatic reload is allowed',
-        navigator.serviceWorker.controller ? 'pass' : (swActive ? 'pending' : 'fail'));
+        navigator.serviceWorker.controller ? 'yes' : 'no — reload once after first install');
     } else {
       add('Service worker API', false, 'unsupported');
     }
@@ -868,11 +812,9 @@
     if (navigator.getInstalledRelatedApps) {
       try { installedApps = await navigator.getInstalledRelatedApps(); } catch (e) {}
     }
-    var installedDetected = hasInstalledMarker() || installedApps.length > 0;
-    if (installedDetected) markInstalled();
-    add('App NOT already installed', !installedDetected,
-      installedDetected
-        ? 'ALREADY INSTALLED — Chrome suppresses duplicate install prompts'
+    add('App NOT already installed', installedApps.length === 0,
+      installedApps.length
+        ? 'ALREADY INSTALLED → Chrome suppresses the prompt'
         : 'not reported as installed (Chrome may still track an existing desktop install)');
     add('Running in a browser tab', !isStandalone(),
       isStandalone() ? 'already standalone' : 'browser tab');
@@ -980,55 +922,48 @@
     if (document.getElementById('mz-install-help-styles')) return;
     var s = document.createElement('style');
     s.id = 'mz-install-help-styles';
-    s.textContent = `
-      #mzInstallHelp{position:fixed;inset:0;z-index:100000;display:none;place-items:center;padding:clamp(.6rem,3vw,1.5rem);overflow:auto;overscroll-behavior:contain;background:radial-gradient(circle at 50% 8%,rgba(245,197,24,.12),transparent 32%),rgba(2,2,8,.91);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
-      #mzInstallHelp.open{display:grid;animation:mzHelpFade .22s ease both}
-      #mzInstallHelp .mz-help-card{position:relative;width:min(100%,580px);max-height:min(94dvh,920px);overflow-x:hidden;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(245,197,24,.65) rgba(255,255,255,.04);border:1px solid rgba(245,197,24,.34);border-radius:26px;padding:clamp(1.15rem,4vw,1.75rem);color:#f7f7fb;background:linear-gradient(145deg,rgba(24,23,35,.99),rgba(7,7,16,.995));box-shadow:0 34px 110px rgba(0,0,0,.78),0 0 80px rgba(245,197,24,.07);font-family:inherit;animation:mzHelpUp .32s cubic-bezier(.16,1,.3,1) both}
-      #mzInstallHelp .mz-help-card::-webkit-scrollbar{width:5px}#mzInstallHelp .mz-help-card::-webkit-scrollbar-thumb{background:rgba(245,197,24,.58);border-radius:99px}
-      #mzInstallHelp .mz-help-card::before{content:'';position:absolute;inset:0 12% auto;height:2px;background:linear-gradient(90deg,transparent,#f5c518,transparent)}
-      #mzInstallHelp .mz-help-head{display:grid;grid-template-columns:58px minmax(0,1fr);align-items:center;gap:.85rem;padding-right:2.5rem;margin-bottom:.8rem}
-      #mzInstallHelp .mz-help-logo{width:58px;aspect-ratio:1;border-radius:16px;padding:3px;background:linear-gradient(145deg,#ffdd57,#d89d00);box-shadow:0 10px 28px rgba(245,197,24,.22)}
-      #mzInstallHelp .mz-help-logo img{display:block;width:100%;height:100%;object-fit:cover;border-radius:13px}
-      #mzInstallHelp .mz-help-kicker{display:block;margin-bottom:.2rem;color:#f5c518;font-size:.64rem;font-weight:800;letter-spacing:.09em;text-transform:uppercase}
-      #mzInstallHelp h3{margin:0;color:#fff;font-size:clamp(1.15rem,4vw,1.55rem);line-height:1.2;overflow-wrap:anywhere}
-      #mzInstallHelp .mz-help-subtitle{margin:0 0 1rem;color:#b9b9c6;font-size:.86rem;line-height:1.55}
-      #mzInstallHelp .mz-help-close{position:absolute;top:.9rem;right:.9rem;z-index:2;display:grid;place-items:center;width:42px;height:42px;padding:0;border-radius:50%;border:1px solid rgba(255,255,255,.13);background:rgba(255,255,255,.055);color:#f3f3f7;font-size:1.3rem;line-height:1;cursor:pointer;transition:.2s ease}
-      #mzInstallHelp .mz-help-close:hover{color:#fff;background:rgba(239,68,68,.18);border-color:rgba(248,113,113,.45);transform:rotate(5deg)}
-      #mzInstallHelp ol{margin:0 0 1rem;padding:0;list-style:none;counter-reset:mzstep}
-      #mzInstallHelp ol li{counter-increment:mzstep;position:relative;padding:.72rem .25rem .72rem 2.65rem;color:#e7e7ed;font-size:.88rem;line-height:1.48;border-bottom:1px solid rgba(255,255,255,.065)}
-      #mzInstallHelp ol li:last-child{border-bottom:0}
-      #mzInstallHelp ol li::before{content:counter(mzstep);position:absolute;left:.1rem;top:.62rem;display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:linear-gradient(145deg,rgba(245,197,24,.28),rgba(245,197,24,.1));border:1px solid rgba(245,197,24,.22);color:#f5c518;font-size:.75rem;font-weight:800}
-      #mzInstallHelp .mz-help-note{color:#9292a2;font-size:.75rem}
-      #mzInstallHelp .mz-help-warning{margin:0 0 1rem;padding:.7rem .8rem;border-radius:11px;border:1px solid rgba(248,113,113,.25);background:rgba(127,29,29,.16);color:#fca5a5;font-size:.76rem;line-height:1.45}
-      #mzInstallHelp .mz-help-qr{display:grid;grid-template-columns:clamp(124px,28vw,172px) minmax(0,1fr);align-items:center;gap:1rem;margin-bottom:1rem;padding:clamp(.75rem,2.5vw,1rem);border:1px solid rgba(245,197,24,.12);border-radius:18px;background:linear-gradient(135deg,rgba(245,197,24,.055),rgba(255,255,255,.035))}
-      #mzInstallHelp #mzHelpQr{width:100%;aspect-ratio:1;padding:6px;border-radius:14px;background:#fff;box-shadow:0 0 0 3px rgba(245,197,24,.13),0 14px 34px rgba(0,0,0,.35)}
-      #mzInstallHelp #mzHelpQr img,#mzInstallHelp #mzHelpQr canvas{display:block!important;width:100%!important;height:100%!important;max-width:none!important;border-radius:9px!important}
-      #mzInstallHelp .mz-help-qr-copy{min-width:0;color:#b9b9c6;font-size:.8rem;line-height:1.5}
-      #mzInstallHelp .mz-help-qr-copy strong{display:block;margin-bottom:.25rem;color:#f5c518;font-size:.93rem}
-      #mzInstallHelp .mz-help-qr-copy code{display:block;max-width:100%;margin-top:.45rem;overflow:hidden;color:#77778a;font-family:inherit;font-size:.68rem;text-overflow:ellipsis;white-space:nowrap}
-      #mzInstallHelp .mz-help-qr-status{display:block;margin-top:.5rem;color:#5ee09a;font-size:.69rem;line-height:1.4}
-      #mzInstallHelp .mz-help-qr-status.local{color:#fbbf24}
-      #mzInstallHelp .mz-help-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}
-      #mzInstallHelp button{min-width:0;min-height:48px;padding:.72rem .85rem;border-radius:12px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.055);color:#f3f3f7;font-family:inherit;font-size:.82rem;font-weight:750;line-height:1.3;cursor:pointer;touch-action:manipulation;transition:transform .18s ease,border-color .18s ease,background .18s ease}
-      #mzInstallHelp button:hover{transform:translateY(-1px);border-color:rgba(245,197,24,.36);background:rgba(255,255,255,.085)}
-      #mzInstallHelp button:disabled{cursor:progress;opacity:.72;transform:none}
-      #mzInstallHelp button.mz-help-primary{border-color:transparent;background:linear-gradient(135deg,#ffd02f,#e7a900);color:#191300;box-shadow:0 8px 26px rgba(245,197,24,.2)}
-      #mzInstallHelp #mzHelpApps{grid-column:1/-1}
-      #mzInstallHelp button:focus-visible{outline:3px solid rgba(245,197,24,.75);outline-offset:3px}
-      #mzInstallHelp .mz-diag{margin-top:1rem;padding-top:.9rem;border-top:1px solid rgba(255,255,255,.08)}
-      #mzInstallHelp .mz-diag-verdict{margin:0 0 .7rem;color:#ededf3;font-size:.82rem;line-height:1.45}
-      #mzInstallHelp .mz-diag ul{max-height:min(32dvh,250px);margin:0 0 .5rem;padding:0;overflow:auto;list-style:none;scrollbar-width:thin;counter-reset:none}
-      #mzInstallHelp .mz-diag li{display:flex;gap:.55rem;align-items:flex-start;padding:.34rem 0;color:#d8d8e1;font-size:.73rem;line-height:1.4;border:0}
-      #mzInstallHelp .mz-diag li::before{content:none}
-      #mzInstallHelp .mz-diag li.pass>span:first-child{color:#4ade80}#mzInstallHelp .mz-diag li.fail>span:first-child{color:#f87171}#mzInstallHelp .mz-diag li.fail{color:#fca5a5}#mzInstallHelp .mz-diag li.pending>span:first-child{color:#f5c518}#mzInstallHelp .mz-diag li.pending{color:#fde68a}#mzInstallHelp .mz-diag li.info>span:first-child{color:#60a5fa}
-      #mzInstallHelp .mz-diag em{color:#8f8fa0;font-style:normal;overflow-wrap:anywhere}
-      @keyframes mzHelpFade{from{opacity:0}to{opacity:1}}@keyframes mzHelpUp{from{opacity:0;transform:translateY(18px) scale(.97)}to{opacity:1;transform:none}}
-      @media(max-width:600px){#mzInstallHelp{place-items:end center;padding:max(.5rem,env(safe-area-inset-top)) max(.5rem,env(safe-area-inset-right)) max(.5rem,env(safe-area-inset-bottom)) max(.5rem,env(safe-area-inset-left))}#mzInstallHelp .mz-help-card{width:100%;max-height:calc(100dvh - 1rem);padding:1.1rem;border-radius:24px 24px 15px 15px}#mzInstallHelp .mz-help-head{grid-template-columns:48px minmax(0,1fr);gap:.7rem;padding-right:2.4rem}#mzInstallHelp .mz-help-logo{width:48px;border-radius:14px}#mzInstallHelp .mz-help-actions{grid-template-columns:1fr}#mzInstallHelp #mzHelpApps{grid-column:auto}#mzInstallHelp .mz-help-close{top:.7rem;right:.7rem}}
-      @media(max-width:380px){#mzInstallHelp .mz-help-card{padding:.9rem}#mzInstallHelp .mz-help-qr{grid-template-columns:100px minmax(0,1fr);gap:.7rem;padding:.65rem}#mzInstallHelp .mz-help-qr-copy{font-size:.72rem}#mzInstallHelp ol li{font-size:.8rem;padding-left:2.45rem}}
-      @media(max-width:330px){#mzInstallHelp .mz-help-qr{grid-template-columns:1fr;text-align:center}#mzInstallHelp #mzHelpQr{width:122px;justify-self:center}#mzInstallHelp .mz-help-qr-copy code{display:none}}
-      @media(orientation:landscape) and (max-height:600px){#mzInstallHelp{padding:.45rem}#mzInstallHelp .mz-help-card{max-width:720px;max-height:calc(100dvh - .9rem);padding:1rem 1.2rem}#mzInstallHelp .mz-help-head{grid-template-columns:46px minmax(0,1fr);margin-bottom:.45rem}#mzInstallHelp .mz-help-logo{width:46px}#mzInstallHelp .mz-help-subtitle{margin-bottom:.5rem}#mzInstallHelp ol{margin-bottom:.55rem}#mzInstallHelp ol li{padding-top:.42rem;padding-bottom:.42rem}#mzInstallHelp ol li::before{top:.34rem}#mzInstallHelp .mz-help-qr{grid-template-columns:96px minmax(0,1fr);margin-bottom:.6rem;padding:.55rem}#mzInstallHelp .mz-help-actions{grid-template-columns:repeat(3,minmax(0,1fr))}#mzInstallHelp #mzHelpApps{grid-column:auto}}
-      @media(prefers-reduced-motion:reduce){#mzInstallHelp.open,#mzInstallHelp .mz-help-card,#mzInstallHelp button{animation:none!important;transition:none!important}}
-    `;
+    s.textContent = [
+      '#mzInstallHelp{position:fixed;inset:0;z-index:100000;display:none;align-items:center;justify-content:center;',
+      'background:rgba(3,3,10,.82);backdrop-filter:blur(8px);padding:20px;overflow-y:auto;}',
+      '#mzInstallHelp.open{display:flex;}',
+      '#mzInstallHelp .mz-help-card{position:relative;width:100%;max-width:460px;background:#0d0d18;',
+      'border:1px solid rgba(245,197,24,.28);border-radius:18px;padding:26px 24px;color:#f2f2f5;',
+      'box-shadow:0 30px 80px rgba(0,0,0,.6);font-family:inherit;}',
+      '#mzInstallHelp h3{margin:0 0 6px;font-size:1.18rem;color:#f5c518;}',
+      '#mzInstallHelp p{margin:0 0 16px;font-size:.9rem;line-height:1.55;color:#b9b9c6;}',
+      '#mzInstallHelp ol{margin:0 0 18px;padding-left:0;list-style:none;counter-reset:mzstep;}',
+      '#mzInstallHelp ol li{counter-increment:mzstep;position:relative;padding:10px 0 10px 40px;font-size:.9rem;',
+      'line-height:1.5;border-bottom:1px solid rgba(255,255,255,.06);}',
+      '#mzInstallHelp ol li:last-child{border-bottom:0;}',
+      '#mzInstallHelp ol li::before{content:counter(mzstep);position:absolute;left:0;top:9px;width:26px;height:26px;',
+      'border-radius:50%;background:rgba(245,197,24,.14);color:#f5c518;font-size:.78rem;font-weight:700;',
+      'display:flex;align-items:center;justify-content:center;}',
+      '#mzInstallHelp .mz-help-note{color:#8f8fa0;font-size:.78rem;}',
+      '#mzInstallHelp .mz-help-qr{display:flex;gap:14px;align-items:center;background:rgba(255,255,255,.04);',
+      'border-radius:12px;padding:12px;margin-bottom:18px;}',
+      '#mzInstallHelp .mz-help-qr span{font-size:.8rem;color:#b9b9c6;line-height:1.45;}',
+      '#mzInstallHelp .mz-help-actions{display:flex;gap:10px;flex-wrap:wrap;}',
+      '#mzInstallHelp button{flex:1 1 140px;padding:12px 16px;border-radius:10px;font-size:.88rem;font-weight:600;',
+      'cursor:pointer;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:#f2f2f5;}',
+      '#mzInstallHelp button.mz-help-primary{background:linear-gradient(135deg,#f5c518,#e0a800);color:#1a1400;border:0;}',
+      '#mzInstallHelp button:focus-visible{outline:2px solid #f5c518;outline-offset:2px;}',
+      '#mzInstallHelp .mz-help-close{position:absolute;top:12px;right:12px;flex:0 0 auto;width:34px;height:34px;',
+      'padding:0;border-radius:50%;font-size:1.1rem;line-height:1;}',
+      '#mzInstallHelp .mz-diag{margin-top:16px;border-top:1px solid rgba(255,255,255,.08);padding-top:14px;}',
+      '#mzInstallHelp .mz-diag-verdict{font-size:.85rem;color:#e6e6ee;margin-bottom:10px;}',
+      '#mzInstallHelp .mz-diag ul{list-style:none;margin:0 0 8px;padding:0;counter-reset:none;',
+      'max-height:220px;overflow-y:auto;}',
+      '#mzInstallHelp .mz-diag li{display:flex;gap:8px;align-items:flex-start;padding:5px 0;font-size:.8rem;',
+      'border:0;line-height:1.4;}',
+      '#mzInstallHelp .mz-diag li::before{content:none;}',
+      '#mzInstallHelp .mz-diag li.pass>span:first-child{color:#4ade80;}',
+      '#mzInstallHelp .mz-diag li.fail>span:first-child{color:#f87171;}',
+      '#mzInstallHelp .mz-diag li.fail{color:#fca5a5;}',
+      '#mzInstallHelp .mz-diag li.pending>span:first-child{color:#f5c518;}',
+      '#mzInstallHelp .mz-diag li.pending{color:#fde68a;}',
+      '#mzInstallHelp .mz-diag li.info>span:first-child{color:#60a5fa;}',
+      '#mzInstallHelp .mz-diag em{color:#8f8fa0;font-style:normal;}'
+    ].join('');
     document.head.appendChild(s);
   }
 
@@ -1053,12 +988,8 @@
 
   function closeHelp() {
     var panel = document.getElementById('mzInstallHelp');
-    if (panel) {
-      panel.classList.remove('open');
-      panel.setAttribute('aria-hidden', 'true');
-    }
+    if (panel) panel.classList.remove('open');
     document.body.style.overflow = '';
-    if (lastFocusedElement && lastFocusedElement.focus) lastFocusedElement.focus({ preventScroll: true });
   }
 
   function showInstallHelp() {
@@ -1074,47 +1005,34 @@
       panel.setAttribute('role', 'dialog');
       panel.setAttribute('aria-modal', 'true');
       panel.setAttribute('aria-labelledby', 'mzHelpTitle');
-      panel.setAttribute('aria-describedby', 'mzHelpDesc');
-      panel.setAttribute('aria-hidden', 'true');
       document.body.appendChild(panel);
     }
 
     var steps = installSteps(b).map(function (s) { return '<li>' + s + '</li>'; }).join('');
-    var context = qrContext();
     var warning = insecure
-      ? '<p class="mz-help-warning">⚠ This page uses <b>' + location.protocol +
-        '</b>. PWA installation requires HTTPS (localhost is allowed for development).</p>'
+      ? '<p class="mz-help-note">⚠ This page is served over <b>' + location.protocol +
+        '</b>. Browsers only allow app install over <b>HTTPS</b> (or localhost).</p>'
       : '';
 
     panel.innerHTML =
-      '<div class="mz-help-card" role="document">' +
-        '<button type="button" class="mz-help-close" id="mzHelpClose" aria-label="Close install help">&times;</button>' +
-        '<div class="mz-help-head">' +
-          '<div class="mz-help-logo" aria-hidden="true"><img src="/icon-192.png" alt=""></div>' +
-          '<div><span class="mz-help-kicker">MovieZone Premium App</span>' +
-          '<h3 id="mzHelpTitle">Install on ' + b.name + '</h3></div>' +
-        '</div>' +
-        '<p class="mz-help-subtitle" id="mzHelpDesc">Chrome has not offered the one-click installer yet. Use these quick browser steps, or scan the verified QR on your phone.</p>' +
-        '<ol aria-label="Manual installation steps">' + steps + '</ol>' +
+      '<div class="mz-help-card">' +
+        '<button class="mz-help-close" id="mzHelpClose" aria-label="Close">&times;</button>' +
+        '<h3 id="mzHelpTitle">Install MovieZone on ' + b.name + '</h3>' +
+        '<p>Your browser didn’t offer the one-click installer for this page. It takes two taps instead:</p>' +
+        '<ol>' + steps + '</ol>' +
         warning +
-        '<div class="mz-help-qr">' +
-          '<div id="mzHelpQr" aria-live="polite"></div>' +
-          '<div class="mz-help-qr-copy"><strong>Scan → Open → Install</strong>' +
-            '<span>Scan with your phone camera, open MovieZone, then choose <b>Install app</b> or <b>Add to Home Screen</b>.</span>' +
-            '<code id="mzHelpQrHost" title="QR destination">' + context.url + '</code>' +
-            '<small class="mz-help-qr-status" id="mzHelpQrStatus"></small>' +
-          '</div>' +
+        '<div class="mz-help-qr"><div id="mzHelpQr"></div>' +
+          '<span><b>Or install on your phone</b><br>Scan this code to open this exact page on mobile, then tap “Install app”.</span>' +
         '</div>' +
         '<div class="mz-help-actions">' +
-          '<button type="button" class="mz-help-primary" id="mzHelpRetry">↻ Retry one-click install</button>' +
-          '<button type="button" id="mzHelpDiagBtn">🔍 Check compatibility</button>' +
-          '<button type="button" id="mzHelpApps">Manage installed Chrome apps</button>' +
+          '<button class="mz-help-primary" id="mzHelpRetry">↻ Retry one-click install</button>' +
+          '<button id="mzHelpDiagBtn">🔍 Why not?</button>' +
+          '<button id="mzHelpApps">Copy chrome://apps</button>' +
         '</div>' +
-        '<div id="mzHelpDiag" aria-live="polite"></div>' +
+        '<div id="mzHelpDiag"></div>' +
       '</div>';
 
-    renderQRInto(document.getElementById('mzHelpQr'), { size: 240, cellSize: 4, margin: 8 });
-    updateQrGuidance('mzHelpQrStatus');
+    renderQRInto(document.getElementById('mzHelpQr'), { size: 160, cellSize: 3, margin: 6 });
 
     document.getElementById('mzHelpClose').addEventListener('click', closeHelp);
     panel.addEventListener('click', function (e) { if (e.target === panel) closeHelp(); });
@@ -1182,12 +1100,9 @@
       }
     });
 
-    lastFocusedElement = document.activeElement;
-    panel.setAttribute('aria-hidden', 'false');
     panel.classList.add('open');
-    document.body.style.overflow = 'hidden';
     var retry = document.getElementById('mzHelpRetry');
-    if (retry) retry.focus({ preventScroll: true });
+    if (retry) retry.focus();
   }
 
   /* ── Click handler ── */
@@ -1231,14 +1146,18 @@
       clearTimeout(popupTimer);
       popupTimer = null;
     }
-    if (overlay && !isStandalone() && !recentlyDismissed(STORAGE_KEY)) {
-      setTimeout(openPopup, 2500);
+    // When native install prompt is ready, show popup immediately (unless already installed)
+    if (overlay && !isStandalone()) {
+      checkAlreadyInstalled().then(function (installed) {
+        if (!installed) {
+          setTimeout(openPopup, 250);
+        }
+      });
     }
   });
 
   window.addEventListener('appinstalled', function () {
     markDismissed(STORAGE_KEY);
-    markInstalled();
     closePopup(false);
     closeHelp();
     window.deferredPrompt = null;
@@ -1250,6 +1169,29 @@
     var banner = document.getElementById('pwa-install-banner');
     if (banner) banner.remove();
   });
+
+  /* ── Comprehensive "already installed" check ──
+     Combines multiple signals to detect if the app is already on the user's device:
+     1. Running in standalone/fullscreen mode (display-mode media query)
+     2. iOS standalone flag (navigator.standalone)
+     3. getInstalledRelatedApps() API (Chromium only)
+  */
+  function checkAlreadyInstalled() {
+    // Check 1: Already running as installed app (standalone or fullscreen)
+    if (isStandalone()) return Promise.resolve(true);
+
+    // Check 2: display-mode fullscreen (some PWAs use this)
+    if (window.matchMedia('(display-mode: fullscreen)').matches) return Promise.resolve(true);
+
+    // Check 3: Chromium's getInstalledRelatedApps API
+    if (navigator.getInstalledRelatedApps) {
+      return navigator.getInstalledRelatedApps()
+        .then(function (apps) { return Array.isArray(apps) && apps.length > 0; })
+        .catch(function () { return false; });
+    }
+
+    return Promise.resolve(false);
+  }
 
   function init() {
     overlay = document.getElementById('pwa-install-overlay');
@@ -1265,58 +1207,48 @@
     tvQrWrap = document.getElementById('pwaTvQrWrap');
     tvDismissBtn = document.getElementById('pwaTvDismissBtn');
 
-    if (isStandalone()) {
-      markInstalled();
-      console.log('[MovieZone PWA] Popup skipped: app is already running in standalone/installed mode.');
-      return;
-    }
-    if (hasInstalledMarker()) {
-      var existingNavBtn = document.getElementById('navInstallBtn');
-      if (existingNavBtn) existingNavBtn.style.display = 'none';
-      console.log('[MovieZone PWA] Popup skipped: this origin is already marked as installed.');
-      return;
-    }
+    // ── If app is already installed, skip popup entirely ──
+    checkAlreadyInstalled().then(function (installed) {
+      if (installed) {
+        console.log('[MovieZone PWA] Popup skipped: app is already installed on this device.');
+        return;
+      }
 
-    /* ── Smart TV: dedicated full-screen QR-only view (remote-friendly, no native install) ── */
-    if (isTV()) {
-      if (!tvOverlay) { console.log('[MovieZone PWA] TV overlay element not found in DOM.'); return; }
-      if (recentlyDismissed(TV_STORAGE_KEY)) { console.log('[MovieZone PWA] TV popup skipped: dismissed recently.'); return; }
-      renderQRInto(tvQrWrap, { size: 300, cellSize: 6, margin: 12 });
-      tvDismissBtn.addEventListener('click', function () { closeTvPopup(true); });
-      tvDismissBtn.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' || e.key === ' ') closeTvPopup(true);
+      /* ── Smart TV: dedicated full-screen QR-only view (remote-friendly, no native install) ── */
+      if (isTV()) {
+        if (!tvOverlay) { console.log('[MovieZone PWA] TV overlay element not found in DOM.'); return; }
+        if (recentlyDismissed(TV_STORAGE_KEY)) { console.log('[MovieZone PWA] TV popup skipped: dismissed recently.'); return; }
+        renderQRInto(tvQrWrap, { size: 260, cellSize: 6, margin: 12 });
+        tvDismissBtn.addEventListener('click', function () { closeTvPopup(true); });
+        tvDismissBtn.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' || e.key === ' ') closeTvPopup(true);
+        });
+        setTimeout(openTvPopup, SHOW_DELAY_MS);
+        setTimeout(function () { tvDismissBtn.focus(); }, SHOW_DELAY_MS + 100);
+        return;
+      }
+
+      /* ── Everyone else: desktop / Android / Windows / iOS card ── */
+      if (!overlay) { console.log('[MovieZone PWA] Popup overlay element not found in DOM.'); return; }
+
+      // ALWAYS setup buttons and QR (so they work from navbar button too)
+      setupInstallButton();
+      renderQRInto(qrWrap, { size: 200 });
+
+      // Attach button event listeners
+      if (laterBtn) laterBtn.addEventListener('click', function () { closePopup(false); });
+      if (closeBtn) closeBtn.addEventListener('click', function () { closePopup(false); });
+      overlay.addEventListener('click', function (e) {
+        if (e.target === overlay) closePopup(false);
       });
-      setTimeout(openTvPopup, SHOW_DELAY_MS);
-      setTimeout(function () { tvDismissBtn.focus(); }, SHOW_DELAY_MS + 100);
-      return;
-    }
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && overlay.classList.contains('open')) closePopup(false);
+      });
 
-    /* ── Everyone else: desktop / Android / Windows / iOS card ── */
-    if (!overlay) { console.log('[MovieZone PWA] Popup overlay element not found in DOM.'); return; }
-
-    // ALWAYS setup buttons and QR (so they work from navbar button too)
-    setupInstallButton();
-    renderQRInto(qrWrap, { size: 240 });
-    updateQrGuidance('pwaQrStatus');
-
-    // Attach button event listeners ALWAYS (regardless of dismiss state)
-    if (laterBtn) laterBtn.addEventListener('click', function () { closePopup(true); });
-    if (closeBtn) closeBtn.addEventListener('click', function () { closePopup(true); });
-    overlay.addEventListener('click', function (e) {
-      if (e.target === overlay) closePopup(true);
+      // AUTO-OPEN popup on every page load after short delay (no snooze check)
+      console.log('[MovieZone PWA] Popup will auto-open in ' + (SHOW_DELAY_MS / 1000) + ' seconds.');
+      popupTimer = setTimeout(openPopup, SHOW_DELAY_MS);
     });
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && overlay.classList.contains('open')) closePopup(true);
-    });
-
-    // Only AUTO-OPEN popup if NOT recently dismissed
-    if (recentlyDismissed(STORAGE_KEY)) {
-      console.log('[MovieZone PWA] Auto-popup skipped (dismissed recently). Navbar button still works.');
-      return;
-    }
-
-    console.log('[MovieZone PWA] Popup will auto-open in ' + (SHOW_DELAY_MS / 1000) + ' seconds.');
-    popupTimer = setTimeout(openPopup, SHOW_DELAY_MS);
   }
 
   // Script is loaded with `defer`, but run immediately if the DOM is already parsed.

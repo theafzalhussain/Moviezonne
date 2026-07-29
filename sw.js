@@ -2,15 +2,15 @@ const CACHE_NAME = 'moviezone-v20';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/moviezone.css?v=3.8',
+  '/moviezone.css?v=3.5',
   '/search-engine.js?v=1.1',
-  '/moviezone.js?v=3.8',
-  '/pwa-install.js?v=1.7',
+  '/moviezone.js?v=3.7',
+  '/pwa-install.js?v=1.4',
   '/manifest.json',
-  '/icon-192.svg',
-  '/icon-512.svg',
   '/icon-192.png',
-  '/icon-512.png'
+  '/icon-512.png',
+  '/favicon-32.png',
+  '/apple-touch-icon.png'
 ];
 
 self.addEventListener('install', event => {
@@ -93,8 +93,8 @@ self.addEventListener('push', event => {
   const title = data.title || 'MovieZone';
   const options = {
     body: data.body || 'A new movie update is available.',
-    icon: data.icon || '/icon-192.svg',
-    badge: data.badge || '/icon-192.svg',
+    icon: data.icon || '/icon-192.png',
+    badge: data.badge || '/icon-192.png',
     tag: data.tag || `moviezone-${Date.now()}`,
     renotify: Boolean(data.tag),
     vibrate: [200, 100, 200],

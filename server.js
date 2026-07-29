@@ -71,7 +71,7 @@ async function fetchWithRetry(url, options = {}) {
   // Strip /3 prefix since axios baseURL already includes it
   let path = parsed.pathname + parsed.search;
   if (path.startsWith('/3/')) path = path.slice(2); // /3/trending -> /trending
-
+  
   const response = await tmdbClient.get(path, {
     headers: options.headers || {}
   });
@@ -134,6 +134,7 @@ const FALLBACK_MANIFEST = {
   dir: 'ltr',
   icons: [
     { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+    { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
     { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
     { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
   ],
@@ -196,7 +197,7 @@ app.get('/sw.js', (req, res) => {
 });
 
 // Frontend files (index.html, css, js) ko browser mein dikhane ke liye
-app.use(express.static(__dirname, {
+app.use(express.static(__dirname, { 
   maxAge: '30d',
   etag: true,
   lastModified: true,
@@ -205,8 +206,12 @@ app.use(express.static(__dirname, {
     if (filePath.endsWith('.css') || filePath.endsWith('.js')) {
       res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
     }
-    // Images ko 60 days cache
-    if (/\.(jpg|jpeg|png|gif|svg|webp|ico)$/.test(filePath)) {
+    // PWA icons: short cache so logo updates reflect immediately
+    if (/icon-\d+\.png|favicon-\d+\.png|apple-touch-icon\.png/.test(require('path').basename(filePath))) {
+      res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+    }
+    // Other images ko 60 days cache
+    else if (/\.(jpg|jpeg|png|gif|svg|webp|ico)$/.test(filePath)) {
       res.setHeader('Cache-Control', 'public, max-age=5184000, immutable');
     }
     // HTML ko short cache (fresh content milta rahe)
@@ -413,8 +418,8 @@ app.post('/api/notify-movies', async (req, res) => {
         title: 'MovieZone',
         body: `Notification set for ${String(title).slice(0, 120)} (${releaseDate}).`,
         url: notificationUrl,
-        icon: '/icon-192.svg',
-        badge: '/icon-192.svg',
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
         tag: `notify-confirm-${numericMovieId}`,
         type: 'notify-confirmation'
       });
@@ -485,8 +490,8 @@ async function processDueNotifications() {
       title: 'Now available on MovieZone',
       body: `${movie.title} has released. Tap to view details.`,
       url: movie.url || '/#upcoming',
-      icon: '/icon-192.svg',
-      badge: '/icon-192.svg',
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
       tag: `movie-release-${movie.movieId}`,
       type: 'movie-release'
     });
@@ -532,8 +537,8 @@ app.post('/api/push/send', async (req, res) => {
         title,
         body,
         url: typeof url === 'string' && url.startsWith('/') ? url : '/',
-        icon: '/icon-192.svg',
-        badge: '/icon-192.svg',
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
         tag: `broadcast-${Date.now()}`
       });
       if (result.sent) sent++;
@@ -568,8 +573,10 @@ app.get('/ping', (req, res) => {
   res.status(200).send('Pong! Server is awake.');
 });
 
-// Ignore favicon requests to prevent 404 errors in the terminal/console
-app.get('/favicon.ico', (req, res) => res.status(204).end());
+// Serve favicon
+app.get('/favicon.ico', (req, res) => {
+  res.sendFile(require('path').join(__dirname, 'favicon-32.png'));
+});
 
 // Proxy Endpoint: Frontend yahan request bhejega
 app.use('/api/tmdb', apiLimiter, async (req, res) => {
@@ -615,15 +622,15 @@ app.use('/api/tmdb', apiLimiter, async (req, res) => {
     const code = error.code || error.response?.status || 'UNKNOWN';
     const msg = error.message || 'Unknown error';
     console.error(`TMDB Proxy Error [${code}]: ${msg}`);
-
+    
     if (error.response) {
       // TMDB returned an error response (after all retries)
       return res.status(error.response.status).json({ error: 'TMDB API error', detail: error.response.statusText });
     }
-
+    
     const isTimeout = error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT';
     const isNetwork = error.code === 'ECONNRESET' || error.code === 'ENOTFOUND' || error.code === 'EPIPE';
-
+    
     if (isTimeout) {
       return res.status(504).json({ error: 'TMDB request timed out. Please retry.' });
     }
