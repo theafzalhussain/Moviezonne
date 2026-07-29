@@ -95,6 +95,13 @@ if (new URLSearchParams(window.location.search).get('tv') === '1') {
 console.log('[MovieZone] TV Detection:', isTV, '| UA:', navigator.userAgent.substring(0, 80));
 if (isMobile) document.documentElement.classList.add('low-end-mode');
 
+// TV: Set initial history state so back button always returns to home (prevents exit)
+if (isTV || document.documentElement.classList.contains('tv-mode')) {
+  if (!window.history.state || !window.history.state.mzHome) {
+    window.history.replaceState({ mzHome: true }, '', window.location.pathname + window.location.search);
+  }
+}
+
 // -- LARGE-SCREEN PERFORMANCE ONLY --
 // Resolution/pointer emulation is not device identity. Large displays may receive
 // lighter GPU styling, but TV navigation is enabled only by confirmed UA hints or ?tv=1.
@@ -3021,11 +3028,21 @@ async function openModal(id, type = 'movie', activationEvent) {
 let _mzModalClosing = false;
 
 function closeModal(fromPopstate) {
-  // Prevent double-close (keydown handler calls closeModal → history.back() → popstate → closeModal again)
+  // Prevent double-close
   if (_mzModalClosing) return;
+  _mzModalClosing = true;
+  setTimeout(() => { _mzModalClosing = false; }, 500);
   
   const overlay = document.getElementById('modal-overlay');
-  if (!overlay || !overlay.classList.contains('open')) return;
+  if (!overlay || !overlay.classList.contains('open')) {
+    _mzModalClosing = false;
+    return;
+  }
+  
+  // Stop any active trailer
+  if (activeTrailerStopper) {
+    try { activeTrailerStopper(); } catch(e) {}
+  }
   
   // Close the modal UI
   overlay.classList.remove('open');
@@ -3041,45 +3058,89 @@ function closeModal(fromPopstate) {
   const relSec = document.getElementById('relatedMoviesSection');
   if (relSec) relSec.style.display = 'none';
   
-  // Handle history navigation
-  if (!fromPopstate && window.location.hash.startsWith('#watch-')) {
-    // Called from close button or TV back key — go back in history properly
-    _mzModalClosing = true;
-    window.history.back();
-    setTimeout(() => { _mzModalClosing = false; }, 300);
-  } else if (fromPopstate && window.location.hash.startsWith('#watch-')) {
-    // Edge case: popstate fired but hash still present (forward navigation)
-    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  // Cancel any running auto-retry timer
+  if (window._mzRetryTimer) { clearTimeout(window._mzRetryTimer); window._mzRetryTimer = null; }
+  
+  // Clean up URL hash
+  if (window.location.hash.startsWith('#watch-')) {
+    try {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    } catch(e) {}
   }
   
-  // If we were in search results mode, reset to home page on TV
-  if (isTVLikeMode() && isSearchResultsMode) {
+  // Always go back to home page (fixes the main TV issue where user gets stuck after search)
+  if (isSearchResultsMode) {
     isSearchResultsMode = false;
     goHome();
   }
   
-  if (isTV && lastFocusedElement) {
-    setTimeout(() => lastFocusedElement.focus(), 100);
+  // Restore focus on TV
+  if ((isTV || document.documentElement.classList.contains('tv-mode')) && lastFocusedElement) {
+    setTimeout(() => {
+      try { lastFocusedElement.focus(); } catch(e) {}
+    }, 150);
   }
 }
  
 // TV / Phone Back Button Navigation for Watch Page
 window.addEventListener('popstate', (e) => {
-  // If closeModal triggered this popstate via history.back(), don't close again
+  // If closeModal is already running, don't trigger again
   if (_mzModalClosing) return;
   
   const overlay = document.getElementById('modal-overlay');
-  // Only handle #watch hash if modal is already open (user went back/forward within session)
-  if (window.location.hash.startsWith('#watch-')) {
-    // Do NOT auto-open modal from hash — just clean it up if modal isn't open
-    if (!overlay || !overlay.classList.contains('open')) {
-      window.history.replaceState(null, '', window.location.pathname + window.location.search);
-    }
-  } else if (overlay && overlay.classList.contains('open')) {
-    // User pressed browser back button — close modal (pass fromPopstate=true)
-    closeModal(true);
+  if (overlay && overlay.classList.contains('open')) {
+    // Modal is open — close it on back navigation
+    closeModal();
+  } else if (window.location.hash.startsWith('#watch-')) {
+    // Hash present but modal not open — clean up stale hash
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
   }
 });
+
+// Backup: hashchange event (some TV browsers fire this instead of/alongside popstate)
+window.addEventListener('hashchange', () => {
+  if (_mzModalClosing) return;
+  const overlay = document.getElementById('modal-overlay');
+  if (!window.location.hash.startsWith('#watch-') && overlay && overlay.classList.contains('open')) {
+    closeModal();
+  }
+});
+
+// Global Back/Escape handler (works even when TV is not detected via UA)
+// This catches: Escape, BrowserBack (keyCode 4), Tizen back (10009), WebOS back (461)
+document.addEventListener('keydown', (e) => {
+  const key = e.key;
+  const keyCode = e.keyCode || e.which;
+  const isBackKey = key === 'Escape' || key === 'BrowserBack' || key === 'GoBack' ||
+    keyCode === 4 || keyCode === 27 || keyCode === 10009 || keyCode === 461 ||
+    key === 'XF86Back';
+  
+  if (!isBackKey) return;
+  
+  // Don't handle if TV navigation mode is active (it has its own handler)
+  if (isTV || document.documentElement.classList.contains('tv-mode')) return;
+  
+  const overlay = document.getElementById('modal-overlay');
+  const upcomingOverlay = document.getElementById('upcoming-detail-overlay');
+  const collectionsOverlay = document.getElementById('collections-hub-overlay');
+  
+  if (overlay && overlay.classList.contains('open')) {
+    closeModal();
+    e.preventDefault();
+  } else if (upcomingOverlay && upcomingOverlay.classList.contains('open')) {
+    if (typeof closeUpcomingDetail === 'function') closeUpcomingDetail();
+    e.preventDefault();
+  } else if (collectionsOverlay && collectionsOverlay.classList.contains('open')) {
+    if (typeof handleCollectionsBack === 'function') handleCollectionsBack();
+    e.preventDefault();
+  } else if (isSearchResultsMode) {
+    // If showing search results, go back to home
+    if (typeof goHome === 'function') goHome();
+    const si = document.getElementById('searchInput');
+    if (si) si.value = '';
+    e.preventDefault();
+  }
+}, true);
  
 // -- RELATED MOVIES LOGIC (Advanced Recommendation Engine) --
 async function loadRelatedMovies(id, type) {
