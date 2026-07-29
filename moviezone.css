@@ -4526,14 +4526,14 @@ body.cursor-hover #cursor-dot {
 
 /* ═══ TV / Ultra Wide (1800px+) ═══ */
 @media (min-width: 1800px) {
-  html { font-size: 115%; }
+  html { font-size: 105%; }
   #navbar { 
     width: min(92%, calc(100% - 2.5rem));
     max-width: 1800px;
     padding: 0.8rem 1.6rem;
     gap: 1rem;
   }
-  .nav-logo { font-size: 2.2rem; }
+  .nav-logo { font-size: 1.9rem; }
   .nav-links { gap: 0.5rem; }
   .nav-links a { font-size: 0.95rem; padding: 0.55rem 1rem; }
   .nav-search { max-width: 340px; }
@@ -4571,7 +4571,7 @@ body.cursor-hover #cursor-dot {
 }
 
 @media (min-width: 2500px) {
-  html { font-size: 140%; }
+  html { font-size: 120%; }
   #navbar { 
     width: min(92%, calc(100% - 3rem));
     max-width: 2400px;
@@ -4695,12 +4695,12 @@ body.cursor-hover #cursor-dot {
 }
 
 /* Increase font sizes for TV viewing distance (10-foot UI) */
-.tv-mode body { font-size: 1.1rem !important; }
-.tv-mode .slide-title { font-size: 2.8rem !important; }
-.tv-mode .slide-desc { font-size: 1.2rem !important; }
-.tv-mode .card-title { font-size: 1.05rem !important; }
-.tv-mode .cat-tab { font-size: 1.05rem !important; padding: 12px 20px !important; }
-.tv-mode .nav-links a { font-size: 1.1rem !important; }
+.tv-mode body { font-size: 1rem !important; }
+.tv-mode .slide-title { font-size: 2.4rem !important; }
+.tv-mode .slide-desc { font-size: 1.05rem !important; }
+.tv-mode .card-title { font-size: 0.92rem !important; }
+.tv-mode .cat-tab { font-size: 0.95rem !important; padding: 10px 18px !important; }
+.tv-mode .nav-links a { font-size: 1rem !important; }
 
 /* === LOW-END MODE styles remain unchanged === */
 .low-end-mode * {
@@ -4879,28 +4879,28 @@ body.cursor-hover #cursor-dot {
 }
 
 .tv-mode .nav-links a {
-  font-size: 1rem !important;
-  padding: 0.55rem 1rem !important;
+  font-size: 0.92rem !important;
+  padding: 0.5rem 0.9rem !important;
   white-space: nowrap;
   letter-spacing: 0.2px;
   border-radius: 12px;
 }
 
 .tv-mode .nav-logo-mark {
-  width: 2.4rem;
-  height: 2.4rem;
-  border-radius: 12px;
-  font-size: 0.82rem;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 11px;
+  font-size: 0.78rem;
 }
 
 .tv-mode .nav-logo-main {
-  font-size: 1.4rem;
+  font-size: 1.3rem;
   letter-spacing: 2px;
 }
 
 .tv-mode .nav-logo-sub {
-  font-size: 0.55rem;
-  letter-spacing: 1.8px;
+  font-size: 0.5rem;
+  letter-spacing: 1.5px;
 }
 
 .tv-mode .nav-search {
@@ -4928,33 +4928,33 @@ body.cursor-hover #cursor-dot {
 }
 
 .tv-mode .slide-title {
-  font-size: clamp(2.8rem, 4.5vw, 5rem) !important;
+  font-size: clamp(2.2rem, 3.5vw, 4rem) !important;
   line-height: 1.1;
 }
 
 .tv-mode .slide-desc {
-  font-size: 1.15rem !important;
+  font-size: 1rem !important;
   line-height: 1.5;
   -webkit-line-clamp: 3;
   max-width: 90%;
 }
 
 .tv-mode .slide-meta {
-  font-size: 1rem;
-  gap: 1rem;
+  font-size: 0.9rem;
+  gap: 0.8rem;
 }
 
 .tv-mode .slide-badge {
-  font-size: 0.75rem;
-  padding: 0.35rem 1rem;
+  font-size: 0.7rem;
+  padding: 0.3rem 0.85rem;
 }
 
 .tv-mode .slide-actions .btn-play,
 .tv-mode .slide-actions .btn-info {
-  padding: 1rem 2rem;
-  font-size: 1.1rem;
-  border-radius: 14px;
-  min-height: 52px;
+  padding: 0.8rem 1.6rem;
+  font-size: 1rem;
+  border-radius: 12px;
+  min-height: 46px;
 }
 
 /* --- TV Movie Grid --- */
@@ -4976,49 +4976,49 @@ body.cursor-hover #cursor-dot {
 
 /* --- TV Section Headers --- */
 .tv-mode .section-title {
-  font-size: 1.8rem;
+  font-size: 1.5rem;
 }
 
 .tv-mode .section-subtitle {
-  font-size: 1rem;
+  font-size: 0.9rem;
 }
 
 /* --- TV Category Tabs --- */
 .tv-mode .cat-tabs {
-  gap: 0.6rem;
+  gap: 0.5rem;
 }
 
 .tv-mode .cat-tab {
-  font-size: 1rem !important;
-  padding: 0.7rem 1.4rem !important;
-  min-height: 48px;
-  border-radius: 12px;
+  font-size: 0.9rem !important;
+  padding: 0.6rem 1.2rem !important;
+  min-height: 42px;
+  border-radius: 10px;
 }
 
 /* --- TV Card Titles --- */
 .tv-mode .card-title {
-  font-size: 1rem !important;
+  font-size: 0.9rem !important;
   line-height: 1.3;
 }
 
 .tv-mode .card-year,
 .tv-mode .card-rating {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
 }
 
 /* --- TV Modal --- */
 .tv-mode .modal-info {
-  max-width: 1600px;
-  padding: 4rem 5%;
+  max-width: 1500px;
+  padding: 3.5rem 5%;
 }
 
 .tv-mode .modal-title {
-  font-size: 3rem;
+  font-size: 2.5rem;
 }
 
 .tv-mode .modal-desc {
-  font-size: 1.1rem;
-  line-height: 1.6;
+  font-size: 1rem;
+  line-height: 1.5;
 }
 
 /* --- TV Footer --- */
