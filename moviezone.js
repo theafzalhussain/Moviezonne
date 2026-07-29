@@ -419,14 +419,16 @@ let lastFocusedElement = null; // TV remote focus memory
 
 // -- EXPLICIT DETAIL ACTIVATION GUARD --
 // Opening a movie is a navigation action. Viewport changes, responsive-mode switches,
-// focus movement, and carried-over TV launch keys must never be able to trigger it.
+// BFCache/session restoration, and carried-over TV launch keys must never trigger it.
 const DETAIL_ACTIVATION_MAX_AGE_MS = 1500;
 const DETAIL_VIEWPORT_SETTLE_MS = 750;
+const TV_POST_KEYUP_DEBOUNCE_MS = 400;
 const detailActivationGuard = {
   lastTrustedActivationAt: -Infinity,
   viewportBlockedUntil: -Infinity,
   tvActivationArmed: !isTV && !document.documentElement.classList.contains('tv-mode'),
-  tvAutoArmAt: (typeof performance !== 'undefined' ? performance.now() : Date.now()) + 4000
+  tvActivationAllowedAt: (!isTV && !document.documentElement.classList.contains('tv-mode')) ? -Infinity : Infinity,
+  tvInteractionEpoch: 0
 };
 
 function detailNow() {
@@ -437,19 +439,37 @@ function isTVLikeMode() {
   return isTV || document.documentElement.classList.contains('tv-mode');
 }
 
+function resetTVLaunchActivation() {
+  if (!isTVLikeMode()) return;
+  detailActivationGuard.tvActivationArmed = false;
+  detailActivationGuard.tvActivationAllowedAt = Infinity;
+  detailActivationGuard.lastTrustedActivationAt = -Infinity;
+  detailActivationGuard.tvInteractionEpoch += 1;
+}
+
+function armTVDetailActivation(fromActivationKeyRelease) {
+  if (!isTVLikeMode()) return;
+  const now = detailNow();
+  detailActivationGuard.tvActivationArmed = true;
+  detailActivationGuard.tvActivationAllowedAt = fromActivationKeyRelease
+    ? now + TV_POST_KEYUP_DEBOUNCE_MS
+    : now;
+  detailActivationGuard.lastTrustedActivationAt = -Infinity;
+}
+
 function blockDetailActivationForViewportChange() {
   const now = detailNow();
   detailActivationGuard.viewportBlockedUntil = now + DETAIL_VIEWPORT_SETTLE_MS;
   detailActivationGuard.lastTrustedActivationAt = -Infinity;
 }
 
-// A pointer-down or activation-key down must precede detail navigation. A click
-// synthesized by layout/focus code therefore has no authority to open the overlay.
+// A trusted pointer-down or clean activation-key down must precede detail navigation.
+// Synthetic clicks and key events therefore have no authority to open the overlay.
 const recordPointerActivation = (event) => {
-  if (event.button != null && event.button !== 0) return;
+  if (!event.isTrusted || (event.button != null && event.button !== 0)) return;
   const now = detailNow();
   if (now < detailActivationGuard.viewportBlockedUntil) return;
-  detailActivationGuard.tvActivationArmed = true;
+  if (isTVLikeMode()) armTVDetailActivation(false);
   detailActivationGuard.lastTrustedActivationAt = now;
 };
 
@@ -461,33 +481,85 @@ if ('PointerEvent' in window) {
 }
 
 document.addEventListener('keydown', (event) => {
+  if (!event.isTrusted) return;
   const key = event.key;
   if (key === 'ArrowLeft' || key === 'ArrowRight' || key === 'ArrowUp' || key === 'ArrowDown') {
-    detailActivationGuard.tvActivationArmed = true;
+    armTVDetailActivation(false);
     return;
   }
-  if (key !== 'Enter' && key !== ' ' && (event.keyCode || event.which) !== 13 && (event.keyCode || event.which) !== 32) return;
+  const code = event.keyCode || event.which;
+  if (key !== 'Enter' && key !== ' ' && code !== 13 && code !== 32) return;
 
   const now = detailNow();
-  if (isTVLikeMode() && !detailActivationGuard.tvActivationArmed && now < detailActivationGuard.tvAutoArmAt) return;
+  if (event.repeat) return;
+  if (isTVLikeMode() && (!detailActivationGuard.tvActivationArmed || now < detailActivationGuard.tvActivationAllowedAt)) return;
   if (now < detailActivationGuard.viewportBlockedUntil) return;
-  detailActivationGuard.tvActivationArmed = true;
   detailActivationGuard.lastTrustedActivationAt = now;
 }, true);
 
-// Releasing the launch/OK key arms the next press without treating the release itself
-// as activation. This prevents the key used to launch a TV app from opening a card.
+// The launch/OK key release only makes a later, separate press eligible. A short
+// post-keyup debounce rejects OS key bounce; elapsed page time never arms playback.
 document.addEventListener('keyup', (event) => {
+  if (!event.isTrusted) return;
   const code = event.keyCode || event.which;
   if (event.key === 'Enter' || event.key === ' ' || code === 13 || code === 32) {
-    detailActivationGuard.tvActivationArmed = true;
-    detailActivationGuard.lastTrustedActivationAt = -Infinity;
+    armTVDetailActivation(true);
   }
 }, true);
 
+function resetRestoredWatchSurface() {
+  for (const id of ['modal-overlay', 'upcoming-detail-overlay']) {
+    const overlay = document.getElementById(id);
+    if (overlay) {
+      overlay.classList.remove('open');
+      overlay.scrollTop = 0;
+    }
+  }
+
+  for (const id of ['videoEmbed', 'udTrailerEmbed']) {
+    const embed = document.getElementById(id);
+    if (embed) {
+      embed.innerHTML = '';
+      embed.classList.remove('fullscreen-mode');
+    }
+  }
+
+  const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement;
+  if (fullscreenElement) {
+    try {
+      const exitResult = document.exitFullscreen
+        ? document.exitFullscreen()
+        : (document.webkitExitFullscreen ? document.webkitExitFullscreen() : null);
+      if (exitResult && typeof exitResult.catch === 'function') exitResult.catch(() => {});
+    } catch (error) {}
+  }
+
+  isPlayerFullscreen = false;
+  currentModalMovie = null;
+  currentUpcomingMovie = null;
+  if (activeTrailerStopper) {
+    try { activeTrailerStopper(); } catch (error) {}
+  }
+  activeTrailerStopper = null;
+  if (window._mzRetryTimer) {
+    clearTimeout(window._mzRetryTimer);
+    window._mzRetryTimer = null;
+  }
+  document.removeEventListener('keydown', exitFSOnEsc);
+  document.body.style.overflow = '';
+
+  if (window.location.hash.startsWith('#watch-')) {
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
+  resetTVLaunchActivation();
+}
+
 window.addEventListener('resize', blockDetailActivationForViewportChange, { passive: true });
 window.addEventListener('orientationchange', blockDetailActivationForViewportChange, { passive: true });
+document.addEventListener('DOMContentLoaded', resetRestoredWatchSurface, { once: true });
 window.addEventListener('pageshow', (event) => {
+  // Handles normal PWA relaunch, session-restored DOM, and BFCache restoration.
+  resetRestoredWatchSurface();
   if (event.persisted) blockDetailActivationForViewportChange();
 });
 
@@ -495,14 +567,19 @@ function claimExplicitDetailActivation(event) {
   const now = detailNow();
   if (now < detailActivationGuard.viewportBlockedUntil) return false;
 
-  // Trusted accessibility/keyboard clicks may not have pointer coordinates. They are
-  // accepted only while the browser reports a real user activation.
+  const tvActivationReady = !isTVLikeMode() || (
+    detailActivationGuard.tvActivationArmed &&
+    now >= detailActivationGuard.tvActivationAllowedAt
+  );
+  // Trusted accessibility/keyboard clicks may not have pointer coordinates. On TV,
+  // even these clicks remain blocked until key release/D-pad proves fresh intent.
   const trustedAccessibleClick = event && event.isTrusted && event.type === 'click' &&
-    event.detail === 0 && navigator.userActivation && navigator.userActivation.isActive;
-  const trustedDirectKey = event && event.isTrusted && event.type === 'keydown' &&
+    event.detail === 0 && navigator.userActivation && navigator.userActivation.isActive && tvActivationReady;
+  const trustedDirectKey = event && event.isTrusted && event.type === 'keydown' && !event.repeat &&
     (event.key === 'Enter' || event.key === ' ' || (event.keyCode || event.which) === 13 || (event.keyCode || event.which) === 32) &&
-    (!isTVLikeMode() || detailActivationGuard.tvActivationArmed || now >= detailActivationGuard.tvAutoArmAt);
-  const hasRecentTrustedInput = now - detailActivationGuard.lastTrustedActivationAt <= DETAIL_ACTIVATION_MAX_AGE_MS;
+    tvActivationReady;
+  const hasRecentTrustedInput = tvActivationReady &&
+    now - detailActivationGuard.lastTrustedActivationAt <= DETAIL_ACTIVATION_MAX_AGE_MS;
 
   if (!trustedAccessibleClick && !trustedDirectKey && !hasRecentTrustedInput) return false;
   detailActivationGuard.lastTrustedActivationAt = -Infinity; // one activation opens at most one detail page
@@ -3920,14 +3997,8 @@ document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
 document.addEventListener('mozfullscreenchange', handleFullscreenChange);
 document.addEventListener('MSFullscreenChange', handleFullscreenChange);
  
-// Direct link URL — only open if user explicitly navigated (not on page reload/resize)
-// Disabled auto-open to prevent redirect issues on TV and responsive testing
-window.addEventListener('DOMContentLoaded', () => {
-  // Clean up stale #watch hash on fresh page load to prevent unwanted modal popup
-  if (window.location.hash.startsWith('#watch-')) {
-    window.history.replaceState(null, '', window.location.pathname + window.location.search);
-  }
-});
+// Direct #watch URLs are never auto-opened. Startup and BFCache/session restoration
+// are sanitized by resetRestoredWatchSurface() before interaction.
  
 function exitFSOnEsc(e) {
   if (e.key === 'Escape') togglePlayerFS();
@@ -4124,11 +4195,19 @@ function showToast(msg) {
   const TV_FOCUSABLE_SELECTORS = '.movie-card, .upcoming-card, .cat-tab, .btn-play, .btn-info, .player-chip, .nav-links a, .carousel-arrow, button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
   const isTVNavigationMode = () => isTV || document.documentElement.classList.contains('tv-mode');
 
-  // GUARD: Prevent accidental navigation on initial page load
-  // Many Smart TVs (Tizen, WebOS, Fire TV) fire an Enter/OK key event when app launches
+  // Many Smart TVs (Tizen, WebOS, Fire TV) carry Enter/OK into the page.
+  // Readiness is event-driven only: a release or D-pad/page key, never elapsed time.
   let tvPageReady = false;
   let tvFirstInteractionTime = 0;
-  setTimeout(() => { tvPageReady = true; }, 3000); // Allow launch/OK carry-over to finish before remote activation
+  let observedInteractionEpoch = detailActivationGuard.tvInteractionEpoch;
+
+  function syncTVPageReadiness() {
+    if (observedInteractionEpoch !== detailActivationGuard.tvInteractionEpoch) {
+      observedInteractionEpoch = detailActivationGuard.tvInteractionEpoch;
+      tvPageReady = false;
+      tvFirstInteractionTime = 0;
+    }
+  }
 
   // 1. Add tabindex=0 to all focusable TV elements
   function markFocusable() {
@@ -4264,6 +4343,7 @@ function showToast(msg) {
     // Genuine TV detection and explicit ?tv=1 share the same navigation behavior.
     const isTVMode = isTVNavigationMode();
 
+    if (isTVMode) syncTVPageReadiness();
     if (!isTVMode) {
       // Non-TV: basic Enter/Space click for custom focusable elements
       if ((e.key === 'Enter' || e.key === ' ') && document.activeElement) {
@@ -4278,6 +4358,7 @@ function showToast(msg) {
 
     const key = e.key;
     const keyCode = e.keyCode || e.which;
+    if (!e.isTrusted) return;
 
     // Dedicated page/channel keys provide predictable long-page scrolling on TVs.
     const pageDirection = (key === 'PageDown' || key === 'ChannelDown' || keyCode === 34 || keyCode === 428)
@@ -4286,7 +4367,7 @@ function showToast(msg) {
     if (pageDirection) {
       e.preventDefault();
       tvPageReady = true;
-      detailActivationGuard.tvActivationArmed = true;
+      armTVDetailActivation(false);
       scrollTVPage(pageDirection);
       return;
     }
@@ -4299,7 +4380,7 @@ function showToast(msg) {
     if (directionMap[key]) {
       e.preventDefault();
       tvPageReady = true; // D-pad movement proves this is a deliberate post-launch interaction
-      detailActivationGuard.tvActivationArmed = true;
+      armTVDetailActivation(false);
       const active = document.activeElement;
       if (!active || active === document.body) {
         // No focus yet — focus first safe navigation element (not play button)
@@ -4322,8 +4403,10 @@ function showToast(msg) {
 
     // Enter/Space: Click focused element
     if (key === 'Enter' || key === ' ' || keyCode === 13 || keyCode === 32) {
-      // GUARD: Ignore initial Enter event fired by TV OS on app launch
-      if (!tvPageReady || (!detailActivationGuard.tvActivationArmed && detailNow() < detailActivationGuard.tvAutoArmAt)) {
+      // Ignore synthetic, repeated, carried launch keys and post-keyup bounce.
+      const activationNow = detailNow();
+      if (!e.isTrusted || e.repeat || !tvPageReady || !detailActivationGuard.tvActivationArmed ||
+          activationNow < detailActivationGuard.tvActivationAllowedAt) {
         e.preventDefault();
         return;
       }
@@ -4376,6 +4459,16 @@ function showToast(msg) {
         if (playBtn) playBtn.click();
       }
       return;
+    }
+  });
+
+  document.addEventListener('keyup', (e) => {
+    if (!isTVNavigationMode() || !e.isTrusted) return;
+    syncTVPageReadiness();
+    const code = e.keyCode || e.which;
+    if (e.key === 'Enter' || e.key === ' ' || code === 13 || code === 32) {
+      // Capture arming includes the debounce; this only makes a later keydown eligible.
+      tvPageReady = true;
     }
   });
 

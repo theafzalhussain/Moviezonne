@@ -125,6 +125,7 @@ const FALLBACK_MANIFEST = {
   start_url: '/',
   scope: '/',
   id: '/',
+  launch_handler: { client_mode: 'navigate-existing' },
   display: 'standalone',
   display_override: ['standalone', 'minimal-ui'],
   background_color: '#03030a',

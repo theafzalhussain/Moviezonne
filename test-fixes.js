@@ -12,6 +12,7 @@ for (const key of ['name', 'short_name', 'start_url', 'scope', 'id', 'display', 
 }
 check('manifest display standalone', manifest.display === 'standalone');
 check('manifest start_url/scope/id are root', manifest.start_url === '/' && manifest.scope === '/' && manifest.id === '/');
+check('manifest relaunch navigates existing client to root', manifest.launch_handler && manifest.launch_handler.client_mode === 'navigate-existing');
 check('manifest has usable 192 icon', manifest.icons.some(i => i.sizes === '192x192' && (!i.purpose || i.purpose.includes('any'))));
 check('manifest has usable 512 icon (any)', manifest.icons.some(i => i.sizes === '512x512' && (!i.purpose || i.purpose.includes('any'))));
 check('manifest has usable 512 icon (maskable)', manifest.icons.some(i => i.sizes === '512x512' && i.purpose && i.purpose.includes('maskable')));
@@ -33,7 +34,7 @@ check('index registers SW early', html.indexOf(".register('/sw.js'") > -1 && htm
 check('index has no forced reload loop', !html.includes('window.location.reload') && !html.includes('reloadOnceForControl'));
 check('index waits for controllerchange', html.includes("addEventListener('controllerchange'"));
 check('index loads pwa-install v1.6', html.includes('pwa-install.js?v=1.6') && !html.includes('pwa-install.js?v=1.5'));
-check('index loads moviezone v4.8', html.includes('moviezone.js?v=4.8') && !html.includes('moviezone.js?v=4.7'));
+check('index loads moviezone v4.9', html.includes('moviezone.js?v=4.9') && !html.includes('moviezone.js?v=4.8'));
 check('index loads moviezone styles v4.2', html.includes('moviezone.css?v=4.2') && !html.includes('moviezone.css?v=4.1'));
 check('index declares modern mobile PWA capability', html.includes('<meta name="mobile-web-app-capable" content="yes">'));
 check('collections catalog contains all configured universes', collectionsCatalog && collectionsCatalog.universes && Object.keys(collectionsCatalog.universes).length >= 18);
@@ -62,6 +63,7 @@ check('PWA state is monitored while page lives', pwa.includes('display-mode-chan
 check('TV and desktop popup no longer use dismissal cooldown', !pwa.includes('recentlyDismissed('));
 check('moviezone navbar consumes shared PWA state', moviezone.includes("addEventListener('mz:pwa-statechange'") && moviezone.includes('__mzPwaInstallMonitor'));
 check('server fallback manifest declares related webapp', server.includes('related_applications') && server.includes("platform: 'webapp'"));
+check('server fallback manifest preserves root relaunch navigation', server.includes("launch_handler: { client_mode: 'navigate-existing' }"));
 check('moviezone has no second prompt() implementation', !moviezone.includes('.prompt()'));
 check('moviezone delegates to canonical trigger', moviezone.includes('__mzTriggerInstall'));
 check('min bundle regenerated from canonical trigger', min.includes('__mzTriggerInstall'));
@@ -78,7 +80,25 @@ check('orientation change blocks detail activation', moviezone.includes("window.
 check('watch modal claims activation before history navigation', /async function openModal\([^)]*activationEvent[^)]*\)\s*\{\s*if \(!claimExplicitDetailActivation\(activationEvent\)\) return;\s*\/\/ Add hash/.test(moviezone));
 check('upcoming detail claims activation before opening', /async function openUpcomingDetail\([^)]*activationEvent[^)]*\)\s*\{\s*if \(!claimExplicitDetailActivation\(activationEvent\)\) return;/.test(moviezone));
 check('TV launch key requires release or deliberate navigation', moviezone.includes("document.addEventListener('keyup'") && moviezone.includes('tvActivationArmed') && moviezone.includes('D-pad movement proves'));
-check('stale watch hash is cleaned without auto-open', moviezone.includes("if (window.location.hash.startsWith('#watch-'))") && moviezone.includes('Disabled auto-open'));
+check('TV activation never auto-arms from elapsed startup time',
+  !moviezone.includes('tvAutoArmAt') &&
+  !moviezone.includes('setTimeout(() => { tvPageReady = true; }'));
+check('TV activation requires trusted non-repeat input and post-keyup debounce',
+  moviezone.includes('TV_POST_KEYUP_DEBOUNCE_MS = 400') &&
+  moviezone.includes('if (!event.isTrusted) return;') &&
+  moviezone.includes('if (event.repeat) return;') &&
+  moviezone.includes('activationNow < detailActivationGuard.tvActivationAllowedAt'));
+check('startup and pageshow sanitize restored detail/player state',
+  moviezone.includes('function resetRestoredWatchSurface()') &&
+  moviezone.includes("document.addEventListener('DOMContentLoaded', resetRestoredWatchSurface") &&
+  /window\.addEventListener\('pageshow',[\s\S]*?resetRestoredWatchSurface\(\)/.test(moviezone) &&
+  moviezone.includes("for (const id of ['modal-overlay', 'upcoming-detail-overlay'])") &&
+  moviezone.includes("for (const id of ['videoEmbed', 'udTrailerEmbed'])"));
+check('pageshow resets TV launch readiness epoch',
+  moviezone.includes('resetTVLaunchActivation();') &&
+  moviezone.includes('detailActivationGuard.tvInteractionEpoch += 1') &&
+  moviezone.includes('syncTVPageReadiness()'));
+check('stale watch hash is cleaned without auto-open', moviezone.includes("if (window.location.hash.startsWith('#watch-'))") && moviezone.includes('Direct #watch URLs are never auto-opened'));
 check('all detail callsites propagate activation evidence', !moviezone.includes('openModal(m.id, type);') && !moviezone.includes('openModal(item.id, type);') && !moviezone.includes('openUpcomingDetail(m.id);'));
 
 // Low frame rate may reduce effects, but must never change device identity/navigation mode.
@@ -167,8 +187,8 @@ check('player iframe sandbox blocks top navigation and popups',
 check('legacy beforeunload redirect trap is removed',
   !moviezone.includes("window.addEventListener('beforeunload'"));
 
-check('SW cache is v34', sw.includes("CACHE_NAME = 'moviezone-v34'"));
-check('SW caches moviezone v4.8', sw.includes("'/moviezone.js?v=4.8'"));
+check('SW cache is v35', sw.includes("CACHE_NAME = 'moviezone-v35'"));
+check('SW caches moviezone v4.9', sw.includes("'/moviezone.js?v=4.9'"));
 check('SW caches pwa-install v1.6', sw.includes("'/pwa-install.js?v=1.6'"));
 check('SW treats collections catalog as optional', sw.includes('const OPTIONAL_ASSETS') && sw.includes("'/collections-catalog.json?v=2'") && sw.includes('Promise.allSettled'));
 check('SW uses skipWaiting and clients.claim', sw.includes('self.skipWaiting()') && sw.includes('self.clients.claim()'));
