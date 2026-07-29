@@ -511,6 +511,28 @@
     return installed;
   }
 
+  function isChromiumRuntime() {
+    // Do not rely on Android/Mobile tokens here: Chrome DevTools device emulation
+    // changes the page UA while the host browser (and installed PWA) stays desktop.
+    if (isIOS()) return false;
+    var brands = navigator.userAgentData && navigator.userAgentData.brands;
+    if (Array.isArray(brands) && brands.some(function (item) {
+      return /Chromium|Google Chrome|Microsoft Edge|Opera/i.test(item.brand || '');
+    })) return true;
+    return /(?:Chrome|Chromium|Edg|OPR)\//i.test(navigator.userAgent) &&
+      !/(?:CriOS|EdgiOS|OPiOS)/i.test(navigator.userAgent);
+  }
+
+  function chromiumSuppressesInstallPrompt() {
+    // Chromium does not consistently expose getInstalledRelatedApps() on desktop.
+    // In a normal tab, an installed PWA suppresses beforeinstallprompt and Chrome
+    // shows "Open in app" instead. The head listener is active before this check,
+    // so a missing prompt means either already installed or not currently
+    // installable; neither case should display our install promotion. If Chrome
+    // emits the event later, mz:installready immediately changes the state to false.
+    return isChromiumRuntime() && window.__mzPromptCaptureReady === true && !window.deferredPrompt;
+  }
+
   function detectInstalledApp() {
     if (isStandalone()) {
       setInstalledMarker(true);
@@ -527,12 +549,18 @@
           setInstalledMarker(true);
           return true;
         }
-        // A successful empty result is authoritative once this PWA declares itself
-        // in related_applications; clear a marker left behind by an uninstall.
+        // The API is absent or unreliable on desktop Chrome. Its empty result must
+        // not override Chrome's stronger no-install-prompt/Open-in-app signal.
+        if (chromiumSuppressesInstallPrompt()) return true;
+        // On supported mobile Chromium, an empty successful result is uninstall
+        // evidence and clears a marker left behind by a previous installation.
         setInstalledMarker(false);
         return false;
-      }).catch(function () { return hasInstalledMarker(); });
+      }).catch(function () {
+        return hasInstalledMarker() || chromiumSuppressesInstallPrompt();
+      });
     }
+    if (chromiumSuppressesInstallPrompt()) return Promise.resolve(true);
     // Safari and Firefox cannot query installation from a normal browser tab.
     return Promise.resolve(hasInstalledMarker());
   }

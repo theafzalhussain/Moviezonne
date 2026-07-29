@@ -17,6 +17,10 @@
     {
       "src": "manifest.json",
       "use": "@vercel/static"
+    },
+    {
+      "src": "collections-catalog.json",
+      "use": "@vercel/static"
     }
   ],
   "rewrites": [
@@ -39,6 +43,13 @@
         { "key": "Content-Type", "value": "application/javascript; charset=utf-8" },
         { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
         { "key": "Service-Worker-Allowed", "value": "/" }
+      ]
+    },
+    {
+      "source": "/collections-catalog.json",
+      "headers": [
+        { "key": "Content-Type", "value": "application/json; charset=utf-8" },
+        { "key": "Cache-Control", "value": "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400" }
       ]
     }
   ]

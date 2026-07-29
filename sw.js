@@ -1,12 +1,11 @@
-const CACHE_NAME = 'moviezone-v30';
+const CACHE_NAME = 'moviezone-v32';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/moviezone.css?v=4.0',
   '/search-engine.js?v=1.1',
-  '/moviezone.js?v=4.4',
-  '/collections-catalog.json?v=1',
-  '/pwa-install.js?v=1.5',
+  '/moviezone.js?v=4.6',
+  '/pwa-install.js?v=1.6',
   '/manifest.json',
   '/icon-192.png',
   '/icon-512.png',
@@ -14,10 +13,28 @@ const STATIC_ASSETS = [
   '/apple-touch-icon.png'
 ];
 
+// Large/feature-specific data should never block a new service worker from
+// installing. It is cached opportunistically and fetched from the network if absent.
+const OPTIONAL_ASSETS = [
+  '/collections-catalog.json?v=2'
+];
+
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(STATIC_ASSETS))
+      .then(async cache => {
+        // Core shell failures should remain visible; optional feature data must not
+        // reject the whole service-worker install (the catalog can load online).
+        await cache.addAll(STATIC_ASSETS);
+        const optionalResults = await Promise.allSettled(
+          OPTIONAL_ASSETS.map(asset => cache.add(asset))
+        );
+        optionalResults.forEach((result, index) => {
+          if (result.status === 'rejected') {
+            console.warn('[MovieZone SW] Optional precache skipped:', OPTIONAL_ASSETS[index]);
+          }
+        });
+      })
       .then(() => self.skipWaiting())
   );
 });

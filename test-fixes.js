@@ -6,6 +6,7 @@ const checks = [];
 const check = (name, ok) => checks.push([name, Boolean(ok)]);
 
 const manifest = JSON.parse(read('manifest.json'));
+const collectionsCatalog = JSON.parse(read('collections-catalog.json'));
 for (const key of ['name', 'short_name', 'start_url', 'scope', 'id', 'display', 'icons']) {
   check(`manifest.${key} exists`, Boolean(manifest[key]));
 }
@@ -31,9 +32,12 @@ check('index captures beforeinstallprompt in head', html.indexOf('beforeinstallp
 check('index registers SW early', html.indexOf(".register('/sw.js'") > -1 && html.indexOf(".register('/sw.js'") < html.indexOf('</head>'));
 check('index has no forced reload loop', !html.includes('window.location.reload') && !html.includes('reloadOnceForControl'));
 check('index waits for controllerchange', html.includes("addEventListener('controllerchange'"));
-check('index loads pwa-install v1.5', html.includes('pwa-install.js?v=1.5'));
-check('index loads moviezone v4.4', html.includes('moviezone.js?v=4.4') && !html.includes('moviezone.js?v=4.3'));
+check('index loads pwa-install v1.6', html.includes('pwa-install.js?v=1.6') && !html.includes('pwa-install.js?v=1.5'));
+check('index loads moviezone v4.6', html.includes('moviezone.js?v=4.6') && !html.includes('moviezone.js?v=4.5'));
 check('index keeps moviezone styles v4.0', html.includes('moviezone.css?v=4.0') && !html.includes('moviezone.css?v=4.1'));
+check('index declares modern mobile PWA capability', html.includes('<meta name="mobile-web-app-capable" content="yes">'));
+check('collections catalog contains all configured universes', collectionsCatalog && collectionsCatalog.universes && Object.keys(collectionsCatalog.universes).length >= 18);
+check('collections loader uses deployed absolute v2 asset', moviezone.includes("fetch('/collections-catalog.json?v=2'"));
 
 check('pwa-install has no BOM', pwa.charCodeAt(0) !== 0xFEFF);
 check('pwa-install keeps one deferred prompt source', pwa.includes('window.deferredPrompt'));
@@ -49,6 +53,9 @@ check('pwa-install explains engagement/cooldown policy', pwa.includes('engagemen
 check('pwa-install has no obsolete reload queue', !pwa.includes('__mzControlReloadQueued'));
 check('pwa-install delayed event requires another click', pwa.includes('Ready — tap to install') && pwa.includes('fresh direct click'));
 check('shared PWA monitor is exposed', pwa.includes('window.__mzPwaInstallMonitor') && pwa.includes('refreshInstalledState'));
+check('Chromium normal-tab fallback suppresses false install UI', pwa.includes('function isChromiumRuntime()') && pwa.includes('function chromiumSuppressesInstallPrompt()') && pwa.includes('window.__mzPromptCaptureReady === true'));
+check('Chromium fallback tolerates DevTools mobile UA emulation', pwa.includes('Do not rely on Android/Mobile tokens here') && pwa.includes('if (isIOS()) return false;') && !pwa.includes('if (isIOS() || /Android'));
+check('late native prompt overrides Chromium fallback', pwa.includes("refreshInstalledState('native-prompt-ready', false)") && pwa.includes('prepareUninstalledUI()'));
 check('installed state hides both popup and navbar', pwa.includes("navBtn.style.display = installed ? 'none' : 'flex'") && pwa.includes('closePopup(false)') && pwa.includes('closeTvPopup(false)'));
 check('native install and uninstall evidence updates state', pwa.includes("window.addEventListener('appinstalled'") && pwa.includes("refreshInstalledState('native-prompt-ready', false)"));
 check('PWA state is monitored while page lives', pwa.includes('display-mode-change') && pwa.includes('visibilitychange') && pwa.includes('periodic-monitor'));
@@ -74,14 +81,35 @@ check('TV launch key requires release or deliberate navigation', moviezone.inclu
 check('stale watch hash is cleaned without auto-open', moviezone.includes("if (window.location.hash.startsWith('#watch-'))") && moviezone.includes('Disabled auto-open'));
 check('all detail callsites propagate activation evidence', !moviezone.includes('openModal(m.id, type);') && !moviezone.includes('openModal(item.id, type);') && !moviezone.includes('openUpcomingDetail(m.id);'));
 
-check('SW cache is v30', sw.includes("CACHE_NAME = 'moviezone-v30'"));
-check('SW caches moviezone v4.4', sw.includes("'/moviezone.js?v=4.4'"));
-check('SW caches pwa-install v1.5', sw.includes("'/pwa-install.js?v=1.5'"));
+// Low frame rate may reduce effects, but must never change device identity/navigation mode.
+check('low FPS uses low-end mode without false TV activation',
+  moviezone.includes("lowFPSCount > 3 && !document.documentElement.classList.contains('low-end-mode')") &&
+  !moviezone.includes('Auto-enabled tv-mode due to low FPS'));
+check('real and explicitly forced TV modes remain available',
+  moviezone.includes("if (isTV) document.documentElement.classList.add('tv-mode')") &&
+  moviezone.includes("new URLSearchParams(window.location.search).get('tv') === '1'"));
+
+const playerSandbox = moviezone.match(/iframe\.setAttribute\('sandbox', '([^']+)'\)/);
+check('player iframe sandbox blocks top navigation and popups',
+  playerSandbox && playerSandbox[1].includes('allow-scripts') &&
+  playerSandbox[1].includes('allow-presentation') &&
+  !playerSandbox[1].includes('allow-top-navigation') &&
+  !playerSandbox[1].includes('allow-popups'));
+check('legacy beforeunload redirect trap is removed',
+  !moviezone.includes("window.addEventListener('beforeunload'"));
+
+check('SW cache is v32', sw.includes("CACHE_NAME = 'moviezone-v32'"));
+check('SW caches moviezone v4.6', sw.includes("'/moviezone.js?v=4.6'"));
+check('SW caches pwa-install v1.6', sw.includes("'/pwa-install.js?v=1.6'"));
+check('SW treats collections catalog as optional', sw.includes('const OPTIONAL_ASSETS') && sw.includes("'/collections-catalog.json?v=2'") && sw.includes('Promise.allSettled'));
 check('SW uses skipWaiting and clients.claim', sw.includes('self.skipWaiting()') && sw.includes('self.clients.claim()'));
 check('server manifest MIME configured', server.includes('application/manifest+json'));
 check('server SW MIME configured', server.includes("res.type('application/javascript')"));
 const swHeaders = vercel.headers.find(h => h.source === '/sw.js');
 check('Vercel SW has JavaScript MIME', swHeaders && swHeaders.headers.some(h => h.key === 'Content-Type' && h.value.includes('application/javascript')));
+check('Vercel deploys collections catalog as a static asset', vercel.builds.some(b => b.src === 'collections-catalog.json' && b.use === '@vercel/static'));
+const catalogHeaders = vercel.headers.find(h => h.source === '/collections-catalog.json');
+check('Vercel serves catalog with JSON MIME', catalogHeaders && catalogHeaders.headers.some(h => h.key === 'Content-Type' && h.value.includes('application/json')));
 check('Vercel static JS glob excludes server.js', vercel.builds.some(b => b.use === '@vercel/static' && b.src.includes('search-engine')) && !vercel.builds.some(b => b.use === '@vercel/static' && b.src.includes('**/*') && b.src.includes('js')));
 
 let failed = 0;

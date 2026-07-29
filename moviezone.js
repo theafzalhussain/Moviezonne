@@ -3226,13 +3226,7 @@ const playerSources = [
     // #6: AutoEmbed — India ke networks par blockage kam aati hai
     return (type === 'tv' ? `https://autoembed.co/tv/tmdb/${id}-${s}-${e}` : 'https://autoembed.co/movie/tmdb/' + id) + `?lang=${lang}`;
   }},
-    { name: 'VidCore', dubbed: true, url: (id, lang, type, s, e) => {
-    // #7: VidCore — 14 servers, subtitle support
-    return type === 'tv'
-      ? `https://vidcore.org/embed/tv/${id}/${s}/${e}`
-      : `https://vidcore.org/embed/movie/${id}`;
-  }},
-  { name: 'Flicky Stream', dubbed: true, url: (id, lang, type, s, e) => {
+    { name: 'Flicky Stream', dubbed: true, url: (id, lang, type, s, e) => {
     // #8: Flicky — Working embed, multiple servers
     return type === 'tv'
       ? `https://flicky.host/embed/tv/?id=${id}&s=${s}&e=${e}`
@@ -3493,6 +3487,8 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   iframe.setAttribute('frameborder', '0');
   iframe.setAttribute('scrolling', 'no');
   iframe.setAttribute('allow', 'fullscreen;autoplay;encrypted-media;picture-in-picture');
+  // Keep untrusted player documents contained: no popup or top-navigation capability.
+  iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-presentation');
   iframe.setAttribute('referrerpolicy', 'no-referrer');
   iframe.setAttribute('fetchpriority', 'high'); 
   iframe.setAttribute('loading', 'eager'); 
@@ -3969,18 +3965,10 @@ if (modalOverlay) {
   });
 }
  
-// -- ANTI-REDIRECT (FRAME-BUSTING BLOCKER) WITHOUT SANDBOX --
-// Anti-redirect blocker for mobile (prevents third-party server auto-redirects)
-// TVs par ye block issue create karta hai video iframes ke liye, isliye !isTV par lagaya
-if (!isTV) {
-  window.addEventListener('beforeunload', (e) => {
-    if (currentModalMovie) {
-      e.preventDefault();
-      e.returnValue = 'Ads are trying to redirect you. Stay on this page to continue watching.';
-      return e.returnValue;
-    }
-  });
-}
+// -- PLAYER REDIRECT CONTAINMENT --
+// loadPlayer() sandboxes every third-party frame without popup/top-navigation grants.
+// This blocks player-driven page redirects on desktop, mobile, and TV without a
+// disruptive beforeunload confirmation that some Smart TV browsers cannot display.
  
 document.addEventListener('DOMContentLoaded', () => {
   const langSel = document.getElementById('langSelect');
@@ -4553,15 +4541,10 @@ setTimeout(extractTopKeywords, 3000);
     // If frame took > 100ms (less than 10 FPS), device is struggling
     if (delta > 100) {
       lowFPSCount++;
-      if (lowFPSCount > 3 && !document.documentElement.classList.contains('tv-mode')) {
-        // Only auto-enable tv-mode on devices that are NOT desktop/laptop
-        // Desktop/laptop must ALWAYS keep premium look — only strip particles for perf
-        const isDesktopDevice = /Windows NT|Macintosh|Mac OS X|CrOS|Linux x86_64/i.test(navigator.userAgent);
-        if (!isDesktopDevice) {
-          document.documentElement.classList.add('tv-mode');
-          console.warn('Performance: Auto-enabled tv-mode due to low FPS');
-        }
-        // On ALL devices: remove heavy particles to recover FPS
+      if (lowFPSCount > 3 && !document.documentElement.classList.contains('low-end-mode')) {
+        // Performance is not device identity. Reduce effects, but never enable TV mode:
+        // real TV behavior remains controlled only by explicit TV detection/?tv=1.
+        document.documentElement.classList.add('low-end-mode');
         const particles = document.querySelector('.ambient-particles');
         if (particles) particles.remove();
       }
@@ -5015,7 +4998,7 @@ window.handleNotifyMe = async function(btn) {
   let curatedCatalogPromise = null;
   function loadCuratedCatalog() {
     if (curatedCatalogPromise) return curatedCatalogPromise;
-    curatedCatalogPromise = fetch('collections-catalog.json?v=1', { cache: 'force-cache' })
+    curatedCatalogPromise = fetch('/collections-catalog.json?v=2', { cache: 'force-cache' })
       .then(response => {
         if (!response.ok) throw new Error('Catalog HTTP ' + response.status);
         return response.json();
