@@ -221,15 +221,24 @@ perfStyle.textContent = `
     text-shadow: none !important;
     filter: none !important;
     animation: none !important;
-    transition: outline 0.08s ease, outline-offset 0.08s ease !important;
+    transition: none !important;
     will-change: auto !important;
+    contain: none !important;
+    content-visibility: visible !important;
+  }
+  .tv-mode .movie-card, .tv-mode .upcoming-card,
+  .tv-mode .cat-tab, .tv-mode .btn-play,
+  .tv-mode .btn-info, .tv-mode .player-chip,
+  .tv-mode .nav-links a, .tv-mode .carousel-arrow,
+  .tv-mode button {
+    transition: outline 0.05s linear !important;
   }
   .tv-mode .movie-card:focus, .tv-mode .upcoming-card:focus,
   .tv-mode .cat-tab:focus, .tv-mode .btn-play:focus,
   .tv-mode .btn-info:focus, .tv-mode .player-chip:focus,
   .tv-mode .nav-links a:focus, .tv-mode .carousel-arrow:focus {
-    outline: 2px solid gold !important;
-    outline-offset: 2px !important;
+    outline: 1px solid rgba(255, 193, 7, 0.6) !important;
+    outline-offset: 1px !important;
     transform: none !important;
     z-index: 10 !important;
   }

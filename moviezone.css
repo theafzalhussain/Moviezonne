@@ -4639,13 +4639,17 @@ body.cursor-hover #cursor-dot {
 
 /* === TV MODE: Remove ALL heavy effects, ultra-minimal transitions === */
 .tv-mode * {
+  scroll-behavior: auto !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   text-shadow: none !important;
   filter: none !important;
   animation: none !important;
+  transition: none !important;
   box-shadow: none !important;
   will-change: auto !important;
+  contain: none !important;
+  content-visibility: visible !important;
 }
 
 /* Minimal transition for D-pad outline movement only */
@@ -4654,12 +4658,12 @@ body.cursor-hover #cursor-dot {
 .tv-mode .btn-info, .tv-mode .player-chip,
 .tv-mode .nav-links a, .tv-mode .carousel-arrow,
 .tv-mode button {
-  transition: outline 0.08s ease, outline-offset 0.08s ease !important;
+  transition: outline 0.05s linear !important;
   min-height: 44px;
   cursor: pointer;
 }
 
-/* Subtle 2px gold outline for TV focus — NO scale, NO background change */
+/* Subtle 1px gold outline for TV focus — NO scale, NO background change */
 .tv-mode .movie-card:focus,
 .tv-mode .movie-card:focus-visible,
 .tv-mode .upcoming-card:focus,
@@ -4672,8 +4676,8 @@ body.cursor-hover #cursor-dot {
 .tv-mode .nav-links a:focus,
 .tv-mode .carousel-arrow:focus,
 .tv-mode button:focus {
-  outline: 2px solid gold !important;
-  outline-offset: 2px !important;
+  outline: 1px solid rgba(255, 193, 7, 0.6) !important;
+  outline-offset: 1px !important;
   z-index: 10 !important;
   transform: none !important;
   background-color: inherit !important;
@@ -4682,8 +4686,8 @@ body.cursor-hover #cursor-dot {
 /* TV hover = focus (since TV remotes simulate hover on focus) */
 .tv-mode .movie-card:hover,
 .tv-mode .upcoming-card:hover {
-  outline: 2px solid gold !important;
-  outline-offset: 2px !important;
+  outline: 1px solid rgba(255, 193, 7, 0.6) !important;
+  outline-offset: 1px !important;
   z-index: 10 !important;
   transform: none !important;
   background-color: inherit !important;
@@ -4741,8 +4745,8 @@ body.cursor-hover #cursor-dot {
 .tv-mode .nav-links a:focus,
 .tv-mode .movie-card:hover,
 .tv-mode .upcoming-card:hover {
-  outline: 2px solid var(--gold) !important;
-  outline-offset: 2px !important;
+  outline: 1px solid rgba(255, 193, 7, 0.6) !important;
+  outline-offset: 1px !important;
   transform: none !important;
   background-color: inherit !important;
   z-index: 10 !important;
@@ -4757,6 +4761,13 @@ body.cursor-hover #cursor-dot {
 .low-end-mode .movie-card .card-poster img,
 .low-end-mode .upcoming-card .upcoming-poster img {
   transform: none !important;
+}
+
+/* Remove 3D transforms from cards on TV — saves GPU layers */
+.tv-mode .movie-card, .tv-mode .upcoming-card {
+  transform: none !important;
+  perspective: none !important;
+  transform-style: flat !important;
 }
 
 /* Skip staggered entrance animations — render instantly */
@@ -4798,7 +4809,7 @@ body.cursor-hover #cursor-dot {
 
 /* Carousel arrows: keep visible */
 .tv-mode .carousel-arrow { opacity: 1; background: var(--card); border: 1px solid rgba(255,255,255,0.15); }
-.tv-mode .carousel-arrow:focus { outline: 2px solid var(--gold) !important; }
+.tv-mode .carousel-arrow:focus { outline: 1px solid rgba(255, 193, 7, 0.6) !important; outline-offset: 1px !important; }
 
 /* Progress bar / dot glow are tiny — keep, but drop the pulsing glow animation */
 .tv-mode .dot.active, .low-end-mode .dot.active { animation: none !important; box-shadow: none !important; }
@@ -4858,18 +4869,22 @@ body.cursor-hover #cursor-dot {
 
 .tv-mode #modal-overlay {
   overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+  height: 100vh;
   overscroll-behavior: contain;
 }
 
 .tv-mode .modal-box {
-  overflow: visible !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  height: auto !important;
+  max-height: none !important;
   min-height: auto;
-  height: auto;
 }
 
 .tv-mode .modal-info {
   overflow: visible !important;
-  height: auto;
+  height: auto !important;
 }
 
 /* Scrollbar: thin and visible */
@@ -5053,6 +5068,8 @@ body.cursor-hover #cursor-dot {
 .tv-mode .modal-info {
   max-width: 1400px;
   padding: 3rem 4%;
+  overflow: visible !important;
+  height: auto !important;
 }
 
 .tv-mode .modal-title {
@@ -5089,7 +5106,7 @@ body.cursor-hover #cursor-dot {
   border-radius: 8px;
 }
 
-/* --- TV Focus/Hover: Subtle 2px gold outline only, NO scale, NO bg change --- */
+/* --- TV Focus/Hover: Subtle 1px gold outline only, NO scale, NO bg change --- */
 .tv-mode .movie-card:focus,
 .tv-mode .movie-card:focus-visible,
 .tv-mode .upcoming-card:focus,
@@ -5102,8 +5119,8 @@ body.cursor-hover #cursor-dot {
 .tv-mode .carousel-arrow:focus,
 .tv-mode .movie-card:hover,
 .tv-mode .upcoming-card:hover {
-  outline: 2px solid var(--gold) !important;
-  outline-offset: 2px !important;
+  outline: 1px solid rgba(255, 193, 7, 0.6) !important;
+  outline-offset: 1px !important;
   z-index: 10 !important;
   transform: none !important;
   background-color: inherit !important;
