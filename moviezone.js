@@ -4073,6 +4073,12 @@ function showToast(msg) {
 (function initTVNavigation() {
   const TV_FOCUSABLE_SELECTORS = '.movie-card, .upcoming-card, .cat-tab, .btn-play, .btn-info, .player-chip, .nav-links a, .carousel-arrow, button[tabindex]';
 
+  // GUARD: Prevent accidental navigation on initial page load
+  // Many Smart TVs (Tizen, WebOS, Fire TV) fire an Enter/OK key event when app launches
+  let tvPageReady = false;
+  let tvFirstInteractionTime = 0;
+  setTimeout(() => { tvPageReady = true; }, 1500); // Ignore Enter within first 1.5s of page load
+
   // 1. Add tabindex=0 to all focusable TV elements
   function markFocusable() {
     if (!isTV) return;
@@ -4158,7 +4164,10 @@ function showToast(msg) {
 
   // 3. Main keydown handler for TV
   document.addEventListener('keydown', (e) => {
-    if (!isTV) {
+    // Check BOTH the const and the CSS class (heuristic may have set tv-mode without isTV being true)
+    const isTVMode = isTV || document.documentElement.classList.contains('tv-mode');
+
+    if (!isTVMode) {
       // Non-TV: basic Enter/Space click for custom focusable elements
       if ((e.key === 'Enter' || e.key === ' ') && document.activeElement) {
         const tag = document.activeElement.tagName;
@@ -4182,8 +4191,9 @@ function showToast(msg) {
       e.preventDefault();
       const active = document.activeElement;
       if (!active || active === document.body) {
-        // No focus yet — focus first visible element
-        const first = getVisibleFocusables()[0];
+        // No focus yet — focus first safe navigation element (not play button)
+        const safeFocusables = getVisibleFocusables().filter(el => !el.classList.contains('btn-play') && !el.classList.contains('movie-card'));
+        const first = safeFocusables[0] || getVisibleFocusables()[0];
         if (first) first.focus();
         return;
       }
@@ -4198,6 +4208,19 @@ function showToast(msg) {
 
     // Enter/Space: Click focused element
     if (key === 'Enter' || key === ' ' || keyCode === 13 || keyCode === 32) {
+      // GUARD: Ignore initial Enter event fired by TV OS on app launch
+      if (!tvPageReady) {
+        e.preventDefault();
+        return;
+      }
+      // GUARD: Prevent double-tap within 300ms (TV remotes sometimes send duplicate events)
+      const now = Date.now();
+      if (now - tvFirstInteractionTime < 300) {
+        e.preventDefault();
+        return;
+      }
+      tvFirstInteractionTime = now;
+
       if (document.activeElement && document.activeElement !== document.body) {
         document.activeElement.click();
         e.preventDefault();
@@ -4854,84 +4877,156 @@ window.handleNotifyMe = async function(btn) {
 
 
 
-// === COLLECTIONS HUB (Accurate per-universe data + premium routing) ===
+// === COLLECTIONS HUB (Premium Cinematic Universes — JioHotstar-level luxury) ===
 (function initCollectionsHub() {
-  // Each universe uses whichever TMDB data source actually returns the correct, complete movie list.
-  // "keyword" = shared-universe movies scattered across many TMDB collections (MCU, DCEU).
-  // "collection" = a single reliable TMDB collection id (franchises that aren't multi-studio shared universes).
+  // TMDB sources: "keyword" = discover API with keyword ID, "collection" = collection endpoint
+  // "multi" = multiple collection IDs merged, "tv_keyword" = TV discover with keyword
   const UNIVERSES = [
-    { slug: 'mcu', name: 'Marvel Cinematic Universe', badge: 'MARVEL', tagline: 'Every Avenger. Every Infinity Stone. One universe.', source: 'keyword', id: 180547, accent: 'marvel' },
-    { slug: 'dceu', name: 'DC Extended Universe', badge: 'DC', tagline: 'Superman, Batman and the Justice League, together.', source: 'keyword', id: 229266, accent: 'dc' },
-    { slug: 'wizarding-world', name: 'Harry Potter Collection', badge: 'WIZARDING WORLD', tagline: 'The complete journey through Hogwarts.', source: 'collection', id: 1241, accent: 'wizard' },
-    { slug: 'fast-furious', name: 'Fast & Furious', badge: 'FAMILY', tagline: 'High-octane heists and family loyalty.', source: 'collection', id: 9485, accent: 'fast' },
-    { slug: 'star-wars', name: 'Star Wars', badge: 'STAR WARS', tagline: 'A galaxy far, far away.', source: 'collection', id: 10, accent: 'starwars' },
-    { slug: 'middle-earth', name: 'The Lord of the Rings', badge: 'MIDDLE-EARTH', tagline: 'One ring. One legendary trilogy.', source: 'collection', id: 119, accent: 'lotr' },
-    { slug: 'james-bond', name: 'James Bond', badge: '007', tagline: 'License to thrill, six decades strong.', source: 'collection', id: 645, accent: 'bond' },
-    { slug: 'jurassic-park', name: 'Jurassic Park', badge: 'JURASSIC', tagline: 'Life finds a way.', source: 'collection', id: 328, accent: 'jurassic' },
-    { slug: 'mission-impossible', name: 'Mission: Impossible', badge: 'M:I', tagline: 'Impossible missions, unstoppable agent.', source: 'collection', id: 87359, accent: 'mi' },
-    { slug: 'john-wick', name: 'John Wick', badge: 'ACTION', tagline: 'An unrelenting legend of vengeance.', source: 'collection', id: 404609, accent: 'wick' },
-    { slug: 'conjuring', name: 'The Conjuring Universe', badge: 'HORROR', tagline: 'The most terrifying true-case horror universe.', source: 'collection', id: 313086, accent: 'horror' },
-    { slug: 'httyd', name: 'How to Train Your Dragon', badge: 'ANIMATION', tagline: 'Hiccup, Toothless and the Viking skies.', source: 'collection', id: 89137, accent: 'dragon' },
-    { slug: 'despicable-me', name: 'Despicable Me & Minions', badge: 'ANIMATION', tagline: 'Gru, his Minions and every villain in between.', source: 'collection', id: 86066, accent: 'minions' }
+    // ── SUPERHERO ──
+    { slug: 'mcu', name: 'Marvel Cinematic Universe', badge: 'MARVEL', tagline: 'Every Avenger. Every Infinity Stone. One connected universe.', source: 'keyword', id: 180547, tvKeyword: 180547, accent: 'marvel', category: 'superhero', fetchPages: 5 },
+    { slug: 'dceu', name: 'DC Universe', badge: 'DC', tagline: 'Superman, Batman and the Justice League saga.', source: 'keyword', id: 229266, extraKeywords: [318424], tvKeyword: 229266, extraTvKeywords: [318424], accent: 'dc', category: 'superhero', fetchPages: 4 },
+    // ── SCI-FI ──
+    { slug: 'terminator', name: 'Terminator', badge: 'TERMINATOR', tagline: 'The war between man and machine.', source: 'collection', id: 528, tvKeyword: null, accent: 'terminator', category: 'scifi' },
+    { slug: 'transformers', name: 'Transformers', badge: 'TRANSFORMERS', tagline: 'Robots in disguise — the complete saga.', source: 'collection', id: 8650, tvKeyword: null, accent: 'transformers', category: 'scifi' },
+    // ── FANTASY ──
+    { slug: 'wizarding-world', name: 'Wizarding World', badge: 'WIZARDING WORLD', tagline: 'Harry Potter, Fantastic Beasts — the complete magical journey.', source: 'collection', id: 1241, extraCollections: [435259], tvKeyword: null, accent: 'wizard', category: 'fantasy' },
+    { slug: 'middle-earth', name: 'Middle-earth', badge: 'MIDDLE-EARTH', tagline: 'The Lord of the Rings & The Hobbit — one epic saga.', source: 'collection', id: 119, extraCollections: [121938], tvKeyword: null, accent: 'lotr', category: 'fantasy' },
+    { slug: 'pirates', name: 'Pirates of the Caribbean', badge: 'PIRATES', tagline: 'Captain Jack Sparrow and the cursed seas.', source: 'collection', id: 295, tvKeyword: null, accent: 'pirates', category: 'fantasy' },
+    // ── ACTION ──
+    { slug: 'fast-furious', name: 'Fast & Furious', badge: 'FAST', tagline: 'High-octane heists and family loyalty.', source: 'collection', id: 9485, tvKeyword: null, accent: 'fast', category: 'action' },
+    { slug: 'james-bond', name: 'James Bond 007', badge: '007', tagline: 'License to thrill — six decades of spy action.', source: 'collection', id: 645, tvKeyword: null, accent: 'bond', category: 'action' },
+    { slug: 'mission-impossible', name: 'Mission: Impossible', badge: 'M:I', tagline: 'Impossible missions, unstoppable agent.', source: 'collection', id: 87359, tvKeyword: null, accent: 'mi', category: 'action' },
+    { slug: 'jurassic-park', name: 'Jurassic World', badge: 'JURASSIC', tagline: 'Life finds a way — every dino film & series.', source: 'collection', id: 328, tvKeyword: null, accent: 'jurassic', category: 'action' },
+    { slug: 'predator', name: 'Predator', badge: 'PREDATOR', tagline: 'The ultimate hunters from another world.', source: 'collection', id: 399, tvKeyword: null, accent: 'predator', category: 'action' },
+    // ── HORROR ──
+    { slug: 'conjuring', name: 'The Conjuring Universe', badge: 'CONJURING', tagline: 'The most terrifying true-case horror universe — Conjuring, Annabelle, The Nun & more.', source: 'collection', id: 313086, extraCollections: [402074, 750822], tvKeyword: null, accent: 'horror', category: 'horror' },
+    // ── ANIMATION ──
+    { slug: 'despicable-me', name: 'Despicable Me & Minions', badge: 'MINIONS', tagline: 'Gru, his Minions and every villain in between.', source: 'collection', id: 86066, tvKeyword: null, accent: 'minions', category: 'animation' },
+    { slug: 'toy-story', name: 'Toy Story', badge: 'PIXAR', tagline: 'To infinity and beyond — the Pixar masterpiece.', source: 'collection', id: 10194, tvKeyword: null, accent: 'toystory', category: 'animation' },
+    { slug: 'shrek', name: 'Shrek', badge: 'DREAMWORKS', tagline: 'The ogre, the donkey and far far away.', source: 'collection', id: 2150, tvKeyword: null, accent: 'shrek', category: 'animation' },
+    { slug: 'kung-fu-panda', name: 'Kung Fu Panda', badge: 'DREAMWORKS', tagline: 'There is no secret ingredient — it\'s just you.', source: 'collection', id: 77816, tvKeyword: null, accent: 'kungfu', category: 'animation' },
+    { slug: 'ice-age', name: 'Ice Age', badge: 'BLUE SKY', tagline: 'Manny, Sid, Diego and the herd.', source: 'collection', id: 8354, tvKeyword: null, accent: 'iceage', category: 'animation' }
   ];
 
   const hubCache = new Map();
   let activeUniverseSlug = null;
+  let activeTab = 'all'; // 'all' | 'movies' | 'tv'
+  let activeCategory = 'all';
 
   function getUniverse(slug) {
-    return UNIVERSES.find(universe => universe.slug === slug);
+    return UNIVERSES.find(u => u.slug === slug);
   }
 
+  // Fetch movies for a universe
   async function fetchUniverseMovies(universe) {
-    if (hubCache.has(universe.slug)) return hubCache.get(universe.slug);
+    const cacheKey = universe.slug + '_movies';
+    if (hubCache.has(cacheKey)) return hubCache.get(cacheKey);
 
     const promise = (async () => {
       let movies = [];
       if (universe.source === 'keyword') {
-        const pages = await Promise.allSettled([
-          tmdb('/discover/movie', { with_keywords: String(universe.id), sort_by: 'primary_release_date.asc', language: 'en-US', page: '1' }),
-          tmdb('/discover/movie', { with_keywords: String(universe.id), sort_by: 'primary_release_date.asc', language: 'en-US', page: '2' })
-        ]);
-        pages.forEach(page => { if (page.status === 'fulfilled') movies.push(...(page.value.results || [])); });
-        // Shared-universe keyword sets include a few promo shorts/specials/documentaries — filter those out.
-        movies = movies.filter(movie => {
-          if (!movie.poster_path || (movie.vote_count || 0) < 10) return false;
-          const title = (movie.title || '').toLowerCase();
-          if (/\bspecial\b|behind the scenes|making of|disney\+ day/.test(title)) return false;
+        // Fetch multiple pages for complete data (MCU has 35+ movies)
+        const pageCount = universe.fetchPages || 3;
+        const fetches = [];
+        for (let p = 1; p <= pageCount; p++) {
+          fetches.push(tmdb('/discover/movie', { with_keywords: String(universe.id), sort_by: 'primary_release_date.asc', language: 'en-US', page: String(p) }));
+        }
+        // Also fetch extra keywords (e.g., new DCU keyword separate from DCEU)
+        if (universe.extraKeywords) {
+          for (const kw of universe.extraKeywords) {
+            for (let p = 1; p <= 2; p++) {
+              fetches.push(tmdb('/discover/movie', { with_keywords: String(kw), sort_by: 'primary_release_date.asc', language: 'en-US', page: String(p) }));
+            }
+          }
+        }
+        const pages = await Promise.allSettled(fetches);
+        pages.forEach(p => { if (p.status === 'fulfilled' && p.value && p.value.results) movies.push(...p.value.results); });
+        // Relaxed filter: allow upcoming movies (no vote_count requirement if has poster)
+        movies = movies.filter(m => {
+          if (!m.poster_path) return false;
+          const t = (m.title || '').toLowerCase();
+          if (/\bspecial\b|behind the scenes|making of|disney\+ day|one-shot|assembling/i.test(t)) return false;
+          // Only filter by vote_count for very old movies (before 2000) to remove obscure titles
+          if (m.release_date && m.release_date < '2000' && (m.vote_count || 0) < 10) return false;
           return true;
         });
       } else {
         const data = await tmdb('/collection/' + universe.id, { language: 'en-US' }).catch(() => ({ parts: [] }));
-        movies = (data.parts || []).filter(movie => movie.poster_path);
+        movies = (data.parts || []).filter(m => m.poster_path);
+        // Extra collections (e.g., Fantastic Beasts for Wizarding World)
+        if (universe.extraCollections) {
+          for (const cid of universe.extraCollections) {
+            const extra = await tmdb('/collection/' + cid, { language: 'en-US' }).catch(() => ({ parts: [] }));
+            if (extra.parts) movies.push(...extra.parts.filter(m => m.poster_path));
+          }
+        }
       }
-
       const seen = new Set();
-      const unique = movies.filter(movie => {
-        if (seen.has(movie.id)) return false;
-        seen.add(movie.id);
-        return true;
-      });
-      unique.sort((a, b) => (a.release_date || '9999').localeCompare(b.release_date || '9999'));
-      return unique;
+      return movies.filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; })
+        .sort((a, b) => (a.release_date || '9999').localeCompare(b.release_date || '9999'));
     })();
 
-    hubCache.set(universe.slug, promise);
+    hubCache.set(cacheKey, promise);
     return promise;
   }
 
-  function buildHubCard(universe) {
+  // Fetch TV series for a universe
+  async function fetchUniverseTV(universe) {
+    const cacheKey = universe.slug + '_tv';
+    if (hubCache.has(cacheKey)) return hubCache.get(cacheKey);
+
+    const promise = (async () => {
+      let series = [];
+      const kwId = universe.tvKeyword || universe.id;
+      if (universe.source === 'keyword' || universe.tvKeyword) {
+        const fetches = [];
+        const tvPages = universe.fetchPages ? Math.min(universe.fetchPages, 3) : 2;
+        for (let p = 1; p <= tvPages; p++) {
+          fetches.push(tmdb('/discover/tv', { with_keywords: String(kwId), sort_by: 'first_air_date.asc', language: 'en-US', page: String(p) }));
+        }
+        // Extra TV keywords (e.g., new DCU series keyword)
+        if (universe.extraTvKeywords) {
+          for (const kw of universe.extraTvKeywords) {
+            fetches.push(tmdb('/discover/tv', { with_keywords: String(kw), sort_by: 'first_air_date.asc', language: 'en-US', page: '1' }));
+          }
+        }
+        const pages = await Promise.allSettled(fetches);
+        pages.forEach(p => { if (p.status === 'fulfilled' && p.value && p.value.results) series.push(...p.value.results); });
+        // Relaxed filter: allow upcoming series with poster (no strict vote requirement)
+        series = series.filter(s => {
+          if (!s.poster_path) return false;
+          const t = (s.name || '').toLowerCase();
+          if (/\bspecial\b|behind the scenes|making of|assembled/i.test(t)) return false;
+          return true;
+        });
+      }
+      const seen = new Set();
+      return series.filter(s => { if (seen.has(s.id)) return false; seen.add(s.id); return true; })
+        .sort((a, b) => (a.first_air_date || '9999').localeCompare(b.first_air_date || '9999'));
+    })();
+
+    hubCache.set(cacheKey, promise);
+    return promise;
+  }
+
+  function buildHubCard(universe, index) {
     const card = document.createElement('button');
     card.type = 'button';
     card.className = 'ch-card ch-accent-' + universe.accent;
     card.setAttribute('data-slug', universe.slug);
+    card.setAttribute('data-category', universe.category);
+    card.style.animationDelay = (index * 60) + 'ms';
     card.innerHTML =
       '<div class="ch-card-posters" id="chPosters-' + universe.slug + '"><div class="ch-card-skeleton"></div></div>' +
       '<div class="ch-card-overlay"></div>' +
+      '<div class="ch-card-glow"></div>' +
       '<div class="ch-card-body">' +
         '<span class="ch-card-badge">' + escapeHTML(universe.badge) + '</span>' +
         '<h3>' + escapeHTML(universe.name) + '</h3>' +
         '<p>' + escapeHTML(universe.tagline) + '</p>' +
-        '<span class="ch-card-count" id="chCount-' + universe.slug + '">Loading…</span>' +
+        '<div class="ch-card-meta">' +
+          '<span class="ch-card-count" id="chCount-' + universe.slug + '">Loading…</span>' +
+        '</div>' +
       '</div>';
     card.addEventListener('click', () => openUniverse(universe.slug));
     return card;
@@ -4942,70 +5037,189 @@ window.handleNotifyMe = async function(btn) {
     if (!grid || grid.dataset.built) return;
     grid.dataset.built = '1';
     const fragment = document.createDocumentFragment();
-    UNIVERSES.forEach(universe => fragment.appendChild(buildHubCard(universe)));
+    UNIVERSES.forEach((u, i) => fragment.appendChild(buildHubCard(u, i)));
     grid.appendChild(fragment);
 
-    UNIVERSES.forEach(async universe => {
+    // Update stats
+    const statUniverses = document.getElementById('chStatUniverses');
+    if (statUniverses) statUniverses.textContent = UNIVERSES.length;
+
+    // Load counts and poster previews
+    let totalTitles = 0;
+    UNIVERSES.forEach(async (universe) => {
       try {
-        const movies = await fetchUniverseMovies(universe);
-        const postersEl = document.getElementById('chPosters-' + universe.slug);
+        const [movies, tvSeries] = await Promise.all([
+          fetchUniverseMovies(universe),
+          (universe.tvKeyword || universe.source === 'keyword') ? fetchUniverseTV(universe) : Promise.resolve([])
+        ]);
+        const total = movies.length + tvSeries.length;
+        totalTitles += total;
         const countEl = document.getElementById('chCount-' + universe.slug);
-        if (countEl) countEl.textContent = movies.length + (movies.length === 1 ? ' Movie' : ' Movies');
+        if (countEl) {
+          let text = movies.length + ' Movie' + (movies.length !== 1 ? 's' : '');
+          if (tvSeries.length > 0) text += ' · ' + tvSeries.length + ' Series';
+          countEl.textContent = text;
+        }
+        const postersEl = document.getElementById('chPosters-' + universe.slug);
         if (postersEl) {
-          postersEl.innerHTML = movies.slice(0, 4).map(movie =>
-            '<img src="' + IMG + movie.poster_path + '" alt="" loading="lazy">'
+          const allItems = [...movies, ...tvSeries].filter(m => m.poster_path);
+          postersEl.innerHTML = allItems.slice(0, 4).map(m =>
+            '<img src="' + IMG + m.poster_path + '" alt="" loading="lazy">'
           ).join('') || '<div class="ch-card-empty">Coming soon</div>';
         }
-      } catch (error) {
-        console.warn('[MovieZone] Collections hub failed for', universe.slug, error);
+        // Update global title count
+        const statTitles = document.getElementById('chStatTitles');
+        if (statTitles) statTitles.textContent = totalTitles + '+';
+      } catch (e) {
         const countEl = document.getElementById('chCount-' + universe.slug);
         if (countEl) countEl.textContent = 'Unavailable';
       }
     });
+
+    // Category tab listeners
+    initCategoryTabs();
   }
 
-  function renderUniverseDetail(universe, movies) {
+  function initCategoryTabs() {
+    const tabsContainer = document.getElementById('chCategoryTabs');
+    if (!tabsContainer) return;
+    tabsContainer.querySelectorAll('.ch-cat-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        tabsContainer.querySelectorAll('.ch-cat-tab').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        activeCategory = btn.dataset.cat;
+        filterGridByCategory();
+      });
+    });
+  }
+
+  function filterGridByCategory() {
+    const grid = document.getElementById('chGrid');
+    if (!grid) return;
+    const cards = grid.querySelectorAll('.ch-card');
+    let visibleIdx = 0;
+    cards.forEach(card => {
+      const cat = card.dataset.category;
+      const show = activeCategory === 'all' || cat === activeCategory;
+      card.style.display = show ? '' : 'none';
+      if (show) {
+        card.style.animationDelay = (visibleIdx * 60) + 'ms';
+        card.classList.remove('ch-card-animate');
+        void card.offsetWidth;
+        card.classList.add('ch-card-animate');
+        visibleIdx++;
+      }
+    });
+  }
+
+  function renderUniverseDetail(universe, movies, tvSeries) {
     const detail = document.getElementById('chDetailView');
     if (!detail) return;
 
-    if (!movies.length) {
-      detail.innerHTML = '<div class="ch-detail-empty"><strong>No movies found for this universe yet.</strong><span>Please check back soon.</span></div>';
+    const allItems = [...movies.map(m => ({...m, _type: 'movie'})), ...tvSeries.map(s => ({...s, _type: 'tv'}))];
+    allItems.sort((a, b) => ((a.release_date || a.first_air_date || '9999').localeCompare(b.release_date || b.first_air_date || '9999')));
+
+    if (!allItems.length) {
+      detail.innerHTML = '<div class="ch-detail-empty"><div class="ch-detail-empty-icon">🎬</div><strong>No titles found for this universe yet.</strong><span>Please check back soon.</span></div>';
       return;
     }
 
-    const heroMovie = movies.find(movie => movie.backdrop_path) || movies[0];
-    const cards = movies.map((movie, index) => {
-      const year = (movie.release_date || '').slice(0, 4) || 'TBA';
-      return (
-        '<div class="ch-movie-card" data-movie-id="' + movie.id + '" tabindex="0">' +
-          '<span class="ch-movie-order">' + (index + 1) + '</span>' +
-          '<img src="' + IMG + movie.poster_path + '" alt="' + escapeHTML(movie.title || '') + '" loading="lazy">' +
-          '<div class="ch-movie-rating">★ ' + Number(movie.vote_average || 0).toFixed(1) + '</div>' +
-          '<div class="ch-movie-info"><h4>' + escapeHTML(movie.title || '') + '</h4><span>' + year + '</span></div>' +
-        '</div>'
-      );
-    }).join('');
+    const heroItem = allItems.find(m => m.backdrop_path) || allItems[0];
+    const totalMovies = movies.length;
+    const totalTV = tvSeries.length;
+    const yearStart = (allItems[0].release_date || allItems[0].first_air_date || '').slice(0, 4) || '?';
+    const yearEnd = (allItems[allItems.length - 1].release_date || allItems[allItems.length - 1].first_air_date || '').slice(0, 4) || 'Present';
+
+    function buildCards(items) {
+      return items.map((item, idx) => {
+        const title = item.title || item.name || '';
+        const year = (item.release_date || item.first_air_date || '').slice(0, 4) || 'TBA';
+        const rating = Number(item.vote_average || 0).toFixed(1);
+        const isTV = item._type === 'tv';
+        return (
+          '<div class="ch-movie-card ch-accent-' + universe.accent + '" data-id="' + item.id + '" data-type="' + item._type + '" tabindex="0" style="animation-delay:' + (idx * 50) + 'ms">' +
+            '<div class="ch-movie-card-inner">' +
+              '<span class="ch-movie-order">' + (idx + 1) + '</span>' +
+              (isTV ? '<span class="ch-movie-type-badge ch-type-tv">TV</span>' : '<span class="ch-movie-type-badge ch-type-movie">MOVIE</span>') +
+              '<img src="' + IMG + item.poster_path + '" alt="' + escapeHTML(title) + '" loading="lazy">' +
+              '<div class="ch-movie-rating">★ ' + rating + '</div>' +
+              '<div class="ch-movie-hover-overlay">' +
+                '<div class="ch-movie-hover-play">▶</div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="ch-movie-info"><h4>' + escapeHTML(title) + '</h4><span>' + year + '</span></div>' +
+          '</div>'
+        );
+      }).join('');
+    }
 
     detail.innerHTML =
       '<div class="ch-detail-hero ch-accent-' + universe.accent + '">' +
-        (heroMovie.backdrop_path ? '<img src="https://image.tmdb.org/t/p/w1280' + heroMovie.backdrop_path + '" alt="" class="ch-detail-hero-img">' : '') +
+        (heroItem.backdrop_path ? '<img src="https://image.tmdb.org/t/p/w1280' + heroItem.backdrop_path + '" alt="" class="ch-detail-hero-img">' : '') +
         '<div class="ch-detail-hero-gradient"></div>' +
+        '<div class="ch-detail-hero-particles"></div>' +
         '<div class="ch-detail-hero-content">' +
           '<span class="ch-card-badge">' + escapeHTML(universe.badge) + '</span>' +
           '<h1>' + escapeHTML(universe.name) + '</h1>' +
           '<p>' + escapeHTML(universe.tagline) + '</p>' +
-          '<span class="ch-detail-count">' + movies.length + (movies.length === 1 ? ' Movie · Chronological order' : ' Movies · Chronological order') + '</span>' +
+          '<div class="ch-detail-meta">' +
+            '<span class="ch-detail-count">' + totalMovies + ' Movie' + (totalMovies !== 1 ? 's' : '') + '</span>' +
+            (totalTV > 0 ? '<span class="ch-detail-count">' + totalTV + ' TV Series</span>' : '') +
+            '<span class="ch-detail-count">' + yearStart + ' – ' + yearEnd + '</span>' +
+          '</div>' +
         '</div>' +
       '</div>' +
-      '<div class="ch-movie-grid">' + cards + '</div>';
+      '<div class="ch-detail-tabs">' +
+        '<button class="ch-dtab active" data-filter="all">All (' + allItems.length + ')</button>' +
+        '<button class="ch-dtab" data-filter="movies">Movies (' + totalMovies + ')</button>' +
+        (totalTV > 0 ? '<button class="ch-dtab" data-filter="tv">TV Series (' + totalTV + ')</button>' : '') +
+      '</div>' +
+      '<div class="ch-detail-sort">' +
+        '<button class="ch-sort-btn active" data-sort="release">Release Order</button>' +
+        '<button class="ch-sort-btn" data-sort="rating">Top Rated</button>' +
+        '<button class="ch-sort-btn" data-sort="title">A – Z</button>' +
+      '</div>' +
+      '<div class="ch-movie-grid" id="chMovieGrid">' + buildCards(allItems) + '</div>';
 
-    detail.querySelectorAll('.ch-movie-card').forEach(card => {
-      card.addEventListener('click', () => openModal(Number(card.dataset.movieId), 'movie'));
-      card.addEventListener('keydown', event => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          openModal(Number(card.dataset.movieId), 'movie');
-        }
+    // Tab filtering
+    detail.querySelectorAll('.ch-dtab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        detail.querySelectorAll('.ch-dtab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        const filter = tab.dataset.filter;
+        let filtered = allItems;
+        if (filter === 'movies') filtered = allItems.filter(i => i._type === 'movie');
+        else if (filter === 'tv') filtered = allItems.filter(i => i._type === 'tv');
+        document.getElementById('chMovieGrid').innerHTML = buildCards(filtered);
+        bindMovieCardClicks();
+      });
+    });
+
+    // Sort functionality
+    detail.querySelectorAll('.ch-sort-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        detail.querySelectorAll('.ch-sort-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const sort = btn.dataset.sort;
+        const activeFilter = detail.querySelector('.ch-dtab.active').dataset.filter;
+        let items = [...allItems];
+        if (activeFilter === 'movies') items = items.filter(i => i._type === 'movie');
+        else if (activeFilter === 'tv') items = items.filter(i => i._type === 'tv');
+        if (sort === 'rating') items.sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0));
+        else if (sort === 'title') items.sort((a, b) => (a.title || a.name || '').localeCompare(b.title || b.name || ''));
+        document.getElementById('chMovieGrid').innerHTML = buildCards(items);
+        bindMovieCardClicks();
+      });
+    });
+
+    bindMovieCardClicks();
+  }
+
+  function bindMovieCardClicks() {
+    document.querySelectorAll('#chMovieGrid .ch-movie-card').forEach(card => {
+      card.addEventListener('click', () => openModal(Number(card.dataset.id), card.dataset.type));
+      card.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openModal(Number(card.dataset.id), card.dataset.type); }
       });
     });
   }
@@ -5029,17 +5243,20 @@ window.handleNotifyMe = async function(btn) {
     }
 
     const detail = document.getElementById('chDetailView');
-    if (detail) detail.innerHTML = '<div class="ch-detail-loading"><div class="player-spinner" style="width:46px;height:46px;border-left-color:var(--gold);"></div><p>Loading ' + escapeHTML(universe.name) + '…</p></div>';
+    if (detail) detail.innerHTML = '<div class="ch-detail-loading"><div class="ch-loading-spinner"></div><p>Loading ' + escapeHTML(universe.name) + '…</p></div>';
 
     const scroller = document.getElementById('chScroll');
     if (scroller) scroller.scrollTo({ top: 0, behavior: 'instant' in Object.getPrototypeOf(scroller.scrollTo || {}) ? 'instant' : 'auto' });
 
     try {
-      const movies = await fetchUniverseMovies(universe);
-      if (activeUniverseSlug === slug) renderUniverseDetail(universe, movies);
+      const [movies, tvSeries] = await Promise.all([
+        fetchUniverseMovies(universe),
+        (universe.tvKeyword || universe.source === 'keyword') ? fetchUniverseTV(universe) : Promise.resolve([])
+      ]);
+      if (activeUniverseSlug === slug) renderUniverseDetail(universe, movies, tvSeries);
     } catch (error) {
       console.warn('[MovieZone] Failed to open universe', slug, error);
-      if (detail) detail.innerHTML = '<div class="ch-detail-empty"><strong>Could not load this universe.</strong><span>Please try again in a moment.</span></div>';
+      if (detail) detail.innerHTML = '<div class="ch-detail-empty"><div class="ch-detail-empty-icon">⚠️</div><strong>Could not load this universe.</strong><span>Please try again in a moment.</span></div>';
     }
   }
 
@@ -5057,6 +5274,75 @@ window.handleNotifyMe = async function(btn) {
     }
   }
 
+  // Particle system for premium ambient effect
+  let particleAnimFrame = null;
+  function initParticles() {
+    const canvas = document.getElementById('chParticleCanvas');
+    if (!canvas || canvas.dataset.init) return;
+    canvas.dataset.init = '1';
+    const ctx = canvas.getContext('2d');
+    let particles = [];
+    const PARTICLE_COUNT = window.innerWidth < 768 ? 30 : 60;
+
+    function resize() {
+      canvas.width = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      particles.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        r: Math.random() * 2 + 0.5,
+        dx: (Math.random() - 0.5) * 0.4,
+        dy: (Math.random() - 0.5) * 0.3,
+        o: Math.random() * 0.4 + 0.1,
+        color: Math.random() > 0.5 ? 'rgba(245,197,24,' : 'rgba(124,58,237,'
+      });
+    }
+
+    function animate() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      particles.forEach(p => {
+        p.x += p.dx;
+        p.y += p.dy;
+        if (p.x < 0 || p.x > canvas.width) p.dx *= -1;
+        if (p.y < 0 || p.y > canvas.height) p.dy *= -1;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = p.color + p.o + ')';
+        ctx.fill();
+      });
+      // Draw connecting lines
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const dx = particles[i].x - particles[j].x;
+          const dy = particles[i].y - particles[j].y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 100) {
+            ctx.beginPath();
+            ctx.moveTo(particles[i].x, particles[i].y);
+            ctx.lineTo(particles[j].x, particles[j].y);
+            ctx.strokeStyle = 'rgba(245,197,24,' + (0.06 * (1 - dist / 100)) + ')';
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+          }
+        }
+      }
+      particleAnimFrame = requestAnimationFrame(animate);
+    }
+    animate();
+  }
+
+  function stopParticles() {
+    if (particleAnimFrame) {
+      cancelAnimationFrame(particleAnimFrame);
+      particleAnimFrame = null;
+    }
+  }
+
   window.openCollectionsHub = function(event, initialSlug) {
     if (event) event.preventDefault();
     openCollectionsHubOverlay({});
@@ -5071,6 +5357,7 @@ window.handleNotifyMe = async function(btn) {
       document.body.style.overflow = 'hidden';
     }
     renderHubGrid();
+    initParticles();
     if (!(options && options.skipHistory) && !window.location.hash.startsWith('#collections')) {
       window.history.pushState({ collectionsHub: true }, '', '#collections');
     }
@@ -5082,6 +5369,7 @@ window.handleNotifyMe = async function(btn) {
     overlay.classList.remove('open', 'detail-mode');
     document.body.style.overflow = '';
     activeUniverseSlug = null;
+    stopParticles();
     if (!(options && options.skipHistory) && window.location.hash.startsWith('#collections')) {
       window.history.back();
     }
@@ -5110,10 +5398,11 @@ window.handleNotifyMe = async function(btn) {
       overlay.classList.remove('open', 'detail-mode');
       document.body.style.overflow = '';
       activeUniverseSlug = null;
+      stopParticles();
     }
   });
 
-  // Deep-link support: opening the site directly on #collections or #collections-<slug>
+  // Deep-link support
   if (window.location.hash.startsWith('#collections')) {
     document.addEventListener('DOMContentLoaded', () => {
       const hash = window.location.hash;

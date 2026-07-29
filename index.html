@@ -280,19 +280,35 @@
 <!-- ── UPCOMING MOVIE DETAIL MODAL ── -->
 <!-- â”€â”€ COLLECTIONS HUB (Premium Universes) â”€â”€ -->
 <div id="collections-hub-overlay" class="collections-hub-overlay">
+  <canvas id="chParticleCanvas" class="ch-particle-canvas"></canvas>
   <div class="ch-topbar">
     <button class="ch-back-btn" id="chBackBtn" onclick="handleCollectionsBack()" aria-label="Back">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
       <span id="chBackLabel">Close</span>
     </button>
     <div class="ch-topbar-title" id="chTopbarTitle">Collections &amp; Universes</div>
+    <div class="ch-topbar-stats" id="chTopbarStats"></div>
   </div>
   <div class="ch-scroll" id="chScroll">
     <div class="ch-hub-view" id="chHubView">
       <div class="ch-hero">
-        <div class="ch-hero-badge">MOVIEZONE ORIGINALS</div>
-        <h1>Collections &amp; Universes</h1>
-        <p>Explore every franchise in one premium hub — from the Marvel Cinematic Universe to Wizarding World, all perfectly organized in release order.</p>
+        <div class="ch-hero-glow"></div>
+        <div class="ch-hero-badge">&#10022; MOVIEZONE PREMIUM</div>
+        <h1>Cinematic <span class="ch-hero-gradient-text">Universes</span></h1>
+        <p>Every franchise. Every timeline. Movies &amp; TV Series — all A to Z in one luxury hub.</p>
+        <div class="ch-hero-stats">
+          <div class="ch-stat-card"><span class="ch-stat-num" id="chStatUniverses">0</span><span class="ch-stat-label">Universes</span></div>
+          <div class="ch-stat-card"><span class="ch-stat-num" id="chStatTitles">0</span><span class="ch-stat-label">Titles</span></div>
+          <div class="ch-stat-card"><span class="ch-stat-num" id="chStatYears">60+</span><span class="ch-stat-label">Years</span></div>
+        </div>
+      </div>
+      <div class="ch-category-tabs" id="chCategoryTabs">
+        <button class="ch-cat-tab active" data-cat="all">All Universes</button>
+        <button class="ch-cat-tab" data-cat="superhero">Superhero</button>
+        <button class="ch-cat-tab" data-cat="scifi">Sci-Fi</button>
+        <button class="ch-cat-tab" data-cat="fantasy">Fantasy</button>
+        <button class="ch-cat-tab" data-cat="action">Action</button>
+        <button class="ch-cat-tab" data-cat="animation">Animation</button>
       </div>
       <div class="ch-grid" id="chGrid"></div>
     </div>
