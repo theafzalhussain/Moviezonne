@@ -11,7 +11,7 @@ const isTV = (() => {
 
   // Signal 1: User-Agent detection ONLY for confirmed TV platforms
   // These strings appear ONLY in actual Smart TV browsers, never in laptops
-  const tvUA = /SmartTV|Web0S|WebOS|Tizen|VIDAA|Roku|RokuOS|AppleTV|Apple TV|Android TV|AndroidTV|BRAVIA|AFTT|AFTS|AFTM|AFTB|AFTKMST|Fire TV|FireTV|CrKey|Chromecast|GoogleTV|Google TV|PlayStation|PS[45]|Xbox One|XBOX|SmartCast|PHILIPSTV|HbbTV|Opera TV|NETTV|Panasonic.*Viera|Vestel|DuneHD|Eltex|NetCast/i.test(ua);
+  const tvUA = /SmartTV|Web0S|WebOS|Tizen|VIDAA|Roku|RokuOS|AppleTV|Apple TV|Android TV|AndroidTV|BRAVIA|AFTT|AFTS|AFTM|AFTB|AFTKMST|Fire TV|FireTV|CrKey|Chromecast|GoogleTV|Google TV|PlayStation|PS[45]|Xbox One|XBOX|SmartCast|PHILIPSTV|HbbTV|Opera TV|NETTV|Panasonic.*Viera|Vestel|DuneHD|Eltex|NetCast|MITV|MiTV/i.test(ua);
   if (tvUA) return true;
 
   // Signal 2: navigator.userAgentData platform hints (Chromium-based TV browsers)
@@ -88,6 +88,13 @@ function getResponsiveBackdrop(path) {
 // Tag <html> early so CSS can strip expensive effects (backdrop-filter, film grain, Ken Burns, etc.)
 // Apply to ALL mobiles and TVs - even mid-range phones lag with these effects
 if (isTV) document.documentElement.classList.add('tv-mode');
+
+// Allow manual TV mode via URL parameter (?tv=1) for Cast/HDMI scenarios
+if (new URLSearchParams(window.location.search).get('tv') === '1') {
+  document.documentElement.classList.add('tv-mode');
+  console.log('[MovieZone] TV mode forced via URL parameter');
+}
+
 console.log('[MovieZone] TV Detection:', isTV, '| UA:', navigator.userAgent.substring(0, 80));
 if (isMobile) document.documentElement.classList.add('low-end-mode');
 
@@ -103,6 +110,15 @@ if (isMobile) document.documentElement.classList.add('low-end-mode');
   if (isLargeScreen && isTouch && noFinePointer) {
     document.documentElement.classList.add('tv-mode');
     console.log('[MovieZone] TV mode activated via screen heuristic (large + touch-only)');
+  }
+  
+  // Xiaomi/Android TV fallback: Large screen + Android UA (not phone) + high resolution
+  if (isLargeScreen && /Android/i.test(navigator.userAgent) && window.screen.height >= 900) {
+    const isPhone = /Mobile|Phone/i.test(navigator.userAgent);
+    if (!isPhone) {
+      document.documentElement.classList.add('tv-mode');
+      console.log('[MovieZone] TV mode activated via Android large-screen heuristic');
+    }
   }
   
   // For all large screens (1920px+): reduce GPU-heavy effects for smoother rendering
