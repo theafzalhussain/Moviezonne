@@ -3,18 +3,12 @@ const isLocalhost = window.location.hostname === 'localhost' || window.location.
 const isTV = (() => {
   const ua = navigator.userAgent;
 
-  // ANTI-FALSE-POSITIVE: If device is clearly a laptop/desktop/mobile, NEVER return true
-  // Windows, Mac, Linux desktops, ChromeOS, standard mobile — these are NEVER TVs
-  const isDesktopOS = /Windows NT|Macintosh|Mac OS X|CrOS|Ubuntu|Fedora|Linux x86_64|Linux i686/i.test(ua);
-  const isMobileDevice = /Mobi|Android(?!.*TV)|iPhone|iPad|iPod/i.test(ua);
-  if (isDesktopOS || isMobileDevice) return false;
-
-  // Signal 1: User-Agent detection ONLY for confirmed TV platforms
-  // These strings appear ONLY in actual Smart TV browsers, never in laptops
-  const tvUA = /SmartTV|Web0S|WebOS|Tizen|VIDAA|Roku|RokuOS|AppleTV|Apple TV|Android TV|AndroidTV|BRAVIA|AFTT|AFTS|AFTM|AFTB|AFTKMST|Fire TV|FireTV|CrKey|Chromecast|GoogleTV|Google TV|PlayStation|PS[45]|Xbox One|XBOX|SmartCast|PHILIPSTV|HbbTV|Opera TV|NETTV|Panasonic.*Viera|Vestel|DuneHD|Eltex|NetCast|MITV|MiTV/i.test(ua);
+  // Confirmed TV signatures must be checked before generic OS tokens. Fire TV,
+  // BRAVIA, Xbox and some Android TV UAs also contain Android/Windows/Linux.
+  const tvUA = /SmartTV|Web0S|WebOS|Tizen|VIDAA|Roku|RokuOS|AppleTV|Apple TV|Android TV|AndroidTV|BRAVIA|AFT[A-Z0-9]+|Fire TV|FireTV|CrKey|Chromecast|GoogleTV|Google TV|PlayStation|PS[45]|Xbox One|XBOX|SmartCast|PHILIPSTV|HbbTV|Opera TV|NETTV|Panasonic.*Viera|Vestel|DuneHD|Eltex|NetCast|MITV|MiTV/i.test(ua);
   if (tvUA) return true;
 
-  // Signal 2: navigator.userAgentData platform hints (Chromium-based TV browsers)
+  // Chromium TV platform hints can remain reliable even when the UA is reduced.
   if (navigator.userAgentData) {
     const platform = (navigator.userAgentData.platform || '').toLowerCase();
     if (/smarttv|tizen|webos|android tv|googletv|chromecast|firetv/.test(platform)) return true;
@@ -23,14 +17,17 @@ const isTV = (() => {
     if (/tizen|webos|smarttv|googletv|firetv/.test(brandStr)) return true;
   }
 
-  // NO screen heuristic fallback — too risky for false positives
-  // Only UA-based detection ensures laptop/desktop is NEVER wrongly identified as TV
+  // Standard desktop/mobile OS signatures are never promoted to TV mode.
+  const isDesktopOS = /Windows NT|Macintosh|Mac OS X|CrOS|Ubuntu|Fedora|Linux x86_64|Linux i686/i.test(ua);
+  const isMobileDevice = /Mobi|Android|iPhone|iPad|iPod/i.test(ua);
+  if (isDesktopOS || isMobileDevice) return false;
 
+  // Device identity is never inferred from screen size, pointer type or FPS.
   return false;
 })();
 
-// Balanced Performance: Mobil/Tablet ko low-end manein, par Desktops/Laptops (bhale hi touch ho) ko full features dein
-const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+// Balanced Performance: phones/tablets use low-end mode; confirmed TVs use tv-mode.
+const isMobile = !isTV && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
 const isLowEnd = (navigator.deviceMemory && navigator.deviceMemory < 4) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency < 4);
 const isTouchOnly = window.matchMedia('(pointer: coarse)').matches && !window.matchMedia('(pointer: fine)').matches;
 
@@ -78,7 +75,7 @@ function getResponsiveBackdrop(path) {
   const isSlow = conn && (conn.saveData || /^[23]g/.test(conn.effectiveType));
   
   if (isSlow) return `https://image.tmdb.org/t/p/w500${path}`; // Prevents lag on slow networks
-  if (isTV || isMobile) return `https://image.tmdb.org/t/p/w780${path}`; // Balanced for mobile/TV
+  if (isTV || document.documentElement.classList.contains('tv-mode') || isMobile) return `https://image.tmdb.org/t/p/w780${path}`; // Balanced for mobile/detected/forced TV
   if (!isLowEnd) return `https://image.tmdb.org/t/p/original${path}`; // Ultra HD for powerful desktops
   return `https://image.tmdb.org/t/p/w1280${path}`; // Normal HD fallback
 }
@@ -98,33 +95,11 @@ if (new URLSearchParams(window.location.search).get('tv') === '1') {
 console.log('[MovieZone] TV Detection:', isTV, '| UA:', navigator.userAgent.substring(0, 80));
 if (isMobile) document.documentElement.classList.add('low-end-mode');
 
-// -- TV SCREEN PERFORMANCE: Large screen optimizations (even without TV UA detection) --
-// When screen is 1920px+ and NOT a desktop OS with mouse pointer, likely a TV via Cast/HDMI
-(function tvScreenPerf() {
-  if (isTV) return; // Already handled above
-  const isLargeScreen = window.innerWidth >= 1920;
-  const isTouch = window.matchMedia('(pointer: coarse)').matches;
-  const noFinePointer = !window.matchMedia('(pointer: fine)').matches;
-  
-  // If large screen + touch-only (no mouse) = likely TV via Cast
-  if (isLargeScreen && isTouch && noFinePointer) {
-    document.documentElement.classList.add('tv-mode');
-    console.log('[MovieZone] TV mode activated via screen heuristic (large + touch-only)');
-  }
-  
-  // Xiaomi/Android TV fallback: Large screen + Android UA (not phone) + high resolution
-  if (isLargeScreen && /Android/i.test(navigator.userAgent) && window.screen.height >= 900) {
-    const isPhone = /Mobile|Phone/i.test(navigator.userAgent);
-    if (!isPhone) {
-      document.documentElement.classList.add('tv-mode');
-      console.log('[MovieZone] TV mode activated via Android large-screen heuristic');
-    }
-  }
-  
-  // For all large screens (1920px+): reduce GPU-heavy effects for smoother rendering
-  if (isLargeScreen) {
-    document.documentElement.classList.add('large-screen-mode');
-  }
+// -- LARGE-SCREEN PERFORMANCE ONLY --
+// Resolution/pointer emulation is not device identity. Large displays may receive
+// lighter GPU styling, but TV navigation is enabled only by confirmed UA hints or ?tv=1.
+(function largeScreenPerf() {
+  if (window.innerWidth >= 1920) document.documentElement.classList.add('large-screen-mode');
 })();
  
 // -- PERFORMANCE BOOST STYLES --
@@ -1724,7 +1699,7 @@ function filterCat(cat, e) {
   const h = document.getElementById('sectionHeading');
   if (h) h.textContent = CAT_HEADINGS[cat] || 'MOVIES';
   const sec = document.getElementById('movies-section');
-  if (sec) sec.scrollIntoView({ behavior: 'smooth' });
+  if (sec) sec.scrollIntoView({ behavior: isTVLikeMode() ? 'auto' : 'smooth' });
   loadMovies(cat);
 }
  
@@ -1780,7 +1755,7 @@ function showWatchlist(e) {
     h.innerHTML = 'MY WATCHLIST' + (watchlist.length > 0 ? ' <button onclick="clearWatchlist()" class="clear-watchlist-btn"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg> Clear All</button>' : '');
   }
   const sec = document.getElementById('movies-section');
-  if (sec) sec.scrollIntoView({ behavior: 'smooth' });
+  if (sec) sec.scrollIntoView({ behavior: isTVLikeMode() ? 'auto' : 'smooth' });
   renderMovies(watchlist);
   const loadMoreBtn = document.getElementById('loadMoreMoviesBtn');
   if (loadMoreBtn) loadMoreBtn.style.display = 'none';
@@ -2140,7 +2115,7 @@ function playUpcomingTrailer() {
   const embed = document.getElementById('udTrailerEmbed');
   section.style.display = 'block';
   embed.innerHTML = '<iframe src="https://www.youtube.com/embed/' + upcomingTrailerKey + '?autoplay=1&rel=0" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen style="width:100%;aspect-ratio:16/9;border-radius:12px;"></iframe>';
-  section.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  section.scrollIntoView({ behavior: isTVLikeMode() ? 'auto' : 'smooth', block: 'center' });
 }
 
 function handleUpcomingWatchlist() {
@@ -2473,7 +2448,7 @@ async function searchAndDisplay(query) {
   const heading = document.getElementById('sectionHeading');
   if (heading) heading.textContent = 'SEARCHING FOR "' + query.toUpperCase() + '"...';
   const section = document.getElementById('movies-section');
-  if (section) section.scrollIntoView({ behavior: 'smooth' });
+  if (section) section.scrollIntoView({ behavior: isTVLikeMode() ? 'auto' : 'smooth' });
 
   try {
     const search = await intelligentMovieSearch(query, 40);
@@ -3172,8 +3147,8 @@ async function loadRelatedMovies(id, type) {
         if (nextBtn) nextBtn.disabled = grid.scrollLeft >= (grid.scrollWidth - grid.clientWidth - 10);
       };
 
-      if (prevBtn) prevBtn.onclick = () => { grid.scrollBy({ left: -scrollAmount, behavior: 'smooth' }); };
-      if (nextBtn) nextBtn.onclick = () => { grid.scrollBy({ left: scrollAmount, behavior: 'smooth' }); };
+      if (prevBtn) prevBtn.onclick = () => { grid.scrollBy({ left: -scrollAmount, behavior: isTVLikeMode() ? 'auto' : 'smooth' }); };
+      if (nextBtn) nextBtn.onclick = () => { grid.scrollBy({ left: scrollAmount, behavior: isTVLikeMode() ? 'auto' : 'smooth' }); };
 
       grid.addEventListener('scroll', updateArrowState, { passive: true });
       updateArrowState();
@@ -3560,7 +3535,7 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   showToast('' + buildSourceLabel(srcIdx) + ' |  ' + _toastLangName + ' | ' + _dubbedStatus + (type === 'tv' ? ` | S${s} E${e}` : ''));
  
   // Smooth scroll to video player
-  setTimeout(() => embedEl.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
+  setTimeout(() => embedEl.scrollIntoView({ behavior: isTVLikeMode() ? 'auto' : 'smooth', block: 'center' }), 300);
   
 }
 
@@ -4146,7 +4121,8 @@ function showToast(msg) {
  
 // -- TV REMOTE NAVIGATION: Full D-Pad Spatial Navigation System --
 (function initTVNavigation() {
-  const TV_FOCUSABLE_SELECTORS = '.movie-card, .upcoming-card, .cat-tab, .btn-play, .btn-info, .player-chip, .nav-links a, .carousel-arrow, button[tabindex]';
+  const TV_FOCUSABLE_SELECTORS = '.movie-card, .upcoming-card, .cat-tab, .btn-play, .btn-info, .player-chip, .nav-links a, .carousel-arrow, button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+  const isTVNavigationMode = () => isTV || document.documentElement.classList.contains('tv-mode');
 
   // GUARD: Prevent accidental navigation on initial page load
   // Many Smart TVs (Tizen, WebOS, Fire TV) fire an Enter/OK key event when app launches
@@ -4156,7 +4132,7 @@ function showToast(msg) {
 
   // 1. Add tabindex=0 to all focusable TV elements
   function markFocusable() {
-    if (!isTV) return;
+    if (!isTVNavigationMode()) return;
     document.querySelectorAll(TV_FOCUSABLE_SELECTORS).forEach(el => {
       if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
     });
@@ -4170,7 +4146,7 @@ function showToast(msg) {
   }
 
   // Re-run when new cards are rendered (MutationObserver)
-  if (isTV) {
+  if (isTVNavigationMode()) {
     const observer = new MutationObserver((mutations) => {
       let hasNewNodes = false;
       for (const m of mutations) {
@@ -4239,8 +4215,8 @@ function showToast(msg) {
 
   // 3. Main keydown handler for TV
   document.addEventListener('keydown', (e) => {
-    // Check BOTH the const and the CSS class (heuristic may have set tv-mode without isTV being true)
-    const isTVMode = isTV || document.documentElement.classList.contains('tv-mode');
+    // Genuine TV detection and explicit ?tv=1 share the same navigation behavior.
+    const isTVMode = isTVNavigationMode();
 
     if (!isTVMode) {
       // Non-TV: basic Enter/Space click for custom focusable elements
@@ -4278,7 +4254,7 @@ function showToast(msg) {
       if (target) {
         target.focus();
         // Smooth scroll to center
-        target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+        target.scrollIntoView({ behavior: isTVLikeMode() ? 'auto' : 'smooth', block: 'center', inline: 'center' });
       }
       return;
     }
@@ -4305,8 +4281,9 @@ function showToast(msg) {
       return;
     }
 
-    // Back keys: Escape, Tizen (10009), WebOS (461), Backspace
-    const isBackKey = key === 'Escape' || keyCode === 27 || keyCode === 10009 || keyCode === 461 ||
+    // Back keys: Android/Fire TV (4/BrowserBack), Tizen (10009), WebOS (461), Escape/Backspace
+    const isBackKey = key === 'Escape' || key === 'BrowserBack' || key === 'GoBack' ||
+      keyCode === 4 || keyCode === 27 || keyCode === 10009 || keyCode === 461 ||
       (key === 'Backspace' && document.activeElement && document.activeElement.tagName !== 'INPUT');
     if (isBackKey) {
       const overlay = document.getElementById('modal-overlay');
@@ -4342,11 +4319,11 @@ function showToast(msg) {
   });
 
   // 6. Auto-scroll focused element to center (for focus via Tab or programmatic focus)
-  if (isTV) {
+  if (isTVNavigationMode()) {
     document.addEventListener('focus', (e) => {
       const overlay = document.getElementById('modal-overlay');
       if (e.target && e.target.scrollIntoView && (!overlay || !overlay.classList.contains('open'))) {
-        e.target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+        e.target.scrollIntoView({ behavior: isTVLikeMode() ? 'auto' : 'smooth', block: 'center', inline: 'center' });
       }
     }, true);
   }
@@ -4393,7 +4370,7 @@ function goHome(e) {
   const loadMoreBtnUpcoming = document.getElementById('loadMoreUpcomingBtn');
   if (loadMoreBtnUpcoming) loadMoreBtnUpcoming.style.display = 'none';
   
-  if (!isHash) window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (!isHash) window.scrollTo({ top: 0, behavior: isTVLikeMode() ? 'auto' : 'smooth' });
 }
  
 
@@ -4495,7 +4472,7 @@ setTimeout(extractTopKeywords, 3000);
   const MAX_CARDS_DESKTOP = 80;
   
   const getMaxCards = () => {
-    if (isTV) return MAX_CARDS_TV;
+    if (isTVLikeMode()) return MAX_CARDS_TV;
     if (isMobile || isLowEnd) return MAX_CARDS_MOBILE;
     return MAX_CARDS_DESKTOP;
   };
@@ -4529,32 +4506,37 @@ setTimeout(extractTopKeywords, 3000);
     }, 10000);
   }
   
-  // 4. Detect if page becomes unresponsive and lighten load
+  // 4. Sample startup responsiveness, then stop to avoid a permanent per-frame task.
   let lastFrameTime = performance.now();
   let lowFPSCount = 0;
-  
+  let performanceSamples = 0;
+  const MAX_PERFORMANCE_SAMPLES = 300;
+
   function checkPerformance() {
     const now = performance.now();
     const delta = now - lastFrameTime;
     lastFrameTime = now;
-    
-    // If frame took > 100ms (less than 10 FPS), device is struggling
+    performanceSamples++;
+
+    // If four startup frames take >100ms, reduce effects without changing identity.
     if (delta > 100) {
       lowFPSCount++;
       if (lowFPSCount > 3 && !document.documentElement.classList.contains('low-end-mode')) {
-        // Performance is not device identity. Reduce effects, but never enable TV mode:
-        // real TV behavior remains controlled only by explicit TV detection/?tv=1.
         document.documentElement.classList.add('low-end-mode');
         const particles = document.querySelector('.ambient-particles');
         if (particles) particles.remove();
+        return;
       }
     } else {
       lowFPSCount = Math.max(0, lowFPSCount - 1);
     }
+    if (performanceSamples < MAX_PERFORMANCE_SAMPLES) requestAnimationFrame(checkPerformance);
+  }
+
+  // TV/mobile/forced-TV modes are already optimized; do not spend frames measuring them.
+  if (!isTVLikeMode() && !document.documentElement.classList.contains('low-end-mode')) {
     requestAnimationFrame(checkPerformance);
   }
-  // Run FPS monitor on all devices to auto-detect lag
-  requestAnimationFrame(checkPerformance);
 })();
 
 init();

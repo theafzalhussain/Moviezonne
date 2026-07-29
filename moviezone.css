@@ -4638,6 +4638,10 @@ body.cursor-hover #cursor-dot {
    ═══════════════════════════════════════════════════════════════ */
 
 /* === TV MODE: Remove ALL heavy effects, ultra-minimal transitions === */
+.tv-mode {
+  scroll-behavior: auto !important;
+}
+
 .tv-mode * {
   scroll-behavior: auto !important;
   backdrop-filter: none !important;
@@ -4648,8 +4652,6 @@ body.cursor-hover #cursor-dot {
   transition: none !important;
   box-shadow: none !important;
   will-change: auto !important;
-  contain: none !important;
-  content-visibility: visible !important;
 }
 
 /* Minimal transition for D-pad outline movement only */

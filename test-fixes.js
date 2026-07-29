@@ -33,8 +33,8 @@ check('index registers SW early', html.indexOf(".register('/sw.js'") > -1 && htm
 check('index has no forced reload loop', !html.includes('window.location.reload') && !html.includes('reloadOnceForControl'));
 check('index waits for controllerchange', html.includes("addEventListener('controllerchange'"));
 check('index loads pwa-install v1.6', html.includes('pwa-install.js?v=1.6') && !html.includes('pwa-install.js?v=1.5'));
-check('index loads moviezone v4.6', html.includes('moviezone.js?v=4.6') && !html.includes('moviezone.js?v=4.5'));
-check('index keeps moviezone styles v4.0', html.includes('moviezone.css?v=4.0') && !html.includes('moviezone.css?v=4.1'));
+check('index loads moviezone v4.7', html.includes('moviezone.js?v=4.7') && !html.includes('moviezone.js?v=4.6'));
+check('index loads moviezone styles v4.1', html.includes('moviezone.css?v=4.1') && !html.includes('moviezone.css?v=4.0'));
 check('index declares modern mobile PWA capability', html.includes('<meta name="mobile-web-app-capable" content="yes">'));
 check('collections catalog contains all configured universes', collectionsCatalog && collectionsCatalog.universes && Object.keys(collectionsCatalog.universes).length >= 18);
 check('collections loader uses deployed absolute v2 asset', moviezone.includes("fetch('/collections-catalog.json?v=2'"));
@@ -89,6 +89,47 @@ check('real and explicitly forced TV modes remain available',
   moviezone.includes("if (isTV) document.documentElement.classList.add('tv-mode')") &&
   moviezone.includes("new URLSearchParams(window.location.search).get('tv') === '1'"));
 
+
+const tvDetector = moviezone.match(/const isTV = \(\(\) => \{[\s\S]*?\n\}\)\(\);/);
+function detectTV(userAgent, userAgentData) {
+  if (!tvDetector) return false;
+  return Function('navigator', tvDetector[0] + '; return isTV;')({ userAgent, userAgentData });
+}
+const realTvUAs = [
+  'Mozilla/5.0 (SMART-TV; Linux; Tizen 7.0) AppleWebKit/537.36 SamsungBrowser/5.0 TV Safari/537.36',
+  'Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/538.2 LG Browser/8.0',
+  'Mozilla/5.0 (Linux; Android 7.1.2; AFTMM Build/NS6265) AppleWebKit/537.36 Silk/112 Safari/537.36',
+  'Mozilla/5.0 (Linux; Android 9; BRAVIA 4K GB ATV3 Build/PTT1) AppleWebKit/537.36 Chrome/87 Safari/537.36',
+  'Roku/DVP-12.5 (12.5.0.4178-46)',
+  'Mozilla/5.0 (Linux; U; VIDAA U6; en-us) AppleWebKit/537.36 SmartTV/10.0',
+  'Mozilla/5.0 (Linux; Android 12; SHIELD Android TV) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Xbox; Xbox One) AppleWebKit/537.36 Edge/44'
+];
+const nonTvUAs = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/138 Safari/537.36',
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148',
+  'Mozilla/5.0 (Linux; Android 15; Pixel 9 Pro) AppleWebKit/537.36 Chrome/138 Mobile Safari/537.36'
+];
+check('confirmed Samsung/LG/Fire/BRAVIA/Roku/VIDAA/Android/Xbox TV UAs detected', realTvUAs.every(ua => detectTV(ua)));
+check('desktop, DevTools iPhone, and Android phone UAs remain non-TV', nonTvUAs.every(ua => !detectTV(ua)));
+check('Chromium reduced-UA TV platform hint remains detected', detectTV(nonTvUAs[0], { platform: 'Android TV', brands: [] }));
+check('screen/pointer heuristics never assign TV identity', !moviezone.includes('TV mode activated via screen heuristic') && !moviezone.includes('TV mode activated via Android large-screen heuristic'));
+check('forced-TV gets dynamic focus, memory, and image safeguards',
+  moviezone.includes('const isTVNavigationMode = () =>') &&
+  moviezone.includes('if (!isTVNavigationMode()) return;') &&
+  moviezone.includes('if (isTVLikeMode()) return MAX_CARDS_TV;') &&
+  moviezone.includes("isTV || document.documentElement.classList.contains('tv-mode') || isMobile"));
+check('TV focus covers custom tabindex controls and buttons', moviezone.includes('button:not([disabled])') && moviezone.includes('[tabindex]:not([tabindex="-1"])'));
+check('Android/Fire, Tizen and WebOS Back keys supported', moviezone.includes("key === 'BrowserBack'") && moviezone.includes('keyCode === 4') && moviezone.includes('keyCode === 10009') && moviezone.includes('keyCode === 461'));
+check('TV scrolling instant while non-TV remains smooth', moviezone.includes("behavior: isTVLikeMode() ? 'auto' : 'smooth'") && !moviezone.includes("behavior: 'smooth'"));
+check('FPS monitor bounded and skips optimized modes', moviezone.includes('MAX_PERFORMANCE_SAMPLES = 300') && moviezone.includes("if (!isTVLikeMode() && !document.documentElement.classList.contains('low-end-mode'))"));
+check('TV CSS preserves containment and root instant scrolling',
+  !css.includes('contain: none !important') &&
+  !css.includes('content-visibility: visible !important') &&
+  /\.tv-mode\s*\{\s*scroll-behavior:\s*auto\s*!important;/.test(css));
+
 const playerSandbox = moviezone.match(/iframe\.setAttribute\('sandbox', '([^']+)'\)/);
 check('player iframe sandbox blocks top navigation and popups',
   playerSandbox && playerSandbox[1].includes('allow-scripts') &&
@@ -98,8 +139,8 @@ check('player iframe sandbox blocks top navigation and popups',
 check('legacy beforeunload redirect trap is removed',
   !moviezone.includes("window.addEventListener('beforeunload'"));
 
-check('SW cache is v32', sw.includes("CACHE_NAME = 'moviezone-v32'"));
-check('SW caches moviezone v4.6', sw.includes("'/moviezone.js?v=4.6'"));
+check('SW cache is v33', sw.includes("CACHE_NAME = 'moviezone-v33'"));
+check('SW caches moviezone v4.7', sw.includes("'/moviezone.js?v=4.7'"));
 check('SW caches pwa-install v1.6', sw.includes("'/pwa-install.js?v=1.6'"));
 check('SW treats collections catalog as optional', sw.includes('const OPTIONAL_ASSETS') && sw.includes("'/collections-catalog.json?v=2'") && sw.includes('Promise.allSettled'));
 check('SW uses skipWaiting and clients.claim', sw.includes('self.skipWaiting()') && sw.includes('self.clients.claim()'));
