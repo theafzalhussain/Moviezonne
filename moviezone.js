@@ -1,4 +1,4 @@
-﻿﻿﻿﻿// Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
+﻿﻿﻿// Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
 const isTV = (() => {
   const ua = navigator.userAgent;
@@ -441,6 +441,98 @@ let currentUpcomingPage = 1;
 let activeTrailerStopper = null; // Function to stop the currently playing trailer
 let allUpcoming = [];
 let lastFocusedElement = null; // TV remote focus memory
+
+// -- EXPLICIT DETAIL ACTIVATION GUARD --
+// Opening a movie is a navigation action. Viewport changes, responsive-mode switches,
+// focus movement, and carried-over TV launch keys must never be able to trigger it.
+const DETAIL_ACTIVATION_MAX_AGE_MS = 1500;
+const DETAIL_VIEWPORT_SETTLE_MS = 750;
+const detailActivationGuard = {
+  lastTrustedActivationAt: -Infinity,
+  viewportBlockedUntil: -Infinity,
+  tvActivationArmed: !isTV && !document.documentElement.classList.contains('tv-mode'),
+  tvAutoArmAt: (typeof performance !== 'undefined' ? performance.now() : Date.now()) + 4000
+};
+
+function detailNow() {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
+function isTVLikeMode() {
+  return isTV || document.documentElement.classList.contains('tv-mode');
+}
+
+function blockDetailActivationForViewportChange() {
+  const now = detailNow();
+  detailActivationGuard.viewportBlockedUntil = now + DETAIL_VIEWPORT_SETTLE_MS;
+  detailActivationGuard.lastTrustedActivationAt = -Infinity;
+}
+
+// A pointer-down or activation-key down must precede detail navigation. A click
+// synthesized by layout/focus code therefore has no authority to open the overlay.
+const recordPointerActivation = (event) => {
+  if (event.button != null && event.button !== 0) return;
+  const now = detailNow();
+  if (now < detailActivationGuard.viewportBlockedUntil) return;
+  detailActivationGuard.tvActivationArmed = true;
+  detailActivationGuard.lastTrustedActivationAt = now;
+};
+
+if ('PointerEvent' in window) {
+  document.addEventListener('pointerdown', recordPointerActivation, true);
+} else {
+  document.addEventListener('mousedown', recordPointerActivation, true);
+  document.addEventListener('touchstart', recordPointerActivation, true);
+}
+
+document.addEventListener('keydown', (event) => {
+  const key = event.key;
+  if (key === 'ArrowLeft' || key === 'ArrowRight' || key === 'ArrowUp' || key === 'ArrowDown') {
+    detailActivationGuard.tvActivationArmed = true;
+    return;
+  }
+  if (key !== 'Enter' && key !== ' ' && (event.keyCode || event.which) !== 13 && (event.keyCode || event.which) !== 32) return;
+
+  const now = detailNow();
+  if (isTVLikeMode() && !detailActivationGuard.tvActivationArmed && now < detailActivationGuard.tvAutoArmAt) return;
+  if (now < detailActivationGuard.viewportBlockedUntil) return;
+  detailActivationGuard.tvActivationArmed = true;
+  detailActivationGuard.lastTrustedActivationAt = now;
+}, true);
+
+// Releasing the launch/OK key arms the next press without treating the release itself
+// as activation. This prevents the key used to launch a TV app from opening a card.
+document.addEventListener('keyup', (event) => {
+  const code = event.keyCode || event.which;
+  if (event.key === 'Enter' || event.key === ' ' || code === 13 || code === 32) {
+    detailActivationGuard.tvActivationArmed = true;
+    detailActivationGuard.lastTrustedActivationAt = -Infinity;
+  }
+}, true);
+
+window.addEventListener('resize', blockDetailActivationForViewportChange, { passive: true });
+window.addEventListener('orientationchange', blockDetailActivationForViewportChange, { passive: true });
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted) blockDetailActivationForViewportChange();
+});
+
+function claimExplicitDetailActivation(event) {
+  const now = detailNow();
+  if (now < detailActivationGuard.viewportBlockedUntil) return false;
+
+  // Trusted accessibility/keyboard clicks may not have pointer coordinates. They are
+  // accepted only while the browser reports a real user activation.
+  const trustedAccessibleClick = event && event.isTrusted && event.type === 'click' &&
+    event.detail === 0 && navigator.userActivation && navigator.userActivation.isActive;
+  const trustedDirectKey = event && event.isTrusted && event.type === 'keydown' &&
+    (event.key === 'Enter' || event.key === ' ' || (event.keyCode || event.which) === 13 || (event.keyCode || event.which) === 32) &&
+    (!isTVLikeMode() || detailActivationGuard.tvActivationArmed || now >= detailActivationGuard.tvAutoArmAt);
+  const hasRecentTrustedInput = now - detailActivationGuard.lastTrustedActivationAt <= DETAIL_ACTIVATION_MAX_AGE_MS;
+
+  if (!trustedAccessibleClick && !trustedDirectKey && !hasRecentTrustedInput) return false;
+  detailActivationGuard.lastTrustedActivationAt = -Infinity; // one activation opens at most one detail page
+  return true;
+}
  
 // -- FETCH helper -- Optimized with aggressive parallel execution
 const tmdbCache = new Map();
@@ -928,9 +1020,9 @@ function buildCarousel() {
       '</div>';
     slide.querySelectorAll('[data-id]').forEach(btn => {
       if (btn.classList.contains('btn-info')) {
-        btn.addEventListener('click', () => { openUpcomingDetail(parseInt(btn.dataset.id), btn.dataset.type); });
+        btn.addEventListener('click', (event) => { openUpcomingDetail(parseInt(btn.dataset.id), btn.dataset.type, event); });
       } else {
-        btn.addEventListener('click', () => { openModal(parseInt(btn.dataset.id), btn.dataset.type); });
+        btn.addEventListener('click', (event) => { openModal(parseInt(btn.dataset.id), btn.dataset.type, event); });
       }
     });
     trackFrag.appendChild(slide);
@@ -1564,7 +1656,7 @@ function renderMovies(movies, append = false) {
         '<div class="card-meta"><div class="card-runtime">LANG '+(m.original_language||'EN').toUpperCase()+'</div></div>' +
         '<div class="card-genres">'+genres.map(g => '<span class="card-genre">'+escapeHTML(g)+'</span>').join('')+'</div>' +
       '</div>';
-    card.addEventListener('click', () => { openModal(m.id, type); });
+    card.addEventListener('click', (event) => { openModal(m.id, type, event); });
     fragment.appendChild(card);
   scrollObserver.observe(card);
 
@@ -1797,7 +1889,7 @@ async function loadUpcoming(isLoadMore = false) {
           '<p class="upcoming-desc">'+escapeHTML((m.overview||'').slice(0, 120))+(m.overview && m.overview.length > 120 ? '...' : '')+'</p>' +
           '<button class="notify-me-btn'+(typeof isNotifySet === 'function' && isNotifySet(m.id) ? ' notified' : '')+'" data-movie-id="'+m.id+'" data-title="'+escapeHTML(m.title||'')+'" data-release="'+(m.release_date||'')+'" onclick="event.stopPropagation(); handleNotifyMe(this)"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span>'+(typeof isNotifySet === 'function' && isNotifySet(m.id) ? 'Notified ✓' : 'Notify Me')+'</span></button>' +
         '</div>';
-      card.addEventListener('click', () => { openUpcomingDetail(m.id); });
+      card.addEventListener('click', (event) => { openUpcomingDetail(m.id, undefined, event); });
       fragment.appendChild(card);
       scrollObserver.observe(card);
     });
@@ -1822,7 +1914,8 @@ let upcomingTrailerKey = null;
 
 let _udAbortController = null;
 
-async function openUpcomingDetail(id, type) {
+async function openUpcomingDetail(id, type, activationEvent) {
+  if (!claimExplicitDetailActivation(activationEvent)) return;
   const mediaType = type || 'movie';
   const overlay = document.getElementById('upcoming-detail-overlay');
   if (!overlay) return;
@@ -2275,12 +2368,12 @@ async function intelligentMovieSearch(query, limit = 20) {
   return value;
 }
 
-function openSearchResult(item) {
+function openSearchResult(item, activationEvent) {
   const type = getSearchMediaType(item);
   const releaseDate = item.release_date || item.first_air_date || '';
   const isUpcomingMovie = type === 'movie' && releaseDate && releaseDate > new Date().toISOString().slice(0, 10);
-  if (isUpcomingMovie && typeof openUpcomingDetail === 'function') openUpcomingDetail(item.id);
-  else openModal(item.id, type);
+  if (isUpcomingMovie && typeof openUpcomingDetail === 'function') openUpcomingDetail(item.id, undefined, activationEvent);
+  else openModal(item.id, type, activationEvent);
   closeDropdown();
 }
 
@@ -2349,7 +2442,7 @@ function renderSearchDropdown(query, search) {
         '<small class="search-match-reason">' + escapeHTML(quality) + '</small></div>' +
         '<span class="search-result-arrow">›</span>';
       resultItem.addEventListener('mouseenter', () => setActiveSearchItem(index, Array.from(dropdown.querySelectorAll('[data-search-result]'))));
-      resultItem.addEventListener('click', () => openSearchResult(item));
+      resultItem.addEventListener('click', (event) => openSearchResult(item, event));
       dropdown.appendChild(resultItem);
     });
 
@@ -2410,7 +2503,8 @@ function closeDropdown() {
 }
  
 // MODAL
-async function openModal(id, type = 'movie') {
+async function openModal(id, type = 'movie', activationEvent) {
+  if (!claimExplicitDetailActivation(activationEvent)) return;
   // Add hash to URL to behave like a separate page
   window.history.pushState({ watchPage: true }, '', '#watch-' + type + '-' + id);
   if (isTV) lastFocusedElement = document.activeElement;
@@ -3062,7 +3156,7 @@ async function loadRelatedMovies(id, type) {
             '<div class="card-meta"><div class="card-rating">RATING '+rating+'</div><div class="card-year">YEAR '+year+'</div></div>' +
             '<div class="card-genres">'+genres.map(g => '<span class="card-genre">'+escapeHTML(g)+'</span>').join('')+'</div>' +
           '</div>';
-        card.addEventListener('click', () => { openModal(m.id, rType); });
+        card.addEventListener('click', (event) => { openModal(m.id, rType, event); });
         fragment.appendChild(card);
         scrollObserver.observe(card);
       });
@@ -4070,7 +4164,7 @@ function showToast(msg) {
   // Many Smart TVs (Tizen, WebOS, Fire TV) fire an Enter/OK key event when app launches
   let tvPageReady = false;
   let tvFirstInteractionTime = 0;
-  setTimeout(() => { tvPageReady = true; }, 1500); // Ignore Enter within first 1.5s of page load
+  setTimeout(() => { tvPageReady = true; }, 3000); // Allow launch/OK carry-over to finish before remote activation
 
   // 1. Add tabindex=0 to all focusable TV elements
   function markFocusable() {
@@ -4182,6 +4276,8 @@ function showToast(msg) {
     };
     if (directionMap[key]) {
       e.preventDefault();
+      tvPageReady = true; // D-pad movement proves this is a deliberate post-launch interaction
+      detailActivationGuard.tvActivationArmed = true;
       const active = document.activeElement;
       if (!active || active === document.body) {
         // No focus yet — focus first safe navigation element (not play button)
@@ -4202,7 +4298,7 @@ function showToast(msg) {
     // Enter/Space: Click focused element
     if (key === 'Enter' || key === ' ' || keyCode === 13 || keyCode === 32) {
       // GUARD: Ignore initial Enter event fired by TV OS on app launch
-      if (!tvPageReady) {
+      if (!tvPageReady || (!detailActivationGuard.tvActivationArmed && detailNow() < detailActivationGuard.tvAutoArmAt)) {
         e.preventDefault();
         return;
       }
@@ -4541,7 +4637,7 @@ init();
         : (item.poster ? `https://image.tmdb.org/t/p/w342${item.poster}` : '');
       const timeAgo = getTimeAgo(item.timestamp);
       return `
-        <div class="cw-card" onclick="openCWMovie(${item.id}, '${item.media_type}')" tabindex="0">
+        <div class="cw-card" onclick="openCWMovie(${item.id}, '${item.media_type}', event)" tabindex="0">
           <img class="cw-card-img" src="${img}" alt="${item.title}" loading="lazy">
           <div class="cw-play-icon">
             <svg viewBox="0 0 24 24" width="22" height="22" fill="#000"><path d="M8 5v14l11-7z"/></svg>
@@ -4569,9 +4665,9 @@ init();
   }
 
   // Open a continue watching movie
-  window.openCWMovie = function(id, mediaType) {
-    // Reuse existing openModal function
-    if (typeof openModal === 'function') openModal(id, mediaType);
+  window.openCWMovie = function(id, mediaType, activationEvent) {
+    // Reuse existing openModal function, preserving the explicit click/remote event.
+    if (typeof openModal === 'function') openModal(id, mediaType, activationEvent);
   };
 
   // Render on page load
@@ -4594,46 +4690,49 @@ init();
     }).catch(err => console.warn('[MovieZone] SW readiness failed:', err));
   }
 
-  // 2. PWA Install Prompt — Handled by pwa-install.js (luxury popup)
-  // Navbar install button shows only when the native prompt is available or after
-  // a grace period (so manual install flow remains accessible).
+  // 2. PWA Install UI - driven by pwa-install.js shared live monitor.
   const navInstallBtn = document.getElementById('navInstallBtn');
-  const isInstalled = window.matchMedia('(display-mode: standalone)').matches || 
-    window.matchMedia('(display-mode: fullscreen)').matches ||
-    window.navigator.standalone === true ||
-    localStorage.getItem('mz_app_installed') === '1';
 
-  // If already installed as app, NEVER show install button or popup
-  if (isInstalled) {
-    if (navInstallBtn) navInstallBtn.style.display = 'none';
-    console.log('[MovieZone] App is installed - hiding install UI');
-  } else if (navInstallBtn) {
-    // Show immediately if native prompt already captured
-    if (window.deferredPrompt) {
-      navInstallBtn.style.display = 'flex';
-      navInstallBtn.classList.add('mz-install-native-ready');
-    } else {
-      // Show when native prompt arrives (with a visual pulse)
-      window.addEventListener('mz:installready', function () {
-        navInstallBtn.style.display = 'flex';
-        navInstallBtn.classList.add('mz-install-native-ready');
-      });
-      // Fallback: show after 35s regardless (for manual install access)
-      setTimeout(function () {
-        if (!isInstalled) navInstallBtn.style.display = 'flex';
-      }, 35000);
-    }
+  function applyPwaInstallState(installed) {
+    if (!navInstallBtn) return;
+    navInstallBtn.style.display = installed ? 'none' : 'flex';
+    navInstallBtn.classList.toggle('mz-install-native-ready', !installed && !!window.deferredPrompt);
   }
 
-  // Global install function — called from navbar button and banner.
-  // pwa-install.js owns the ONLY native prompt path, preserving direct-click semantics.
+  window.addEventListener('mz:pwa-statechange', function(event) {
+    applyPwaInstallState(!!(event.detail && event.detail.installed));
+  });
+
+  // pwa-install.js is loaded immediately after this file. Defer one task so its
+  // monitor exists, then ask it for the authoritative state.
+  setTimeout(function syncPwaInstallState() {
+    const monitor = window.__mzPwaInstallMonitor;
+    if (monitor && typeof monitor.check === 'function') {
+      monitor.check().then(applyPwaInstallState).catch(function() { applyPwaInstallState(false); });
+      return;
+    }
+    // Defensive fallback only if the dedicated controller failed to load.
+    const installedFallback = window.matchMedia('(display-mode: standalone)').matches ||
+      window.matchMedia('(display-mode: fullscreen)').matches ||
+      window.navigator.standalone === true ||
+      localStorage.getItem('mz_app_installed') === '1';
+    applyPwaInstallState(installedFallback);
+  }, 0);
+
+  // Global install function - called from navbar button and banner.
   window.installPWA = function() {
+    const monitor = window.__mzPwaInstallMonitor;
+    if (monitor && monitor.isInstalled()) {
+      applyPwaInstallState(true);
+      if (typeof showToast === 'function') showToast('MovieZone is already installed on this device.');
+      return;
+    }
+
     if (typeof window.__mzTriggerInstall === 'function') {
       if (!window.deferredPrompt && window.__mzOpenInstallPopup) window.__mzOpenInstallPopup();
       return window.__mzTriggerInstall();
     }
 
-    // Defensive UI fallback if the dedicated install controller failed to load.
     if (window.__mzOpenInstallPopup) {
       window.__mzOpenInstallPopup();
       return;
@@ -5368,18 +5467,18 @@ window.handleNotifyMe = async function(btn) {
     const detail = document.getElementById('chDetailView');
     if (!detail) return;
     movieDelegationBound = true;
-    const open = (card) => {
+    const open = (card, activationEvent) => {
       if (!card) return;
-      openModal(Number(card.dataset.id), card.dataset.type);
+      openModal(Number(card.dataset.id), card.dataset.type, activationEvent);
     };
     detail.addEventListener('click', (e) => {
       const card = e.target.closest && e.target.closest('.ch-movie-card');
-      if (card) open(card);
+      if (card) open(card, e);
     });
     detail.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter' && e.key !== ' ') return;
       const card = e.target.closest && e.target.closest('.ch-movie-card');
-      if (card) { e.preventDefault(); open(card); }
+      if (card) { e.preventDefault(); open(card, e); }
     });
   }
 

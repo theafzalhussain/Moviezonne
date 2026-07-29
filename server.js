@@ -139,6 +139,9 @@ const FALLBACK_MANIFEST = {
     { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
   ],
   categories: ['entertainment'],
+  related_applications: [
+    { platform: 'webapp', url: '/manifest.json', id: '/' }
+  ],
   prefer_related_applications: false
 };
 

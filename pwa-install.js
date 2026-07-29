@@ -429,17 +429,23 @@
 (function () {
   var STORAGE_KEY = 'mz_pwa_prompt_dismissed_at';
   var TV_STORAGE_KEY = 'mz_pwa_tv_prompt_dismissed_at';
-  var SHOW_DELAY_MS = 20000; // 20 seconds delay before showing popup
+  var INSTALLED_KEY = 'mz_app_installed';
+  var SHOW_DELAY_MS = 3000; // uninstalled users see the popup on every refresh
   var popupTimer = null;
-  var SNOOZE_DAYS = 7; // kept for TV overlay only
+  var popupShownThisLoad = false;
+  var installedState = null;
+  var installedCheckToken = 0;
+  var uiPrepared = false;
+  var tvUiPrepared = false;
+  var monitorStarted = false;
 
   var overlay, installBtn, laterBtn, closeBtn, iosGuide, iosShareLabel, pwaDesc, qrWrap;
   var tvOverlay, tvQrWrap, tvDismissBtn;
-  // NOTE: the prompt event lives only on `window.deferredPrompt` (single source of truth).
 
   function isStandalone() {
     return window.matchMedia('(display-mode: standalone)').matches ||
-      window.navigator.standalone === true; // iOS Safari
+      window.matchMedia('(display-mode: fullscreen)').matches ||
+      window.navigator.standalone === true;
   }
 
   function isTV() {
@@ -449,52 +455,134 @@
 
   function isIOS() {
     var ua = navigator.userAgent;
-    // Covers iPhone/iPad Safari + Chrome/Firefox-on-iOS (all use WebKit, same install path)
-    // Also catches iPadOS 13+ which reports as "Macintosh" but has touch support.
     var isAppleTouch = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
     var isIpadOS13 = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
     return isAppleTouch || isIpadOS13;
   }
 
-  function isIOSChrome() {
-    return /CriOS/.test(navigator.userAgent);
+  function isIOSChrome() { return /CriOS/.test(navigator.userAgent); }
+  function isIOSFirefox() { return /FxiOS/.test(navigator.userAgent); }
+
+  function hasInstalledMarker() {
+    try { return localStorage.getItem(INSTALLED_KEY) === '1'; } catch (e) { return false; }
   }
 
-  function isIOSFirefox() {
-    return /FxiOS/.test(navigator.userAgent);
-  }
-
-  function recentlyDismissed(key) {
-    var raw = localStorage.getItem(key);
-    if (!raw) return false;
-    var dismissedAt = parseInt(raw, 10);
-    if (isNaN(dismissedAt)) return false;
-    var elapsedDays = (Date.now() - dismissedAt) / (1000 * 60 * 60 * 24);
-    return elapsedDays < SNOOZE_DAYS;
+  function setInstalledMarker(installed) {
+    try {
+      if (installed) localStorage.setItem(INSTALLED_KEY, '1');
+      else localStorage.removeItem(INSTALLED_KEY);
+    } catch (e) {}
   }
 
   function markDismissed(key) {
     try { localStorage.setItem(key, String(Date.now())); } catch (e) {}
   }
 
-  function openPopup() {
-    if (!overlay) return;
+  function dispatchInstallState(installed, reason) {
+    var detail = { installed: !!installed, reason: reason || 'check' };
+    try {
+      window.dispatchEvent(new CustomEvent('mz:pwa-statechange', { detail: detail }));
+    } catch (e) {
+      var event = document.createEvent('CustomEvent');
+      event.initCustomEvent('mz:pwa-statechange', false, false, detail);
+      window.dispatchEvent(event);
+    }
+  }
+
+  function applyInstalledState(installed, reason) {
+    installed = !!installed;
+    var changed = installedState !== installed;
+    installedState = installed;
+    document.documentElement.setAttribute('data-mz-pwa-installed', installed ? '1' : '0');
+    var navBtn = document.getElementById('navInstallBtn');
+    if (navBtn) {
+      navBtn.style.display = installed ? 'none' : 'flex';
+      navBtn.classList.toggle('mz-install-native-ready', !installed && !!window.deferredPrompt);
+    }
+    if (installed) {
+      if (popupTimer) { clearTimeout(popupTimer); popupTimer = null; }
+      closePopup(false);
+      closeTvPopup(false);
+      closeHelp();
+      var banner = document.getElementById('pwa-install-banner');
+      if (banner) banner.remove();
+    }
+    if (changed) dispatchInstallState(installed, reason);
+    return installed;
+  }
+
+  function detectInstalledApp() {
+    if (isStandalone()) {
+      setInstalledMarker(true);
+      return Promise.resolve(true);
+    }
+    // beforeinstallprompt proves that this browser can install the app now.
+    if (window.deferredPrompt) {
+      setInstalledMarker(false);
+      return Promise.resolve(false);
+    }
+    if (typeof navigator.getInstalledRelatedApps === 'function') {
+      return navigator.getInstalledRelatedApps().then(function (apps) {
+        if (Array.isArray(apps) && apps.length > 0) {
+          setInstalledMarker(true);
+          return true;
+        }
+        // A successful empty result is authoritative once this PWA declares itself
+        // in related_applications; clear a marker left behind by an uninstall.
+        setInstalledMarker(false);
+        return false;
+      }).catch(function () { return hasInstalledMarker(); });
+    }
+    // Safari and Firefox cannot query installation from a normal browser tab.
+    return Promise.resolve(hasInstalledMarker());
+  }
+
+  function refreshInstalledState(reason, forcedValue) {
+    var token = ++installedCheckToken;
+    var result = typeof forcedValue === 'boolean' ? Promise.resolve(forcedValue) : detectInstalledApp();
+    return result.then(function (installed) {
+      if (token !== installedCheckToken) return installedState;
+      return applyInstalledState(installed, reason);
+    });
+  }
+
+  function checkAlreadyInstalled() {
+    return refreshInstalledState('explicit-check');
+  }
+
+  window.__mzPwaInstallMonitor = {
+    check: function () { return refreshInstalledState('external-check'); },
+    refresh: function () { return refreshInstalledState('external-refresh'); },
+    isInstalled: function () { return installedState === true; },
+    getState: function () { return installedState; }
+  };
+
+  function openPopup(force) {
+    if (!overlay || installedState === true) return;
+    if (!force && popupShownThisLoad) return;
+    if (installedState === null) {
+      refreshInstalledState('popup-check').then(function (installed) { if (!installed) openPopup(force); });
+      return;
+    }
+    popupShownThisLoad = true;
     overlay.classList.add('open');
     document.body.style.overflow = 'hidden';
   }
 
-  // Expose globally so navbar Install button can trigger it
-  window.__mzOpenInstallPopup = openPopup;
+  window.__mzOpenInstallPopup = function () { openPopup(true); };
 
   function closePopup(remember) {
     if (!overlay) return;
+    var wasOpen = overlay.classList.contains('open');
     overlay.classList.remove('open');
-    document.body.style.overflow = '';
+    if (wasOpen) document.body.style.overflow = '';
     if (remember) markDismissed(STORAGE_KEY);
   }
 
-  function openTvPopup() {
-    if (!tvOverlay) return;
+  function openTvPopup(force) {
+    if (!tvOverlay || installedState === true) return;
+    if (!force && popupShownThisLoad) return;
+    popupShownThisLoad = true;
     tvOverlay.classList.add('open');
   }
 
@@ -504,11 +592,7 @@
     if (remember) markDismissed(TV_STORAGE_KEY);
   }
 
-  /* ── QR CODE ─────────────────────────────────────────────────────────────
-     Always encodes the CURRENT page URL (window.location.href), rendered as a real
-     <img> from the goQR API. If the network call fails (offline / blocked / CSP),
-     we silently fall back to the inlined client-side generator. ── */
-
+  /* QR CODE */
   var QR_API = 'https://api.qrserver.com/v1/create-qr-code/';
 
   function qrApiUrl(text, size) {
@@ -718,17 +802,12 @@
     showInstallHelp();
   }
 
-  // getInstalledRelatedApps() is Chromium-only; treat any failure as "not installed".
+  // Reuse the shared monitor so popup, navbar, and fallback flow always agree.
   function alreadyInstalled() {
-    if (!navigator.getInstalledRelatedApps) return Promise.resolve(false);
-    return navigator.getInstalledRelatedApps()
-      .then(function (apps) { return Array.isArray(apps) && apps.length > 0; })
-      .catch(function () { return false; });
+    return checkAlreadyInstalled();
   }
 
-  /* ── Installability diagnostics ───────────────────────────────────────
-     Chrome never says WHY beforeinstallprompt didn't fire, so we re-check every
-     documented install criterion ourselves and report exactly which one fails. ── */
+  /* Installability diagnostics */
   function probeImage(url) {
     return new Promise(function (resolve) {
       var img = new Image();
@@ -1140,62 +1219,84 @@
   window.__mzTriggerInstall = handleInstallClick;
   window.__mzShowInstallHelp = showInstallHelp;
 
-  window.addEventListener('mz:installready', function () {
-    if (installBtn && !clickBusy && !isIOS()) resetBtn();
-    if (popupTimer) {
-      clearTimeout(popupTimer);
+  function scheduleInstallPopup(delay) {
+    if (installedState === true || popupShownThisLoad || popupTimer) return;
+    popupTimer = setTimeout(function () {
       popupTimer = null;
-    }
-    // When native install prompt is ready, show popup immediately (unless already installed)
-    if (overlay && !isStandalone()) {
-      checkAlreadyInstalled().then(function (installed) {
-        if (!installed) {
-          setTimeout(openPopup, 250);
+      refreshInstalledState('before-auto-popup').then(function (installed) {
+        if (installed || popupShownThisLoad) return;
+        if (isTV()) {
+          openTvPopup(false);
+          setTimeout(function () { if (tvDismissBtn) tvDismissBtn.focus(); }, 100);
+        } else openPopup(false);
+      });
+    }, typeof delay === 'number' ? delay : SHOW_DELAY_MS);
+  }
+
+  function prepareUninstalledUI() {
+    if (installedState === true) return;
+    if (isTV()) {
+      if (!tvOverlay) { console.log('[MovieZone PWA] TV overlay element not found in DOM.'); return; }
+      if (!tvUiPrepared) {
+        tvUiPrepared = true;
+        renderQRInto(tvQrWrap, { size: 260, cellSize: 6, margin: 12 });
+        if (tvDismissBtn) {
+          tvDismissBtn.addEventListener('click', function () { closeTvPopup(false); });
+          tvDismissBtn.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') closeTvPopup(false);
+          });
         }
+      }
+      scheduleInstallPopup(SHOW_DELAY_MS);
+      return;
+    }
+    if (!overlay) { console.log('[MovieZone PWA] Popup overlay element not found in DOM.'); return; }
+    if (!uiPrepared) {
+      uiPrepared = true;
+      setupInstallButton();
+      renderQRInto(qrWrap, { size: 200 });
+      if (laterBtn) laterBtn.addEventListener('click', function () { closePopup(false); });
+      if (closeBtn) closeBtn.addEventListener('click', function () { closePopup(false); });
+      overlay.addEventListener('click', function (e) { if (e.target === overlay) closePopup(false); });
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && overlay.classList.contains('open')) closePopup(false);
       });
     }
+    scheduleInstallPopup(SHOW_DELAY_MS);
+  }
+
+  window.addEventListener('mz:installready', function () {
+    setInstalledMarker(false);
+    refreshInstalledState('native-prompt-ready', false).then(function () {
+      if (installBtn && !clickBusy && !isIOS()) resetBtn();
+      prepareUninstalledUI();
+      if (popupTimer) { clearTimeout(popupTimer); popupTimer = null; }
+      setTimeout(function () { if (isTV()) openTvPopup(false); else openPopup(false); }, 250);
+    });
   });
 
   window.addEventListener('appinstalled', function () {
     markDismissed(STORAGE_KEY);
-    closePopup(false);
-    closeHelp();
     window.deferredPrompt = null;
-    toast('MovieZone installed! 🎬');
-    // Mark as installed permanently
-    try { localStorage.setItem('mz_app_installed', '1'); } catch(e) {}
-    // Hide navbar install button
-    var navBtn = document.getElementById('navInstallBtn');
-    if (navBtn) navBtn.style.display = 'none';
-    // Remove banner if exists
-    var banner = document.getElementById('pwa-install-banner');
-    if (banner) banner.remove();
+    setInstalledMarker(true);
+    refreshInstalledState('appinstalled', true);
+    toast('MovieZone installed!');
   });
 
-  /* ── Comprehensive "already installed" check ──
-     Combines multiple signals to detect if the app is already on the user's device:
-     1. Running in standalone/fullscreen mode (display-mode media query)
-     2. iOS standalone flag (navigator.standalone)
-     3. getInstalledRelatedApps() API (Chromium only)
-  */
-  function checkAlreadyInstalled() {
-    // Check 1: Already running as installed app (standalone or fullscreen)
-    if (isStandalone()) return Promise.resolve(true);
-
-    // Check 2: display-mode fullscreen (some PWAs use this)
-    if (window.matchMedia('(display-mode: fullscreen)').matches) return Promise.resolve(true);
-
-    // Check 3: Previously installed (localStorage flag)
-    try { if (localStorage.getItem('mz_app_installed') === '1') return Promise.resolve(true); } catch(e) {}
-
-    // Check 4: Chromium's getInstalledRelatedApps API
-    if (navigator.getInstalledRelatedApps) {
-      return navigator.getInstalledRelatedApps()
-        .then(function (apps) { return Array.isArray(apps) && apps.length > 0; })
-        .catch(function () { return false; });
-    }
-
-    return Promise.resolve(false);
+  function startInstallMonitoring() {
+    if (monitorStarted) return;
+    monitorStarted = true;
+    ['(display-mode: standalone)', '(display-mode: fullscreen)'].forEach(function (query) {
+      var media = window.matchMedia(query);
+      var onChange = function () { refreshInstalledState('display-mode-change'); };
+      if (media.addEventListener) media.addEventListener('change', onChange);
+      else if (media.addListener) media.addListener(onChange);
+    });
+    window.addEventListener('pageshow', function () { refreshInstalledState('pageshow'); });
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) refreshInstalledState('visibility');
+    });
+    setInterval(function () { refreshInstalledState('periodic-monitor'); }, 30000);
   }
 
   function init() {
@@ -1207,52 +1308,18 @@
     iosShareLabel = document.getElementById('pwaIosShareLabel');
     pwaDesc = document.getElementById('pwaDesc');
     qrWrap = document.getElementById('pwaQrWrap');
-
     tvOverlay = document.getElementById('pwa-install-tv-overlay');
     tvQrWrap = document.getElementById('pwaTvQrWrap');
     tvDismissBtn = document.getElementById('pwaTvDismissBtn');
 
-    // ── If app is already installed, skip popup entirely ──
-    checkAlreadyInstalled().then(function (installed) {
+    startInstallMonitoring();
+    refreshInstalledState('initial-load').then(function (installed) {
       if (installed) {
-        console.log('[MovieZone PWA] Popup skipped: app is already installed on this device.');
+        console.log('[MovieZone PWA] Install UI hidden: app is already installed.');
         return;
       }
-
-      /* ── Smart TV: dedicated full-screen QR-only view (remote-friendly, no native install) ── */
-      if (isTV()) {
-        if (!tvOverlay) { console.log('[MovieZone PWA] TV overlay element not found in DOM.'); return; }
-        if (recentlyDismissed(TV_STORAGE_KEY)) { console.log('[MovieZone PWA] TV popup skipped: dismissed recently.'); return; }
-        renderQRInto(tvQrWrap, { size: 260, cellSize: 6, margin: 12 });
-        tvDismissBtn.addEventListener('click', function () { closeTvPopup(true); });
-        tvDismissBtn.addEventListener('keydown', function (e) {
-          if (e.key === 'Enter' || e.key === ' ') closeTvPopup(true);
-        });
-        setTimeout(openTvPopup, SHOW_DELAY_MS);
-        setTimeout(function () { tvDismissBtn.focus(); }, SHOW_DELAY_MS + 100);
-        return;
-      }
-
-      /* ── Everyone else: desktop / Android / Windows / iOS card ── */
-      if (!overlay) { console.log('[MovieZone PWA] Popup overlay element not found in DOM.'); return; }
-
-      // ALWAYS setup buttons and QR (so they work from navbar button too)
-      setupInstallButton();
-      renderQRInto(qrWrap, { size: 200 });
-
-      // Attach button event listeners
-      if (laterBtn) laterBtn.addEventListener('click', function () { closePopup(false); });
-      if (closeBtn) closeBtn.addEventListener('click', function () { closePopup(false); });
-      overlay.addEventListener('click', function (e) {
-        if (e.target === overlay) closePopup(false);
-      });
-      document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape' && overlay.classList.contains('open')) closePopup(false);
-      });
-
-      // AUTO-OPEN popup on every page load after short delay (no snooze check)
-      console.log('[MovieZone PWA] Popup will auto-open in ' + (SHOW_DELAY_MS / 1000) + ' seconds.');
-      popupTimer = setTimeout(openPopup, SHOW_DELAY_MS);
+      console.log('[MovieZone PWA] App not installed: button visible; popup opens on this refresh.');
+      prepareUninstalledUI();
     });
   }
 
