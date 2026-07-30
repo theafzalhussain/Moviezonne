@@ -1,18 +1,19 @@
-const CACHE_NAME = 'moviezone-v37';
+const CACHE_NAME = 'moviezone-v40';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/tv-mode.css?v=1.0',
-  '/moviezone.css?v=4.2',
-  '/tv-mode.js?v=1.0',
+  '/tv-mode.css?v=1.1',
+  '/moviezone.css?v=4.4',
+  '/tv-mode.js?v=1.1',
   '/search-engine.js?v=1.1',
-  '/moviezone.js?v=5.0',
+  '/moviezone.js?v=5.1',
   '/pwa-install.js?v=1.6',
   '/manifest.json',
-  '/icon-192.png',
-  '/icon-512.png',
-  '/favicon-32.png',
-  '/apple-touch-icon.png'
+  '/moviezone-logo.png?v=2',
+  '/icon-192.png?v=2',
+  '/icon-512.png?v=2',
+  '/favicon-32.png?v=2',
+  '/apple-touch-icon.png?v=2'
 ];
 
 // Large/feature-specific data should never block a new service worker from
@@ -113,8 +114,8 @@ self.addEventListener('push', event => {
   const title = data.title || 'MovieZone';
   const options = {
     body: data.body || 'A new movie update is available.',
-    icon: data.icon || '/icon-192.png',
-    badge: data.badge || '/icon-192.png',
+    icon: data.icon || '/icon-192.png?v=2',
+    badge: data.badge || '/icon-192.png?v=2',
     tag: data.tag || `moviezone-${Date.now()}`,
     renotify: Boolean(data.tag),
     vibrate: [200, 100, 200],

@@ -667,7 +667,7 @@ body.cursor-hover #cursor-dot {
   cursor: pointer;
 }
 
-/* TV logo images — hidden by default, shown only in tv-mode.css */
+/* App/TV artwork stays hidden on desktop and mobile website chrome. */
 .nav-logo-tv,
 .loader-logo-tv {
   display: none;

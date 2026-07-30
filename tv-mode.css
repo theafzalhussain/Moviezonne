@@ -21,6 +21,40 @@ html[data-mz-tv="true"] * {
   will-change: auto !important;
 }
 
+/* Android TV WebViews can skip lazy/contained content inside fixed overlays. */
+html[data-mz-tv="true"] img,
+html[data-mz-tv="true"] .movie-card,
+html[data-mz-tv="true"] .upcoming-card,
+html[data-mz-tv="true"] #movies-section,
+html[data-mz-tv="true"] #upcoming,
+html[data-mz-tv="true"] .collections-hub-overlay {
+  content-visibility: visible !important;
+  contain-intrinsic-size: none !important;
+}
+
+/* Collection images must never depend on a deferred opacity reveal on TV. */
+html[data-mz-tv="true"] .ch-mosaic-tile img,
+html[data-mz-tv="true"] .ch-card-posters img,
+html[data-mz-tv="true"] .ch-movie-card img {
+  opacity: 1 !important;
+}
+
+html[data-mz-tv="true"] .ch-particle-canvas {
+  display: none !important;
+}
+
+html[data-mz-tv="true"] select:focus,
+html[data-mz-tv="true"] input:focus,
+html[data-mz-tv="true"] #playerFrame:focus {
+  outline: 2px solid rgba(255, 193, 7, 0.8) !important;
+  outline-offset: 2px !important;
+}
+
+html[data-mz-tv="true"] #playerFrame {
+  pointer-events: auto !important;
+  content-visibility: visible !important;
+}
+
 /* Minimal transition for D-pad outline movement only */
 html[data-mz-tv="true"] .movie-card,
 html[data-mz-tv="true"] .upcoming-card,
@@ -223,8 +257,14 @@ html[data-mz-tv="true"] .collections-hub-overlay {
 
 html[data-mz-tv="true"] .collections-hub-overlay.open {
   display: flex !important;
-  overflow-y: scroll !important;
+  overflow: hidden !important;
+  overscroll-behavior: contain;
+}
+
+html[data-mz-tv="true"] .collections-hub-overlay.open .ch-scroll {
+  overflow-y: auto !important;
   overflow-x: hidden !important;
+  min-height: 0 !important;
   overscroll-behavior: contain;
   scrollbar-width: thin !important;
 }

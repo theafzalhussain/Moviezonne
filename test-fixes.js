@@ -17,7 +17,7 @@ check('manifest has usable 192 icon', manifest.icons.some(i => i.sizes === '192x
 check('manifest has usable 512 icon (any)', manifest.icons.some(i => i.sizes === '512x512' && (!i.purpose || i.purpose.includes('any'))));
 check('manifest has usable 512 icon (maskable)', manifest.icons.some(i => i.sizes === '512x512' && i.purpose && i.purpose.includes('maskable')));
 check('manifest declares itself for installed-related-app detection', Array.isArray(manifest.related_applications) && manifest.related_applications.some(app => app.platform === 'webapp' && app.url === '/manifest.json'));
-for (const icon of manifest.icons) check(`icon exists: ${icon.src}`, fs.existsSync(path.join(dir, icon.src.replace(/^\//, ''))));
+for (const icon of manifest.icons) check(`icon exists: ${icon.src}`, fs.existsSync(path.join(dir, icon.src.replace(/^\//, '').split('?')[0])));
 
 const html = read('index.html');
 const pwa = read('pwa-install.js');
@@ -36,8 +36,19 @@ check('index registers SW early', html.indexOf(".register('/sw.js'") > -1 && htm
 check('index has no forced reload loop', !html.includes('window.location.reload') && !html.includes('reloadOnceForControl'));
 check('index waits for controllerchange', html.includes("addEventListener('controllerchange'"));
 check('index loads pwa-install v1.6', html.includes('pwa-install.js?v=1.6') && !html.includes('pwa-install.js?v=1.5'));
-check('index loads moviezone v5.0', html.includes('moviezone.js?v=5.0') && !html.includes('moviezone.js?v=4.9'));
-check('index loads moviezone styles v4.2', html.includes('moviezone.css?v=4.2') && !html.includes('moviezone.css?v=4.1'));
+check('index loads moviezone v5.1', html.includes('moviezone.js?v=5.1') && !html.includes('moviezone.js?v=5.0'));
+check('index loads moviezone styles v4.4', html.includes('moviezone.css?v=4.4') && !html.includes('moviezone.css?v=4.3'));
+check('index uses versioned website and browser branding',
+  html.includes('src="/moviezone-logo.png?v=2"') &&
+  html.includes('href="/favicon-32.png?v=2"') &&
+  html.includes('href="/apple-touch-icon.png?v=2"'));
+check('manifest uses versioned replacement app icons',
+  manifest.icons.length >= 4 && manifest.icons.every(icon => icon.src.endsWith('?v=2')));
+check('base CSS hides app artwork from website navbar and loader',
+  css.includes('App/TV artwork stays hidden') &&
+  /\.nav-logo-tv,\s*\.loader-logo-tv\s*\{\s*display:\s*none/.test(css) &&
+  /\.nav-logo-mark\s*\{[\s\S]*?display:\s*grid/.test(css) &&
+  !css.includes('.nav-logo-mark,\n.loader-icon'));
 check('index declares modern mobile PWA capability', html.includes('<meta name="mobile-web-app-capable" content="yes">'));
 check('collections catalog contains all configured universes', collectionsCatalog && collectionsCatalog.universes && Object.keys(collectionsCatalog.universes).length >= 18);
 check('collections loader uses deployed absolute v2 asset', moviezone.includes("fetch('/collections-catalog.json?v=2'"));
@@ -158,9 +169,10 @@ check('TV focus covers custom tabindex controls and buttons', tvJs.includes('but
 check('Android/Fire, Tizen and WebOS Back keys supported', tvJs.includes("key === 'BrowserBack'") && tvJs.includes('keyCode === 4') && tvJs.includes('keyCode === 10009') && tvJs.includes('keyCode === 461'));
 check('TV scrolling instant while non-TV remains smooth', moviezone.includes("behavior: isMzTVMode() ? 'auto' : 'smooth'") && !moviezone.includes("behavior: 'smooth'"));
 check('FPS monitor bounded and skips optimized modes', moviezone.includes('MAX_PERFORMANCE_SAMPLES = 300') && moviezone.includes("if (!isMzTVMode() && !document.documentElement.classList.contains('low-end-mode'))"));
-check('TV CSS preserves containment and root instant scrolling',
+check('TV CSS bypasses content skipping while preserving containment and root instant scrolling',
   !tvCss.includes('contain: none !important') &&
-  !tvCss.includes('content-visibility: visible !important') &&
+  tvCss.includes('content-visibility: visible !important') &&
+  tvCss.includes('contain-intrinsic-size: none !important') &&
   /html\[data-mz-tv="true"\]\s*\{\s*scroll-behavior:\s*auto\s*!important;/.test(tvCss));
 
 
@@ -203,8 +215,15 @@ check('player iframe sandbox blocks top navigation and popups',
 check('legacy beforeunload redirect trap is removed',
   !moviezone.includes("window.addEventListener('beforeunload'"));
 
-check('SW cache is v37', sw.includes("CACHE_NAME = 'moviezone-v37'"));
-check('SW caches moviezone v5.0', sw.includes("'/moviezone.js?v=5.0'"));
+check('SW cache is v40', sw.includes("CACHE_NAME = 'moviezone-v40'"));
+check('SW precaches replacement branding v2',
+  sw.includes("'/moviezone-logo.png?v=2'") &&
+  sw.includes("'/icon-192.png?v=2'") &&
+  sw.includes("'/icon-512.png?v=2'") &&
+  sw.includes("'/favicon-32.png?v=2'") &&
+  sw.includes("'/apple-touch-icon.png?v=2'"));
+check('SW caches moviezone styles v4.4', sw.includes("'/moviezone.css?v=4.4'"));
+check('SW caches moviezone v5.1', sw.includes("'/moviezone.js?v=5.1'"));
 check('SW caches pwa-install v1.6', sw.includes("'/pwa-install.js?v=1.6'"));
 check('SW treats collections catalog as optional', sw.includes('const OPTIONAL_ASSETS') && sw.includes("'/collections-catalog.json?v=2'") && sw.includes('Promise.allSettled'));
 check('SW uses skipWaiting and clients.claim', sw.includes('self.skipWaiting()') && sw.includes('self.clients.claim()'));

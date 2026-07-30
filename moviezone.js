@@ -1638,7 +1638,7 @@ function renderMovies(movies, append = false) {
     card.style.animationDelay = ((i % 24) * 0.04) + 's';
     card.innerHTML =
       '<div class="card-poster">' +
-        `<img src="${IMG}${m.poster_path}" alt="${escapeHTML(m.title||'')}" width="171" height="256" loading="lazy" decoding="async">` +
+        `<img src="${IMG}${m.poster_path}" alt="${escapeHTML(m.title||'')}" width="171" height="256" loading="${isMzTV() ? 'eager' : 'lazy'}" decoding="async">` +
         '<div class="card-quality '+(qualClass||'')+'">'+qual+'</div>' +
         (isHot ? '<div class="card-hot">HOT</div>' : '') +
         freshBadge +
@@ -1872,7 +1872,7 @@ async function loadUpcoming(isLoadMore = false) {
       card.style.animationDelay = ((i % 12) * 0.08) + 's';
       card.innerHTML =
         '<div class="upcoming-poster">' +
-          '<img src="'+posterImg+'" alt="'+escapeHTML(m.title||'')+'" width="280" height="157" loading="lazy" decoding="async">' +
+          '<img src="'+posterImg+'" alt="'+escapeHTML(m.title||'')+'" width="280" height="157" loading="'+(isMzTV() ? 'eager' : 'lazy')+'" decoding="async">' +
           '<div class="upcoming-poster-overlay"></div>' +
           '<div class="upcoming-release-badge"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" style="margin-right:4px;vertical-align:-1px"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10z"/></svg>'+dateStr+'</div>' +
           (countdownText ? '<div class="upcoming-countdown-badge">⏳ '+countdownText+'</div>' : '') +
@@ -3562,8 +3562,12 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   iframe.setAttribute('frameborder', '0');
   iframe.setAttribute('scrolling', 'no');
   iframe.setAttribute('allow', 'fullscreen;autoplay;encrypted-media;picture-in-picture');
+  iframe.setAttribute('allowfullscreen', '');
+  iframe.setAttribute('webkitallowfullscreen', '');
+  iframe.setAttribute('title', 'MovieZone video player');
+  iframe.setAttribute('tabindex', '0');
   iframe.setAttribute('referrerpolicy', 'no-referrer');
-  iframe.setAttribute('fetchpriority', 'high'); 
+  iframe.setAttribute('fetchpriority', 'high');
   iframe.setAttribute('loading', 'eager'); 
   
   embedEl.appendChild(iframe);
@@ -3968,6 +3972,13 @@ function togglePlayerFS() {
   const embedEl = document.getElementById('videoEmbed');
   const btn = document.getElementById('fsBtn');
   if (!embedEl) return;
+
+  const activateCSSFullscreen = () => {
+    isPlayerFullscreen = true;
+    embedEl.classList.add('fullscreen-mode');
+    if (btn) btn.textContent = 'Exit';
+    document.addEventListener('keydown', exitFSOnEsc);
+  };
  
   if (!document.fullscreenElement && !document.webkitFullscreenElement && !isPlayerFullscreen) {
     const target = embedEl;
@@ -3975,17 +3986,18 @@ function togglePlayerFS() {
       let fsResult = null;
       if (target.requestFullscreen) fsResult = target.requestFullscreen();
       else if (target.webkitRequestFullscreen) fsResult = target.webkitRequestFullscreen();
+      else {
+        activateCSSFullscreen();
+        return;
+      }
       
       Promise.resolve(fsResult).then(() => {
         if (screen.orientation && screen.orientation.lock) {
           return screen.orientation.lock('landscape').catch(() => {});
         }
-      }).catch(() => {});
+      }).catch(activateCSSFullscreen);
     } catch (err) {
-      isPlayerFullscreen = true;
-      embedEl.classList.add('fullscreen-mode');
-      if (btn) btn.textContent = 'Exit';
-      document.addEventListener('keydown', exitFSOnEsc);
+      activateCSSFullscreen();
     }
   } else {
     if (document.exitFullscreen) document.exitFullscreen();
@@ -4949,12 +4961,14 @@ window.handleNotifyMe = async function(btn) {
   function attachImageReveal(scope) {
     scope.querySelectorAll('img[data-ch-reveal]').forEach(img => {
       img.removeAttribute('data-ch-reveal');
+      if (isMzTV()) img.loading = 'eager';
       const done = () => {
         img.classList.add('ch-img-in');
         const inner = img.closest('.ch-movie-card-inner');
         if (inner) inner.classList.add('ch-img-in');
       };
-      if (img.complete && img.naturalWidth) done();
+      // Cached successes and cached failures can both complete before listeners attach.
+      if (img.complete) done();
       else {
         img.addEventListener('load', done, { once: true });
         img.addEventListener('error', done, { once: true });
@@ -5088,7 +5102,7 @@ window.handleNotifyMe = async function(btn) {
     const gridW = vw * (isNarrow ? 1.7 : 1.28);
     const tileW = (gridW - gap * (cols - 1)) / cols;
     const rows = Math.min(10, Math.ceil((vh * 1.4) / (tileW * 1.5 + gap)) + 1);
-    const maxTiles = isNarrow ? 42 : (liteMode ? 60 : 112);
+    const maxTiles = isMzTV() ? 48 : (isNarrow ? 42 : (liteMode ? 60 : 112));
     const total = Math.min(cols * rows, maxTiles);
 
     grid.style.setProperty('--cols', cols);
@@ -5406,7 +5420,7 @@ window.handleNotifyMe = async function(btn) {
   function initParticles() {
     const canvas = document.getElementById('chParticleCanvas');
     if (!canvas) return;
-    if (liteMode) { canvas.style.display = 'none'; return; }
+    if (isMzTV() || liteMode) { canvas.style.display = 'none'; return; }
     if (particlesRunning) return;
 
     const ctx = canvas.getContext('2d', { alpha: true });

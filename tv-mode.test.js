@@ -422,7 +422,7 @@ test('index.html: moviezone.css loads BEFORE tv-mode.css (cascade order)', () =>
 
 test('index.html: TV navbar logo uses existing moviezone-logo.png with explicit dimensions', () => {
   assert.ok(html.includes('class="nav-logo-tv"'), 'nav-logo-tv class present');
-  assert.ok(html.includes('src="/moviezone-logo.png"'), 'uses existing MZ logo asset');
+  assert.ok(html.includes('src="/moviezone-logo.png?v=2"'), 'uses existing MZ logo asset');
   assert.ok(html.includes('width="40"') && html.includes('height="40"'), 'explicit width/height on nav logo');
 });
 
@@ -451,10 +451,10 @@ test('tv-mode.css: hides legacy loader icon on TV', () => {
     'legacy loader icon hidden');
 });
 
-test('moviezone.css: TV logo images hidden by default (non-TV)', () => {
-  assert.ok(moviezoneCss.includes('.nav-logo-tv'), 'nav-logo-tv in base CSS');
-  assert.ok(moviezoneCss.includes('.loader-logo-tv'), 'loader-logo-tv in base CSS');
-  assert.ok(moviezoneCss.includes('display: none'), 'hidden by default');
+test('moviezone.css: app logo images hidden by default outside TV', () => {
+  assert.ok(/\.nav-logo-tv,\s*\.loader-logo-tv\s*\{[^}]*display:\s*none/.test(moviezoneCss), 'navbar and loader images hidden outside TV');
+  assert.ok(/\.nav-logo-mark\s*\{[^}]*display:\s*grid/.test(moviezoneCss), 'original navbar mark remains visible');
+  assert.ok(!/\.nav-logo-mark,\s*\.loader-icon\s*\{[^}]*display:\s*none/.test(moviezoneCss), 'original loader icon is not suppressed');
 });
 
 
@@ -713,6 +713,55 @@ test('tv-mode.css forces instant scrolling', () => {
   assert.ok(tvCss.includes('scroll-behavior: auto !important'), 'auto scroll behavior');
 });
 
+
+test('TV rendering overrides content visibility and collection opacity', () => {
+  assert.ok(/html\[data-mz-tv="true"\][\s\S]*?content-visibility:\s*visible\s*!important/.test(tvCss), 'TV content visibility forced visible');
+  assert.ok(/\.ch-mosaic-tile img,[\s\S]*?\.ch-card-posters img,[\s\S]*?\.ch-movie-card img[\s\S]*?opacity:\s*1\s*!important/.test(tvCss), 'collection images forced visible');
+  assert.ok(/\.ch-particle-canvas\s*\{[\s\S]*?display:\s*none\s*!important/.test(tvCss), 'particle canvas hidden');
+});
+
+test('TV images are eagerly upgraded and cached collection images reveal immediately', () => {
+  assert.ok(moviezone.includes("loading=\"${isMzTV() ? 'eager' : 'lazy'}\""), 'movie posters select eager TV loading');
+  assert.ok(moviezone.includes("if (isMzTV()) img.loading = 'eager'"), 'collection images become eager on TV');
+  assert.ok(moviezone.includes('if (img.complete) done();'), 'cached image completion handled');
+  assert.ok(tvJs.includes("img.setAttribute('loading', 'eager')"), 'dynamic TV images upgraded');
+});
+
+test('TV focus is scoped to the topmost overlay and background focus is trapped', () => {
+  assert.ok(tvJs.includes('function getActiveFocusRoot()'), 'active focus root helper');
+  assert.ok(tvJs.includes('var root = getActiveFocusRoot();'), 'focus query uses active root');
+  assert.ok(tvJs.includes('root.querySelectorAll(TV_FOCUSABLE_SELECTORS)'), 'focusables queried inside root');
+  assert.ok(tvJs.includes('activeOutsideOverlay'), 'background focus is trapped');
+});
+
+test('TV mutation and focus scrolling work is de-duplicated', () => {
+  assert.ok(tvJs.includes('function scheduleTVDOMRefresh()'), 'mutation refresh scheduler exists');
+  assert.ok(tvJs.includes('_mutationFrame = requestAnimationFrame(refreshTVDOM)'), 'mutation work is rAF debounced');
+  assert.ok(tvJs.includes('if (_managedFocusTarget === e.target) return;'), 'managed focus skips capture scroll');
+});
+
+test('TV watch controls expose native selects and the embedded player', () => {
+  assert.ok(tvJs.includes('select:not([disabled]), #playerFrame'), 'select and iframe are spatial targets');
+  assert.ok(tvJs.includes("document.activeElement.tagName === 'SELECT'"), 'native select keys preserved');
+  assert.ok(moviezone.includes("iframe.setAttribute('tabindex', '0')"), 'player iframe focusable');
+  assert.ok(moviezone.includes("iframe.setAttribute('allowfullscreen', '')"), 'standard fullscreen attribute');
+  assert.ok(moviezone.includes("iframe.setAttribute('webkitallowfullscreen', '')"), 'legacy WebKit fullscreen attribute');
+});
+
+test('fullscreen rejection activates the existing CSS fallback', () => {
+  assert.ok(moviezone.includes('const activateCSSFullscreen = () =>'), 'fallback helper exists');
+  assert.ok(moviezone.includes('.catch(activateCSSFullscreen)'), 'Promise rejection uses fallback');
+  assert.ok(moviezone.includes("embedEl.classList.add('fullscreen-mode')"), 'existing fullscreen CSS mode retained');
+});
+
+test('TV collections use one inner scroll owner and do not start particles', () => {
+  assert.ok(/\.collections-hub-overlay\.open\s*\{[\s\S]*?overflow:\s*hidden\s*!important/.test(tvCss), 'outer collection overlay does not scroll');
+  assert.ok(/\.collections-hub-overlay\.open \.ch-scroll\s*\{[\s\S]*?overflow-y:\s*auto\s*!important/.test(tvCss), 'inner collection surface scrolls');
+  assert.ok(moviezone.includes("if (isMzTV() || liteMode) { canvas.style.display = 'none'; return; }"), 'particle loop cannot start on TV');
+  assert.ok(moviezone.includes('const maxTiles = isMzTV() ? 48'), 'TV mosaic work is capped');
+});
+
+
 // ─── MOVIEZONE.JS NO LEGACY TV SIGNATURES ─────────────────────────────────────
 
 test('moviezone.js has no standalone or ambiguous isTV variable', () => {
@@ -776,12 +825,12 @@ test('pwa-install.js uses isMzTV shared state helper (no duplicate detector)', (
 // ─── INDEX.HTML INTEGRATION ───────────────────────────────────────────────────
 
 test('index.html loads tv-mode.css', () => {
-  assert.ok(html.includes('tv-mode.css?v=1.0'), 'tv-mode.css loaded');
+  assert.ok(html.includes('tv-mode.css?v=1.1'), 'tv-mode.css loaded');
 });
 
 test('index.html loads tv-mode.js before moviezone.js', () => {
-  const tvJsIdx = html.indexOf('tv-mode.js?v=1.0');
-  const mzJsIdx = html.indexOf('moviezone.js?v=5.0');
+  const tvJsIdx = html.indexOf('tv-mode.js?v=1.1');
+  const mzJsIdx = html.indexOf('moviezone.js?v=5.1');
   assert.ok(tvJsIdx > -1, 'tv-mode.js referenced');
   assert.ok(tvJsIdx < mzJsIdx, 'tv-mode.js loads before moviezone.js');
 });
@@ -794,11 +843,11 @@ test('index.html has data-tv-hide on Hollywood and South nav items', () => {
 // ─── SW CACHE INTEGRATION ─────────────────────────────────────────────────────
 
 test('sw.js caches tv-mode.css', () => {
-  assert.ok(sw.includes("'/tv-mode.css?v=1.0'"), 'tv-mode.css in cache');
+  assert.ok(sw.includes("'/tv-mode.css?v=1.1'"), 'tv-mode.css in cache');
 });
 
 test('sw.js caches tv-mode.js', () => {
-  assert.ok(sw.includes("'/tv-mode.js?v=1.0'"), 'tv-mode.js in cache');
+  assert.ok(sw.includes("'/tv-mode.js?v=1.1'"), 'tv-mode.js in cache');
 });
 
 // ─── VERCEL INTEGRATION ───────────────────────────────────────────────────────
@@ -843,4 +892,28 @@ test('iframe sandbox line unchanged', () => {
 test('loadPlayer fallback behavior preserved', () => {
   assert.ok(moviezone.includes('const bestDubIdx = playerSources.findIndex(s => s.dubbed === true)'), 'dubbed fallback');
   assert.ok(moviezone.includes('if (DUBBED_LANG_LIST.includes(lang) && playerSources[srcIdx] && !playerSources[srcIdx].dubbed)'), 'lang switch logic');
+});
+
+
+test('protected player source host order and sandbox policy remain exact', () => {
+  const start = moviezone.indexOf('const playerSources = [');
+  const end = moviezone.indexOf('let currentSourceIdx', start);
+  const block = moviezone.slice(start, end);
+  const orderedHosts = [
+    'www.viduki.net',
+    'cinextream.net',
+    'flicky.host',
+    'vidphantom.com',
+    'autoembed.co',
+    'vidlink.pro',
+    'vidnest.fun',
+    'vidsrc.pm'
+  ];
+  let previous = -1;
+  orderedHosts.forEach(host => {
+    const index = block.indexOf(host);
+    assert.ok(index > previous, `${host} remains in protected order`);
+    previous = index;
+  });
+  assert.ok(moviezone.includes("iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-presentation')"), 'sandbox remains exact');
 });

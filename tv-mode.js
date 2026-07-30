@@ -191,6 +191,8 @@
   var _destroyed = false;
   var activeScrollAnimation = null;
   var _lastFocusBeforeModal = null;
+  var _mutationFrame = null;
+  var _managedFocusTarget = null;
 
   // Configure callbacks — moviezone.js registers these to communicate state
   var _callbacks = {
@@ -234,12 +236,13 @@
     cleanup: function() {
       _destroyed = true;
       cancelTVScroll();
+      if (_mutationFrame) { cancelAnimationFrame(_mutationFrame); _mutationFrame = null; }
       if (_observer) { _observer.disconnect(); _observer = null; }
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('keyup', handleKeyUp);
       document.removeEventListener('focus', handleFocus, true);
       document.removeEventListener('DOMContentLoaded', removeTVHiddenItems);
-      document.removeEventListener('DOMContentLoaded', markFocusable);
+      document.removeEventListener('DOMContentLoaded', refreshTVDOM);
       document.removeEventListener('DOMContentLoaded', removeHeavyEffects);
     },
 
@@ -283,7 +286,8 @@
   }
 
   // ─── D-PAD SPATIAL NAVIGATION ───────────────────────────────────────────────
-  var TV_FOCUSABLE_SELECTORS = '.movie-card, .upcoming-card, .cat-tab, .btn-play, .btn-info, .player-chip, .nav-links a, .carousel-arrow, button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+  var TV_FOCUSABLE_SELECTORS = '.movie-card, .upcoming-card, .cat-tab, .btn-play, .btn-info, .player-chip, .nav-links a, .carousel-arrow, input:not([disabled]), select:not([disabled]), #playerFrame, button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+  var TV_IMAGE_SELECTORS = '.movie-card img, .upcoming-card img, .cw-card img, .ch-mosaic-tile img, .ch-card-posters img, .ch-movie-card img, #modal-overlay img, #upcoming-detail-overlay img';
 
   var tvPageReady = false;
   var tvFirstInteractionTime = 0;
@@ -294,24 +298,69 @@
     });
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', markFocusable);
-  } else {
+  function prepareTVImages() {
+    document.querySelectorAll(TV_IMAGE_SELECTORS).forEach(function(img) {
+      if (img.getAttribute('loading') !== 'eager') img.setAttribute('loading', 'eager');
+      if (img.hasAttribute('data-ch-reveal') || img.closest('.collections-hub-overlay')) {
+        img.classList.add('ch-img-in');
+        var inner = img.closest('.ch-movie-card-inner');
+        if (inner) inner.classList.add('ch-img-in');
+      }
+    });
+  }
+
+  function refreshTVDOM() {
+    _mutationFrame = null;
     markFocusable();
+    prepareTVImages();
+    removeTVHiddenItems();
+  }
+
+  function scheduleTVDOMRefresh() {
+    if (_mutationFrame) return;
+    _mutationFrame = requestAnimationFrame(refreshTVDOM);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', refreshTVDOM);
+  } else {
+    refreshTVDOM();
   }
 
   var _observer = new MutationObserver(function(mutations) {
-    var hasNewNodes = false;
     for (var i = 0; i < mutations.length; i++) {
-      if (mutations[i].addedNodes.length > 0) { hasNewNodes = true; break; }
+      if (mutations[i].addedNodes.length > 0) {
+        scheduleTVDOMRefresh();
+        break;
+      }
     }
-    if (hasNewNodes) markFocusable();
   });
   _observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
 
+  function getActiveFocusRoot() {
+    var downloadOverlay = document.getElementById('dlModal');
+    if (downloadOverlay && getComputedStyle(downloadOverlay).display !== 'none') return downloadOverlay;
+
+    var overlayIds = [
+      'modal-overlay',
+      'upcoming-detail-overlay',
+      'collections-hub-overlay',
+      'pwa-install-tv-overlay',
+      'pwa-install-overlay'
+    ];
+    for (var i = 0; i < overlayIds.length; i++) {
+      var overlay = document.getElementById(overlayIds[i]);
+      if (overlay && overlay.classList.contains('open')) return overlay;
+    }
+    return document;
+  }
+
   function getVisibleFocusables() {
-    var els = document.querySelectorAll(TV_FOCUSABLE_SELECTORS);
+    var root = getActiveFocusRoot();
+    var els = root.querySelectorAll(TV_FOCUSABLE_SELECTORS);
     return Array.from(els).filter(function(el) {
+      if (el.disabled || el.getAttribute('aria-hidden') === 'true') return false;
+      if (el.closest('[aria-hidden="true"]')) return false;
       if (el.offsetParent === null && getComputedStyle(el).position !== 'fixed') return false;
       var r = el.getBoundingClientRect();
       return r.width > 0 && r.height > 0;
@@ -358,15 +407,15 @@
   }
 
   function getTVScrollContainer() {
-    var collections = document.getElementById('collections-hub-overlay');
-    if (collections && collections.classList.contains('open')) {
-      return document.getElementById('chScroll') || collections;
-    }
-
-    var overlayIds = ['upcoming-detail-overlay', 'modal-overlay', 'pwa-install-overlay', 'pwa-install-tv-overlay'];
+    var overlayIds = ['modal-overlay', 'upcoming-detail-overlay', 'pwa-install-tv-overlay', 'pwa-install-overlay'];
     for (var i = 0; i < overlayIds.length; i++) {
       var overlay = document.getElementById(overlayIds[i]);
       if (overlay && overlay.classList.contains('open')) return overlay;
+    }
+
+    var collections = document.getElementById('collections-hub-overlay');
+    if (collections && collections.classList.contains('open')) {
+      return document.getElementById('chScroll') || collections;
     }
 
     return document.scrollingElement || document.documentElement;
@@ -433,8 +482,13 @@
 
   function focusAndRevealTVTarget(target, direction) {
     cancelTVScroll(); // Cancel any ongoing scroll on new navigation
-    try { target.focus({ preventScroll: true }); }
-    catch (error) { target.focus(); }
+    _managedFocusTarget = target;
+    try {
+      try { target.focus({ preventScroll: true }); }
+      catch (error) { target.focus(); }
+    } finally {
+      _managedFocusTarget = null;
+    }
     try {
       target.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
     } catch (error) {
@@ -488,6 +542,14 @@
           if (exitResult && typeof exitResult.catch === 'function') exitResult.catch(function() {});
         } catch (error) {}
       }
+      e.preventDefault();
+      return;
+    }
+
+    // Download options are rendered above the watch modal.
+    var downloadOverlay = document.getElementById('dlModal');
+    if (downloadOverlay) {
+      downloadOverlay.remove();
       e.preventDefault();
       return;
     }
@@ -625,15 +687,25 @@
         armTVDetail(false);
         return;
       }
+      // Native TV select popups need vertical arrows to change options.
+      if (document.activeElement && document.activeElement.tagName === 'SELECT' &&
+          (direction === 'up' || direction === 'down')) {
+        tvPageReady = true;
+        armTVDetail(false);
+        return;
+      }
       e.preventDefault();
       tvPageReady = true; // D-pad movement proves this is a deliberate post-launch interaction
       armTVDetail(false);
       var active = document.activeElement;
-      if (!active || active === document.body) {
-        var safeFocusables = getVisibleFocusables().filter(function(el) {
+      var focusRoot = getActiveFocusRoot();
+      var activeOutsideOverlay = focusRoot !== document && active && !focusRoot.contains(active);
+      if (!active || active === document.body || activeOutsideOverlay) {
+        var visibleFocusables = getVisibleFocusables();
+        var safeFocusables = visibleFocusables.filter(function(el) {
           return !el.classList.contains('btn-play') && !el.classList.contains('movie-card');
         });
-        var first = safeFocusables[0] || getVisibleFocusables()[0];
+        var first = safeFocusables[0] || visibleFocusables[0];
         if (first) first.focus();
         return;
       }
@@ -649,6 +721,11 @@
     // Enter/Space: Click focused element
     if (action === 'enter' || action === 'space') {
       if (document.activeElement && document.activeElement.id === 'searchInput') {
+        armTVDetail(false);
+        return;
+      }
+      if (document.activeElement && document.activeElement.tagName === 'SELECT') {
+        tvPageReady = true;
         armTVDetail(false);
         return;
       }
@@ -711,6 +788,7 @@
 
   // Auto-scroll focused element to center
   function handleFocus(e) {
+    if (_managedFocusTarget === e.target) return;
     var overlay = document.getElementById('modal-overlay');
     if (e.target && e.target.scrollIntoView && (!overlay || !overlay.classList.contains('open'))) {
       try {

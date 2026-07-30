@@ -134,10 +134,10 @@ const FALLBACK_MANIFEST = {
   lang: 'en',
   dir: 'ltr',
   icons: [
-    { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-    { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
-    { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-    { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+    { src: '/icon-192.png?v=2', sizes: '192x192', type: 'image/png', purpose: 'any' },
+    { src: '/icon-192.png?v=2', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+    { src: '/icon-512.png?v=2', sizes: '512x512', type: 'image/png', purpose: 'any' },
+    { src: '/icon-512.png?v=2', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
   ],
   categories: ['entertainment'],
   related_applications: [
@@ -422,8 +422,8 @@ app.post('/api/notify-movies', async (req, res) => {
         title: 'MovieZone',
         body: `Notification set for ${String(title).slice(0, 120)} (${releaseDate}).`,
         url: notificationUrl,
-        icon: '/icon-192.png',
-        badge: '/icon-192.png',
+        icon: '/icon-192.png?v=2',
+        badge: '/icon-192.png?v=2',
         tag: `notify-confirm-${numericMovieId}`,
         type: 'notify-confirmation'
       });
@@ -494,8 +494,8 @@ async function processDueNotifications() {
       title: 'Now available on MovieZone',
       body: `${movie.title} has released. Tap to view details.`,
       url: movie.url || '/#upcoming',
-      icon: '/icon-192.png',
-      badge: '/icon-192.png',
+      icon: '/icon-192.png?v=2',
+      badge: '/icon-192.png?v=2',
       tag: `movie-release-${movie.movieId}`,
       type: 'movie-release'
     });
@@ -541,8 +541,8 @@ app.post('/api/push/send', async (req, res) => {
         title,
         body,
         url: typeof url === 'string' && url.startsWith('/') ? url : '/',
-        icon: '/icon-192.png',
-        badge: '/icon-192.png',
+        icon: '/icon-192.png?v=2',
+        badge: '/icon-192.png?v=2',
         tag: `broadcast-${Date.now()}`
       });
       if (result.sent) sent++;
