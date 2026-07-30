@@ -160,8 +160,15 @@
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
 // TV detection is handled by tv-mode.js which sets html[data-mz-tv="true"].
 // This getter reads the data attribute set by the isolated TV module.
-const isMzTV = () => false; // TV Mode disabled to run exactly like Laptop
-
+const isMzTV = () => {
+  if (document.documentElement.getAttribute('data-mz-tv') === 'true') return true;
+  const ua = navigator.userAgent;
+  if (/TV|SmartTV|GoogleTV|AppleTV|HbbTV|CrKey|WebOS|Tizen|Opera TV|AndroidTV|OPR\/[0-9].*TV/i.test(ua)) return true;
+  if (/SMART-TV|SmartTV|SamsungBrowser\/[0-9].*TV/i.test(ua)) return true;
+  // Large screen + no fine pointer (remotes don't have fine pointer)
+  if (window.innerWidth >= 1920 && !window.matchMedia('(pointer: fine)').matches) return true;
+  return false;
+};
 // Balanced Performance: phones/tablets use low-end mode; confirmed TVs use data-mz-tv.
 const isMobile = !isMzTV() && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
 const isLowEnd = (navigator.deviceMemory && navigator.deviceMemory < 4) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency < 4);
@@ -528,7 +535,7 @@ function detailNow() {
 }
 
 function isMzTVMode() {
-  return false; // TV Mode disabled to run exactly like Laptop
+  return isMzTV();
 }
 
 

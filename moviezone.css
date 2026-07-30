@@ -6786,3 +6786,51 @@ body.cursor-hover #cursor-dot {
   .pwa-tv-desc { font-size: 1rem; }
   .pwa-tv-qr-wrap { width: 200px; height: 200px; }
 }
+/* ===================================================
+   TV SCREEN COMPLETE FIX — Paste at very bottom
+   =================================================== */
+
+/* Fix 1: TV par images blank na aayein */
+html[data-mz-tv="true"] img,
+.mz-tv-active img {
+  content-visibility: visible !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* Fix 2: TV grid rendering — data blank na aaye */
+html[data-mz-tv="true"] .movie-grid,
+html[data-mz-tv="true"] .upcoming-grid,
+html[data-mz-tv="true"] .related-grid,
+.mz-tv-active .movie-grid,
+.mz-tv-active .upcoming-grid {
+  content-visibility: visible !important;
+  contain: none !important;
+}
+
+/* Fix 3: TV par iframe players block na ho */
+html[data-mz-tv="true"] #playerFrame,
+html[data-mz-tv="true"] .video-embed iframe,
+html[data-mz-tv="true"] iframe,
+.mz-tv-active iframe {
+  pointer-events: auto !important;
+  display: block !important;
+  visibility: visible !important;
+}
+
+/* Fix 4: TV par heavy CSS effects off (performance) */
+html[data-mz-tv="true"] .ambient-particles { display: none !important; }
+html[data-mz-tv="true"] #cursor-glow,
+html[data-mz-tv="true"] #cursor-ring,
+html[data-mz-tv="true"] #cursor-dot { display: none !important; }
+html[data-mz-tv="true"] .click-spark { display: none !important; }
+
+/* Fix 5: TV card focus (remote navigation ke liye visible highlight) */
+html[data-mz-tv="true"] .movie-card:focus,
+html[data-mz-tv="true"] .upcoming-card:focus,
+html[data-mz-tv="true"] button:focus,
+html[data-mz-tv="true"] a:focus {
+  outline: 3px solid var(--gold) !important;
+  outline-offset: 4px !important;
+  box-shadow: 0 0 0 6px rgba(245,197,24,0.35) !important;
+}

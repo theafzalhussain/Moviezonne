@@ -625,6 +625,24 @@ if ('requestIdleCallback' in window) {
     });
   });
 }
+<!-- ✅ TV Detection — <head> ke PEHLE script tag ke roop mein add karo -->
+
+(function detectTV() {
+  const ua = navigator.userAgent;
+  const isTV =
+    /TV|SmartTV|GoogleTV|AppleTV|HbbTV|CrKey|WebOS|Tizen|AndroidTV|Opera TV/i.test(ua) ||
+    (window.innerWidth >= 1920 && !window.matchMedia('(pointer: fine)').matches);
+  if (isTV) {
+    document.documentElement.setAttribute('data-mz-tv', 'true');
+    document.documentElement.classList.add('mz-tv-active', 'large-screen-mode');
+    // Body overflow lock off on TV (remote scroll ke liye)
+    document.addEventListener('DOMContentLoaded', function() {
+      document.body.style.overflow = '';
+    });
+  }
+})();
+
+
 </script>
 
 <!-- Service worker registration is intentionally performed in the <head> PWA
