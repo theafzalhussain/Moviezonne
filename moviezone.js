@@ -1,8 +1,166 @@
-﻿﻿﻿// Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
+﻿﻿/* ============================================================
+   🚀 MZ TV ULTRA PERFORMANCE BOOSTER — Sirf TV par chale
+   Laptop/Desktop par automatically SKIP ho jayega
+   ============================================================ */
+(function MZTVBooster() {
+
+  // ✅ SMART TV CHECK — Laptop/Desktop par return kar do
+  const isLargeScreenTV = window.innerWidth >= 1920 && 
+    !(/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) &&
+    window.matchMedia('(hover: none)').matches;
+  
+  if (!isLargeScreenTV) {
+    console.log('ℹ️ MZ Booster: Laptop/Desktop — Skipped');
+    return; // Laptop par yahan se bahar — kuch nahi chalega
+  }
+
+  // ── 1. GPU-ACCELERATED SMOOTH SCROLLING ──
+  const smoothScrollStyle = document.createElement('style');
+  smoothScrollStyle.textContent = `
+    html { scroll-behavior: smooth !important; -webkit-overflow-scrolling: touch !important; }
+    body { overflow-x: hidden !important; overscroll-behavior: none !important; }
+    *, *::before, *::after {
+      -webkit-font-smoothing: antialiased !important;
+      -moz-osx-font-smoothing: grayscale !important;
+    }
+    .movie-card, .upcoming-card, .carousel-slide,
+    .movie-grid, .upcoming-grid, #hero, .main-content,
+    .collections-grid, .related-grid {
+      transform: translateZ(0) !important;
+      -webkit-transform: translateZ(0) !important;
+      backface-visibility: hidden !important;
+      will-change: transform !important;
+    }
+    img { decoding: async !important; content-visibility: auto !important; }
+    .movie-grid, .upcoming-grid, .related-grid,
+    .collections-grid, .search-results-dropdown {
+      scroll-behavior: smooth !important; overflow-anchor: none !important;
+    }
+    #navbar { transform: translateZ(0) !important; will-change: transform !important; }
+    #modal-overlay, #upcoming-detail-overlay {
+      transform: translateZ(0) !important; will-change: transform, opacity !important;
+    }
+  `;
+  document.head.appendChild(smoothScrollStyle);
+
+  // ── 2. PASSIVE EVENT LISTENERS — Scroll Lag Zero ──
+  const passiveFix = { passive: true, capture: false };
+  ['touchstart','touchmove','touchend','wheel','mousewheel','scroll'].forEach(evt => {
+    document.addEventListener(evt, () => {}, passiveFix);
+    window.addEventListener(evt, () => {}, passiveFix);
+  });
+
+  // ── 3. INERTIAL SMOOTH SCROLL ENGINE (Arrow keys butter-smooth) ──
+  let scrollVelocity = 0;
+  let isScrolling = false;
+  function smoothScrollTick() {
+    if (Math.abs(scrollVelocity) < 0.5) { isScrolling = false; scrollVelocity = 0; return; }
+    window.scrollBy(0, scrollVelocity);
+    scrollVelocity *= 0.88;
+    requestAnimationFrame(smoothScrollTick);
+  }
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); scrollVelocity += 18; if (!isScrolling) { isScrolling = true; requestAnimationFrame(smoothScrollTick); } }
+    if (e.key === 'ArrowUp')   { e.preventDefault(); scrollVelocity -= 18; if (!isScrolling) { isScrolling = true; requestAnimationFrame(smoothScrollTick); } }
+    if (e.key === 'PageDown')  { e.preventDefault(); scrollVelocity += 60; if (!isScrolling) { isScrolling = true; requestAnimationFrame(smoothScrollTick); } }
+    if (e.key === 'PageUp')    { e.preventDefault(); scrollVelocity -= 60; if (!isScrolling) { isScrolling = true; requestAnimationFrame(smoothScrollTick); } }
+  }, { passive: false });
+
+  // ── 4. AUTO IMAGE LAZY LOADING ──
+  if ('IntersectionObserver' in window) {
+    const imgObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const img = entry.target;
+          if (img.dataset.src) { img.src = img.dataset.src; img.removeAttribute('data-src'); }
+          img.decoding = 'async';
+          imgObserver.unobserve(img);
+        }
+      });
+    }, { rootMargin: '400px 0px', threshold: 0.01 });
+    new MutationObserver((mutations) => {
+      mutations.forEach(mutation => {
+        mutation.addedNodes.forEach(node => {
+          if (node.nodeType === 1) {
+            const imgs = node.tagName === 'IMG' ? [node] : node.querySelectorAll('img');
+            imgs.forEach(img => { if (img.dataset.src) imgObserver.observe(img); img.decoding = 'async'; img.loading = 'lazy'; });
+          }
+        });
+      });
+    }).observe(document.body, { childList: true, subtree: true });
+  }
+
+  // ── 5. FPS GUARD — 30fps gire toh auto heavy effects band ──
+  let frameCount = 0, lastFrameTime = performance.now(), lowFPSMode = false;
+  function monitorFPS() {
+    frameCount++;
+    const now = performance.now();
+    if (now - lastFrameTime >= 2000) {
+      const fps = frameCount / ((now - lastFrameTime) / 1000);
+      frameCount = 0; lastFrameTime = now;
+      if (fps < 30 && !lowFPSMode) {
+        lowFPSMode = true;
+        document.documentElement.classList.add('mz-low-fps');
+        const s = document.createElement('style'); s.id = 'mz-low-fps-style';
+        s.textContent = `.mz-low-fps .ambient-particles{display:none!important}.mz-low-fps .movie-card::before,.mz-low-fps .movie-card::after{display:none!important}.mz-low-fps *,.mz-low-fps *::before,.mz-low-fps *::after{animation-duration:.15s!important;transition-duration:.15s!important}`;
+        document.head.appendChild(s);
+      } else if (fps >= 50 && lowFPSMode) {
+        lowFPSMode = false;
+        document.documentElement.classList.remove('mz-low-fps');
+        const s = document.getElementById('mz-low-fps-style'); if (s) s.remove();
+      }
+    }
+    requestAnimationFrame(monitorFPS);
+  }
+  requestAnimationFrame(monitorFPS);
+
+  // ── 6. MEMORY AUTO-CLEANUP ──
+  let cleanupTimer;
+  window.addEventListener('scroll', () => {
+    clearTimeout(cleanupTimer);
+    cleanupTimer = setTimeout(() => {
+      const cards = document.querySelectorAll('.movie-card img, .upcoming-card img');
+      const viewH = window.innerHeight;
+      cards.forEach(img => {
+        if (Math.abs(img.getBoundingClientRect().top) > viewH * 5 && img.src && !img.dataset.src) {
+          img.dataset.src = img.src;
+          img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+        }
+      });
+    }, 1500);
+  }, { passive: true });
+
+  // ── 7. RENDER OPTIMIZATION ──
+  const pendingWrites = [];
+  window.mzWrite = function(fn) {
+    pendingWrites.push(fn);
+    if (pendingWrites.length === 1) requestAnimationFrame(() => { while (pendingWrites.length) pendingWrites.shift()(); });
+  };
+
+  // ── 8. NETWORK-AWARE OPTIMIZATION ──
+  const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (conn && (conn.saveData || /^[23]g/.test(conn.effectiveType))) {
+    const s = document.createElement('style');
+    s.textContent = `.ambient-particles{display:none!important}.slide-bg{transition:none!important}*{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}`;
+    document.head.appendChild(s);
+  }
+
+  // ── 9. SCROLLBAR + HARDWARE ACCELERATION ──
+  document.documentElement.style.setProperty('scroll-behavior', 'smooth', 'important');
+  const haStyle = document.createElement('style');
+  haStyle.textContent = `#hero,#navbar,.main-content,#modal-overlay,#upcoming-detail-overlay,.carousel-track,#collections-hub-overlay{transform:translate3d(0,0,0)!important;-webkit-transform:translate3d(0,0,0)!important}`;
+  document.head.appendChild(haStyle);
+
+  console.log('🚀 MZ TV Booster: Active — Smooth Mode ON');
+})();
+
+
+
+﻿// Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
 // TV detection is handled by tv-mode.js which sets html[data-mz-tv="true"].
 // This getter reads the data attribute set by the isolated TV module.
-const isMzTV = () => document.documentElement.getAttribute('data-mz-tv') === 'true';
+const isMzTV = () => false; // TV Mode disabled to run exactly like Laptop
 
 // Balanced Performance: phones/tablets use low-end mode; confirmed TVs use data-mz-tv.
 const isMobile = !isMzTV() && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
@@ -370,8 +528,9 @@ function detailNow() {
 }
 
 function isMzTVMode() {
-  return document.documentElement.getAttribute('data-mz-tv') === 'true';
+  return false; // TV Mode disabled to run exactly like Laptop
 }
+
 
 function resetTVLaunchActivation() {
   if (!isMzTVMode()) return;
