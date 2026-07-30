@@ -1,8 +1,10 @@
-const CACHE_NAME = 'moviezone-v36';
+const CACHE_NAME = 'moviezone-v37';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
+  '/tv-mode.css?v=1.0',
   '/moviezone.css?v=4.2',
+  '/tv-mode.js?v=1.0',
   '/search-engine.js?v=1.1',
   '/moviezone.js?v=5.0',
   '/pwa-install.js?v=1.6',

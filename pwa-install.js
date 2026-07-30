@@ -448,9 +448,9 @@
       window.navigator.standalone === true;
   }
 
-  function isTV() {
-    var ua = navigator.userAgent.toLowerCase();
-    return /smart-tv|smarttv|googletv|appletv|hbbtv|netcast|viera|tizen.*tv|webos.*tv|tv.*webos|aft[a-z]|crkey|roku/.test(ua);
+  function isMzTV() {
+    // Reads the data attribute set by tv-mode.js
+    return document.documentElement.getAttribute('data-mz-tv') === 'true';
   }
 
   function isIOS() {
@@ -1253,7 +1253,7 @@
       popupTimer = null;
       refreshInstalledState('before-auto-popup').then(function (installed) {
         if (installed || popupShownThisLoad) return;
-        if (isTV()) {
+        if (isMzTV()) {
           openTvPopup(false);
           setTimeout(function () { if (tvDismissBtn) tvDismissBtn.focus(); }, 100);
         } else openPopup(false);
@@ -1263,7 +1263,7 @@
 
   function prepareUninstalledUI() {
     if (installedState === true) return;
-    if (isTV()) {
+    if (isMzTV()) {
       if (!tvOverlay) { console.log('[MovieZone PWA] TV overlay element not found in DOM.'); return; }
       if (!tvUiPrepared) {
         tvUiPrepared = true;
@@ -1299,7 +1299,7 @@
       if (installBtn && !clickBusy && !isIOS()) resetBtn();
       prepareUninstalledUI();
       if (popupTimer) { clearTimeout(popupTimer); popupTimer = null; }
-      setTimeout(function () { if (isTV()) openTvPopup(false); else openPopup(false); }, 250);
+      setTimeout(function () { if (isMzTV()) openTvPopup(false); else openPopup(false); }, 250);
     });
   });
 

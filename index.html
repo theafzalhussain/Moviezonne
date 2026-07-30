@@ -111,9 +111,12 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
 <link rel="preload" href="moviezone.css?v=4.2" as="style">
+<link rel="preload" href="tv-mode.css?v=1.0" as="style">
+<link rel="preload" href="tv-mode.js?v=1.0" as="script">
 <link rel="preload" href="search-engine.js?v=1.1" as="script">
 <link rel="preload" href="moviezone.js?v=5.0" as="script">
 <link rel="stylesheet" href="moviezone.css?v=4.2">
+<link rel="stylesheet" href="tv-mode.css?v=1.0">
 </head>
 <body>
 
@@ -125,6 +128,7 @@
 <!-- ── CINEMATIC LOADER ── -->
 <div id="mz-loader">
   <div class="mz-loader-brand">
+    <img class="loader-logo-tv" src="/moviezone-logo.png" alt="MovieZone" width="80" height="80" aria-hidden="true">
     <div class="loader-icon">
       <svg viewBox="0 0 100 100" width="80" height="80">
         <defs>
@@ -153,6 +157,7 @@
 <nav id="navbar">
   <div class="nav-brand">
     <a class="nav-logo" href="#" aria-label="MovieZone home">
+      <img class="nav-logo-tv" src="/moviezone-logo.png" alt="MovieZone" width="40" height="40" aria-hidden="true">
       <span class="nav-logo-mark">MZ</span>
       <span class="nav-logo-copy">
         <span class="nav-logo-main">MOVIEZONE</span>
@@ -173,7 +178,7 @@
     <li><a href="#upcoming" onclick="goHome(event)">Upcoming</a></li>
     <li><a href="#" onclick="filterCat('bollywood', event)">Bollywood</a></li>
     <li data-tv-hide><a href="#" onclick="filterCat('hollywood', event)">Hollywood</a></li>
-    <li data-tv-hide><a href="#" onclick="filterCat('south', event)">South</a></li>
+    <li data-tv-hide><a href="#" onclick="filterCat('anime', event)">Anime</a></li>
     <li><a href="#" onclick="showWatchlist(event)">Watchlist</a></li>
   </ul>
   <div class="nav-search">
@@ -593,6 +598,7 @@
 <!-- â”€â”€ TOAST â”€â”€ -->
 <div id="toast"></div>
 
+<script src="tv-mode.js?v=1.0" defer></script>
 <script src="search-engine.js?v=1.1" defer></script>
 <script src="moviezone.js?v=5.0" defer></script>
 <script src="pwa-install.js?v=1.6" defer></script>

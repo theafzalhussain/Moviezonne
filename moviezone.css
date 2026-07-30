@@ -1,4 +1,4 @@
-﻿/* ═══════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    MOVIEZONE — ULTRA PREMIUM LUXURY EDITION
    Complete design system with cinematic animations
    ═══════════════════════════════════════════════════════════════ */
@@ -665,6 +665,12 @@ body.cursor-hover #cursor-dot {
   gap: 0.8rem;
   text-decoration: none;
   cursor: pointer;
+}
+
+/* TV logo images — hidden by default, shown only in tv-mode.css */
+.nav-logo-tv,
+.loader-logo-tv {
+  display: none;
 }
 
 .nav-logo-mark {
@@ -2911,10 +2917,7 @@ body.cursor-hover #cursor-dot {
   transform: translate(-50%, -50%) scale(0.8);
 }
 
-/* TV par heavy blur lag (stutter) na kare isliye fallback */
-.tv-mode .modal-image-wrapper img.blur-in {
-  animation: none !important; opacity: 1 !important; filter: none !important;
-}
+/* TV styles moved to tv-mode.css */
 
 .modal-gradient {
   position: absolute;
@@ -4633,77 +4636,11 @@ body.cursor-hover #cursor-dot {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   TV MODE & LOW-END MODE — Performance optimizations
-   EXTREME PERFORMANCE OPTIMIZATION FOR TV + MOBILE
+   LOW-END MODE — Performance optimizations for mobile/weak devices
+   TV styles are in tv-mode.css (uses html[data-mz-tv="true"])
    ═══════════════════════════════════════════════════════════════ */
 
-/* === TV MODE: Remove ALL heavy effects, ultra-minimal transitions === */
-.tv-mode {
-  scroll-behavior: auto !important;
-}
-
-.tv-mode * {
-  scroll-behavior: auto !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  text-shadow: none !important;
-  filter: none !important;
-  animation: none !important;
-  transition: none !important;
-  box-shadow: none !important;
-  will-change: auto !important;
-}
-
-/* Minimal transition for D-pad outline movement only */
-.tv-mode .movie-card, .tv-mode .upcoming-card,
-.tv-mode .cat-tab, .tv-mode .btn-play,
-.tv-mode .btn-info, .tv-mode .player-chip,
-.tv-mode .nav-links a, .tv-mode .carousel-arrow,
-.tv-mode button {
-  transition: outline 0.05s linear !important;
-  min-height: 44px;
-  cursor: pointer;
-}
-
-/* Subtle 1px gold outline for TV focus — NO scale, NO background change */
-.tv-mode .movie-card:focus,
-.tv-mode .movie-card:focus-visible,
-.tv-mode .upcoming-card:focus,
-.tv-mode .upcoming-card:focus-visible,
-.tv-mode .cat-tab:focus,
-.tv-mode .cat-tab:focus-visible,
-.tv-mode .btn-play:focus,
-.tv-mode .btn-info:focus,
-.tv-mode .player-chip:focus,
-.tv-mode .nav-links a:focus,
-.tv-mode .carousel-arrow:focus,
-.tv-mode button:focus {
-  outline: 1px solid rgba(255, 193, 7, 0.6) !important;
-  outline-offset: 1px !important;
-  z-index: 10 !important;
-  transform: none !important;
-  background-color: inherit !important;
-}
-
-/* TV hover = focus (since TV remotes simulate hover on focus) */
-.tv-mode .movie-card:hover,
-.tv-mode .upcoming-card:hover {
-  outline: 1px solid rgba(255, 193, 7, 0.6) !important;
-  outline-offset: 1px !important;
-  z-index: 10 !important;
-  transform: none !important;
-  background-color: inherit !important;
-}
-
-/* Compact font sizes for TV */
-.tv-mode body { font-size: 1rem !important; }
-.tv-mode .slide-title { font-size: 2.4rem !important; }
-.tv-mode .slide-desc { font-size: 1.05rem !important; }
-.tv-mode .card-title { font-size: 0.9rem !important; }
-.tv-mode .cat-tab { font-size: 0.92rem !important; padding: 9px 16px !important; }
-.tv-mode .nav-links a { font-size: 0.88rem !important; }
-
-/* === LOW-END MODE styles remain unchanged === */
+/* === LOW-END MODE styles === */
 .low-end-mode * {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
@@ -4712,79 +4649,46 @@ body.cursor-hover #cursor-dot {
 }
 
 /* Film grain noise filter is GPU-expensive — remove */
-.tv-mode #hero::before, .low-end-mode #hero::before { display: none !important; }
-.tv-mode #hero::after, .low-end-mode #hero::after { display: none !important; }
+.low-end-mode #hero::before { display: none !important; }
+.low-end-mode #hero::after { display: none !important; }
 
 /* Ken-Burns zoom causes continuous repaint of a huge image — freeze it */
-.tv-mode .slide-bg,
-.tv-mode .carousel-slide.active .slide-bg,
 .low-end-mode .slide-bg,
 .low-end-mode .carousel-slide.active .slide-bg {
   transform: scale(1) !important;
 }
 
 /* Kill ALL heavy box-shadows */
-.tv-mode .movie-card, .low-end-mode .movie-card,
-.tv-mode .upcoming-card, .low-end-mode .upcoming-card,
-.tv-mode #navbar, .low-end-mode #navbar,
-.tv-mode .cat-tab, .low-end-mode .cat-tab,
-.tv-mode .modal-box, .low-end-mode .modal-box,
-.tv-mode .btn-play, .low-end-mode .btn-play,
-.tv-mode .btn-info, .low-end-mode .btn-info,
-.tv-mode .player-chip, .low-end-mode .player-chip {
-  box-shadow: none !important;
-}
-
-/* Fast Focus Outline — subtle, no scale */
-.tv-mode .movie-card:focus,
-.tv-mode .movie-card:focus-visible,
-.tv-mode .upcoming-card:focus,
-.tv-mode .upcoming-card:focus-visible,
-.tv-mode .cat-tab:focus,
-.tv-mode .btn-play:focus,
-.tv-mode .btn-info:focus,
-.tv-mode .player-chip:focus,
-.tv-mode .nav-links a:focus,
-.tv-mode .movie-card:hover,
-.tv-mode .upcoming-card:hover {
-  outline: 1px solid rgba(255, 193, 7, 0.6) !important;
-  outline-offset: 1px !important;
-  transform: none !important;
-  background-color: inherit !important;
-  z-index: 10 !important;
+.low-end-mode .movie-card,
+.low-end-mode .upcoming-card,
+.low-end-mode #navbar,
+.low-end-mode .cat-tab,
+.low-end-mode .modal-box,
+.low-end-mode .btn-play,
+.low-end-mode .btn-info,
+.low-end-mode .player-chip {
   box-shadow: none !important;
 }
 
 /* Disable scaling inside the card to avoid double-painting */
-.tv-mode .movie-card:focus .card-poster img,
-.tv-mode .movie-card:hover .card-poster img,
-.tv-mode .upcoming-card:focus .upcoming-poster img,
-.tv-mode .upcoming-card:hover .upcoming-poster img,
 .low-end-mode .movie-card .card-poster img,
 .low-end-mode .upcoming-card .upcoming-poster img {
   transform: none !important;
 }
 
-/* Remove 3D transforms from cards on TV — saves GPU layers */
-.tv-mode .movie-card, .tv-mode .upcoming-card {
-  transform: none !important;
-  perspective: none !important;
-  transform-style: flat !important;
-}
-
 /* Skip staggered entrance animations — render instantly */
-.tv-mode .movie-card, .low-end-mode .movie-card,
-.tv-mode .upcoming-card, .low-end-mode .upcoming-card,
-.tv-mode .reveal-up, .low-end-mode .reveal-up {
+.low-end-mode .movie-card,
+.low-end-mode .upcoming-card,
+.low-end-mode .reveal-up {
   animation: none !important;
   opacity: 1 !important;
   will-change: auto !important;
 }
 
 /* Disable shine sweeps and overlays to save paints */
-.tv-mode .card-poster::after, .low-end-mode .card-poster::after,
-.tv-mode .upcoming-poster::after, .low-end-mode .upcoming-poster::after,
-.tv-mode .card-overlay, .low-end-mode .card-overlay {
+.low-end-mode .card-poster::after,
+.low-end-mode .upcoming-poster::after,
+.low-end-mode .card-overlay {
   display: none !important;
 }
 
@@ -4804,18 +4708,14 @@ body.cursor-hover #cursor-dot {
 }
 
 /* Stop skeleton shimmer animation */
-.tv-mode .skeleton, .low-end-mode .skeleton {
+.low-end-mode .skeleton {
   animation: none !important;
   background: var(--card2) !important;
 }
 
-/* Carousel arrows: keep visible */
-.tv-mode .carousel-arrow { opacity: 1; background: var(--card); border: 1px solid rgba(255,255,255,0.15); }
-.tv-mode .carousel-arrow:focus { outline: 1px solid rgba(255, 193, 7, 0.6) !important; outline-offset: 1px !important; }
-
-/* Progress bar / dot glow are tiny — keep, but drop the pulsing glow animation */
-.tv-mode .dot.active, .low-end-mode .dot.active { animation: none !important; box-shadow: none !important; }
-.tv-mode .slide-title, .low-end-mode .slide-title { animation: none !important; }
+/* Progress bar / dot glow — drop the pulsing glow animation */
+.low-end-mode .dot.active { animation: none !important; box-shadow: none !important; }
+.low-end-mode .slide-title { animation: none !important; }
 
 /* ═══════════════════════════════════════════════════════════════
    TV SCREEN RESPONSIVE LAYOUT (43inch+ / 1920px+)
@@ -4854,385 +4754,6 @@ body.cursor-hover #cursor-dot {
   transition: transform 0.2s ease !important;
 }
 
-/* --- TV Scrolling: Force scroll everywhere, no smooth (causes jank on TV) --- */
-.tv-mode html {
-  overflow-y: auto !important;
-  overflow-x: hidden !important;
-  scroll-behavior: auto !important;
-  height: auto !important;
-}
-
-.tv-mode body {
-  overflow-y: auto !important;
-  overflow-x: hidden !important;
-  height: auto !important;
-  min-height: 100vh;
-}
-
-.tv-mode #modal-overlay {
-  overflow-y: scroll !important;
-  overflow-x: hidden !important;
-  -webkit-overflow-scrolling: touch;
-  height: 100% !important;
-  max-height: 100vh !important;
-  display: block !important;
-  overscroll-behavior: contain;
-  scrollbar-width: thin !important;
-}
-
-.tv-mode #modal-overlay.open {
-  display: block !important;
-}
-
-/* TV: Make close/back button sticky so it's always visible and clickable */
-.tv-mode .modal-close {
-  position: fixed !important;
-  top: 0.8rem !important;
-  left: 0.8rem !important;
-  z-index: 9999 !important;
-  display: flex !important;
-  pointer-events: auto !important;
-  opacity: 1 !important;
-  visibility: visible !important;
-}
-
-/* TV: Ensure close button is focusable and visible on focus */
-.tv-mode .modal-close:focus {
-  outline: 3px solid var(--gold) !important;
-  outline-offset: 3px !important;
-  background: rgba(245, 197, 24, 0.2) !important;
-  border-color: var(--gold) !important;
-  transform: scale(1.05);
-}
-
-.tv-mode .modal-box {
-  overflow: visible !important;
-  height: auto !important;
-  max-height: none !important;
-  min-height: auto !important;
-  position: relative !important;
-}
-
-.tv-mode .modal-content-wrapper {
-  overflow: visible !important;
-  height: auto !important;
-}
-
-.tv-mode .modal-info {
-  overflow: visible !important;
-  height: auto !important;
-}
-
-.tv-mode .modal-top {
-  min-height: auto !important;
-  height: auto !important;
-}
-
-/* Scrollbar: thin and visible */
-.tv-mode ::-webkit-scrollbar { width: 6px !important; display: block !important; }
-.tv-mode ::-webkit-scrollbar-thumb { background: var(--gold) !important; border-radius: 3px; }
-.tv-mode ::-webkit-scrollbar-track { background: rgba(255,255,255,0.03) !important; }
-
-/* --- TV Movie Cards: Smaller grid for performance --- */
-.tv-mode .movie-grid {
-  grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
-  gap: 1rem;
-}
-
-.tv-mode .movie-card {
-  border-radius: 10px;
-  margin-top: 8px;
-}
-
-.tv-mode .movie-card .card-poster img {
-  height: auto;
-  aspect-ratio: 2/3;
-}
-
-.tv-mode .upcoming-grid {
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 1rem;
-}
-
-.tv-mode .upcoming-card {
-  border-radius: 10px;
-}
-
-/* --- TV Navbar: Wider, smaller text, no overlap --- */
-.tv-mode [data-tv-hide] {
-  display: none !important;
-}
-
-.tv-mode #navbar {
-  width: 97% !important;
-  max-width: 1920px;
-  padding: 0.6rem 1.2rem;
-  gap: 0.6rem;
-  border-radius: 18px;
-  background: rgba(5, 5, 12, 0.97) !important;
-  border: 1px solid rgba(255, 255, 255, 0.06) !important;
-  flex-wrap: nowrap;
-  align-items: center;
-}
-
-.tv-mode .nav-brand {
-  flex-shrink: 0;
-}
-
-.tv-mode .nav-links {
-  gap: 0.2rem !important;
-  flex-wrap: nowrap;
-  overflow: visible;
-  flex: 1;
-  justify-content: center;
-}
-
-.tv-mode .nav-links a {
-  font-size: 0.88rem !important;
-  padding: 0.45rem 0.8rem !important;
-  white-space: nowrap;
-  letter-spacing: 0.2px;
-  border-radius: 8px;
-}
-
-.tv-mode .nav-logo-mark {
-  width: 2rem;
-  height: 2rem;
-  border-radius: 8px;
-  font-size: 0.72rem;
-}
-
-.tv-mode .nav-logo-main {
-  font-size: 1.15rem;
-  letter-spacing: 1.5px;
-}
-
-.tv-mode .nav-logo-sub {
-  font-size: 0.45rem;
-  letter-spacing: 1.2px;
-}
-
-.tv-mode .nav-search {
-  max-width: 240px;
-  flex: 0 1 240px;
-  margin-left: auto;
-}
-
-.tv-mode .nav-search input {
-  font-size: 0.85rem;
-  padding: 0.5rem 0.8rem 0.5rem 2.2rem;
-  min-height: 36px;
-}
-
-/* --- TV Hero Section --- */
-.tv-mode #hero {
-  height: 75vh;
-  margin-top: 80px;
-}
-
-.tv-mode .slide-content {
-  left: 4%;
-  bottom: 12%;
-  max-width: 55%;
-}
-
-.tv-mode .slide-title {
-  font-size: clamp(2.2rem, 3.5vw, 3.8rem) !important;
-  line-height: 1.1;
-}
-
-.tv-mode .slide-desc {
-  font-size: 1rem !important;
-  line-height: 1.4;
-  -webkit-line-clamp: 3;
-  max-width: 90%;
-}
-
-.tv-mode .slide-meta {
-  font-size: 0.85rem;
-  gap: 0.6rem;
-}
-
-.tv-mode .slide-badge {
-  font-size: 0.65rem;
-  padding: 0.25rem 0.7rem;
-}
-
-.tv-mode .slide-actions .btn-play,
-.tv-mode .slide-actions .btn-info {
-  padding: 0.7rem 1.4rem;
-  font-size: 0.95rem;
-  border-radius: 10px;
-  min-height: 42px;
-}
-
-/* --- TV Content Areas --- */
-.tv-mode .main-content,
-.tv-mode #upcoming {
-  padding-left: 2.5%;
-  padding-right: 2.5%;
-}
-
-/* --- TV Section Headers --- */
-.tv-mode .section-title {
-  font-size: 1.5rem;
-}
-
-.tv-mode .section-subtitle {
-  font-size: 0.9rem;
-}
-
-/* --- TV Category Tabs --- */
-.tv-mode .cat-tabs {
-  gap: 0.4rem;
-}
-
-.tv-mode .cat-tab {
-  font-size: 0.9rem !important;
-  padding: 0.5rem 1.1rem !important;
-  min-height: 38px;
-  border-radius: 8px;
-}
-
-/* --- TV Card Titles --- */
-.tv-mode .card-title {
-  font-size: 0.88rem !important;
-  line-height: 1.3;
-}
-
-.tv-mode .card-year,
-.tv-mode .card-rating {
-  font-size: 0.78rem;
-}
-
-/* --- TV Modal --- */
-.tv-mode .modal-info {
-  max-width: 1400px;
-  padding: 3rem 4%;
-  overflow: visible !important;
-  height: auto !important;
-}
-
-.tv-mode .modal-title {
-  font-size: 2.5rem;
-}
-
-.tv-mode .modal-desc {
-  font-size: 1rem;
-  line-height: 1.5;
-}
-
-/* --- TV Footer --- */
-.tv-mode footer {
-  padding: 2.5rem 3%;
-}
-
-.tv-mode .footer-inner {
-  max-width: 1600px;
-}
-
-/* --- TV Carousel --- */
-.tv-mode .carousel-arrow {
-  width: 48px;
-  height: 48px;
-  font-size: 1.2rem;
-  opacity: 1;
-  background: var(--card);
-  border: 1px solid rgba(255,255,255,0.15);
-}
-
-.tv-mode .carousel-thumbs img {
-  width: 80px;
-  height: 120px;
-  border-radius: 8px;
-}
-
-/* --- TV Focus/Hover: Subtle 1px gold outline only, NO scale, NO bg change --- */
-.tv-mode .movie-card:focus,
-.tv-mode .movie-card:focus-visible,
-.tv-mode .upcoming-card:focus,
-.tv-mode .upcoming-card:focus-visible,
-.tv-mode .cat-tab:focus,
-.tv-mode .btn-play:focus,
-.tv-mode .btn-info:focus,
-.tv-mode .player-chip:focus,
-.tv-mode .nav-links a:focus,
-.tv-mode .carousel-arrow:focus,
-.tv-mode .movie-card:hover,
-.tv-mode .upcoming-card:hover {
-  outline: 1px solid rgba(255, 193, 7, 0.6) !important;
-  outline-offset: 1px !important;
-  z-index: 10 !important;
-  transform: none !important;
-  background-color: inherit !important;
-  box-shadow: none !important;
-}
-
-/* No inner image zoom on focus/hover */
-.tv-mode .movie-card:focus .card-poster img,
-.tv-mode .movie-card:hover .card-poster img,
-.tv-mode .upcoming-card:focus .upcoming-poster img,
-.tv-mode .upcoming-card:hover .upcoming-poster img {
-  transform: none !important;
-}
-
-/* --- TV Font Sizes --- */
-.tv-mode body { font-size: 1rem !important; }
-
-/* --- TV: Extra large screens (4K / 55inch+) --- */
-@media (min-width: 2500px) {
-  .tv-mode #navbar {
-    max-width: 2400px;
-    padding: 0.9rem 1.8rem;
-    gap: 1rem;
-  }
-
-  .tv-mode .nav-links {
-    gap: 0.5rem !important;
-  }
-
-  .tv-mode .nav-links a {
-    font-size: 1.05rem !important;
-    padding: 0.6rem 1.2rem !important;
-  }
-
-  .tv-mode .nav-logo-main {
-    font-size: 1.6rem;
-  }
-
-  .tv-mode .nav-logo-mark {
-    width: 2.8rem;
-    height: 2.8rem;
-  }
-
-  .tv-mode .nav-search {
-    max-width: 350px;
-    flex: 0 1 350px;
-  }
-
-  .tv-mode .movie-grid {
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 1.5rem;
-  }
-
-  .tv-mode .upcoming-grid {
-    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-    gap: 1.5rem;
-  }
-
-  .tv-mode .slide-title {
-    font-size: clamp(3.5rem, 4.5vw, 6rem) !important;
-  }
-
-  .tv-mode .slide-desc {
-    font-size: 1.25rem !important;
-  }
-
-  .tv-mode .cat-tab {
-    font-size: 1.05rem !important;
-    padding: 0.7rem 1.5rem !important;
-  }
-}
 
 /* ═══════════════════════════════════════════════════════════════
    REDUCED MOTION — Accessibility

@@ -1,0 +1,610 @@
+/* ═══════════════════════════════════════════════════════════════
+   TV MODE — Isolated styles for Google TV / Android TV / Smart TV
+   Selector: html[data-mz-tv="true"]
+   All selectors are scoped to html[data-mz-tv="true"] except
+   media query wrappers and this comment block.
+   ═══════════════════════════════════════════════════════════════ */
+
+html[data-mz-tv="true"] {
+  scroll-behavior: auto !important;
+}
+
+html[data-mz-tv="true"] * {
+  scroll-behavior: auto !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  text-shadow: none !important;
+  filter: none !important;
+  animation: none !important;
+  transition: none !important;
+  box-shadow: none !important;
+  will-change: auto !important;
+}
+
+/* Minimal transition for D-pad outline movement only */
+html[data-mz-tv="true"] .movie-card,
+html[data-mz-tv="true"] .upcoming-card,
+html[data-mz-tv="true"] .cat-tab,
+html[data-mz-tv="true"] .btn-play,
+html[data-mz-tv="true"] .btn-info,
+html[data-mz-tv="true"] .player-chip,
+html[data-mz-tv="true"] .nav-links a,
+html[data-mz-tv="true"] .carousel-arrow,
+html[data-mz-tv="true"] button {
+  transition: outline 0.05s linear !important;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+/* Subtle 1px gold outline for TV focus — NO scale, NO background change */
+html[data-mz-tv="true"] .movie-card:focus,
+html[data-mz-tv="true"] .movie-card:focus-visible,
+html[data-mz-tv="true"] .upcoming-card:focus,
+html[data-mz-tv="true"] .upcoming-card:focus-visible,
+html[data-mz-tv="true"] .cat-tab:focus,
+html[data-mz-tv="true"] .cat-tab:focus-visible,
+html[data-mz-tv="true"] .btn-play:focus,
+html[data-mz-tv="true"] .btn-info:focus,
+html[data-mz-tv="true"] .player-chip:focus,
+html[data-mz-tv="true"] .nav-links a:focus,
+html[data-mz-tv="true"] .carousel-arrow:focus,
+html[data-mz-tv="true"] button:focus {
+  outline: 1px solid rgba(255, 193, 7, 0.6) !important;
+  outline-offset: 1px !important;
+  z-index: 10 !important;
+  transform: none !important;
+  background-color: inherit !important;
+}
+
+/* TV hover = focus (since TV remotes simulate hover on focus) */
+html[data-mz-tv="true"] .movie-card:hover,
+html[data-mz-tv="true"] .upcoming-card:hover {
+  outline: 1px solid rgba(255, 193, 7, 0.6) !important;
+  outline-offset: 1px !important;
+  z-index: 10 !important;
+  transform: none !important;
+  background-color: inherit !important;
+}
+
+/* Compact font sizes for TV */
+html[data-mz-tv="true"] body { font-size: 1rem !important; }
+html[data-mz-tv="true"] .slide-title { font-size: 2.4rem !important; }
+html[data-mz-tv="true"] .slide-desc { font-size: 1.05rem !important; }
+html[data-mz-tv="true"] .card-title { font-size: 0.9rem !important; }
+html[data-mz-tv="true"] .cat-tab { font-size: 0.92rem !important; padding: 9px 16px !important; }
+html[data-mz-tv="true"] .nav-links a { font-size: 0.88rem !important; }
+
+/* Film grain noise filter is GPU-expensive — remove */
+html[data-mz-tv="true"] #hero::before { display: none !important; }
+html[data-mz-tv="true"] #hero::after { display: none !important; }
+
+/* Ken-Burns zoom causes continuous repaint of a huge image — freeze it */
+html[data-mz-tv="true"] .slide-bg,
+html[data-mz-tv="true"] .carousel-slide.active .slide-bg {
+  transform: scale(1) !important;
+}
+
+/* Kill ALL heavy box-shadows */
+html[data-mz-tv="true"] .movie-card,
+html[data-mz-tv="true"] .upcoming-card,
+html[data-mz-tv="true"] #navbar,
+html[data-mz-tv="true"] .cat-tab,
+html[data-mz-tv="true"] .modal-box,
+html[data-mz-tv="true"] .btn-play,
+html[data-mz-tv="true"] .btn-info,
+html[data-mz-tv="true"] .player-chip {
+  box-shadow: none !important;
+}
+
+/* Disable scaling inside the card to avoid double-painting */
+html[data-mz-tv="true"] .movie-card:focus .card-poster img,
+html[data-mz-tv="true"] .movie-card:hover .card-poster img,
+html[data-mz-tv="true"] .upcoming-card:focus .upcoming-poster img,
+html[data-mz-tv="true"] .upcoming-card:hover .upcoming-poster img {
+  transform: none !important;
+}
+
+/* Remove 3D transforms from cards on TV — saves GPU layers */
+html[data-mz-tv="true"] .movie-card,
+html[data-mz-tv="true"] .upcoming-card {
+  transform: none !important;
+  perspective: none !important;
+  transform-style: flat !important;
+}
+
+/* Skip staggered entrance animations — render instantly */
+html[data-mz-tv="true"] .movie-card,
+html[data-mz-tv="true"] .upcoming-card,
+html[data-mz-tv="true"] .reveal-up {
+  animation: none !important;
+  opacity: 1 !important;
+  will-change: auto !important;
+}
+
+/* Disable shine sweeps and overlays to save paints */
+html[data-mz-tv="true"] .card-poster::after,
+html[data-mz-tv="true"] .upcoming-poster::after,
+html[data-mz-tv="true"] .card-overlay {
+  display: none !important;
+}
+
+/* TV par heavy blur lag (stutter) na kare isliye fallback */
+html[data-mz-tv="true"] .modal-image-wrapper img.blur-in {
+  animation: none !important; opacity: 1 !important; filter: none !important;
+}
+
+/* Ambient particles and click sparks - hide on TV */
+html[data-mz-tv="true"] .ambient-particles { display: none !important; }
+html[data-mz-tv="true"] .click-spark { display: none !important; }
+
+/* Kill pseudo-element decorations */
+html[data-mz-tv="true"] .movie-card::before,
+html[data-mz-tv="true"] .movie-card::after {
+  display: none !important;
+}
+
+/* Simplify navbar background */
+html[data-mz-tv="true"] #navbar {
+  background: rgba(5,5,12,0.97) !important;
+  border: 1px solid rgba(255,255,255,0.05) !important;
+}
+
+html[data-mz-tv="true"] .slide-gradient {
+  background: linear-gradient(to top, rgba(3,3,10,0.98) 0%, transparent 50%) !important;
+}
+
+/* Stop skeleton shimmer animation */
+html[data-mz-tv="true"] .skeleton {
+  animation: none !important;
+  background: var(--card2) !important;
+}
+
+/* Carousel arrows: keep visible */
+html[data-mz-tv="true"] .carousel-arrow { opacity: 1; background: var(--card); border: 1px solid rgba(255,255,255,0.15); }
+html[data-mz-tv="true"] .carousel-arrow:focus { outline: 1px solid rgba(255, 193, 7, 0.6) !important; outline-offset: 1px !important; }
+
+/* Progress bar / dot glow are tiny — keep, but drop the pulsing glow animation */
+html[data-mz-tv="true"] .dot.active { animation: none !important; box-shadow: none !important; }
+html[data-mz-tv="true"] .slide-title { animation: none !important; }
+
+/* --- TV: Hide Hollywood/South navbar items --- */
+html[data-mz-tv="true"] [data-tv-hide] {
+  display: none !important;
+}
+
+/* --- TV Scrolling: Force scroll everywhere, no smooth (causes jank on TV) --- */
+html[data-mz-tv="true"] body {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  height: auto !important;
+  min-height: 100vh;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   OVERLAYS: Must stay hidden when closed (display:none by base CSS).
+   Only override scroll/overflow behavior when .open is present.
+   NEVER force display:block without .open — that's the #1 TV bug.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* --- #modal-overlay: hidden when closed, scrollable when open --- */
+html[data-mz-tv="true"] #modal-overlay {
+  /* Intentionally NO display property — base CSS keeps it display:none */
+}
+
+html[data-mz-tv="true"] #modal-overlay.open {
+  display: block !important;
+  overflow-y: scroll !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch;
+  height: 100% !important;
+  max-height: 100vh !important;
+  overscroll-behavior: contain;
+  scrollbar-width: thin !important;
+}
+
+/* --- .upcoming-detail-overlay: hidden when closed, visible when open --- */
+html[data-mz-tv="true"] .upcoming-detail-overlay {
+  /* Intentionally NO visibility/opacity override — base CSS keeps it hidden */
+}
+
+html[data-mz-tv="true"] .upcoming-detail-overlay.open {
+  opacity: 1 !important;
+  visibility: visible !important;
+  overflow-y: scroll !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain;
+  scrollbar-width: thin !important;
+}
+
+/* --- .collections-hub-overlay: hidden when closed, visible when open --- */
+html[data-mz-tv="true"] .collections-hub-overlay {
+  /* Intentionally NO display override — base CSS keeps it display:none */
+}
+
+html[data-mz-tv="true"] .collections-hub-overlay.open {
+  display: flex !important;
+  overflow-y: scroll !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain;
+  scrollbar-width: thin !important;
+}
+
+/* --- #pwa-install-overlay: hidden when closed, visible when open --- */
+html[data-mz-tv="true"] #pwa-install-overlay {
+  /* Intentionally NO display override — base CSS keeps it display:none */
+}
+
+html[data-mz-tv="true"] #pwa-install-overlay.open {
+  display: flex !important;
+}
+
+/* --- #pwa-install-tv-overlay: hidden when closed, visible when open --- */
+html[data-mz-tv="true"] #pwa-install-tv-overlay {
+  /* Intentionally NO display override — base CSS keeps it display:none */
+}
+
+html[data-mz-tv="true"] #pwa-install-tv-overlay.open {
+  display: flex !important;
+}
+
+/* TV: Make close/back button sticky so it's always visible and clickable */
+html[data-mz-tv="true"] .modal-close {
+  position: fixed !important;
+  top: 0.8rem !important;
+  left: 0.8rem !important;
+  z-index: 9999 !important;
+  display: flex !important;
+  pointer-events: auto !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* TV: Ensure close button is focusable and visible on focus */
+html[data-mz-tv="true"] .modal-close:focus {
+  outline: 3px solid var(--gold) !important;
+  outline-offset: 3px !important;
+  background: rgba(245, 197, 24, 0.2) !important;
+  border-color: var(--gold) !important;
+  transform: scale(1.05);
+}
+
+html[data-mz-tv="true"] .modal-box {
+  overflow: visible !important;
+  height: auto !important;
+  max-height: none !important;
+  min-height: auto !important;
+  position: relative !important;
+}
+
+html[data-mz-tv="true"] .modal-content-wrapper {
+  overflow: visible !important;
+  height: auto !important;
+}
+
+html[data-mz-tv="true"] .modal-info {
+  overflow: visible !important;
+  height: auto !important;
+}
+
+html[data-mz-tv="true"] .modal-top {
+  min-height: auto !important;
+  height: auto !important;
+}
+
+/* Scrollbar: thin and visible */
+html[data-mz-tv="true"] ::-webkit-scrollbar { width: 6px !important; display: block !important; }
+html[data-mz-tv="true"] ::-webkit-scrollbar-thumb { background: var(--gold) !important; border-radius: 3px; }
+html[data-mz-tv="true"] ::-webkit-scrollbar-track { background: rgba(255,255,255,0.03) !important; }
+
+/* --- TV Movie Cards: Smaller grid for performance --- */
+html[data-mz-tv="true"] .movie-grid {
+  grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+  gap: 1rem;
+}
+
+html[data-mz-tv="true"] .movie-card {
+  border-radius: 10px;
+  margin-top: 8px;
+}
+
+html[data-mz-tv="true"] .movie-card .card-poster img {
+  height: auto;
+  aspect-ratio: 2/3;
+}
+
+html[data-mz-tv="true"] .upcoming-grid {
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+html[data-mz-tv="true"] .upcoming-card {
+  border-radius: 10px;
+}
+
+/* --- TV Navbar: Wider, smaller text, no overlap --- */
+html[data-mz-tv="true"] #navbar {
+  width: 97% !important;
+  max-width: 1920px;
+  padding: 0.6rem 1.2rem;
+  gap: 0.6rem;
+  border-radius: 18px;
+  background: rgba(5, 5, 12, 0.97) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+html[data-mz-tv="true"] .nav-brand {
+  flex-shrink: 0;
+}
+
+/* --- TV Logo: Show the real MZ logo asset on TV --- */
+html[data-mz-tv="true"] .nav-logo-tv {
+  display: inline-block !important;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+html[data-mz-tv="true"] .loader-logo-tv {
+  display: block !important;
+  width: 80px;
+  height: 80px;
+  border-radius: 12px;
+  object-fit: cover;
+  object-position: center;
+  margin: 0 auto 1rem;
+}
+
+html[data-mz-tv="true"] .mz-loader-brand .loader-icon {
+  display: none !important;
+}
+
+/* Hide the MZ text mark on TV — logo image replaces it */
+html[data-mz-tv="true"] .nav-logo-mark {
+  display: none !important;
+}
+
+html[data-mz-tv="true"] .nav-links {
+  gap: 0.2rem !important;
+  flex-wrap: nowrap;
+  overflow: visible;
+  flex: 1;
+  justify-content: center;
+}
+
+html[data-mz-tv="true"] .nav-links a {
+  font-size: 0.88rem !important;
+  padding: 0.45rem 0.8rem !important;
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+  border-radius: 8px;
+}
+
+html[data-mz-tv="true"] .nav-logo-main {
+  font-size: 1.15rem;
+  letter-spacing: 1.5px;
+}
+
+html[data-mz-tv="true"] .nav-logo-sub {
+  font-size: 0.45rem;
+  letter-spacing: 1.2px;
+}
+
+html[data-mz-tv="true"] .nav-search {
+  max-width: 240px;
+  flex: 0 1 240px;
+  margin-left: auto;
+}
+
+html[data-mz-tv="true"] .nav-search input {
+  font-size: 0.85rem;
+  padding: 0.5rem 0.8rem 0.5rem 2.2rem;
+  min-height: 36px;
+}
+
+/* --- TV Hero Section --- */
+html[data-mz-tv="true"] #hero {
+  height: 75vh;
+  margin-top: 80px;
+}
+
+html[data-mz-tv="true"] .slide-content {
+  left: 4%;
+  bottom: 12%;
+  max-width: 55%;
+}
+
+html[data-mz-tv="true"] .slide-title {
+  font-size: clamp(2.2rem, 3.5vw, 3.8rem) !important;
+  line-height: 1.1;
+}
+
+html[data-mz-tv="true"] .slide-desc {
+  font-size: 1rem !important;
+  line-height: 1.4;
+  -webkit-line-clamp: 3;
+  max-width: 90%;
+}
+
+html[data-mz-tv="true"] .slide-meta {
+  font-size: 0.85rem;
+  gap: 0.6rem;
+}
+
+html[data-mz-tv="true"] .slide-badge {
+  font-size: 0.65rem;
+  padding: 0.25rem 0.7rem;
+}
+
+html[data-mz-tv="true"] .slide-actions .btn-play,
+html[data-mz-tv="true"] .slide-actions .btn-info {
+  padding: 0.7rem 1.4rem;
+  font-size: 0.95rem;
+  border-radius: 10px;
+  min-height: 42px;
+}
+
+/* --- TV Content Areas --- */
+html[data-mz-tv="true"] .main-content,
+html[data-mz-tv="true"] #upcoming {
+  padding-left: 2.5%;
+  padding-right: 2.5%;
+}
+
+/* --- TV Section Headers --- */
+html[data-mz-tv="true"] .section-title {
+  font-size: 1.5rem;
+}
+
+html[data-mz-tv="true"] .section-subtitle {
+  font-size: 0.9rem;
+}
+
+/* --- TV Category Tabs --- */
+html[data-mz-tv="true"] .cat-tabs {
+  gap: 0.4rem;
+}
+
+html[data-mz-tv="true"] .cat-tab {
+  font-size: 0.9rem !important;
+  padding: 0.5rem 1.1rem !important;
+  min-height: 38px;
+  border-radius: 8px;
+}
+
+/* --- TV Card Titles --- */
+html[data-mz-tv="true"] .card-title {
+  font-size: 0.88rem !important;
+  line-height: 1.3;
+}
+
+html[data-mz-tv="true"] .card-year,
+html[data-mz-tv="true"] .card-rating {
+  font-size: 0.78rem;
+}
+
+/* --- TV Modal Info --- */
+html[data-mz-tv="true"] .modal-info {
+  max-width: 1400px;
+  padding: 3rem 4%;
+  overflow: visible !important;
+  height: auto !important;
+}
+
+html[data-mz-tv="true"] .modal-title {
+  font-size: 2.5rem;
+}
+
+html[data-mz-tv="true"] .modal-desc {
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+/* --- TV Footer --- */
+html[data-mz-tv="true"] footer {
+  padding: 2.5rem 3%;
+}
+
+html[data-mz-tv="true"] .footer-inner {
+  max-width: 1600px;
+}
+
+/* --- TV Carousel --- */
+html[data-mz-tv="true"] .carousel-arrow {
+  width: 48px;
+  height: 48px;
+  font-size: 1.2rem;
+  opacity: 1;
+  background: var(--card);
+  border: 1px solid rgba(255,255,255,0.15);
+}
+
+html[data-mz-tv="true"] .carousel-thumbs img {
+  width: 80px;
+  height: 120px;
+  border-radius: 8px;
+}
+
+/* --- TV: Extra large screens (4K / 55inch+) --- */
+@media (min-width: 2500px) {
+  html[data-mz-tv="true"] #navbar {
+    max-width: 2400px;
+    padding: 0.9rem 1.8rem;
+    gap: 1rem;
+  }
+
+  html[data-mz-tv="true"] .nav-links {
+    gap: 0.5rem !important;
+  }
+
+  html[data-mz-tv="true"] .nav-links a {
+    font-size: 1.05rem !important;
+    padding: 0.6rem 1.2rem !important;
+  }
+
+  html[data-mz-tv="true"] .nav-logo-main {
+    font-size: 1.6rem;
+  }
+
+  html[data-mz-tv="true"] .nav-logo-tv {
+    width: 52px;
+    height: 52px;
+  }
+
+  html[data-mz-tv="true"] .nav-search {
+    max-width: 350px;
+    flex: 0 1 350px;
+  }
+
+  html[data-mz-tv="true"] .movie-grid {
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1.5rem;
+  }
+
+  html[data-mz-tv="true"] .upcoming-grid {
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 1.5rem;
+  }
+
+  html[data-mz-tv="true"] .slide-title {
+    font-size: clamp(3.5rem, 4.5vw, 6rem) !important;
+  }
+
+  html[data-mz-tv="true"] .slide-desc {
+    font-size: 1.25rem !important;
+  }
+
+  html[data-mz-tv="true"] .cat-tab {
+    font-size: 1.05rem !important;
+    padding: 0.7rem 1.5rem !important;
+  }
+}
+
+/* --- TV: 720p screens --- */
+@media (max-width: 1280px) {
+  html[data-mz-tv="true"] .movie-grid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 0.8rem;
+  }
+
+  html[data-mz-tv="true"] .upcoming-grid {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 0.8rem;
+  }
+
+  html[data-mz-tv="true"] .slide-title {
+    font-size: clamp(1.8rem, 3vw, 2.8rem) !important;
+  }
+
+  html[data-mz-tv="true"] .cat-tab {
+    font-size: 0.82rem !important;
+    padding: 0.4rem 0.9rem !important;
+  }
+
+  html[data-mz-tv="true"] .nav-links a {
+    font-size: 0.8rem !important;
+    padding: 0.4rem 0.6rem !important;
+  }
+}

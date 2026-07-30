@@ -4,7 +4,8 @@
   "description": "",
   "main": "moviezone.js",
   "scripts": {
-    "build": "cleancss -o moviezone.min.css moviezone.css && terser moviezone.js -o moviezone.min.js -c -m",
+    "build": "cleancss -o moviezone.min.css moviezone.css && cleancss -o tv-mode.min.css tv-mode.css && terser moviezone.js -o moviezone.min.js -c -m && terser tv-mode.js -o tv-mode.min.js -c -m",
+    "test": "node test-fixes.js && node tv-mode.test.js",
     "start": "pm2-runtime start ecosystem.config.js",
     "dev": "node server.js"
   },

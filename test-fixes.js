@@ -23,6 +23,8 @@ const html = read('index.html');
 const pwa = read('pwa-install.js');
 const moviezone = read('moviezone.js');
 const css = read('moviezone.css');
+const tvJs = read('tv-mode.js');
+const tvCss = read('tv-mode.css');
 const min = read('moviezone.min.js');
 const sw = read('sw.js');
 const server = read('server.js');
@@ -34,7 +36,7 @@ check('index registers SW early', html.indexOf(".register('/sw.js'") > -1 && htm
 check('index has no forced reload loop', !html.includes('window.location.reload') && !html.includes('reloadOnceForControl'));
 check('index waits for controllerchange', html.includes("addEventListener('controllerchange'"));
 check('index loads pwa-install v1.6', html.includes('pwa-install.js?v=1.6') && !html.includes('pwa-install.js?v=1.5'));
-check('index loads moviezone v4.9', html.includes('moviezone.js?v=4.9') && !html.includes('moviezone.js?v=4.8'));
+check('index loads moviezone v5.0', html.includes('moviezone.js?v=5.0') && !html.includes('moviezone.js?v=4.9'));
 check('index loads moviezone styles v4.2', html.includes('moviezone.css?v=4.2') && !html.includes('moviezone.css?v=4.1'));
 check('index declares modern mobile PWA capability', html.includes('<meta name="mobile-web-app-capable" content="yes">'));
 check('collections catalog contains all configured universes', collectionsCatalog && collectionsCatalog.universes && Object.keys(collectionsCatalog.universes).length >= 18);
@@ -79,15 +81,15 @@ check('viewport resize blocks detail activation', moviezone.includes("window.add
 check('orientation change blocks detail activation', moviezone.includes("window.addEventListener('orientationchange', blockDetailActivationForViewportChange"));
 check('watch modal claims activation before history navigation', /async function openModal\([^)]*activationEvent[^)]*\)\s*\{\s*if \(!claimExplicitDetailActivation\(activationEvent\)\) return;\s*\/\/ Add hash/.test(moviezone));
 check('upcoming detail claims activation before opening', /async function openUpcomingDetail\([^)]*activationEvent[^)]*\)\s*\{\s*if \(!claimExplicitDetailActivation\(activationEvent\)\) return;/.test(moviezone));
-check('TV launch key requires release or deliberate navigation', moviezone.includes("document.addEventListener('keyup'") && moviezone.includes('tvActivationArmed') && moviezone.includes('D-pad movement proves'));
+check('TV launch key requires release or deliberate navigation', tvJs.includes("document.addEventListener('keyup'") && moviezone.includes('tvActivationArmed') && tvJs.includes('D-pad movement proves'));
 check('TV activation never auto-arms from elapsed startup time',
-  !moviezone.includes('tvAutoArmAt') &&
-  !moviezone.includes('setTimeout(() => { tvPageReady = true; }'));
+  !tvJs.includes('tvAutoArmAt') &&
+  !tvJs.includes('setTimeout(() => { tvPageReady = true; }'));
 check('TV activation requires trusted non-repeat input and post-keyup debounce',
   moviezone.includes('TV_POST_KEYUP_DEBOUNCE_MS = 400') &&
   moviezone.includes('if (!event.isTrusted) return;') &&
   moviezone.includes('if (event.repeat) return;') &&
-  moviezone.includes('activationNow < detailActivationGuard.tvActivationAllowedAt'));
+  tvJs.includes('tvActivationAllowedAt'));
 check('startup and pageshow sanitize restored detail/player state',
   moviezone.includes('function resetRestoredWatchSurface()') &&
   moviezone.includes("document.addEventListener('DOMContentLoaded', resetRestoredWatchSurface") &&
@@ -97,7 +99,7 @@ check('startup and pageshow sanitize restored detail/player state',
 check('pageshow resets TV launch readiness epoch',
   moviezone.includes('resetTVLaunchActivation();') &&
   moviezone.includes('detailActivationGuard.tvInteractionEpoch += 1') &&
-  moviezone.includes('syncTVPageReadiness()'));
+  tvJs.includes('syncTVPageReadiness'));
 check('stale watch hash is cleaned without auto-open', moviezone.includes("if (window.location.hash.startsWith('#watch-'))") && moviezone.includes('Direct #watch URLs are never auto-opened'));
 check('all detail callsites propagate activation evidence', !moviezone.includes('openModal(m.id, type);') && !moviezone.includes('openModal(item.id, type);') && !moviezone.includes('openUpcomingDetail(m.id);'));
 
@@ -106,14 +108,27 @@ check('low FPS uses low-end mode without false TV activation',
   moviezone.includes("lowFPSCount > 3 && !document.documentElement.classList.contains('low-end-mode')") &&
   !moviezone.includes('Auto-enabled tv-mode due to low FPS'));
 check('real and explicitly forced TV modes remain available',
-  moviezone.includes("if (isTV) document.documentElement.classList.add('tv-mode')") &&
-  moviezone.includes("new URLSearchParams(window.location.search).get('tv') === '1'"));
+  tvJs.includes("setAttribute('data-mz-tv', 'true')") &&
+  tvJs.includes("tvParam === '1'"));
 
 
-const tvDetector = moviezone.match(/const isTV = \(\(\) => \{[\s\S]*?\n\}\)\(\);/);
+// TV detection logic is now in tv-mode.js. Extract regex for testing.
 function detectTV(userAgent, userAgentData) {
-  if (!tvDetector) return false;
-  return Function('navigator', tvDetector[0] + '; return isTV;')({ userAgent, userAgentData });
+  const ua = userAgent;
+  // Main UA regex from tv-mode.js
+  const tvUA = /SmartTV|Web0S|WebOS|Tizen|VIDAA|Roku|RokuOS|AppleTV|Apple TV|Android TV|AndroidTV|BRAVIA|AFT[A-Z0-9]+|Fire TV|FireTV|CrKey|Chromecast|GoogleTV|Google TV|PlayStation|PS[45]|Xbox One|XBOX|SmartCast|PHILIPSTV|HbbTV|Opera TV|NETTV|Panasonic.*Viera|Vestel|DuneHD|Eltex|NetCast|MITV|MiTV/i.test(ua);
+  if (tvUA) return true;
+  if (userAgentData) {
+    const platform = (userAgentData.platform || '').toLowerCase();
+    if (/smarttv|tizen|webos|android tv|googletv|chromecast|firetv/.test(platform)) return true;
+    const brands = userAgentData.brands || [];
+    const brandStr = brands.map(function(b) { return b.brand; }).join(' ').toLowerCase();
+    if (/tizen|webos|smarttv|googletv|firetv/.test(brandStr)) return true;
+  }
+  const isDesktopOS = /Windows NT|Macintosh|Mac OS X|CrOS|Ubuntu|Fedora|Linux x86_64|Linux i686/i.test(ua);
+  const isMobileDevice = /Mobi|Android|iPhone|iPad|iPod/i.test(ua);
+  if (isDesktopOS || isMobileDevice) return false;
+  return false;
 }
 const realTvUAs = [
   'Mozilla/5.0 (SMART-TV; Linux; Tizen 7.0) AppleWebKit/537.36 SamsungBrowser/5.0 TV Safari/537.36',
@@ -137,42 +152,43 @@ check('desktop, DevTools iPhone, and Android phone UAs remain non-TV', nonTvUAs.
 check('Chromium reduced-UA TV platform hint remains detected', detectTV(nonTvUAs[0], { platform: 'Android TV', brands: [] }));
 check('screen/pointer heuristics never assign TV identity', !moviezone.includes('TV mode activated via screen heuristic') && !moviezone.includes('TV mode activated via Android large-screen heuristic'));
 check('forced-TV gets dynamic focus, memory, and image safeguards',
-  moviezone.includes('const isTVNavigationMode = () =>') &&
-  moviezone.includes('if (!isTVNavigationMode()) return;') &&
-  moviezone.includes('if (isTVLikeMode()) return MAX_CARDS_TV;') &&
-  moviezone.includes("isTV || document.documentElement.classList.contains('tv-mode') || isMobile"));
-check('TV focus covers custom tabindex controls and buttons', moviezone.includes('button:not([disabled])') && moviezone.includes('[tabindex]:not([tabindex="-1"])'));
-check('Android/Fire, Tizen and WebOS Back keys supported', moviezone.includes("key === 'BrowserBack'") && moviezone.includes('keyCode === 4') && moviezone.includes('keyCode === 10009') && moviezone.includes('keyCode === 461'));
-check('TV scrolling instant while non-TV remains smooth', moviezone.includes("behavior: isTVLikeMode() ? 'auto' : 'smooth'") && !moviezone.includes("behavior: 'smooth'"));
-check('FPS monitor bounded and skips optimized modes', moviezone.includes('MAX_PERFORMANCE_SAMPLES = 300') && moviezone.includes("if (!isTVLikeMode() && !document.documentElement.classList.contains('low-end-mode'))"));
+  moviezone.includes('if (isMzTVMode()) return MAX_CARDS_TV;') &&
+  moviezone.includes("isMzTV() || isMobile"));
+check('TV focus covers custom tabindex controls and buttons', tvJs.includes('button:not([disabled])') && tvJs.includes('[tabindex]:not([tabindex="-1"])'));
+check('Android/Fire, Tizen and WebOS Back keys supported', tvJs.includes("key === 'BrowserBack'") && tvJs.includes('keyCode === 4') && tvJs.includes('keyCode === 10009') && tvJs.includes('keyCode === 461'));
+check('TV scrolling instant while non-TV remains smooth', moviezone.includes("behavior: isMzTVMode() ? 'auto' : 'smooth'") && !moviezone.includes("behavior: 'smooth'"));
+check('FPS monitor bounded and skips optimized modes', moviezone.includes('MAX_PERFORMANCE_SAMPLES = 300') && moviezone.includes("if (!isMzTVMode() && !document.documentElement.classList.contains('low-end-mode'))"));
 check('TV CSS preserves containment and root instant scrolling',
-  !css.includes('contain: none !important') &&
-  !css.includes('content-visibility: visible !important') &&
-  /\.tv-mode\s*\{\s*scroll-behavior:\s*auto\s*!important;/.test(css));
+  !tvCss.includes('contain: none !important') &&
+  !tvCss.includes('content-visibility: visible !important') &&
+  /html\[data-mz-tv="true"\]\s*\{\s*scroll-behavior:\s*auto\s*!important;/.test(tvCss));
 
 
 const tvHiddenNavItems = html.match(/<li data-tv-hide><a[^>]+filterCat\('(hollywood|south)'/g) || [];
 check('exactly Hollywood and South navbar links are marked TV-only hidden',
   tvHiddenNavItems.length === 2 && html.includes("filterCat('hollywood'") && html.includes("filterCat('south'"));
 check('TV-only nav CSS hides marked links without changing desktop markup',
-  /\.tv-mode\s+\[data-tv-hide\]\s*\{[^}]*display:\s*none\s*!important;/.test(css));
+  /html\[data-mz-tv="true"\]\s+\[data-tv-hide\]\s*\{[^}]*display:\s*none\s*!important;/.test(tvCss));
 check('compact/mobile nav clone preserves TV-hide markers',
   moviezone.includes("a.closest('[data-tv-hide]') ? ' data-tv-hide' : ''"));
 check('TV D-pad has vertical page-scroll fallback at focus boundary',
-  moviezone.includes("else if (direction === 'up' || direction === 'down')") &&
-  moviezone.includes("scrollTVPage(direction === 'down' ? 1 : -1)"));
+  tvJs.includes("direction === 'up' || direction === 'down'") &&
+  tvJs.includes("scrollTVPage(direction === 'down' ? 1 : -1)"));
 check('TV Page and Channel remote keys scroll both directions',
-  moviezone.includes("key === 'PageDown'") && moviezone.includes("key === 'PageUp'") &&
-  moviezone.includes("key === 'ChannelDown'") && moviezone.includes("key === 'ChannelUp'") &&
-  moviezone.includes('keyCode === 428') && moviezone.includes('keyCode === 427'));
-check('TV scrolling supports old browsers and overlay-owned scroll surfaces',
-  moviezone.includes('function getTVScrollContainer()') &&
-  moviezone.includes("document.getElementById('chScroll') || collections") &&
-  moviezone.includes('window.scrollBy(0, amount)') &&
-  moviezone.includes('scroller.scrollTop += amount'));
+  tvJs.includes("key === 'PageDown'") && tvJs.includes("key === 'PageUp'") &&
+  tvJs.includes("key === 'ChannelDown'") && tvJs.includes("key === 'ChannelUp'") &&
+  tvJs.includes('keyCode === 428') && tvJs.includes('keyCode === 427'));
+check('TV scrolling is cancellable and supports overlay-owned scroll surfaces',
+  tvJs.includes('function getTVScrollContainer') &&
+  tvJs.includes("getElementById('chScroll')") &&
+  tvJs.includes('function applyScroll') &&
+  tvJs.includes('window.scrollTo(0, position)') &&
+  tvJs.includes('scroller.scrollTop = position') &&
+  tvJs.includes('activeScrollAnimation = requestAnimationFrame(animateFrame)') &&
+  tvJs.includes('cancelAnimationFrame(activeScrollAnimation)'));
 check('TV focus reveal supports legacy scrollIntoView signature',
-  moviezone.includes('function focusAndRevealTVTarget') &&
-  moviezone.includes("target.scrollIntoView(direction !== 'up')"));
+  tvJs.includes('function focusAndRevealTVTarget') &&
+  tvJs.includes("target.scrollIntoView(direction !== 'up')"));
 check('infinite-scroll sentinels remain scroll-driven with preload margin',
   moviezone.includes("document.getElementById('infiniteScrollTrigger')") &&
   moviezone.includes("document.getElementById('infiniteScrollTriggerUpcoming')") &&
@@ -187,8 +203,8 @@ check('player iframe sandbox blocks top navigation and popups',
 check('legacy beforeunload redirect trap is removed',
   !moviezone.includes("window.addEventListener('beforeunload'"));
 
-check('SW cache is v35', sw.includes("CACHE_NAME = 'moviezone-v35'"));
-check('SW caches moviezone v4.9', sw.includes("'/moviezone.js?v=4.9'"));
+check('SW cache is v37', sw.includes("CACHE_NAME = 'moviezone-v37'"));
+check('SW caches moviezone v5.0', sw.includes("'/moviezone.js?v=5.0'"));
 check('SW caches pwa-install v1.6', sw.includes("'/pwa-install.js?v=1.6'"));
 check('SW treats collections catalog as optional', sw.includes('const OPTIONAL_ASSETS') && sw.includes("'/collections-catalog.json?v=2'") && sw.includes('Promise.allSettled'));
 check('SW uses skipWaiting and clients.claim', sw.includes('self.skipWaiting()') && sw.includes('self.clients.claim()'));

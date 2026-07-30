@@ -1,33 +1,11 @@
 ﻿﻿﻿// Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
-const isTV = (() => {
-  const ua = navigator.userAgent;
+// TV detection is handled by tv-mode.js which sets html[data-mz-tv="true"].
+// This getter reads the data attribute set by the isolated TV module.
+const isMzTV = () => document.documentElement.getAttribute('data-mz-tv') === 'true';
 
-  // Confirmed TV signatures must be checked before generic OS tokens. Fire TV,
-  // BRAVIA, Xbox and some Android TV UAs also contain Android/Windows/Linux.
-  const tvUA = /SmartTV|Web0S|WebOS|Tizen|VIDAA|Roku|RokuOS|AppleTV|Apple TV|Android TV|AndroidTV|BRAVIA|AFT[A-Z0-9]+|Fire TV|FireTV|CrKey|Chromecast|GoogleTV|Google TV|PlayStation|PS[45]|Xbox One|XBOX|SmartCast|PHILIPSTV|HbbTV|Opera TV|NETTV|Panasonic.*Viera|Vestel|DuneHD|Eltex|NetCast|MITV|MiTV/i.test(ua);
-  if (tvUA) return true;
-
-  // Chromium TV platform hints can remain reliable even when the UA is reduced.
-  if (navigator.userAgentData) {
-    const platform = (navigator.userAgentData.platform || '').toLowerCase();
-    if (/smarttv|tizen|webos|android tv|googletv|chromecast|firetv/.test(platform)) return true;
-    const brands = navigator.userAgentData.brands || [];
-    const brandStr = brands.map(b => b.brand).join(' ').toLowerCase();
-    if (/tizen|webos|smarttv|googletv|firetv/.test(brandStr)) return true;
-  }
-
-  // Standard desktop/mobile OS signatures are never promoted to TV mode.
-  const isDesktopOS = /Windows NT|Macintosh|Mac OS X|CrOS|Ubuntu|Fedora|Linux x86_64|Linux i686/i.test(ua);
-  const isMobileDevice = /Mobi|Android|iPhone|iPad|iPod/i.test(ua);
-  if (isDesktopOS || isMobileDevice) return false;
-
-  // Device identity is never inferred from screen size, pointer type or FPS.
-  return false;
-})();
-
-// Balanced Performance: phones/tablets use low-end mode; confirmed TVs use tv-mode.
-const isMobile = !isTV && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+// Balanced Performance: phones/tablets use low-end mode; confirmed TVs use data-mz-tv.
+const isMobile = !isMzTV() && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
 const isLowEnd = (navigator.deviceMemory && navigator.deviceMemory < 4) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency < 4);
 const isTouchOnly = window.matchMedia('(pointer: coarse)').matches && !window.matchMedia('(pointer: fine)').matches;
 
@@ -75,32 +53,18 @@ function getResponsiveBackdrop(path) {
   const isSlow = conn && (conn.saveData || /^[23]g/.test(conn.effectiveType));
   
   if (isSlow) return `https://image.tmdb.org/t/p/w500${path}`; // Prevents lag on slow networks
-  if (isTV || document.documentElement.classList.contains('tv-mode') || isMobile) return `https://image.tmdb.org/t/p/w780${path}`; // Balanced for mobile/detected/forced TV
+  if (isMzTV() || isMobile) return `https://image.tmdb.org/t/p/w780${path}`; // Balanced for mobile/detected/forced TV
   if (!isLowEnd) return `https://image.tmdb.org/t/p/original${path}`; // Ultra HD for powerful desktops
   return `https://image.tmdb.org/t/p/w1280${path}`; // Normal HD fallback
 }
 
-// -- TV MODE (Performance) --
-// Smart TV browsers have weak CPUs/GPUs: heavy blur/animation cause visible lag.
-// Tag <html> early so CSS can strip expensive effects (backdrop-filter, film grain, Ken Burns, etc.)
-// Apply to ALL mobiles and TVs - even mid-range phones lag with these effects
-if (isTV) document.documentElement.classList.add('tv-mode');
+// TV mode detection and class tagging is handled by tv-mode.js (sets data-mz-tv attribute).
+// isMzTV() reads that attribute for conditional behavior.
 
-// Allow manual TV mode via URL parameter (?tv=1) for Cast/HDMI scenarios
-if (new URLSearchParams(window.location.search).get('tv') === '1') {
-  document.documentElement.classList.add('tv-mode');
-  console.log('[MovieZone] TV mode forced via URL parameter');
-}
-
-console.log('[MovieZone] TV Detection:', isTV, '| UA:', navigator.userAgent.substring(0, 80));
 if (isMobile) document.documentElement.classList.add('low-end-mode');
 
-// TV: Set initial history state so back button always returns to home (prevents exit)
-if (isTV || document.documentElement.classList.contains('tv-mode')) {
-  if (!window.history.state || !window.history.state.mzHome) {
-    window.history.replaceState({ mzHome: true }, '', window.location.pathname + window.location.search);
-  }
-}
+// TV: Set initial history state so back button always returns to home (handled by tv-mode.js)
+
 
 // -- LARGE-SCREEN PERFORMANCE ONLY --
 // Resolution/pointer emulation is not device identity. Large displays may receive
@@ -195,41 +159,6 @@ perfStyle.textContent = `
     * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
   }
   
-  /* === TV MODE: Ultra-lightweight — zero animations, minimal transitions === */
-  .tv-mode *, .tv-mode *::before, .tv-mode *::after {
-    box-shadow: none !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-    text-shadow: none !important;
-    filter: none !important;
-    animation: none !important;
-    transition: none !important;
-    will-change: auto !important;
-    contain: none !important;
-    content-visibility: visible !important;
-  }
-  .tv-mode .movie-card, .tv-mode .upcoming-card,
-  .tv-mode .cat-tab, .tv-mode .btn-play,
-  .tv-mode .btn-info, .tv-mode .player-chip,
-  .tv-mode .nav-links a, .tv-mode .carousel-arrow,
-  .tv-mode button {
-    transition: outline 0.05s linear !important;
-  }
-  .tv-mode .movie-card:focus, .tv-mode .upcoming-card:focus,
-  .tv-mode .cat-tab:focus, .tv-mode .btn-play:focus,
-  .tv-mode .btn-info:focus, .tv-mode .player-chip:focus,
-  .tv-mode .nav-links a:focus, .tv-mode .carousel-arrow:focus {
-    outline: 1px solid rgba(255, 193, 7, 0.6) !important;
-    outline-offset: 1px !important;
-    transform: none !important;
-    z-index: 10 !important;
-  }
-  .tv-mode .movie-card, .tv-mode .upcoming-card, .tv-mode .cat-tab,
-  .tv-mode .btn-play, .tv-mode .btn-info, .tv-mode .player-chip,
-  .tv-mode .nav-links a {
-    cursor: pointer;
-    min-height: 44px;
-  }
   /* === LOW-END / MOBILE MODE: Strip effects but KEEP short transitions for smooth UI === */
   .low-end-mode *, .low-end-mode *::before, .low-end-mode *::after {
     box-shadow: none !important;
@@ -248,17 +177,15 @@ perfStyle.textContent = `
   .low-end-mode #mzMobilePanel .mz-mp-link {
     transition-duration: 0.3s !important;
   }
-  .tv-mode .ambient-particles, .low-end-mode .ambient-particles { display: none !important; }
-  .tv-mode #hero::before, .tv-mode #hero::after,
+  .low-end-mode .ambient-particles { display: none !important; }
   .low-end-mode #hero::before, .low-end-mode #hero::after { display: none !important; }
-  .tv-mode .click-spark, .low-end-mode .click-spark { display: none !important; }
-  .tv-mode .movie-card::before, .tv-mode .movie-card::after,
+  .low-end-mode .click-spark { display: none !important; }
   .low-end-mode .movie-card::before, .low-end-mode .movie-card::after { display: none !important; }
-  .tv-mode #navbar, .low-end-mode #navbar { 
+  .low-end-mode #navbar { 
     background: rgba(5,5,12,0.97) !important; 
     border: 1px solid rgba(255,255,255,0.05) !important;
   }
-  .tv-mode .slide-gradient, .low-end-mode .slide-gradient { 
+  .low-end-mode .slide-gradient { 
     background: linear-gradient(to top, rgba(3,3,10,0.98) 0%, transparent 50%) !important; 
   }
   
@@ -276,7 +203,7 @@ document.head.appendChild(perfStyle);
 // Weak device detect karke class lagana
 // -- PREMIUM CURSOR GLOW & CLICK SPARKS --
 // Disable on TV, Touch, and Mobile to save CPU/battery and ensure smooth performance
-if (!isTV && !isTouchOnly && !isMobile) {
+if (!isMzTV() && !isTouchOnly && !isMobile) {
   const cursorGlow = document.getElementById('cursor-glow');
   const cursorRing = document.getElementById('cursor-ring');
   const cursorDot = document.getElementById('cursor-dot');
@@ -433,8 +360,8 @@ const TV_POST_KEYUP_DEBOUNCE_MS = 400;
 const detailActivationGuard = {
   lastTrustedActivationAt: -Infinity,
   viewportBlockedUntil: -Infinity,
-  tvActivationArmed: !isTV && !document.documentElement.classList.contains('tv-mode'),
-  tvActivationAllowedAt: (!isTV && !document.documentElement.classList.contains('tv-mode')) ? -Infinity : Infinity,
+  tvActivationArmed: !isMzTV(),
+  tvActivationAllowedAt: (!isMzTV()) ? -Infinity : Infinity,
   tvInteractionEpoch: 0
 };
 
@@ -442,12 +369,12 @@ function detailNow() {
   return typeof performance !== 'undefined' ? performance.now() : Date.now();
 }
 
-function isTVLikeMode() {
-  return isTV || document.documentElement.classList.contains('tv-mode');
+function isMzTVMode() {
+  return document.documentElement.getAttribute('data-mz-tv') === 'true';
 }
 
 function resetTVLaunchActivation() {
-  if (!isTVLikeMode()) return;
+  if (!isMzTVMode()) return;
   detailActivationGuard.tvActivationArmed = false;
   detailActivationGuard.tvActivationAllowedAt = Infinity;
   detailActivationGuard.lastTrustedActivationAt = -Infinity;
@@ -455,7 +382,7 @@ function resetTVLaunchActivation() {
 }
 
 function armTVDetailActivation(fromActivationKeyRelease) {
-  if (!isTVLikeMode()) return;
+  if (!isMzTVMode()) return;
   const now = detailNow();
   detailActivationGuard.tvActivationArmed = true;
   detailActivationGuard.tvActivationAllowedAt = fromActivationKeyRelease
@@ -476,7 +403,7 @@ const recordPointerActivation = (event) => {
   if (!event.isTrusted || (event.button != null && event.button !== 0)) return;
   const now = detailNow();
   if (now < detailActivationGuard.viewportBlockedUntil) return;
-  if (isTVLikeMode()) armTVDetailActivation(false);
+  if (isMzTVMode()) armTVDetailActivation(false);
   detailActivationGuard.lastTrustedActivationAt = now;
 };
 
@@ -501,7 +428,7 @@ document.addEventListener('keydown', (event) => {
   if (event.repeat) return;
   // Always record the trusted activation time (needed for TV search fallback)
   // But only fully arm if TV activation is ready
-  if (isTVLikeMode() && (!detailActivationGuard.tvActivationArmed || now < detailActivationGuard.tvActivationAllowedAt)) {
+  if (isMzTVMode() && (!detailActivationGuard.tvActivationArmed || now < detailActivationGuard.tvActivationAllowedAt)) {
     // Still record the time so tvSearchFallback can use it
     detailActivationGuard.lastTrustedActivationAt = now;
     return;
@@ -580,7 +507,7 @@ function claimExplicitDetailActivation(event) {
   const now = detailNow();
   if (now < detailActivationGuard.viewportBlockedUntil) return false;
 
-  const tvActivationReady = !isTVLikeMode() || (
+  const tvActivationReady = !isMzTVMode() || (
     detailActivationGuard.tvActivationArmed &&
     now >= detailActivationGuard.tvActivationAllowedAt
   );
@@ -596,7 +523,7 @@ function claimExplicitDetailActivation(event) {
   
   // On TV: Allow activation if user has active navigator.userActivation (proves recent real interaction)
   // This handles the case where search dropdown item.click() is called from searchInput's Enter handler
-  const tvSearchFallback = isTVLikeMode() && !trustedAccessibleClick && !trustedDirectKey && !hasRecentTrustedInput &&
+  const tvSearchFallback = isMzTVMode() && !trustedAccessibleClick && !trustedDirectKey && !hasRecentTrustedInput &&
     navigator.userActivation && navigator.userActivation.isActive &&
     now - detailActivationGuard.lastTrustedActivationAt <= 3000;
 
@@ -715,7 +642,7 @@ async function init() {
 
   // Luxury Ambient Particles (Jugnu)
   // Only create on desktop - mobile/TV gets zero particles for performance
-  if (!isTV && !isMobile && !document.querySelector('.ambient-particles')) {
+  if (!isMzTV() && !isMobile && !document.querySelector('.ambient-particles')) {
     const pContainer = document.createElement('div');
     pContainer.className = 'ambient-particles';
     document.body.appendChild(pContainer);
@@ -1188,7 +1115,7 @@ function resumeAutoSlide() {
   if (!hero) return;
  
   // Pause autoplay while the user is looking closely (desktop hover)
-  if (!isTV) {
+  if (!isMzTV()) {
     hero.addEventListener('mouseenter', pauseAutoSlide);
     hero.addEventListener('mouseleave', resumeAutoSlide);
   }
@@ -1598,7 +1525,7 @@ async function loadMovies(cat, isLoadMore = false) {
   if (loadMoreBtn) loadMoreBtn.style.display = 'none'; // Always hide button for infinite scroll
  
   // Har load ke baad agle page ko chupke se fetch karke ready rakho
-  if (!isTV) {
+  if (!isMzTV()) {
     setTimeout(() => prefetchMoviesPage(cat, currentMoviePage + 1), 800);
   }
 
@@ -1732,7 +1659,7 @@ function renderMovies(movies, append = false) {
   scrollObserver.observe(card);
 
     // Premium 3D Tilt Effect on Hover (Desktop only - causes lag on mobile/TV)
-    if (!isTV && !isMobile) {
+    if (!isMzTV() && !isMobile) {
       let tiltRAF;
       let cachedRect = null; // Cache to stop Layout Thrashing
       card.addEventListener('mouseenter', () => { 
@@ -1795,7 +1722,7 @@ function filterCat(cat, e) {
   const h = document.getElementById('sectionHeading');
   if (h) h.textContent = CAT_HEADINGS[cat] || 'MOVIES';
   const sec = document.getElementById('movies-section');
-  if (sec) sec.scrollIntoView({ behavior: isTVLikeMode() ? 'auto' : 'smooth' });
+  if (sec) sec.scrollIntoView({ behavior: isMzTVMode() ? 'auto' : 'smooth' });
   loadMovies(cat);
 }
  
@@ -1851,7 +1778,7 @@ function showWatchlist(e) {
     h.innerHTML = 'MY WATCHLIST' + (watchlist.length > 0 ? ' <button onclick="clearWatchlist()" class="clear-watchlist-btn"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg> Clear All</button>' : '');
   }
   const sec = document.getElementById('movies-section');
-  if (sec) sec.scrollIntoView({ behavior: isTVLikeMode() ? 'auto' : 'smooth' });
+  if (sec) sec.scrollIntoView({ behavior: isMzTVMode() ? 'auto' : 'smooth' });
   renderMovies(watchlist);
   const loadMoreBtn = document.getElementById('loadMoreMoviesBtn');
   if (loadMoreBtn) loadMoreBtn.style.display = 'none';
@@ -1921,7 +1848,7 @@ async function loadUpcoming(isLoadMore = false) {
       if (m.release_date) {
         try { dateStr = new Date(m.release_date).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }); } catch(e){}
       }
-      const posterImg = m.backdrop_path ? (isTV ? 'https://image.tmdb.org/t/p/w780' : 'https://image.tmdb.org/t/p/w500') + m.backdrop_path : IMG + m.poster_path;
+      const posterImg = m.backdrop_path ? (isMzTV() ? 'https://image.tmdb.org/t/p/w780' : 'https://image.tmdb.org/t/p/w500') + m.backdrop_path : IMG + m.poster_path;
       const genres = (m.genre_ids||[]).slice(0,2).map(id => GENRE_MAP[id]).filter(Boolean);
       
       // Calculate countdown days
@@ -1974,7 +1901,7 @@ async function loadUpcoming(isLoadMore = false) {
   } catch(e) { console.warn(e); }
  
   // Har load ke baad agle upcoming page ko chupke se fetch karke ready rakho
-  if (!isTV) {
+  if (!isMzTV()) {
     setTimeout(() => prefetchUpcomingPage(currentUpcomingPage + 1), 800);
   }
 }
@@ -2001,7 +1928,7 @@ async function openUpcomingDetail(id, type, activationEvent) {
   
   // Open overlay instantly
   overlay.classList.add('open');
-  if (!isTV && !document.documentElement.classList.contains('tv-mode')) {
+  if (!isMzTV()) {
     document.body.style.overflow = 'hidden';
   }
   overlay.scrollTop = 0;
@@ -2211,7 +2138,7 @@ function playUpcomingTrailer() {
   const embed = document.getElementById('udTrailerEmbed');
   section.style.display = 'block';
   embed.innerHTML = '<iframe src="https://www.youtube.com/embed/' + upcomingTrailerKey + '?autoplay=1&rel=0" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen style="width:100%;aspect-ratio:16/9;border-radius:12px;"></iframe>';
-  section.scrollIntoView({ behavior: isTVLikeMode() ? 'auto' : 'smooth', block: 'center' });
+  section.scrollIntoView({ behavior: isMzTVMode() ? 'auto' : 'smooth', block: 'center' });
 }
 
 function handleUpcomingWatchlist() {
@@ -2544,7 +2471,7 @@ async function searchAndDisplay(query) {
   const heading = document.getElementById('sectionHeading');
   if (heading) heading.textContent = 'SEARCHING FOR "' + query.toUpperCase() + '"...';
   const section = document.getElementById('movies-section');
-  if (section) section.scrollIntoView({ behavior: isTVLikeMode() ? 'auto' : 'smooth' });
+  if (section) section.scrollIntoView({ behavior: isMzTVMode() ? 'auto' : 'smooth' });
 
   try {
     const search = await intelligentMovieSearch(query, 40);
@@ -2578,13 +2505,13 @@ async function openModal(id, type = 'movie', activationEvent) {
   if (!claimExplicitDetailActivation(activationEvent)) return;
   // Add hash to URL to behave like a separate page
   window.history.pushState({ watchPage: true }, '', '#watch-' + type + '-' + id);
-  if (isTV) lastFocusedElement = document.activeElement;
+  if (isMzTV()) lastFocusedElement = document.activeElement;
   const overlay = document.getElementById('modal-overlay');
   if (!overlay) return;
  
   // 1. INSTANT UI OPEN (Bina backend wait kiye instantly page open karo)
   overlay.classList.add('open');
-  if (!isTV && !document.documentElement.classList.contains('tv-mode')) {
+  if (!isMzTV()) {
     document.body.style.overflow = 'hidden';
   }
   overlay.scrollTop = 0;
@@ -2668,7 +2595,7 @@ async function openModal(id, type = 'movie', activationEvent) {
       eventContainer.onmouseenter = null;
       eventContainer.onmouseleave = null;
 
-      if (bestVids.length > 0 && !isTV) {
+      if (bestVids.length > 0 && !isMzTV()) {
         let currentVidIdx = 0;
         let trailerKey = bestVids[currentVidIdx].key;
  
@@ -3015,7 +2942,7 @@ async function openModal(id, type = 'movie', activationEvent) {
     loadRelatedMovies(id, type);
  
     // TV ke liye Auto-Focus on Play button
-    if (isTV) {
+    if (isMzTV()) {
       setTimeout(() => {
         const playBtn = document.querySelector('.play-big') || document.querySelector('.premium-play-btn');
         if (playBtn) playBtn.focus();
@@ -3075,7 +3002,7 @@ function closeModal(fromPopstate) {
   }
   
   // Restore focus on TV
-  if ((isTV || document.documentElement.classList.contains('tv-mode')) && lastFocusedElement) {
+  if (isMzTV() && lastFocusedElement) {
     setTimeout(() => {
       try { lastFocusedElement.focus(); } catch(e) {}
     }, 150);
@@ -3118,7 +3045,7 @@ document.addEventListener('keydown', (e) => {
   if (!isBackKey) return;
   
   // Don't handle if TV navigation mode is active (it has its own handler)
-  if (isTV || document.documentElement.classList.contains('tv-mode')) return;
+  if (isMzTV()) return;
   
   const overlay = document.getElementById('modal-overlay');
   const upcomingOverlay = document.getElementById('upcoming-detail-overlay');
@@ -3324,8 +3251,8 @@ async function loadRelatedMovies(id, type) {
         if (nextBtn) nextBtn.disabled = grid.scrollLeft >= (grid.scrollWidth - grid.clientWidth - 10);
       };
 
-      if (prevBtn) prevBtn.onclick = () => { grid.scrollBy({ left: -scrollAmount, behavior: isTVLikeMode() ? 'auto' : 'smooth' }); };
-      if (nextBtn) nextBtn.onclick = () => { grid.scrollBy({ left: scrollAmount, behavior: isTVLikeMode() ? 'auto' : 'smooth' }); };
+      if (prevBtn) prevBtn.onclick = () => { grid.scrollBy({ left: -scrollAmount, behavior: isMzTVMode() ? 'auto' : 'smooth' }); };
+      if (nextBtn) nextBtn.onclick = () => { grid.scrollBy({ left: scrollAmount, behavior: isMzTVMode() ? 'auto' : 'smooth' }); };
 
       grid.addEventListener('scroll', updateArrowState, { passive: true });
       updateArrowState();
@@ -3349,13 +3276,15 @@ const playerSources = [
       : `https://www.viduki.net/2/movie/${id}`;
   }},
   { name: 'Cinextream', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
-    // #2 ULTIMATE ALL-ROUNDER: Cinextream.net
-    // 115K Movies + 79K Shows + 9K Anime (SUB & DUB)
-    // Hindi Dubbed anime, Auto-next, Fast servers, 1080p, Customizable
-    // No heavy ads, server fallback built-in, error recovery
     return type === 'tv'
       ? `https://cinextream.net/api/embed/tv/${id}/${s}/${e}?color=E6B800&autoplay=true`
       : `https://cinextream.net/api/embed/movie/${id}?color=E6B800&autoplay=true`;
+  }},
+      { name: 'Flicky Stream', dubbed: true, url: (id, lang, type, s, e) => {
+    // #8: Flicky — Working embed, multiple servers
+    return type === 'tv'
+      ? `https://flicky.host/embed/tv/?id=${id}&s=${s}&e=${e}`
+      : `https://flicky.host/embed/movie/?id=${id}`;
   }},
   { name: 'VidPhantom Pro', dubbed: true, url: (id, lang, type, s, e) => {
     // #3 PREMIUM: VidPhantom — AD-FREE, 115K Movies + 79K Episodes + 5.3K Anime
@@ -3363,6 +3292,10 @@ const playerSources = [
     return type === 'tv'
       ? `https://vidphantom.com/tv/${id}/${s}/${e}?autoplay=true&sub_lang=${lang}`
       : `https://vidphantom.com/movie/${id}?autoplay=true&sub_lang=${lang}`;
+  }},
+    { name: 'Ultra HD', dubbed: true, url: (id, lang, type, s, e) => {
+    // #6: AutoEmbed — India ke networks par blockage kam aati hai
+    return (type === 'tv' ? `https://autoembed.co/tv/tmdb/${id}-${s}-${e}` : 'https://autoembed.co/movie/tmdb/' + id) + `?lang=${lang}`;
   }},
   { name: 'Pro Stream', dubbed: true, url: (id, lang, type, s, e) => {
     // #4: VidLink Pro — Clean interface with settings
@@ -3373,16 +3306,6 @@ const playerSources = [
     return type === 'tv'
       ? `https://vidnest.fun/tv/${id}/${s}/${e}`
       : `https://vidnest.fun/movie/${id}`;
-  }},
-  { name: 'Ultra HD', dubbed: true, url: (id, lang, type, s, e) => {
-    // #6: AutoEmbed — India ke networks par blockage kam aati hai
-    return (type === 'tv' ? `https://autoembed.co/tv/tmdb/${id}-${s}-${e}` : 'https://autoembed.co/movie/tmdb/' + id) + `?lang=${lang}`;
-  }},
-    { name: 'Flicky Stream', dubbed: true, url: (id, lang, type, s, e) => {
-    // #8: Flicky — Working embed, multiple servers
-    return type === 'tv'
-      ? `https://flicky.host/embed/tv/?id=${id}&s=${s}&e=${e}`
-      : `https://flicky.host/embed/movie/?id=${id}`;
   }},
   { name: 'Premium Mirror', dubbed: true, url: (id, lang, type, s, e) => {
     // #9: Official proxy mirror to fix 'refused to connect' / iframe block issue
@@ -3639,8 +3562,6 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   iframe.setAttribute('frameborder', '0');
   iframe.setAttribute('scrolling', 'no');
   iframe.setAttribute('allow', 'fullscreen;autoplay;encrypted-media;picture-in-picture');
-  // Keep untrusted player documents contained: no popup or top-navigation capability.
-  iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-presentation');
   iframe.setAttribute('referrerpolicy', 'no-referrer');
   iframe.setAttribute('fetchpriority', 'high'); 
   iframe.setAttribute('loading', 'eager'); 
@@ -3712,7 +3633,7 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   showToast('' + buildSourceLabel(srcIdx) + ' |  ' + _toastLangName + ' | ' + _dubbedStatus + (type === 'tv' ? ` | S${s} E${e}` : ''));
  
   // Smooth scroll to video player
-  setTimeout(() => embedEl.scrollIntoView({ behavior: isTVLikeMode() ? 'auto' : 'smooth', block: 'center' }), 300);
+  setTimeout(() => embedEl.scrollIntoView({ behavior: isMzTVMode() ? 'auto' : 'smooth', block: 'center' }), 300);
   
 }
 
@@ -3827,7 +3748,7 @@ async function downloadMovie() {
   if (!currentModalMovie) return;
   const title = currentModalMovie.title || currentModalMovie.name || '';
   const year = (currentModalMovie.release_date || currentModalMovie.first_air_date || '').slice(0, 4);
-  const isTV = currentModalMovie.media_type === 'tv';
+  const isSeries = currentModalMovie.media_type === 'tv';
   const lang = currentModalMovie.original_language || 'en';
   
   // Get download button reference
@@ -3852,7 +3773,7 @@ async function downloadMovie() {
   
   let directLinksHtml = '';
   
-  if (isTV) {
+  if (isSeries) {
     // TV SHOWS / WEB SERIES download links
     directLinksHtml = `
       <a href="https://www.google.com/search?q=${encodedTitleYear}+download+hindi+dubbed+web+series" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid #10b981; margin-bottom:8px;">
@@ -3913,7 +3834,7 @@ async function downloadMovie() {
   // 2. TORRENT SECTION (YTS for movies, 1337x for all)
   let torrentsHtml = '';
   try {
-    if (!isTV) {
+    if (!isSeries) {
       const query = currentModalMovie.imdb_id || title;
       let ytsData = null;
       let fetchSuccess = false;
@@ -3980,7 +3901,7 @@ async function downloadMovie() {
   // 3. ANIME DOWNLOAD (if anime/cartoon detected)
   let animeHtml = '';
   const isAnime = (currentModalMovie.genre_ids || []).includes(16) || lang === 'ja';
-  if (isAnime || isTV) {
+  if (isAnime || isSeries) {
     animeHtml = `
       <h4 style="font-size:0.7rem; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:var(--text2); margin-top:1.2rem; margin-bottom:0.8rem; padding-bottom:0.4rem; border-bottom: 1px solid rgba(255,255,255,0.1);">ANIME / CARTOON DOWNLOAD</h4>
       <a href="https://www.google.com/search?q=${encodedTitle}+hindi+dubbed+anime+download+480p+720p+1080p" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid #06b6d4; margin-bottom:8px;">
@@ -4111,11 +4032,6 @@ if (modalOverlay) {
   });
 }
  
-// -- PLAYER REDIRECT CONTAINMENT --
-// loadPlayer() sandboxes every third-party frame without popup/top-navigation grants.
-// This blocks player-driven page redirects on desktop, mobile, and TV without a
-// disruptive beforeunload confirmation that some Smart TV browsers cannot display.
- 
 document.addEventListener('DOMContentLoaded', () => {
   const langSel = document.getElementById('langSelect');
   if (langSel) langSel.addEventListener('change', (e) => {
@@ -4186,7 +4102,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Fluid Ripple Effect for buttons
   document.body.addEventListener('click', (e) => {
     const btn = e.target.closest('.btn-play, .btn-info, .btn-watchlist, .btn-download, .load-more-btn, .premium-play-btn, .cat-tab, .carousel-arrow, .nav-btn');
-    if (btn && !isTV) {
+    if (btn && !isMzTV()) {
       btn.classList.add('ripple-wrapper');
       const circle = document.createElement('span');
       const diameter = Math.max(btn.clientWidth, btn.clientHeight);
@@ -4290,321 +4206,30 @@ function showToast(msg) {
   setTimeout(() => { t.classList.remove('show'); }, 3000);
 }
  
-// -- TV REMOTE NAVIGATION: Full D-Pad Spatial Navigation System --
-(function initTVNavigation() {
-  const TV_FOCUSABLE_SELECTORS = '.movie-card, .upcoming-card, .cat-tab, .btn-play, .btn-info, .player-chip, .nav-links a, .carousel-arrow, button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
-  const isTVNavigationMode = () => isTV || document.documentElement.classList.contains('tv-mode');
+// TV REMOTE NAVIGATION moved to tv-mode.js (D-pad, Back, Page/Channel, Media keys).
+// Expose detailActivationGuard and armTVDetailActivation globally for tv-mode.js integration.
+window.detailActivationGuard = detailActivationGuard;
+window.armTVDetailActivation = armTVDetailActivation;
 
-  // Many Smart TVs (Tizen, WebOS, Fire TV) carry Enter/OK into the page.
-  // Readiness is event-driven only: a release or D-pad/page key, never elapsed time.
-  let tvPageReady = false;
-  let tvFirstInteractionTime = 0;
-  let observedInteractionEpoch = detailActivationGuard.tvInteractionEpoch;
-
-  function syncTVPageReadiness() {
-    if (observedInteractionEpoch !== detailActivationGuard.tvInteractionEpoch) {
-      observedInteractionEpoch = detailActivationGuard.tvInteractionEpoch;
-      tvPageReady = false;
-      tvFirstInteractionTime = 0;
-    }
-  }
-
-  // 1. Add tabindex=0 to all focusable TV elements
-  function markFocusable() {
-    if (!isTVNavigationMode()) return;
-    document.querySelectorAll(TV_FOCUSABLE_SELECTORS).forEach(el => {
-      if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
-    });
-  }
-
-  // Run on DOMContentLoaded
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', markFocusable);
-  } else {
-    markFocusable();
-  }
-
-  // Re-run when new cards are rendered (MutationObserver)
-  if (isTVNavigationMode()) {
-    const observer = new MutationObserver((mutations) => {
-      let hasNewNodes = false;
-      for (const m of mutations) {
-        if (m.addedNodes.length > 0) { hasNewNodes = true; break; }
-      }
-      if (hasNewNodes) markFocusable();
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-  }
-
-  // 2. Spatial navigation: find nearest element in direction
-  function getVisibleFocusables() {
-    const els = document.querySelectorAll(TV_FOCUSABLE_SELECTORS);
-    return Array.from(els).filter(el => {
-      if (el.offsetParent === null && getComputedStyle(el).position !== 'fixed') return false;
-      const r = el.getBoundingClientRect();
-      return r.width > 0 && r.height > 0;
-    });
-  }
-
-  function findNearest(current, direction) {
-    const focusables = getVisibleFocusables();
-    const currentRect = current.getBoundingClientRect();
-    const cx = currentRect.left + currentRect.width / 2;
-    const cy = currentRect.top + currentRect.height / 2;
-
-    let best = null;
-    let bestDist = Infinity;
-
-    for (const el of focusables) {
-      if (el === current) continue;
-      const r = el.getBoundingClientRect();
-      const ex = r.left + r.width / 2;
-      const ey = r.top + r.height / 2;
-      const dx = ex - cx;
-      const dy = ey - cy;
-
-      // Filter by direction
-      let inDirection = false;
-      switch (direction) {
-        case 'left':  inDirection = dx < -10; break;
-        case 'right': inDirection = dx > 10; break;
-        case 'up':    inDirection = dy < -10; break;
-        case 'down':  inDirection = dy > 10; break;
-      }
-      if (!inDirection) continue;
-
-      // Weighted distance: heavily penalize perpendicular offset
-      let primaryDist, crossDist;
-      if (direction === 'left' || direction === 'right') {
-        primaryDist = Math.abs(dx);
-        crossDist = Math.abs(dy);
-      } else {
-        primaryDist = Math.abs(dy);
-        crossDist = Math.abs(dx);
-      }
-      const dist = primaryDist + crossDist * 3;
-
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = el;
-      }
-    }
-    return best;
-  }
-
-  // Scroll the active TV surface. Overlays keep ownership of their own scroll;
-  // the movie page scrolls only when no modal/collections surface is open.
-  function getTVScrollContainer() {
-    const collections = document.getElementById('collections-hub-overlay');
-    if (collections && collections.classList.contains('open')) {
-      return document.getElementById('chScroll') || collections;
-    }
-
-    for (const id of ['upcoming-detail-overlay', 'modal-overlay', 'pwa-install-overlay']) {
-      const overlay = document.getElementById(id);
-      if (overlay && overlay.classList.contains('open')) return overlay;
-    }
-
-    return document.scrollingElement || document.documentElement;
-  }
-
-  function scrollTVPage(direction) {
-    const scroller = getTVScrollContainer();
-    if (!scroller) return;
-    const isPage = scroller === document.scrollingElement ||
-      scroller === document.documentElement || scroller === document.body;
-    const viewportHeight = isPage ? window.innerHeight : scroller.clientHeight;
-    const amount = Math.max(240, Math.round((viewportHeight || window.innerHeight) * 0.78)) * direction;
-
-    if (isPage) {
-      try { window.scrollBy({ top: amount, left: 0, behavior: 'auto' }); }
-      catch (error) { window.scrollBy(0, amount); }
-    } else if (typeof scroller.scrollBy === 'function') {
-      try { scroller.scrollBy({ top: amount, left: 0, behavior: 'auto' }); }
-      catch (error) { scroller.scrollTop += amount; }
-    } else {
-      scroller.scrollTop += amount;
-    }
-  }
-
-  function focusAndRevealTVTarget(target, direction) {
-    try { target.focus({ preventScroll: true }); }
-    catch (error) { target.focus(); }
-    try {
-      target.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
-    } catch (error) {
-      // Legacy Tizen/WebOS browsers may support only the boolean signature.
-      target.scrollIntoView(direction !== 'up');
-    }
-  }
-
-  // 3. Main keydown handler for TV
-  document.addEventListener('keydown', (e) => {
-    // Genuine TV detection and explicit ?tv=1 share the same navigation behavior.
-    const isTVMode = isTVNavigationMode();
-
-    if (isTVMode) syncTVPageReadiness();
-    if (!isTVMode) {
-      // Non-TV: basic Enter/Space click for custom focusable elements
-      if ((e.key === 'Enter' || e.key === ' ') && document.activeElement) {
-        const tag = document.activeElement.tagName;
-        if (tag !== 'BUTTON' && tag !== 'A' && tag !== 'INPUT') {
-          document.activeElement.click();
-          e.preventDefault();
-        }
-      }
-      return;
-    }
-
-    const key = e.key;
-    const keyCode = e.keyCode || e.which;
-    if (!e.isTrusted) return;
-
-    // Dedicated page/channel keys provide predictable long-page scrolling on TVs.
-    const pageDirection = (key === 'PageDown' || key === 'ChannelDown' || keyCode === 34 || keyCode === 428)
-      ? 1
-      : ((key === 'PageUp' || key === 'ChannelUp' || keyCode === 33 || keyCode === 427) ? -1 : 0);
-    if (pageDirection) {
-      e.preventDefault();
-      tvPageReady = true;
-      armTVDetailActivation(false);
-      scrollTVPage(pageDirection);
-      return;
-    }
-
-    // D-Pad Arrow Navigation
-    const directionMap = {
-      'ArrowLeft': 'left', 'ArrowRight': 'right',
-      'ArrowUp': 'up', 'ArrowDown': 'down'
-    };
-    if (directionMap[key]) {
-      // Don't intercept arrow keys when search input is focused and dropdown is open
-      const searchDropdown = document.getElementById('searchDropdown');
-      if (document.activeElement && document.activeElement.id === 'searchInput' && 
-          searchDropdown && searchDropdown.classList.contains('open') &&
-          (key === 'ArrowUp' || key === 'ArrowDown')) {
-        // Let the search input's own handler manage dropdown navigation
-        armTVDetailActivation(false);
-        return;
-      }
-      e.preventDefault();
-      tvPageReady = true; // D-pad movement proves this is a deliberate post-launch interaction
-      armTVDetailActivation(false);
-      const active = document.activeElement;
-      if (!active || active === document.body) {
-        // No focus yet — focus first safe navigation element (not play button)
-        const safeFocusables = getVisibleFocusables().filter(el => !el.classList.contains('btn-play') && !el.classList.contains('movie-card'));
-        const first = safeFocusables[0] || getVisibleFocusables()[0];
-        if (first) first.focus();
-        return;
-      }
-      const direction = directionMap[key];
-      const target = findNearest(active, direction);
-      if (target) {
-        focusAndRevealTVTarget(target, direction);
-      } else if (direction === 'up' || direction === 'down') {
-        // At the edge of currently rendered cards, keep moving the page. This also
-        // brings the infinite-scroll sentinel into range so the next batch can load.
-        scrollTVPage(direction === 'down' ? 1 : -1);
-      }
-      return;
-    }
-
-    // Enter/Space: Click focused element
-    if (key === 'Enter' || key === ' ' || keyCode === 13 || keyCode === 32) {
-      // Let search input handle its own Enter key (for dropdown item selection)
-      if (document.activeElement && document.activeElement.id === 'searchInput') {
-        // Don't interfere - the search input's own keydown handler will handle this
-        armTVDetailActivation(false);
-        return;
-      }
-      // Ignore synthetic, repeated, carried launch keys and post-keyup bounce.
-      const activationNow = detailNow();
-      if (!e.isTrusted || e.repeat || !tvPageReady || !detailActivationGuard.tvActivationArmed ||
-          activationNow < detailActivationGuard.tvActivationAllowedAt) {
-        e.preventDefault();
-        return;
-      }
-      // GUARD: Prevent double-tap within 300ms (TV remotes sometimes send duplicate events)
-      const now = Date.now();
-      if (now - tvFirstInteractionTime < 300) {
-        e.preventDefault();
-        return;
-      }
-      tvFirstInteractionTime = now;
-
-      if (document.activeElement && document.activeElement !== document.body) {
-        document.activeElement.click();
-        e.preventDefault();
-      }
-      return;
-    }
-
-    // Back keys: Android/Fire TV (4/BrowserBack), Tizen (10009), WebOS (461), Escape/Backspace
-    const isBackKey = key === 'Escape' || key === 'BrowserBack' || key === 'GoBack' ||
-      keyCode === 4 || keyCode === 27 || keyCode === 10009 || keyCode === 461 ||
-      (key === 'Backspace' && document.activeElement && document.activeElement.tagName !== 'INPUT');
-    if (isBackKey) {
-      const overlay = document.getElementById('modal-overlay');
-      const collectionsOverlay = document.getElementById('collections-hub-overlay');
-      if (overlay && overlay.classList.contains('open')) {
-        if (typeof closeModal === 'function') closeModal();
-        e.preventDefault();
-      } else if (collectionsOverlay && collectionsOverlay.classList.contains('open')) {
-        if (typeof handleCollectionsBack === 'function') handleCollectionsBack();
-        e.preventDefault();
-      } else {
-        const dd = document.getElementById('searchDropdown');
-        if (dd && dd.classList.contains('open')) {
-          if (typeof closeDropdown === 'function') closeDropdown();
-          e.preventDefault();
-        } else if (isSearchResultsMode || isFullViewMovies || isFullViewUpcoming) {
-          // User is in search results or filtered view — go back to home page
-          e.preventDefault();
-          if (typeof goHome === 'function') goHome();
-          // Clear search input
-          const si = document.getElementById('searchInput');
-          if (si) si.value = '';
-        }
-        // If already on home page, let the browser handle back (exit/previous page)
-      }
-      return;
-    }
-
-    // Media keys: Play/Pause, Stop, FastForward, Rewind
-    const mediaKeys = ['MediaPlayPause', 'MediaPlay', 'MediaPause', 'MediaStop',
-                       'MediaFastForward', 'MediaRewind', 'MediaTrackNext', 'MediaTrackPrevious'];
-    const mediaKeyCodes = [179, 415, 19, 413, 417, 412, 176, 177];
-    if (mediaKeys.includes(key) || mediaKeyCodes.includes(keyCode)) {
-      e.preventDefault();
-      if (key === 'MediaPlayPause' || key === 'MediaPlay' || key === 'MediaPause' || keyCode === 179 || keyCode === 415 || keyCode === 19) {
-        const playBtn = document.querySelector('.play-big') || document.querySelector('.premium-play-btn') || document.querySelector('.btn-play');
-        if (playBtn) playBtn.click();
-      }
-      return;
-    }
+// Register MovieZoneTV configure callbacks so tv-mode.js can read top-level let state
+if (typeof window.MovieZoneTV !== 'undefined' && window.MovieZoneTV.configure) {
+  window.MovieZoneTV.configure({
+    isSearchResultsMode: function() { return isSearchResultsMode; },
+    isFullViewMovies: function() { return isFullViewMovies; },
+    isFullViewUpcoming: function() { return isFullViewUpcoming; },
+    closeModal: function() { closeModal(); },
+    closeDropdown: function() { closeDropdown(); },
+    goHome: function() { goHome(); },
+    closeUpcomingDetail: function() { closeUpcomingDetail(); },
+    handleCollectionsBack: function() {
+      if (typeof window.handleCollectionsBack === 'function') window.handleCollectionsBack();
+    },
+    isFullscreen: function() {
+      return Boolean(document.fullscreenElement || document.webkitFullscreenElement || isPlayerFullscreen);
+    },
+    exitFullscreen: function() { togglePlayerFS(); }
   });
-
-  document.addEventListener('keyup', (e) => {
-    if (!isTVNavigationMode() || !e.isTrusted) return;
-    syncTVPageReadiness();
-    const code = e.keyCode || e.which;
-    if (e.key === 'Enter' || e.key === ' ' || code === 13 || code === 32) {
-      // Capture arming includes the debounce; this only makes a later keydown eligible.
-      tvPageReady = true;
-    }
-  });
-
-  // 6. Auto-scroll focused element to center (for focus via Tab or programmatic focus)
-  if (isTVNavigationMode()) {
-    document.addEventListener('focus', (e) => {
-      const overlay = document.getElementById('modal-overlay');
-      if (e.target && e.target.scrollIntoView && (!overlay || !overlay.classList.contains('open'))) {
-        e.target.scrollIntoView({ behavior: isTVLikeMode() ? 'auto' : 'smooth', block: 'center', inline: 'center' });
-      }
-    }, true);
-  }
-})();
+}
  
 function goHome(e) {
   let isHash = false;
@@ -4647,7 +4272,7 @@ function goHome(e) {
   const loadMoreBtnUpcoming = document.getElementById('loadMoreUpcomingBtn');
   if (loadMoreBtnUpcoming) loadMoreBtnUpcoming.style.display = 'none';
   
-  if (!isHash) window.scrollTo({ top: 0, behavior: isTVLikeMode() ? 'auto' : 'smooth' });
+  if (!isHash) window.scrollTo({ top: 0, behavior: isMzTVMode() ? 'auto' : 'smooth' });
 }
  
 
@@ -4749,7 +4374,7 @@ setTimeout(extractTopKeywords, 3000);
   const MAX_CARDS_DESKTOP = 80;
   
   const getMaxCards = () => {
-    if (isTVLikeMode()) return MAX_CARDS_TV;
+    if (isMzTVMode()) return MAX_CARDS_TV;
     if (isMobile || isLowEnd) return MAX_CARDS_MOBILE;
     return MAX_CARDS_DESKTOP;
   };
@@ -4811,7 +4436,7 @@ setTimeout(extractTopKeywords, 3000);
   }
 
   // TV/mobile/forced-TV modes are already optimized; do not spend frames measuring them.
-  if (!isTVLikeMode() && !document.documentElement.classList.contains('low-end-mode')) {
+  if (!isMzTVMode() && !document.documentElement.classList.contains('low-end-mode')) {
     requestAnimationFrame(checkPerformance);
   }
 })();
@@ -4982,7 +4607,7 @@ init();
     const overlay = document.getElementById('pwa-install-overlay');
     if (overlay) {
       overlay.classList.add('open');
-      if (!isTV && !document.documentElement.classList.contains('tv-mode')) {
+      if (!isMzTV()) {
         document.body.style.overflow = 'hidden';
       }
     } else if (typeof showToast === 'function') {
@@ -5167,7 +4792,7 @@ init();
   async function requestNotificationPermission() {
     if (!('Notification' in window) || !('PushManager' in window)) {
       // TV fallback: Push not supported, use local-only notify (reminder on next visit)
-      if (isTV || document.documentElement.classList.contains('tv-mode')) {
+      if (isMzTV()) {
         console.log('[MovieZone] TV mode: using local-only notifications');
         return 'local-only';
       }
@@ -5914,7 +5539,7 @@ window.handleNotifyMe = async function(btn) {
     const overlay = document.getElementById('collections-hub-overlay');
     if (!overlay) return;
     overlay.classList.add('open');
-    if (!isTV && !document.documentElement.classList.contains('tv-mode')) {
+    if (!isMzTV()) {
       document.body.style.overflow = 'hidden';
     }
     renderHubGrid();
