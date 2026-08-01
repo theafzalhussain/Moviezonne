@@ -1,4 +1,4 @@
-﻿﻿﻿// Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
+﻿﻿﻿﻿// Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
 // TV detection is handled by tv-mode.js which sets html[data-mz-tv="true"].
 // This getter reads the data attribute set by the isolated TV module.
@@ -460,6 +460,7 @@ function resetRestoredWatchSurface() {
   for (const id of ['videoEmbed', 'udTrailerEmbed']) {
     const embed = document.getElementById(id);
     if (embed) {
+      if (id === 'videoEmbed') { try { destroyPrewarm(); } catch (e) {} }
       embed.innerHTML = '';
       embed.classList.remove('fullscreen-mode');
     }
@@ -1174,8 +1175,8 @@ function prefetchMoviesPage(cat, pageNum) {
     tmdb('/discover/tv', { with_genres: '10762', with_original_language: 'en', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
     tmdb('/discover/movie', { with_genres: '16,10751', without_genres: '27,53,18', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
   } else if (cat === 'anime') {
-    tmdb('/discover/tv', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-    tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    // Anime engine ke saare active-mode sources ko chupke se warm kar do
+    buildAnimeQueries(currentAnimeMode, pageNum).forEach(q => tmdb(q.endpoint, q.params));
   } else if (cat === 'adult') {
     tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799|195669|156321', without_genres: '16,10751,28,12,35,878', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
     tmdb('/discover/tv', { include_adult: 'true', with_keywords: '9799|195669|156321', without_genres: '16,10751,10759,10762,35', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
@@ -1227,6 +1228,213 @@ const CAT_PARAMS = {
   animation: { with_genres: '16',  sort_by: 'popularity.desc', page: '1' },
   kids:      { with_genres: '16,10751', without_genres: '27,53,18', sort_by: 'popularity.desc', page: '1' }
 };
+
+/* ══════════════════════════════════════════════════════════════
+   POWERFUL ANIME ENGINE
+   Multi-source anime discovery: Trending, Latest, Airing Now,
+   Popular, Top Rated, Movies, Series — sab ek jagah.
+   ══════════════════════════════════════════════════════════════ */
+const ANIME_GENRE   = '16';        // TMDB Animation genre
+const ANIME_KEYWORD = '210024';    // TMDB "anime" keyword (Japanese + donghua style titles)
+
+const ANIME_MODES = [
+  { id: 'all',       label: 'All Anime',    icon: '🎌' },
+  { id: 'trending',  label: 'Trending',     icon: '🔥' },
+  { id: 'latest',    label: 'Latest',       icon: '🆕' },
+  { id: 'airing',    label: 'Airing Now',   icon: '📡' },
+  { id: 'popular',   label: 'Popular',      icon: '⭐' },
+  { id: 'top_rated', label: 'Top Rated',    icon: '🏆' },
+  { id: 'series',    label: 'Anime Series', icon: '📺' },
+  { id: 'movies',    label: 'Anime Movies', icon: '🎬' },
+  { id: 'classics',  label: 'All Time Best',icon: '👑' }
+];
+
+let currentAnimeMode = 'all';
+
+function animeISTDate(offsetDays = 0) {
+  const d = new Date(Date.now() + (5.5 * 60 * 60 * 1000) + (offsetDays * 86400000));
+  return d.toISOString().split('T')[0];
+}
+
+// Anime detection for un-filterable endpoints (/trending)
+function isAnimeItem(m) {
+  if (!m) return false;
+  const gid = m.genre_ids || [];
+  const lang = m.original_language;
+  return gid.includes(16) && (lang === 'ja' || lang === 'zh' || lang === 'ko');
+}
+
+/**
+ * Builds the TMDB request plan for a given anime mode.
+ * Returns [{ endpoint, params, type, badge }] — type forces media_type
+ * so anime series ka season/episode support intact rahe.
+ */
+function buildAnimeQueries(mode, page) {
+  const p1 = String(page * 2 - 1);
+  const p2 = String(page * 2);
+  const pg = String(page);
+  const today = animeISTDate(0);
+  const tvBase    = { with_genres: ANIME_GENRE, with_original_language: 'ja', language: 'en-US' };
+  const mvBase    = { with_genres: ANIME_GENRE, with_original_language: 'ja', language: 'en-US' };
+  const kwTv      = { with_keywords: ANIME_KEYWORD, with_genres: ANIME_GENRE, language: 'en-US' };
+  const kwMv      = { with_keywords: ANIME_KEYWORD, with_genres: ANIME_GENRE, language: 'en-US' };
+  const q = [];
+
+  const push = (endpoint, params, type, badge) => q.push({ endpoint, params, type, badge });
+
+  switch (mode) {
+    case 'trending':
+      // /trending filter support nahi karta, isliye locally anime filter hoga
+      push('/trending/tv/week',    { language: 'en-US', page: pg }, 'tv',    '🔥 TRENDING NOW');
+      push('/trending/movie/week', { language: 'en-US', page: pg }, 'movie', '🔥 TRENDING NOW');
+      push('/trending/tv/day',     { language: 'en-US', page: pg }, 'tv',    '🔥 TRENDING TODAY');
+      push('/trending/movie/day',  { language: 'en-US', page: pg }, 'movie', '🔥 TRENDING TODAY');
+      // Fallback fillers: recent high-momentum anime
+      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'popularity.desc', 'first_air_date.gte': animeISTDate(-400), 'first_air_date.lte': today, page: pg }), 'tv', '🔥 HOT ANIME');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'popularity.desc', 'primary_release_date.gte': animeISTDate(-800), 'primary_release_date.lte': today, page: pg }), 'movie', '🔥 HOT ANIME');
+      break;
+
+    case 'latest':
+      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'first_air_date.desc', 'first_air_date.lte': today, 'vote_count.gte': '2', page: pg }), 'tv', '🆕 NEW RELEASE');
+      push('/discover/tv', Object.assign({}, kwTv,   { sort_by: 'first_air_date.desc', 'first_air_date.lte': today, 'vote_count.gte': '2', page: pg }), 'tv', '🆕 NEW RELEASE');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'primary_release_date.desc', 'primary_release_date.lte': today, 'vote_count.gte': '3', page: pg }), 'movie', '🆕 NEW MOVIE');
+      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'popularity.desc', 'first_air_date.gte': animeISTDate(-120), 'first_air_date.lte': today, page: pg }), 'tv', '🆕 THIS SEASON');
+      break;
+
+    case 'airing':
+      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'popularity.desc', 'air_date.gte': animeISTDate(-30), 'air_date.lte': today, page: pg }), 'tv', '📡 AIRING NOW');
+      push('/discover/tv', Object.assign({}, kwTv,   { sort_by: 'popularity.desc', 'air_date.gte': animeISTDate(-30), 'air_date.lte': today, page: pg }), 'tv', '📡 AIRING NOW');
+      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '20', 'air_date.gte': animeISTDate(-60), 'air_date.lte': today, page: pg }), 'tv', '📡 ONGOING HIT');
+      break;
+
+    case 'popular':
+      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'popularity.desc', page: p1 }), 'tv',    '⭐ POPULAR');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'popularity.desc', page: p1 }), 'movie', '⭐ POPULAR');
+      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'popularity.desc', page: p2 }), 'tv',    '⭐ POPULAR');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'popularity.desc', page: p2 }), 'movie', '⭐ POPULAR');
+      push('/discover/tv',    Object.assign({}, kwTv,   { sort_by: 'popularity.desc', page: p1 }), 'tv',    '⭐ POPULAR');
+      break;
+
+    case 'top_rated':
+      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: p1 }), 'tv',    '🏆 TOP RATED');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: p1 }), 'movie', '🏆 TOP RATED');
+      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: p2 }), 'tv',    '🏆 TOP RATED');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: p2 }), 'movie', '🏆 TOP RATED');
+      break;
+
+    case 'series':
+      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'popularity.desc', page: p1 }), 'tv', '📺 ANIME SERIES');
+      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'popularity.desc', page: p2 }), 'tv', '📺 ANIME SERIES');
+      push('/discover/tv', Object.assign({}, kwTv,   { sort_by: 'popularity.desc', page: p1 }), 'tv', '📺 ANIME SERIES');
+      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'first_air_date.desc', 'first_air_date.lte': today, 'vote_count.gte': '5', page: pg }), 'tv', '📺 NEW SEASON');
+      break;
+
+    case 'movies':
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'popularity.desc', page: p1 }), 'movie', '🎬 ANIME MOVIE');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'popularity.desc', page: p2 }), 'movie', '🎬 ANIME MOVIE');
+      push('/discover/movie', Object.assign({}, kwMv,   { sort_by: 'popularity.desc', page: p1 }), 'movie', '🎬 ANIME MOVIE');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '100', page: pg }), 'movie', '🎬 MUST WATCH');
+      break;
+
+    case 'classics':
+      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'vote_count.desc', page: p1 }), 'tv',    '👑 LEGENDARY');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'vote_count.desc', page: p1 }), 'movie', '👑 LEGENDARY');
+      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'vote_count.desc', page: p2 }), 'tv',    '👑 LEGENDARY');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'vote_count.desc', page: p2 }), 'movie', '👑 LEGENDARY');
+      break;
+
+    case 'all':
+    default:
+      // Har flavour ka mix — trending + latest + popular + top rated + movies
+      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'popularity.desc', page: p1 }), 'tv',    '⭐ POPULAR');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'popularity.desc', page: p1 }), 'movie', '🎬 ANIME MOVIE');
+      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'first_air_date.desc', 'first_air_date.lte': today, 'vote_count.gte': '5', page: pg }), 'tv', '🆕 LATEST');
+      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'popularity.desc', 'air_date.gte': animeISTDate(-30), 'air_date.lte': today, page: pg }), 'tv', '📡 AIRING NOW');
+      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: pg }), 'tv',    '🏆 TOP RATED');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: pg }), 'movie', '🏆 TOP RATED');
+      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'popularity.desc', page: p2 }), 'tv',    '⭐ POPULAR');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'popularity.desc', page: p2 }), 'movie', '🎬 ANIME MOVIE');
+      push('/discover/tv',    Object.assign({}, kwTv,   { sort_by: 'popularity.desc', page: p1 }), 'tv',    '🎌 ANIME');
+      break;
+  }
+  return q;
+}
+
+/** Fetches + interleaves all sources for the active anime mode. */
+async function fetchAnimeMovies(mode, page) {
+  const plan = buildAnimeQueries(mode, page);
+  const res = await Promise.allSettled(plan.map(p => tmdb(p.endpoint, p.params)));
+
+  const buckets = res.map((r, idx) => {
+    const data = (r.status === 'fulfilled' && r.value && r.value.results) ? r.value.results : [];
+    const plan_i = plan[idx];
+    const isTrendingEp = plan_i.endpoint.indexOf('/trending/') === 0;
+    return data
+      .filter(item => !isTrendingEp || isAnimeItem(item))   // trending endpoints ko locally anime tak limit karo
+      .map(item => {
+        const it = Object.assign({}, item);
+        it.media_type = plan_i.type || it.media_type || 'movie';
+        if (!it._animeBadge && plan_i.badge) it._animeBadge = plan_i.badge;
+        return it;
+      });
+  });
+
+  // Round-robin interleave: har source ka content grid me mix hoke aaye
+  const out = [];
+  const seen = new Set();
+  let maxLen = 0;
+  buckets.forEach(b => { if (b.length > maxLen) maxLen = b.length; });
+  for (let i = 0; i < maxLen; i++) {
+    buckets.forEach(b => {
+      if (i < b.length) {
+        const item = b[i];
+        const key = item.media_type + '-' + item.id;
+        if (!seen.has(key)) { seen.add(key); out.push(item); }
+      }
+    });
+  }
+  return out;
+}
+
+// ── ANIME SUB-FILTER BAR (chips under category tabs) ──
+function renderAnimeFilterBar() {
+  const catTabs = document.getElementById('catTabs');
+  if (!catTabs) return;
+  let bar = document.getElementById('animeFilterBar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'animeFilterBar';
+    bar.className = 'anime-filter-bar';
+    bar.setAttribute('role', 'tablist');
+    bar.setAttribute('aria-label', 'Anime filters');
+    catTabs.insertAdjacentElement('afterend', bar);
+  }
+  bar.innerHTML = ANIME_MODES.map(m => {
+    const active = m.id === currentAnimeMode;
+    return `<button type="button" class="anime-chip${active ? ' active' : ''}" role="tab" tabindex="0" aria-selected="${active}" onclick="setAnimeMode('${m.id}')"><span class="anime-chip-icon" aria-hidden="true">${m.icon}</span><span>${m.label}</span></button>`;
+  }).join('');
+  bar.style.display = 'flex';
+}
+
+function hideAnimeFilterBar() {
+  const bar = document.getElementById('animeFilterBar');
+  if (bar) bar.style.display = 'none';
+}
+
+function updateAnimeHeading() {
+  const h = document.getElementById('sectionHeading');
+  if (!h) return;
+  const m = ANIME_MODES.find(x => x.id === currentAnimeMode) || ANIME_MODES[0];
+  h.textContent = currentAnimeMode === 'all' ? 'ANIME SERIES & MOVIES' : ('ANIME • ' + m.label.toUpperCase());
+}
+
+function setAnimeMode(mode) {
+  if (!ANIME_MODES.some(m => m.id === mode)) mode = 'all';
+  currentAnimeMode = mode;
+  renderAnimeFilterBar();
+  updateAnimeHeading();
+  loadMovies('anime');
+}
  
 async function loadMovies(cat, isLoadMore = false) {
   const grid = document.getElementById('movieGrid');
@@ -1405,23 +1613,8 @@ async function loadMovies(cat, isLoadMore = false) {
         });
       }
     } else if (cat === 'anime') {
-      const res = await Promise.all([
-        tmdb('/discover/tv', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Anime Series (Naruto, DBZ, etc.)
-        tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Anime Movies (Your Name, Demon Slayer Movie)
-        tmdb('/discover/tv', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: p2, language: 'en-US' }), // Series Page 2
-        tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: p2, language: 'en-US' }) // Movies Page 2
-      ]);
-      let maxLength = 0;
-      res.forEach(r => { if (r.results && r.results.length > maxLength) maxLength = r.results.length; });
-      for (let i = 0; i < maxLength; i++) {
-        res.forEach((r, idx) => {
-          if (r.results && i < r.results.length) {
-            const item = r.results[i];
-            item.media_type = (idx === 0 || idx === 2) ? 'tv' : 'movie'; // Anime series ke liye seasons support activate hoga
-            movies.push(item);
-          }
-        });
-      }
+      // POWERFUL ANIME ENGINE: mode ke hisaab se 4-9 sources parallel fetch
+      movies = movies.concat(await fetchAnimeMovies(currentAnimeMode, currentMoviePage));
     } else if (cat === 'horror') {
       const res = await Promise.all([
         tmdb('/discover/movie', { with_genres: '27', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Global Horror Movies
@@ -1502,7 +1695,8 @@ async function loadMovies(cat, isLoadMore = false) {
     if (!m.poster_path) return false;
     const rDate = m.release_date || m.first_air_date;
     // Agar release date hi nahi hai, toh bhi sirf popular + high votes wali movies pass karein (already released)
-    if (!rDate) return (m.vote_count > 50);
+    // Anime exception: naye/niche anime ke votes kam hote hain, unhe drop nahi karna
+    if (!rDate) return (m.vote_count > 50 || cat === 'anime');
     // Agar date future ki hai, toh isko normal list se strict block kar do
     if (rDate > realToday) return false;
     return true;
@@ -1516,8 +1710,9 @@ async function loadMovies(cat, isLoadMore = false) {
     return;
   }
   
-  const existingIds = new Set(allMovies.map(m => m.id));
-  const newMovies = movies.filter(m => { if(existingIds.has(m.id)) return false; existingIds.add(m.id); return true; });
+  const keyOf = (m) => (m.media_type || (m.name && !m.title ? 'tv' : 'movie')) + '-' + m.id;
+  const existingIds = new Set(allMovies.map(keyOf));
+  const newMovies = movies.filter(m => { const k = keyOf(m); if (existingIds.has(k)) return false; existingIds.add(k); return true; });
   allMovies = allMovies.concat(newMovies);
  
   renderMovies(isLoadMore ? newMovies : (isFullViewMovies ? allMovies : allMovies.slice(0, 24)), isLoadMore);
@@ -1537,8 +1732,10 @@ async function loadMovies(cat, isLoadMore = false) {
   }
 }
  
-function renderMovies(movies, append = false) {
-  const grid = document.getElementById('movieGrid');
+// Hover-prefetch budget: ek session me itne se zyada card details prefetch na ho
+let _mzHoverPrefetchCount = 0;
+
+function renderMovies(movies, append = false) {  const grid = document.getElementById('movieGrid');
   if (!grid) return;
   if (!append) {
     if (!movies.length) {
@@ -1644,6 +1841,7 @@ function renderMovies(movies, append = false) {
         (isHot ? '<div class="card-hot">HOT</div>' : '') +
         freshBadge +
         (isDubbedLikely ? '<div class="card-dubbed"> HINDI</div>' : '') +
+        (m._animeBadge ? '<div class="card-anime-tag">'+escapeHTML(m._animeBadge)+'</div>' : '') +
         '<div class="card-overlay"><button class="card-play-btn">&#9654;</button></div>' +
       '</div>' +
       '<div class="card-info">' +
@@ -1656,6 +1854,21 @@ function renderMovies(movies, append = false) {
         '<div class="card-genres">'+genres.map(g => '<span class="card-genre">'+escapeHTML(g)+'</span>').join('')+'</div>' +
       '</div>';
     card.addEventListener('click', (event) => { openModal(m.id, type, event); });
+
+    // ⚡ SPEED: hover/touch par hi details prefetch + provider hosts warm,
+    // taaki modal khulte hi play ready ho (max 24 prefetch per session)
+    let _cardPrefetched = false;
+    const cardPrefetch = () => {
+      if (_cardPrefetched || _mzHoverPrefetchCount >= 24) return;
+      if (typeof isDataSaver === 'function' && isDataSaver()) return;
+      _cardPrefetched = true;
+      _mzHoverPrefetchCount++;
+      try { tmdb('/' + type + '/' + m.id, { language: 'en-US', append_to_response: 'videos,credits' }); } catch (err) {}
+      try { preconnectPlayerHosts(2); } catch (err) {}
+    };
+    card.addEventListener('mouseenter', cardPrefetch, { passive: true });
+    card.addEventListener('touchstart', cardPrefetch, { passive: true });
+    card.addEventListener('focus', cardPrefetch, { passive: true });
     fragment.appendChild(card);
   scrollObserver.observe(card);
 
@@ -1722,6 +1935,8 @@ function filterCat(cat, e) {
   tabs.forEach(t => { if ((t.getAttribute('onclick')||'').indexOf("'"+cat+"'") !== -1) t.classList.add('active'); });
   const h = document.getElementById('sectionHeading');
   if (h) h.textContent = CAT_HEADINGS[cat] || 'MOVIES';
+  // Anime ke liye extra sub-filter bar (Trending / Latest / Airing / Top Rated ...)
+  if (cat === 'anime') { renderAnimeFilterBar(); updateAnimeHeading(); } else { hideAnimeFilterBar(); }
   const sec = document.getElementById('movies-section');
   if (sec) sec.scrollIntoView({ behavior: isMzTVMode() ? 'auto' : 'smooth' });
   loadMovies(cat);
@@ -1769,6 +1984,7 @@ function updateModalWatchlistBtn(id) {
 function showWatchlist(e) {
   if (e) e.preventDefault();
   isSearchResultsMode = false;
+  hideAnimeFilterBar();
   const scrollTrigger = document.getElementById('infiniteScrollTrigger');
   if (scrollTrigger) scrollTrigger.style.display = '';
   document.querySelectorAll('.cat-tab').forEach(t => t.classList.remove('active'));
@@ -2539,6 +2755,12 @@ async function openModal(id, type = 'movie', activationEvent) {
  
   // Saare servers aur buttons instantly show karo taaki user immediately click kar sake
   try { renderExternalSources(id, getSelectedSourceIdx(), getSelectedLang()); } catch(e){}
+
+  // ⚡ SPEED: provider hosts se DNS+TLS handshake abhi shuru kar do (details aane se pehle)
+  try {
+    preconnectPlayerHosts(4);
+    warmPlayerConnection(id, type);
+  } catch(e){}
  
   try {
     const details = await tmdb('/'+type+'/'+id, { language: 'en-US', append_to_response: 'videos,credits' });
@@ -2854,6 +3076,45 @@ async function openModal(id, type = 'movie', activationEvent) {
       '</div>';
     const pb = document.getElementById('playBigBtn');
     if (pb) pb.addEventListener('click', playMovie);
+
+    // ⚡ INSTANT PLAY: stream ko background me abhi resolve karna shuru kar do
+    // (anime ke liye pehle AniList id, taaki double-load na ho)
+    try {
+      if (isAnimeContent(details)) {
+        const sel0 = currentEpisodeSelection();
+        const known = getAnilistIdSync(details, sel0.s);
+        if (known === null) {
+          resolveAnilistId(details, sel0.s)
+            .then(() => { if (currentModalMovie && currentModalMovie.id === details.id) prewarmPlayer(details.id, type); })
+            .catch(() => prewarmPlayer(details.id, type));
+        } else {
+          schedulePlayerPrewarm(details.id, type, 120);
+        }
+      } else {
+        schedulePlayerPrewarm(details.id, type, 120);
+      }
+    } catch(e){}
+
+    // Play button par hover/focus/touch hote hi prewarm pakka kar do
+    try {
+      if (pb) {
+        ['mouseenter', 'focus', 'touchstart'].forEach(evt => {
+          pb.addEventListener(evt, () => prewarmPlayer(details.id, type), { passive: true });
+        });
+      }
+      if (!window._mzPlayHoverBound) {
+        window._mzPlayHoverBound = true;
+        const mainPlayBtn = document.querySelector('.modal-actions .btn-play');
+        if (mainPlayBtn) {
+          ['mouseenter', 'focus', 'touchstart'].forEach(evt => {
+            mainPlayBtn.addEventListener(evt, () => {
+              // Handler ek hi baar bind hota hai, isliye current movie hi use karo
+              if (currentModalMovie) prewarmPlayer(currentModalMovie.id, currentModalMovie.media_type || 'movie');
+            }, { passive: true });
+          });
+        }
+      }
+    } catch(e){}
     try { setSelectedLang(getSelectedLang()); } catch(e) {}
     try { setSelectedQuality(getSelectedQuality()); } catch(e) {}
     
@@ -2977,6 +3238,7 @@ function closeModal(fromPopstate) {
   document.body.style.overflow = '';
   const embedEl = document.getElementById('videoEmbed');
   if (embedEl) {
+    destroyPrewarm();
     embedEl.innerHTML = '';
     embedEl.classList.remove('fullscreen-mode');
   }
@@ -3267,25 +3529,231 @@ async function loadRelatedMovies(id, type) {
   }
 }
  
+/* ══════════════════════════════════════════════════════════════
+   ANIME PLAYBACK BRIDGE
+   Anime/Cartoon servers AniList ID maangte hain (TMDB ID nahi),
+   isliye TMDB title → AniList ID mapping (cached in localStorage).
+   ══════════════════════════════════════════════════════════════ */
+const anilistIdCache = new Map();
+let anilistLookupInFlight = false;
+
+function normalizeTitleForMatch(t) {
+  return String(t || '').toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\b(season|part|cour|the animation|tv)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Anime/animation content detect karta hai (anime + Japanese/Chinese/Korean cartoons) */
+function isAnimeContent(m) {
+  if (!m) return false;
+  const ids = (m.genre_ids || (Array.isArray(m.genres) ? m.genres.map(g => g.id) : []) || []);
+  const lang = m.original_language;
+  const isAnimated = ids.includes(16) || ids.includes(10762);
+  return isAnimated && (lang === 'ja' || lang === 'zh' || lang === 'ko');
+}
+
+/** Kisi bhi animated content (Doraemon/Ben10/Tom&Jerry bhi) ke liye true */
+function isCartoonContent(m) {
+  if (!m) return false;
+  const ids = (m.genre_ids || (Array.isArray(m.genres) ? m.genres.map(g => g.id) : []) || []);
+  return ids.includes(16) || ids.includes(10762);
+}
+
+function animeAudioTrack(lang) {
+  if (lang === 'hi') return 'hindi';   // VidNest officially Hindi dub support karta hai
+  if (lang === 'en') return 'dub';
+  return 'sub';
+}
+
+function anilistCacheKey(m, season) {
+  const type = (m && m.media_type) || 'tv';
+  return type + '-' + (m ? m.id : '0') + '-s' + (season || 1);
+}
+
+function getAnilistIdSync(m, season) {
+  if (!m) return null;
+  const key = anilistCacheKey(m, season);
+  if (anilistIdCache.has(key)) return anilistIdCache.get(key);
+  try {
+    const ls = localStorage.getItem('mz_anilist_' + key);
+    if (ls !== null) {
+      const val = (ls === 'null' || ls === '') ? null : parseInt(ls, 10);
+      const safe = isNaN(val) ? null : val;
+      anilistIdCache.set(key, safe);
+      return safe;
+    }
+  } catch (e) {}
+  return null;
+}
+
+function setAnilistId(m, season, id) {
+  const key = anilistCacheKey(m, season);
+  anilistIdCache.set(key, id);
+  try { localStorage.setItem('mz_anilist_' + key, id === null ? 'null' : String(id)); } catch (e) {}
+}
+
+/** AniList GraphQL se best matching anime entry dhundhta hai */
+async function resolveAnilistId(m, season) {
+  if (!m) return null;
+  const cached = getAnilistIdSync(m, season);
+  if (cached !== null) return cached;
+
+  const s = parseInt(season || 1, 10) || 1;
+  const engTitle  = m.name || m.title || '';
+  const origTitle = m.original_name || m.original_title || '';
+  const year = parseInt(String(m.first_air_date || m.release_date || '').slice(0, 4), 10) || null;
+  const wantMovie = (m.media_type === 'movie');
+
+  const searches = [];
+  if (engTitle)  searches.push(s > 1 ? engTitle + ' season ' + s : engTitle);
+  if (origTitle && origTitle !== engTitle) searches.push(s > 1 ? origTitle + ' season ' + s : origTitle);
+  if (s > 1 && engTitle) searches.push(engTitle); // fallback: base entry
+
+  const query = 'query($s:String){Page(perPage:8){media(search:$s,type:ANIME,sort:SEARCH_MATCH){id title{romaji english} format startDate{year} episodes popularity}}}';
+
+  for (const term of searches) {
+    let list = [];
+    try {
+      const r = await fetch('https://graphql.anilist.co', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ query, variables: { s: term } })
+      });
+      if (!r.ok) continue;
+      const j = await r.json();
+      list = (j && j.data && j.data.Page && j.data.Page.media) || [];
+    } catch (e) { continue; }
+    if (!list.length) continue;
+
+    const target = normalizeTitleForMatch(engTitle || origTitle);
+    let best = null, bestScore = -Infinity;
+    list.forEach(a => {
+      let score = 0;
+      const rom = normalizeTitleForMatch(a.title && a.title.romaji);
+      const eng = normalizeTitleForMatch(a.title && a.title.english);
+      if (rom === target || eng === target) score += 6;
+      else if ((rom && target && (rom.indexOf(target) === 0 || target.indexOf(rom) === 0)) ||
+               (eng && target && (eng.indexOf(target) === 0 || target.indexOf(eng) === 0))) score += 3;
+      else if ((rom && target && rom.indexOf(target) !== -1) || (eng && target && eng.indexOf(target) !== -1)) score += 1;
+
+      const ay = a.startDate && a.startDate.year;
+      if (year && ay) {
+        const diff = Math.abs(ay - year);
+        if (diff === 0) score += 4; else if (diff === 1) score += 2; else if (diff <= 3) score += 0.5; else score -= 1;
+      }
+      if (wantMovie) { if (a.format === 'MOVIE') score += 3; else score -= 2; }
+      else { if (a.format === 'MOVIE') score -= 2; else score += 1.5; }
+      score += Math.min((a.popularity || 0) / 100000, 0.9);
+
+      if (score > bestScore) { bestScore = score; best = a; }
+    });
+
+    if (best && bestScore >= 2) {
+      setAnilistId(m, s, best.id);
+      return best.id;
+    }
+  }
+  setAnilistId(m, s, null); // negative cache — dubara useless lookups na ho
+  return null;
+}
+
+/**
+ * Anime server select hone par AniList id background me resolve karta hai
+ * aur milte hi player ko sahi anime stream par reload kar deta hai.
+ */
+function ensureAnilistThenReload(m, season, srcIdx, lang, quality, type) {
+  if (!m || anilistLookupInFlight) return;
+  const s = parseInt(season || 1, 10) || 1;
+  const key = anilistCacheKey(m, s);
+  if (anilistIdCache.has(key) || getAnilistIdSync(m, s) !== null) return;
+  anilistLookupInFlight = true;
+  resolveAnilistId(m, s).then(anilistId => {
+    anilistLookupInFlight = false;
+    if (!anilistId) return;
+    // Sirf tab reload karo jab user usi title par aur usi anime server par hai
+    if (!currentModalMovie || currentModalMovie.id !== m.id) return;
+    if (currentSourceIdx !== srcIdx) return;
+    loadPlayer(m.id, srcIdx, lang, quality, type);
+  }).catch(() => { anilistLookupInFlight = false; });
+}
+
 // -- PLAYER SOURCES — FINAL (July 2026) --
 // All tested & working. Includes 2 PREMIUM all-in-one servers.
 const playerSources = [
+  // ⚡ #0 ALL-ROUNDER: Anime + Cartoons + Movies + Web Series, with real Hindi dub tracks.
+  // Anime ke liye AniList route (hindi/dub/sub), baaki sab ke liye TMDB route.
+  // { name: 'AllRounder Hindi', dubbed: true, anime: true, url: (id, lang, type, s, e) => {
+  //   const m = currentModalMovie;
+  //   const track = animeAudioTrack(lang);
+  //   if (isAnimeContent(m)) {
+  //     const anilistId = getAnilistIdSync(m, s);
+  //     if (anilistId) {
+  //       const ep = String(parseInt(e, 10) || 1);
+  //       return `https://vidnest.fun/anime/${anilistId}/${ep}/${track}`;
+  //     }
+  //   }
+  //   return type === 'tv'
+  //     ? `https://vidnest.fun/tv/${id}/${s}/${e}`
+  //     : `https://vidnest.fun/movie/${id}`;
+  // }},
+  // ⚡ #1 ALL-ROUNDER 4K: Videasy — anime + movies + series, high bitrate, multi-audio
+  { name: 'OmniPlay 4K', dubbed: true, is4K: true, anime: true, url: (id, lang, type, s, e) => {
+    const m = currentModalMovie;
+    const wantDub = (lang === 'hi' || lang === 'en');
+    const common = `color=ffc107&autoplay=true&nextEpisode=true&episodeSelector=true&autoplayNextEpisode=true`;
+    if (isAnimeContent(m)) {
+      const anilistId = getAnilistIdSync(m, s);
+      if (anilistId) {
+        const ep = String(parseInt(e, 10) || 1);
+        return `https://player.videasy.net/anime/${anilistId}/${ep}?dub=${wantDub}&${common}`;
+      }
+    }
+    return type === 'tv'
+      ? `https://player.videasy.net/tv/${id}/${s}/${e}?${common}&lang=${lang}`
+      : `https://player.videasy.net/movie/${id}?${common}&lang=${lang}`;
+  }},
+  // 🌸 ANIME SPECIALIST: AnimePahe mirror — purane/long-running anime & cartoons ke liye best
+  { name: 'AnimePahe HD', dubbed: true, anime: true, url: (id, lang, type, s, e) => {
+    const m = currentModalMovie;
+    const track = animeAudioTrack(lang) === 'hindi' ? 'dub' : animeAudioTrack(lang); // animepahe: sub/dub
+    if (isAnimeContent(m)) {
+      const anilistId = getAnilistIdSync(m, s);
+      if (anilistId) {
+        const ep = String(parseInt(e, 10) || 1);
+        return `https://vidnest.fun/animepahe/${anilistId}/${ep}/${track}`;
+      }
+    }
+    // Cartoon/movie fallback: VidNest ke alfa/gama server force karke high-quality stream
+    return type === 'tv'
+      ? `https://vidnest.fun/tv/${id}/${s}/${e}?server=alfa`
+      : `https://vidnest.fun/movie/${id}?server=gama`;
+  }},
   { name: '4K Ultra HD', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
     // #1: Viduki.net API 2 — 4K AI Upscaling + Multi-Language + 5.1 Surround
     return type === 'tv'
       ? `https://www.viduki.net/2/tv/${id}/${s}/${e}`
       : `https://www.viduki.net/2/movie/${id}`;
   }},
-  { name: 'Cinextream', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
+  // 🔁 Cinextream (cinextream.net) ka domain dead ho gaya (DNS record hi nahi bacha),
+  //    uski jagah VidFast — 4K/multi-audio, tez CDN, movies + series dono
+  { name: 'VidFast 4K', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
+    const opts = `autoPlay=true&theme=FFC107&title=true&poster=true&autoNext=true&nextButton=true&lang=${lang}`;
     return type === 'tv'
-      ? `https://cinextream.net/api/embed/tv/${id}/${s}/${e}?color=E6B800&autoplay=true`
-      : `https://cinextream.net/api/embed/movie/${id}?color=E6B800&autoplay=true`;
+      ? `https://vidfast.pro/tv/${id}/${s}/${e}?${opts}`
+      : `https://vidfast.pro/movie/${id}?${opts}`;
   }},
-      { name: 'Flicky Stream', dubbed: true, url: (id, lang, type, s, e) => {
+         { name: 'Flicky Stream', dubbed: true, url: (id, lang, type, s, e) => {
     // #8: Flicky — Working embed, multiple servers
     return type === 'tv'
       ? `https://flicky.host/embed/tv/?id=${id}&s=${s}&e=${e}`
       : `https://flicky.host/embed/movie/?id=${id}`;
+  }},
+  { name: 'Turbo Stream', dubbed: true, url: (id, lang, type, s, e) => {
+    return type === 'tv'
+      ? `https://111movies.com/tv/${id}/${s}/${e}`
+      : `https://111movies.com/movie/${id}`;
   }},
   { name: 'VidPhantom Pro', dubbed: true, url: (id, lang, type, s, e) => {
     // #3 PREMIUM: VidPhantom — AD-FREE, 115K Movies + 79K Episodes + 5.3K Anime
@@ -3302,12 +3770,7 @@ const playerSources = [
     // #4: VidLink Pro — Clean interface with settings
     return (type === 'tv' ? `https://vidlink.pro/tv/${id}/${s}/${e}` : 'https://vidlink.pro/movie/' + id) + `?lang=${lang}`;
   }},
-  { name: 'VidNest', dubbed: true, url: (id, lang, type, s, e) => {
-    // #5: VidNest — 9 servers, Audio switcher, ad-free plays
-    return type === 'tv'
-      ? `https://vidnest.fun/tv/${id}/${s}/${e}`
-      : `https://vidnest.fun/movie/${id}`;
-  }},
+
   { name: 'Premium Mirror', dubbed: true, url: (id, lang, type, s, e) => {
     // #9: Official proxy mirror to fix 'refused to connect' / iframe block issue
     return (type === 'tv' ? `https://vidsrc.pm/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.pm/embed/movie?tmdb=${id}`) + `&lang=${lang}`;
@@ -3391,15 +3854,25 @@ function renderExternalSources(id, srcIdx, lang) {
   const ext = document.getElementById('externalSources');
   if (!ext) return;
 
-  const serverBtnsHtml = playerSources.map((s, i) =>
-    '<button class="player-chip player-chip--source'+(s.dubbed ? ' player-chip--dubbed' : '')+(s.is4K ? ' player-chip--4k' : '')+'" data-srcidx="'+i+'" title="'+(s.is4K ? '4K AI Upscaling + Multi-Language + Spatial Audio' : (s.dubbed ? 'Hindi Dubbed Supported' : 'Mostly English Audio'))+'">'+escapeHTML(s.name)+(s.dubbed ? '<span class="dubbed-dot"></span>' : '')+(s.is4K ? '<span class="fourk-badge">4K</span>' : '')+'</button>'
-  ).join('');
+  const serverBtnsHtml = playerSources.map((s, i) => {
+    const tip = s.anime
+      ? 'All-Rounder: Anime + Cartoons + Movies + Series (Hindi Dub supported)'
+      : (s.is4K ? '4K AI Upscaling + Multi-Language + Spatial Audio' : (s.dubbed ? 'Hindi Dubbed Supported' : 'Mostly English Audio'));
+    return '<button class="player-chip player-chip--source'+(s.dubbed ? ' player-chip--dubbed' : '')+(s.is4K ? ' player-chip--4k' : '')+(s.anime ? ' player-chip--anime' : '')+'" data-srcidx="'+i+'" title="'+escapeHTML(tip)+'">'+escapeHTML(s.name)+(s.dubbed ? '<span class="dubbed-dot"></span>' : '')+(s.anime ? '<span class="anime-badge">ANIME</span>' : '')+(s.is4K ? '<span class="fourk-badge">4K</span>' : '')+'</button>';
+  }).join('');
   ext.innerHTML =
     '<div style="font-size:0.7rem;font-weight:800;letter-spacing:1.8px;color:rgba(255,255,255,0.35);text-transform:uppercase;margin-bottom:8px;"> Playback Server</div>' +
     '<div style="display:flex;flex-wrap:wrap;gap:7px;">' + serverBtnsHtml + '</div>';
 
   const srcButtons = ext.querySelectorAll('.player-chip--source');
   srcButtons.forEach(btn => {
+    // ⚡ Hover/focus par us server ki stream pehle se warm kar do
+    const warmThis = () => {
+      const idx = parseInt(btn.getAttribute('data-srcidx') || '0', 10);
+      const type = currentModalMovie ? (currentModalMovie.media_type || 'movie') : 'movie';
+      prewarmPlayer(id, type, idx);
+    };
+    ['mouseenter', 'focus'].forEach(evt => btn.addEventListener(evt, warmThis, { passive: true }));
     btn.addEventListener('click', () => {
       const idx = parseInt(btn.getAttribute('data-srcidx')||'0', 10);
       const type = currentModalMovie ? currentModalMovie.media_type : 'movie';
@@ -3464,6 +3937,16 @@ function playMovie() {
   currentSourceIdx = getSelectedSourceIdx();
   const lang = getSelectedLang();
   const quality = getSelectedQuality();
+  // Anime/Cartoon: agar user ka saved server anime support nahi karta to
+  // automatically All-Rounder (anime-capable) server pe switch kar do
+  if ((isAnimeContent(currentModalMovie) || isCartoonContent(currentModalMovie)) &&
+      playerSources[currentSourceIdx] && !playerSources[currentSourceIdx].anime) {
+    const animeIdx = playerSources.findIndex(sr => sr.anime);
+    if (animeIdx !== -1) {
+      currentSourceIdx = animeIdx;
+      showToast(`Anime detected — switched to ${playerSources[animeIdx].name}`);
+    }
+  }
   loadPlayer(currentModalMovie.id, currentSourceIdx, lang, quality, currentModalMovie.media_type);
 }
  
@@ -3496,6 +3979,150 @@ function playNextEpisode() {
   }
 }
  
+/* ══════════════════════════════════════════════════════════════
+   INSTANT PLAY ENGINE (Zero-wait playback)
+   1. Provider host preconnect (DNS + TLS handshake pehle se ready)
+   2. Hidden prewarm iframe — stream background me resolve ho jata hai
+      jab user description/servers dekh raha hota hai
+   3. Play dabate hi wahi ready frame reveal hota hai (naya load nahi)
+   ══════════════════════════════════════════════════════════════ */
+const PLAYER_HOSTS = [
+  'https://vidnest.fun',
+  'https://player.videasy.net',
+  'https://vidfast.pro',
+  'https://www.viduki.net',
+  'https://vidphantom.com',
+  'https://autoembed.co',
+  'https://vidlink.pro',
+  'https://vidsrc.pm',
+  'https://graphql.anilist.co'
+];
+const _mzPreconnected = new Set();
+let _mzPrewarm = null;
+
+function preconnectHost(origin) {
+  if (!origin || _mzPreconnected.has(origin)) return;
+  _mzPreconnected.add(origin);
+  try {
+    const pc = document.createElement('link');
+    pc.rel = 'preconnect'; pc.href = origin; pc.crossOrigin = 'anonymous';
+    document.head.appendChild(pc);
+    const dp = document.createElement('link');
+    dp.rel = 'dns-prefetch'; dp.href = origin;
+    document.head.appendChild(dp);
+  } catch (e) {}
+}
+
+function preconnectPlayerHosts(limit) {
+  PLAYER_HOSTS.slice(0, limit || 4).forEach(preconnectHost);
+}
+
+function isDataSaver() {
+  const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (!c) return false;
+  if (c.saveData) return true;
+  return ['slow-2g', '2g'].indexOf(c.effectiveType) !== -1;
+}
+
+/** Anime-aware server index (playMovie ka same logic, reuse ke liye) */
+function effectiveSourceIdx() {
+  let idx = getSelectedSourceIdx();
+  const m = currentModalMovie;
+  if (m && (isAnimeContent(m) || isCartoonContent(m)) && playerSources[idx] && !playerSources[idx].anime) {
+    const animeIdx = playerSources.findIndex(sr => sr.anime);
+    if (animeIdx !== -1) idx = animeIdx;
+  }
+  return idx;
+}
+
+function currentEpisodeSelection() {
+  const sInput = document.getElementById('seasonInput');
+  const eInput = document.getElementById('episodeInput');
+  return {
+    s: (sInput && sInput.value) ? sInput.value : '1',
+    e: (eInput && eInput.value) ? eInput.value : '1'
+  };
+}
+
+function buildPlayerUrl(id, type, srcIdx, lang) {
+  const sel = currentEpisodeSelection();
+  try {
+    return playerSources[srcIdx].url(id, lang || getSelectedLang(), type, sel.s, sel.e);
+  } catch (e) { return null; }
+}
+
+function destroyPrewarm() {
+  if (_mzPrewarm && _mzPrewarm.iframe && _mzPrewarm.iframe.parentNode) {
+    try { _mzPrewarm.iframe.src = 'about:blank'; } catch (e) {}
+    try { _mzPrewarm.iframe.parentNode.removeChild(_mzPrewarm.iframe); } catch (e) {}
+  }
+  _mzPrewarm = null;
+}
+
+/** Warms DNS/TLS + provider CDN cache without creating a frame (super cheap) */
+function warmPlayerConnection(id, type) {
+  if (!id) return;
+  const idx = effectiveSourceIdx();
+  const url = buildPlayerUrl(id, type, idx);
+  if (!url) return;
+  try { preconnectHost(new URL(url).origin); } catch (e) {}
+  if (isDataSaver()) return;
+  try { fetch(url, { mode: 'no-cors', credentials: 'omit', cache: 'force-cache' }).catch(() => {}); } catch (e) {}
+}
+
+/**
+ * Hidden iframe me stream pehle se resolve kar deta hai.
+ * Autoplay permission jaan-bujhkar nahi di jati taaki background audio na baje.
+ */
+function prewarmPlayer(id, type, srcIdxOverride) {
+  if (!id || isDataSaver()) return;
+  const embedEl = document.getElementById('videoEmbed');
+  if (!embedEl) return;
+  if (document.getElementById('playerFrame')) return; // already playing — prewarm ki zarurat nahi
+  const idx = (typeof srcIdxOverride === 'number') ? srcIdxOverride : effectiveSourceIdx();
+  const url = buildPlayerUrl(id, type, idx);
+  if (!url) return;
+  try { preconnectHost(new URL(url).origin); } catch (e) {}
+  if (_mzPrewarm && _mzPrewarm.url === url && _mzPrewarm.iframe && _mzPrewarm.iframe.parentNode) return;
+
+  destroyPrewarm();
+  const frame = document.createElement('iframe');
+  frame.className = 'mz-prewarm-frame';
+  frame.id = 'mzPrewarmFrame';
+  frame.tabIndex = -1;
+  frame.setAttribute('aria-hidden', 'true');
+  frame.setAttribute('title', 'Preloading stream');
+  frame.setAttribute('frameborder', '0');
+  frame.setAttribute('scrolling', 'no');
+  frame.setAttribute('referrerpolicy', 'no-referrer');
+  frame.setAttribute('allow', 'encrypted-media'); // autoplay NAHI — silent prewarm
+  frame.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;opacity:0.001;pointer-events:none;z-index:0;';
+
+  const state = { url: url, iframe: frame, loaded: false, srcIdx: idx, id: id, type: type, startedAt: Date.now() };
+  frame.addEventListener('load', () => { state.loaded = true; });
+  try {
+    if (getComputedStyle(embedEl).position === 'static') embedEl.style.position = 'relative';
+  } catch (e) {}
+  embedEl.appendChild(frame);
+  frame.src = url;
+  _mzPrewarm = state;
+}
+
+/** Prewarmed frame ko claim karta hai agar wahi stream URL match kare */
+function takePrewarmedFrame(embedEl, src) {
+  const st = _mzPrewarm;
+  if (!st || !src || st.url !== src) return null;
+  if (!st.iframe || st.iframe.parentNode !== embedEl) return null;
+  _mzPrewarm = null;
+  return st;
+}
+
+/** Modal khulte hi (ya Play button hover par) playback ready karna */
+function schedulePlayerPrewarm(id, type, delay) {
+  if (window._mzPrewarmTimer) clearTimeout(window._mzPrewarmTimer);
+  window._mzPrewarmTimer = setTimeout(() => prewarmPlayer(id, type), typeof delay === 'number' ? delay : 250);
+}
+
 function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   // Stop trailer instantly when movie starts playing
   if (activeTrailerStopper) activeTrailerStopper();
@@ -3528,38 +4155,62 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   const s = sInput ? sInput.value : '1';
   const e = eInput ? eInput.value : '1';
   const src = playerSources[srcIdx].url(id, lang, type, s, e);
+
+  // Anime/Cartoon servers: AniList ID background me resolve karo aur milte hi
+  // player ko asli anime stream (Hindi dub / dub / sub) par upgrade kar do
+  if (playerSources[srcIdx] && playerSources[srcIdx].anime && isAnimeContent(currentModalMovie)) {
+    ensureAnilistThenReload(currentModalMovie, s, srcIdx, lang, quality, type);
+  }
  
   // AUTO-SAVE TV PROGRESS (Continue Watching)
   if (type === 'tv') {
     localStorage.setItem('mz_progress_' + id, JSON.stringify({ season: parseInt(s), episode: parseInt(e) }));
   }
 
-  // Clear previous player instantly to prevent background audio/lag
-  embedEl.innerHTML = '';
+  // ── INSTANT PLAY: agar yahi stream pehle se prewarm ho chuki hai to
+  //    naya load karne ki zarurat nahi — sirf usi ready frame ko reveal karo
+  const preState = takePrewarmedFrame(embedEl, src);
+  const reusable = preState ? preState.iframe : null;
+  const preAlreadyLoaded = preState ? preState.loaded : false;
+
+  if (reusable) {
+    // Placeholder/loader hatao, prewarm frame ko waise hi rehne do (reparent = reload)
+    Array.prototype.slice.call(embedEl.childNodes).forEach(n => { if (n !== reusable) embedEl.removeChild(n); });
+  } else {
+    destroyPrewarm();
+    // Clear previous player instantly to prevent background audio/lag
+    embedEl.innerHTML = '';
+  }
   
   // Cancel any running auto-retry timer
   if (window._mzRetryTimer) { clearTimeout(window._mzRetryTimer); window._mzRetryTimer = null; }
  
   // Add Optimized Loading Spinner with server info
-  const loader = document.createElement('div');
-  loader.className = 'player-loader';
-  loader.id = 'mzPlayerLoader';
   const isDubServer = playerSources[srcIdx].dubbed;
-  loader.innerHTML = `
-    <div class="player-spinner"></div>
-    <div style="color:var(--gold); margin-top:15px; font-weight:600; font-size:0.9rem;">
-      ${isDubServer ? 'Loading Hindi Dubbed Stream...' : 'Loading Stream...'}
-    </div>
-    <div style="color:rgba(255,255,255,0.4); margin-top:6px; font-size:0.75rem;">
-      Server: ${escapeHTML(playerSources[srcIdx].name)} ${isDubServer ? '• Dubbed ?' : ''}
-    </div>
-  `;
-  embedEl.appendChild(loader);
+  let loader = null;
+  if (!preAlreadyLoaded) {
+    loader = document.createElement('div');
+    loader.className = 'player-loader';
+    loader.id = 'mzPlayerLoader';
+    loader.innerHTML = `
+      <div class="player-spinner"></div>
+      <div style="color:var(--gold); margin-top:15px; font-weight:600; font-size:0.9rem;">
+        ${reusable ? 'Almost ready...' : (isDubServer ? 'Loading Hindi Dubbed Stream...' : 'Loading Stream...')}
+      </div>
+      <div style="color:rgba(255,255,255,0.4); margin-top:6px; font-size:0.75rem;">
+        Server: ${escapeHTML(playerSources[srcIdx].name)} ${isDubServer ? '• Dubbed ?' : ''}
+      </div>
+    `;
+    embedEl.appendChild(loader);
+  }
  
-  const iframe = document.createElement('iframe');
+  const iframe = reusable || document.createElement('iframe');
   iframe.id = 'playerFrame';
-  iframe.src = src;
   iframe.style.cssText = 'width: 100%; height: 100%; border: none; background: transparent; position: relative; z-index: 1; transform: translateZ(0);';
+  iframe.style.opacity = '1';
+  iframe.style.pointerEvents = 'auto';
+  iframe.className = '';
+  iframe.removeAttribute('aria-hidden');
   iframe.setAttribute('frameborder', '0');
   iframe.setAttribute('scrolling', 'no');
   iframe.setAttribute('allow', 'fullscreen;autoplay;encrypted-media;picture-in-picture');
@@ -3569,12 +4220,14 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   iframe.setAttribute('tabindex', '0');
   iframe.setAttribute('referrerpolicy', 'no-referrer');
   iframe.setAttribute('fetchpriority', 'high');
-  iframe.setAttribute('loading', 'eager'); 
-  
-  embedEl.appendChild(iframe);
+  iframe.setAttribute('loading', 'eager');
+  if (!reusable) {
+    iframe.src = src;
+    embedEl.appendChild(iframe);
+  }
 
-  // -- AUTO-RETRY SYSTEM: If server doesn't load in 12s, try next dubbed server --
-  let hasLoaded = false;
+  // -- AUTO-RETRY SYSTEM: If server doesn't load in time, try next dubbed server --
+  let hasLoaded = preAlreadyLoaded;
   
   iframe.onload = () => {
     hasLoaded = true;
@@ -3589,20 +4242,26 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
     autoRetryNextServer(id, srcIdx, lang, quality, type);
   };
 
-  // Timeout-based auto-retry (if iframe stuck loading for 12 seconds)
-  window._mzRetryTimer = setTimeout(() => {
-    if (!hasLoaded) {
-      const loaderEl = document.getElementById('mzPlayerLoader');
-      if (loaderEl) {
-        loaderEl.innerHTML = `
-          <div style="color:#e63946; font-size:0.9rem; font-weight:600;"> Server slow/blocked</div>
-          <div style="color:rgba(255,255,255,0.5); margin-top:6px; font-size:0.78rem;">Auto-trying next dubbed server...</div>
-          <div class="player-spinner" style="width:28px; height:28px; border-width:2px; margin-top:10px;"></div>
-        `;
+  // Prewarm frame pehle hi load ho chuka tha — loader hi mat dikhao
+  if (preAlreadyLoaded && loader && loader.parentNode) loader.remove();
+
+  // Timeout-based auto-retry (prewarmed stream ko extra wait ki zarurat nahi)
+  if (!hasLoaded) {
+    const retryAfter = reusable ? 6000 : 8000;
+    window._mzRetryTimer = setTimeout(() => {
+      if (!hasLoaded) {
+        const loaderEl = document.getElementById('mzPlayerLoader');
+        if (loaderEl) {
+          loaderEl.innerHTML = `
+            <div style="color:#e63946; font-size:0.9rem; font-weight:600;"> Server slow/blocked</div>
+            <div style="color:rgba(255,255,255,0.5); margin-top:6px; font-size:0.78rem;">Auto-trying next dubbed server...</div>
+            <div class="player-spinner" style="width:28px; height:28px; border-width:2px; margin-top:10px;"></div>
+          `;
+        }
+        setTimeout(() => autoRetryNextServer(id, srcIdx, lang, quality, type), 900);
       }
-      setTimeout(() => autoRetryNextServer(id, srcIdx, lang, quality, type), 1500);
-    }
-  }, 12000);
+    }, retryAfter);
+  }
 
   // Optimistic UI: Start fading loader after 1.5s for perceived speed
   setTimeout(() => {
@@ -3648,7 +4307,18 @@ function autoRetryNextServer(id, currentIdx, lang, quality, type) {
   
   // Find next server to try (prefer dubbed servers for dubbed languages)
   let nextIdx = -1;
-  for (let i = currentIdx + 1; i < playerSources.length; i++) {
+  // Anime/Cartoon content: pehle anime-capable all-rounder servers try karo
+  if (isAnimeContent(currentModalMovie) || isCartoonContent(currentModalMovie)) {
+    for (let i = currentIdx + 1; i < playerSources.length; i++) {
+      if (playerSources[i].anime) { nextIdx = i; break; }
+    }
+    if (nextIdx === -1) {
+      for (let i = 0; i < currentIdx; i++) {
+        if (playerSources[i].anime) { nextIdx = i; break; }
+      }
+    }
+  }
+  if (nextIdx === -1) for (let i = currentIdx + 1; i < playerSources.length; i++) {
     if (isDubbedLang && playerSources[i].dubbed) { nextIdx = i; break; }
   }
   // If no more dubbed servers, try any server
@@ -4088,7 +4758,7 @@ document.addEventListener('DOMContentLoaded', () => {
     animeTab.className = 'cat-tab';
     animeTab.tabIndex = 0;
     animeTab.setAttribute('onclick', "filterCat('anime')");
-    animeTab.innerHTML = ' Anime';
+    animeTab.innerHTML = 'Anime';
     catTabs.appendChild(animeTab);
   }
       
@@ -4163,7 +4833,7 @@ window.addEventListener('scroll', () => {
       </div>
       <nav class="mz-mp-links">
         ${Array.from(navLinksOriginal.querySelectorAll('a')).map((a, i) => 
-          `<a href="${a.getAttribute('href') || '#'}" class="mz-mp-link${a.classList.contains('active') ? ' active' : ''}" data-idx="${i}"${a.closest('[data-tv-hide]') ? ' data-tv-hide' : ''} style="--i:${i}">${a.textContent}</a>`
+          `<a href="${a.getAttribute('href') || '#'}" class="mz-mp-link${a.classList.contains('active') ? ' active' : ''}${a.classList.contains('nav-premium') ? ' mz-mp-premium' : ''}" data-idx="${i}"${a.closest('[data-tv-hide]') ? ' data-tv-hide' : ''} style="--i:${i}">${(a.dataset.label || a.textContent).trim()}</a>`
         ).join('')}
       </nav>
       <div class="mz-mp-footer">
@@ -4254,6 +4924,7 @@ function goHome(e) {
   isFullViewMovies = false;
   isFullViewUpcoming = false;
   isSearchResultsMode = false;
+  hideAnimeFilterBar();
   const scrollTrigger = document.getElementById('infiniteScrollTrigger');
   if (scrollTrigger) scrollTrigger.style.display = '';
   

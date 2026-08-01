@@ -790,6 +790,108 @@ body.cursor-hover #cursor-dot {
 .nav-links a:hover::before, .nav-links a.active::before { opacity: 1; }
 .nav-links a:hover::after, .nav-links a.active::after { width: 55%; }
 
+/* ── Premium nav link (Cinematic Universe) ── */
+.nav-links a.nav-premium {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36rem;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  padding: 0.5rem 0.95rem;
+  border-color: rgba(245,197,24,0.32);
+  background:
+    linear-gradient(135deg, rgba(245,197,24,0.16), rgba(124,58,237,0.14) 55%, rgba(245,197,24,0.1));
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.04) inset,
+    0 2px 14px rgba(245,197,24,0.14);
+  animation: navPremiumGlow 3.2s ease-in-out infinite;
+}
+
+/* Keep the shared hover wash from double-tinting the premium pill */
+.nav-links a.nav-premium::before { background: linear-gradient(135deg, rgba(245,197,24,0.2), rgba(124,58,237,0.18)); }
+.nav-links a.nav-premium::after { background: linear-gradient(90deg, var(--gold3), #a855f7); }
+
+.nav-links a.nav-premium .nav-premium-label {
+  background: linear-gradient(92deg, var(--gold3) 0%, #fff6d3 28%, var(--gold) 52%, #d8b4fe 78%, var(--gold3) 100%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: navPremiumSheen 5s linear infinite;
+}
+
+.nav-links a.nav-premium .nav-premium-icon {
+  color: var(--gold3);
+  filter: drop-shadow(0 0 4px rgba(245,197,24,0.55));
+  transition: transform 0.45s var(--ease-spring);
+  flex-shrink: 0;
+}
+
+/* Diagonal light sweep across the pill */
+.nav-links a.nav-premium .nav-premium-shine {
+  position: absolute;
+  top: 0;
+  left: -60%;
+  width: 45%;
+  height: 100%;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,0.38), transparent);
+  transform: skewX(-18deg);
+  pointer-events: none;
+  animation: navPremiumSweep 4.5s ease-in-out infinite;
+}
+
+.nav-links a.nav-premium:hover,
+.nav-links a.nav-premium.active {
+  border-color: rgba(245,197,24,0.6);
+  animation: none; /* let the richer hover glow take over */
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.07) inset,
+    0 4px 22px rgba(245,197,24,0.3),
+    0 0 26px rgba(168,85,247,0.22);
+  transform: translateY(-1px);
+}
+
+.nav-links a.nav-premium:hover .nav-premium-icon { transform: rotate(72deg) scale(1.18); }
+
+@keyframes navPremiumGlow {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(255,255,255,0.04) inset, 0 2px 14px rgba(245,197,24,0.12); }
+  50%      { box-shadow: 0 0 0 1px rgba(255,255,255,0.06) inset, 0 3px 20px rgba(245,197,24,0.26), 0 0 18px rgba(168,85,247,0.18); }
+}
+
+@keyframes navPremiumSheen {
+  0%   { background-position: 220% 50%; }
+  100% { background-position: -20% 50%; }
+}
+
+@keyframes navPremiumSweep {
+  0%, 62%  { left: -60%; }
+  92%, 100% { left: 118%; }
+}
+
+/* Mobile panel premium variant */
+#mzMobilePanel .mz-mp-link.mz-mp-premium {
+  font-weight: 700;
+  border: 1px solid rgba(245,197,24,0.34);
+  background: linear-gradient(135deg, rgba(245,197,24,0.14), rgba(124,58,237,0.12));
+  box-shadow: 0 4px 18px rgba(245,197,24,0.14);
+}
+
+#mzMobilePanel .mz-mp-link.mz-mp-premium::before {
+  content: '\2726';
+  margin-right: 0.5rem;
+  color: var(--gold3);
+  font-size: 0.95em;
+  filter: drop-shadow(0 0 4px rgba(245,197,24,0.5));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-links a.nav-premium,
+  .nav-links a.nav-premium .nav-premium-label,
+  .nav-links a.nav-premium .nav-premium-shine { animation: none; }
+  .nav-links a.nav-premium .nav-premium-shine { display: none; }
+}
+
 /* Search bar */
 .nav-search {
   flex: 1;
@@ -1731,6 +1833,99 @@ body.cursor-hover #cursor-dot {
 .cat-tab:hover::before { opacity: 1; }
 
 .cat-tab span { position: relative; z-index: 1; }
+
+/* ══ ANIME SUB-FILTER BAR (Trending / Latest / Airing / Top Rated ...) ══ */
+.anime-filter-bar {
+  display: none;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.55rem 0.6rem;
+  margin: -1.2rem 0 2rem;
+  border-radius: 16px;
+  border: 1px solid rgba(245,197,24,0.14);
+  background:
+    linear-gradient(120deg, rgba(245,197,24,0.07), rgba(124,58,237,0.07) 60%, rgba(6,182,212,0.05)),
+    rgba(10,10,20,0.6);
+  backdrop-filter: blur(16px) saturate(150%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 10px 28px rgba(0,0,0,0.25);
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.anime-filter-bar::-webkit-scrollbar { display: none; }
+
+.anime-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  padding: 0.48rem 0.95rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.04);
+  color: var(--text2);
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.25s var(--ease-smooth);
+}
+
+.anime-chip .anime-chip-icon { font-size: 0.9rem; line-height: 1; }
+
+.anime-chip:hover {
+  color: var(--text);
+  border-color: rgba(245,197,24,0.3);
+  background: rgba(245,197,24,0.09);
+  transform: translateY(-2px);
+}
+
+.anime-chip:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.anime-chip.active {
+  color: #fff;
+  font-weight: 700;
+  border-color: transparent;
+  background: linear-gradient(135deg, rgba(245,197,24,0.95), rgba(236,72,153,0.85) 55%, rgba(124,58,237,0.9));
+  box-shadow: 0 10px 26px rgba(124,58,237,0.28), 0 0 18px rgba(245,197,24,0.18), inset 0 1px 0 rgba(255,255,255,0.22);
+}
+
+/* Anime source tag on poster (TRENDING / NEW RELEASE / AIRING NOW ...) */
+.card-anime-tag {
+  position: absolute;
+  bottom: 36px;
+  left: 9px;
+  max-width: calc(100% - 18px);
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(8,8,16,0.82);
+  border: 1px solid rgba(236,72,153,0.35);
+  backdrop-filter: blur(12px);
+  transform: translateZ(25px);
+  font-size: 0.55rem;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  color: #ffd9ef;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+  z-index: 3;
+}
+
+@media (max-width: 600px) {
+  .anime-filter-bar { margin: -0.8rem 0 1.4rem; padding: 0.45rem; }
+  .anime-chip { padding: 0.42rem 0.8rem; font-size: 0.74rem; }
+  .card-anime-tag { font-size: 0.5rem; bottom: 32px; }
+}
 
 .cat-tab.active {
   background: linear-gradient(135deg, rgba(245,197,24,0.95), rgba(230,120,50,0.88), rgba(124,58,237,0.85));
@@ -3759,6 +3954,35 @@ body.cursor-hover #cursor-dot {
 @keyframes dubbedDotPulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.7; transform: scale(1.3); }
+}
+
+/* ── ALL-ROUNDER / ANIME SERVER BADGE ── */
+.player-chip--anime {
+  border-color: rgba(236,72,153,0.45) !important;
+  position: relative;
+}
+.player-chip--anime:not(.active) {
+  background: linear-gradient(135deg, rgba(18,18,30,0.94), rgba(60,0,45,0.45));
+  box-shadow: 0 10px 24px rgba(0,0,0,0.3), 0 0 14px rgba(236,72,153,0.14);
+}
+.anime-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #ec4899, #a855f7);
+  color: #fff;
+  font-size: 0.55rem;
+  font-weight: 900;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 5px;
+  letter-spacing: 0.6px;
+  box-shadow: 0 2px 8px rgba(236,72,153,0.45);
+  animation: animeBadgeGlow 2.6s ease-in-out infinite;
+}
+@keyframes animeBadgeGlow {
+  0%, 100% { box-shadow: 0 2px 8px rgba(236,72,153,0.45); }
+  50% { box-shadow: 0 2px 16px rgba(236,72,153,0.85), 0 0 6px rgba(168,85,247,0.5); }
 }
 
 /* ── 4K SERVER BADGE ── */
