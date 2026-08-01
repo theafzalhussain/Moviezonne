@@ -1209,6 +1209,53 @@ function prefetchMoviesPage(cat, pageNum) {
     tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', language: 'en-US', page: p1 });
   
   }
+  else if (cat === 'trending') {
+    tmdb('/trending/movie/week', { language: 'en-US', page: p1 });
+    tmdb('/trending/movie/day', { language: 'en-US', page: pageStr });
+    tmdb('/trending/tv/week', { language: 'en-US', page: pageStr });
+    tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', 'vote_count.gte': '50', page: pageStr, language: 'en-US' });
+  }
+  else if (cat === 'uhd4k') {
+    const uhdCutoff = new Date(Date.now() - 240 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const uhdBase = { sort_by: 'popularity.desc', 'primary_release_date.lte': uhdCutoff, 'vote_average.gte': '7', language: 'en-US' };
+    tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'en', 'vote_count.gte': '300', page: p1 }));
+    tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'en', 'vote_count.gte': '300', page: p2 }));
+    tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'hi', 'vote_count.gte': '40', page: p1 }));
+    tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'hi', 'vote_count.gte': '40', page: p2 }));
+    tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'te', 'vote_count.gte': '30', page: p1 }));
+    tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'ta', 'vote_count.gte': '30', page: p1 }));
+    tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'ko', 'vote_count.gte': '60', page: p1 }));
+    tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'ml', 'vote_count.gte': '25', page: p1 }));
+  }
+  else if (cat === 'toprated') {
+    tmdb('/movie/top_rated', { language: 'en-US', page: p1 });
+    tmdb('/movie/top_rated', { language: 'en-US', page: p2 });
+    tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: p1, language: 'en-US' });
+    tmdb('/discover/tv', { sort_by: 'vote_average.desc', 'vote_count.gte': '300', page: p1, language: 'en-US' });
+  }
+  else if (cat === 'kdrama') {
+    tmdb('/discover/tv', { with_original_language: 'ko', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/tv', { with_original_language: 'ko', sort_by: 'popularity.desc', page: p2, language: 'en-US' });
+    tmdb('/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+  }
+  else if (cat === 'netflix') {
+    tmdb('/discover/tv', { with_networks: '213', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/tv', { with_networks: '213', sort_by: 'popularity.desc', page: p2, language: 'en-US' });
+    tmdb('/discover/movie', { with_watch_providers: '8', watch_region: 'IN', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/movie', { with_watch_providers: '8', watch_region: 'US', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+  }
+  else if (cat === 'prime') {
+    tmdb('/discover/tv', { with_networks: '1024', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/tv', { with_networks: '1024', sort_by: 'popularity.desc', page: p2, language: 'en-US' });
+    tmdb('/discover/movie', { with_watch_providers: '119', watch_region: 'IN', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/movie', { with_watch_providers: '9', watch_region: 'US', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+  }
+  else if (cat === 'jiohotstar') {
+    tmdb('/discover/tv', { with_networks: '3919', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/tv', { with_networks: '122', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/movie', { with_watch_providers: '122', watch_region: 'IN', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    tmdb('/discover/movie', { with_watch_providers: '122', watch_region: 'IN', sort_by: 'popularity.desc', page: p2, language: 'en-US' });
+  }
   else {
     const base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: 'en-US' });
     tmdb('/discover/movie', Object.assign({}, base, { page: p1 }));
@@ -1238,6 +1285,11 @@ const CAT_PARAMS = {
   thriller:  { with_genres: '53',  sort_by: 'popularity.desc', page: '1' },
   romance:   { with_genres: '10749', sort_by: 'popularity.desc', page: '1' },
   scifi:     { with_genres: '878', sort_by: 'popularity.desc', page: '1' },
+  adventure: { with_genres: '12',  sort_by: 'popularity.desc', page: '1' },
+  fantasy:   { with_genres: '14',  sort_by: 'popularity.desc', page: '1' },
+  crime:     { with_genres: '80',  sort_by: 'popularity.desc', page: '1' },
+  documentary:{ with_genres: '99', sort_by: 'popularity.desc', page: '1' },
+  family:    { with_genres: '10751', without_genres: '27', sort_by: 'popularity.desc', page: '1' },
   animation: { with_genres: '16',  sort_by: 'popularity.desc', page: '1' },
   kids:      { with_genres: '16,10751', without_genres: '27,53,18', sort_by: 'popularity.desc', page: '1' }
 };
@@ -1692,12 +1744,141 @@ async function loadMovies(cat, isLoadMore = false) {
           }
         });
       }
-    } else {
-      const base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: 'en-US' });
-      const res = await Promise.all([
-        tmdb('/discover/movie', Object.assign({}, base, { page: p1 })),
-        tmdb('/discover/movie', Object.assign({}, base, { page: p2 }))
+    } else if (cat === 'trending') {
+      // 🔥 TRENDING NOW: Global trending movies + shows, interleaved
+      const res = await Promise.allSettled([
+        tmdb('/trending/movie/week', { language: 'en-US', page: p1 }),
+        tmdb('/trending/movie/day', { language: 'en-US', page: pageStr }),
+        tmdb('/trending/tv/week', { language: 'en-US', page: pageStr }),
+        tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', 'vote_count.gte': '50', page: pageStr, language: 'en-US' })
       ]);
+      const combined = [];
+      res.forEach((r, idx) => {
+        if (r.status === 'fulfilled' && r.value && r.value.results) {
+          r.value.results.forEach(item => { if (idx === 2) item.media_type = 'tv'; combined.push(item); });
+        }
+      });
+      const seen = new Set();
+      combined.forEach(m => { if (m && m.id && !seen.has(m.id)) { seen.add(m.id); movies.push(m); } });
+    } else if (cat === 'uhd4k') {
+      // 💎 4K ULTRA HD: is app me "quality" release-date se decide hoti hai.
+      // CAM/TS/HD movies (0-120 din purani) yahan na aa saken, isliye sirf
+      // 240+ din purani, high-rated (>=7) movies fetch karte hain — badge 4K.
+      // UNLIMITED volume ke liye 8 languages + do pages har load par,
+      // aur infinite scroll page aage badhata rehta hai.
+      const uhdCutoff = new Date(Date.now() - 240 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const uhdBase = { sort_by: 'popularity.desc', 'primary_release_date.lte': uhdCutoff, 'vote_average.gte': '7', language: 'en-US' };
+      const res = await Promise.allSettled([
+        tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'en', 'vote_count.gte': '300', page: p1 })),
+        tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'en', 'vote_count.gte': '300', page: p2 })),
+        tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'hi', 'vote_count.gte': '40', page: p1 })),
+        tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'hi', 'vote_count.gte': '40', page: p2 })),
+        tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'te', 'vote_count.gte': '30', page: p1 })),
+        tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'ta', 'vote_count.gte': '30', page: p1 })),
+        tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'ko', 'vote_count.gte': '60', page: p1 })),
+        tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'ml', 'vote_count.gte': '25', page: p1 }))
+      ]);
+      const buckets = res.map(r => (r.status === 'fulfilled' && r.value && r.value.results) ? r.value.results : []);
+      let maxLen = 0; buckets.forEach(b => { if (b.length > maxLen) maxLen = b.length; });
+      const seen = new Set();
+      const nowMs = Date.now();
+      // Round-robin interleave taaki har language mix hoke aaye
+      for (let i = 0; i < maxLen; i++) {
+        buckets.forEach(b => {
+          const m = b[i];
+          if (!m || !m.id || seen.has(m.id) || !m.poster_path) return;
+          const rd = m.release_date;
+          if (!rd) return;
+          const daysOld = (nowMs - new Date(rd).getTime()) / 86400000;
+          // 4K-era guarantee: 200+ din purani + rating >=7 (koi CAM/TS possible nahi)
+          if (daysOld > 200 && (m.vote_average || 0) >= 7) {
+            seen.add(m.id);
+            m.media_type = 'movie';
+            m._force4K = true; // badge guaranteed 4K (movie genuinely 4K-era hai)
+            movies.push(m);
+          }
+        });
+      }
+    } else if (cat === 'toprated') {
+      // ⭐ TOP RATED: IMDb-style highest rated, min vote threshold ताकि reliable ho
+      const res = await Promise.allSettled([
+        tmdb('/movie/top_rated', { language: 'en-US', page: p1 }),
+        tmdb('/movie/top_rated', { language: 'en-US', page: p2 }),
+        tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: p1, language: 'en-US' }),
+        tmdb('/discover/tv', { sort_by: 'vote_average.desc', 'vote_count.gte': '300', page: p1, language: 'en-US' })
+      ]);
+      const combined = [];
+      res.forEach((r, idx) => {
+        if (r.status === 'fulfilled' && r.value && r.value.results) {
+          r.value.results.forEach(item => { if (idx === 3) item.media_type = 'tv'; combined.push(item); });
+        }
+      });
+      const seen = new Set();
+      combined.forEach(m => { if (m && m.id && !seen.has(m.id)) { seen.add(m.id); movies.push(m); } });
+    } else if (cat === 'kdrama') {
+      // 🇰🇷 K-DRAMA: Korean web series + movies
+      const res = await Promise.allSettled([
+        tmdb('/discover/tv', { with_original_language: 'ko', sort_by: 'popularity.desc', page: p1, language: 'en-US' }),
+        tmdb('/discover/tv', { with_original_language: 'ko', sort_by: 'popularity.desc', page: p2, language: 'en-US' }),
+        tmdb('/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', page: p1, language: 'en-US' })
+      ]);
+      const combined = [];
+      res.forEach((r, idx) => {
+        if (r.status === 'fulfilled' && r.value && r.value.results) {
+          r.value.results.forEach(item => { item.media_type = idx === 2 ? 'movie' : 'tv'; combined.push(item); });
+        }
+      });
+      const seen = new Set();
+      combined.forEach(m => { if (m && m.id && !seen.has(m.id)) { seen.add(m.id); movies.push(m); } });
+    } else if (cat === 'netflix') {
+      // NETFLIX ORIGINALS: Netflix network (213) ke movies + shows
+      const res = await Promise.allSettled([
+        tmdb('/discover/tv', { with_networks: '213', sort_by: 'popularity.desc', page: p1, language: 'en-US' }),
+        tmdb('/discover/tv', { with_networks: '213', sort_by: 'popularity.desc', page: p2, language: 'en-US' }),
+        tmdb('/discover/movie', { with_watch_providers: '8', watch_region: 'IN', sort_by: 'popularity.desc', page: p1, language: 'en-US' }),
+        tmdb('/discover/movie', { with_watch_providers: '8', watch_region: 'US', sort_by: 'popularity.desc', page: p1, language: 'en-US' })
+      ]);
+      const combined = [];
+      res.forEach((r, idx) => {
+        if (r.status === 'fulfilled' && r.value && r.value.results) {
+          r.value.results.forEach(item => { item.media_type = idx < 2 ? 'tv' : 'movie'; combined.push(item); });
+        }
+      });
+      const seen = new Set();
+      combined.forEach(m => { if (m && m.id && !seen.has(m.id)) { seen.add(m.id); movies.push(m); } });
+    } else if (cat === 'prime') {
+      // AMAZON PRIME VIDEO: Prime network (1024) shows + Prime Video provider (119 IN / 9 US) movies
+      const res = await Promise.allSettled([
+        tmdb('/discover/tv', { with_networks: '1024', sort_by: 'popularity.desc', page: p1, language: 'en-US' }),
+        tmdb('/discover/tv', { with_networks: '1024', sort_by: 'popularity.desc', page: p2, language: 'en-US' }),
+        tmdb('/discover/movie', { with_watch_providers: '119', watch_region: 'IN', sort_by: 'popularity.desc', page: p1, language: 'en-US' }),
+        tmdb('/discover/movie', { with_watch_providers: '9', watch_region: 'US', sort_by: 'popularity.desc', page: p1, language: 'en-US' })
+      ]);
+      const combined = [];
+      res.forEach((r, idx) => {
+        if (r.status === 'fulfilled' && r.value && r.value.results) {
+          r.value.results.forEach(item => { item.media_type = idx < 2 ? 'tv' : 'movie'; combined.push(item); });
+        }
+      });
+      const seen = new Set();
+      combined.forEach(m => { if (m && m.id && !seen.has(m.id)) { seen.add(m.id); movies.push(m); } });
+    } else if (cat === 'jiohotstar') {
+      // JIOHOTSTAR: Disney+ Hotstar / Hotstar networks (3919|122) shows + Hotstar provider (122 IN) movies
+      const res = await Promise.allSettled([
+        tmdb('/discover/tv', { with_networks: '3919', sort_by: 'popularity.desc', page: p1, language: 'en-US' }),
+        tmdb('/discover/tv', { with_networks: '122', sort_by: 'popularity.desc', page: p1, language: 'en-US' }),
+        tmdb('/discover/movie', { with_watch_providers: '122', watch_region: 'IN', sort_by: 'popularity.desc', page: p1, language: 'en-US' }),
+        tmdb('/discover/movie', { with_watch_providers: '122', watch_region: 'IN', sort_by: 'popularity.desc', page: p2, language: 'en-US' })
+      ]);
+      const combined = [];
+      res.forEach((r, idx) => {
+        if (r.status === 'fulfilled' && r.value && r.value.results) {
+          r.value.results.forEach(item => { item.media_type = idx < 2 ? 'tv' : 'movie'; combined.push(item); });
+        }
+      });
+      const seen = new Set();
+      combined.forEach(m => { if (m && m.id && !seen.has(m.id)) { seen.add(m.id); movies.push(m); } });
+    } else {
       res.forEach(r => { movies = movies.concat(r.results||[]); });
     }
   } catch(e) { console.warn(e); }
@@ -1827,6 +2008,9 @@ function renderMovies(movies, append = false) {  const grid = document.getElemen
       }
     }
     
+    // -- 4K ULTRA HD CATEGORY: force 4K badge on these cards --
+    if (m._force4K) { qual = '4K'; qualClass = 'qual-4k'; }
+    
     // -- SMART RELEASE FRESHNESS BADGE --
     let freshBadge = '';
     if (rDateStr) {
@@ -1854,7 +2038,6 @@ function renderMovies(movies, append = false) {  const grid = document.getElemen
         (isHot ? '<div class="card-hot">HOT</div>' : '') +
         freshBadge +
         (isDubbedLikely ? '<div class="card-dubbed"> HINDI</div>' : '') +
-        (m._animeBadge ? '<div class="card-anime-tag">'+escapeHTML(m._animeBadge)+'</div>' : '') +
         '<div class="card-overlay"><button class="card-play-btn">&#9654;</button></div>' +
       '</div>' +
       '<div class="card-info">' +
@@ -1936,7 +2119,11 @@ const CAT_HEADINGS = {
   comedy:'COMEDY', horror:'HORROR', thriller:'THRILLER', romance:'ROMANCE',
   scifi:'SCI-FI', animation:'ANIMATION', kids:'KIDS & CARTOONS', anime:'ANIME SERIES & MOVIES',
   dubbed:'HINDI DUBBED MOVIES', // <-- YE LINE ADD KI HAI
-  adult:'18+ ADULT MOVIES & WEB SERIES'
+  adult:'18+ ADULT MOVIES & WEB SERIES',
+  trending:'🔥 TRENDING NOW', uhd4k:'💎 4K ULTRA HD', toprated:'⭐ TOP RATED',
+  kdrama:'K-DRAMA & KOREAN', netflix:'NETFLIX ORIGINALS',
+  prime:'AMAZON PRIME VIDEO', jiohotstar:'JIOHOTSTAR',
+  adventure:'ADVENTURE', fantasy:'FANTASY', crime:'CRIME', documentary:'DOCUMENTARY', family:'FAMILY'
 };
 function filterCat(cat, e) {
   if (e) e.preventDefault();
@@ -3728,7 +3915,7 @@ const playerSources = [
       : `https://player.videasy.net/movie/${id}?${common}&lang=${lang}`;
   }},
   // 🌸 ANIME SPECIALIST: AnimePahe mirror — purane/long-running anime & cartoons ke liye best
-  { name: 'AnimePahe HD', dubbed: true, anime: true, url: (id, lang, type, s, e) => {
+  { name: 'AnimePahe HD', dubbed: true, is4K: true, anime: true, url: (id, lang, type, s, e) => {
     const m = currentModalMovie;
     const track = animeAudioTrack(lang) === 'hindi' ? 'dub' : animeAudioTrack(lang); // animepahe: sub/dub
     if (isAnimeContent(m)) {
@@ -3757,7 +3944,7 @@ const playerSources = [
       ? `https://vidfast.pro/tv/${id}/${s}/${e}?${opts}`
       : `https://vidfast.pro/movie/${id}?${opts}`;
   }},
-         { name: 'Flicky Stream', dubbed: true, url: (id, lang, type, s, e) => {
+         { name: 'Flicky Stream', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
     // #8: Flicky — Working embed, multiple servers
     return type === 'tv'
       ? `https://flicky.host/embed/tv/?id=${id}&s=${s}&e=${e}`
@@ -3867,15 +4054,70 @@ function renderExternalSources(id, srcIdx, lang) {
   const ext = document.getElementById('externalSources');
   if (!ext) return;
 
-  const serverBtnsHtml = playerSources.map((s, i) => {
+  // ── Categorize servers for premium layout ──
+  const premium4K = [];
+  const hdStreams = [];
+
+  playerSources.forEach((s, i) => {
+    const serverData = { ...s, _idx: i };
+    if (s.is4K || s.anime) { premium4K.push(serverData); }
+    else { hdStreams.push(serverData); }
+  });
+
+  function buildServerCard(s) {
     const tip = s.anime
       ? 'All-Rounder: Anime + Cartoons + Movies + Series (Hindi Dub supported)'
-      : (s.is4K ? '4K AI Upscaling + Multi-Language + Spatial Audio' : (s.dubbed ? 'Hindi Dubbed Supported' : 'Mostly English Audio'));
-    return '<button class="player-chip player-chip--source'+(s.dubbed ? ' player-chip--dubbed' : '')+(s.is4K ? ' player-chip--4k' : '')+(s.anime ? ' player-chip--anime' : '')+'" data-srcidx="'+i+'" title="'+escapeHTML(tip)+'">'+escapeHTML(s.name)+(s.dubbed ? '<span class="dubbed-dot"></span>' : '')+(s.anime ? '<span class="anime-badge">ANIME</span>' : '')+(s.is4K ? '<span class="fourk-badge">4K</span>' : '')+'</button>';
-  }).join('');
-  ext.innerHTML =
-    '<div style="font-size:0.7rem;font-weight:800;letter-spacing:1.8px;color:rgba(255,255,255,0.35);text-transform:uppercase;margin-bottom:8px;"> Playback Server</div>' +
-    '<div style="display:flex;flex-wrap:wrap;gap:7px;">' + serverBtnsHtml + '</div>';
+      : (s.is4K ? '4K AI Upscaling + Multi-Language + Spatial Audio' : (s.dubbed ? 'Hindi Dubbed + Multi-Audio' : 'Mostly English Audio'));
+    const badges = [];
+    if (s.is4K) badges.push('<span class="srv-badge srv-badge--4k"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>4K</span>');
+    if (s.anime) badges.push('<span class="srv-badge srv-badge--anime"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>ANIME</span>');
+    if (s.dubbed) badges.push('<span class="srv-badge srv-badge--dub"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>DUB</span>');
+    return '<button class="srv-card player-chip--source'
+      + (s.is4K ? ' srv-card--4k' : '')
+      + (s.anime ? ' srv-card--anime' : '')
+      + (s.dubbed ? ' srv-card--dubbed' : '')
+      + '" data-srcidx="' + s._idx + '" title="' + escapeHTML(tip) + '">'
+      + '<div class="srv-card__inner">'
+      + '<span class="srv-card__name">' + escapeHTML(s.name) + '</span>'
+      + '<span class="srv-card__status"></span>'
+      + '</div>'
+      + (badges.length ? '<div class="srv-card__badges">' + badges.join('') + '</div>' : '')
+      + '<div class="srv-card__glow"></div>'
+      + '</button>';
+  }
+
+  function buildSection(title, icon, servers, className) {
+    if (!servers.length) return '';
+    const cards = servers.map(buildServerCard).join('');
+    return '<div class="srv-section ' + className + '">'
+      + '<div class="srv-section__header">'
+      + '<span class="srv-section__icon">' + icon + '</span>'
+      + '<span class="srv-section__title">' + title + '</span>'
+      + '<span class="srv-section__count">' + servers.length + ' servers</span>'
+      + '</div>'
+      + '<div class="srv-section__grid">' + cards + '</div>'
+      + '</div>';
+  }
+
+  const headerHtml = '<div class="srv-master-header">'
+    + '<div class="srv-master-header__left">'
+    + '<svg class="srv-master-header__icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>'
+    + '<span class="srv-master-header__title">Playback Servers</span>'
+    + '</div>'
+    + '<span class="srv-master-header__live"><span class="srv-live-dot"></span>LIVE</span>'
+    + '</div>';
+
+  const sectionsHtml = buildSection(
+    'Premium 4K • Hindi Dub',
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+    premium4K, 'srv-section--premium'
+  ) + buildSection(
+    'HD Streams • Multi-Audio',
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>',
+    hdStreams, 'srv-section--hd'
+  );
+
+  ext.innerHTML = headerHtml + '<div class="srv-container">' + sectionsHtml + '</div>';
 
   const srcButtons = ext.querySelectorAll('.player-chip--source');
   srcButtons.forEach(btn => {
