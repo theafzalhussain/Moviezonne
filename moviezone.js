@@ -2,7 +2,7 @@
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
 // TV detection is handled by tv-mode.js which sets html[data-mz-tv="true"].
 // This getter reads the data attribute set by the isolated TV module.
-const isMzTV = () => false; // TV Mode disabled to run exactly like Laptop
+const isMzTV = () => document.documentElement.getAttribute('data-mz-tv') === 'true';
 
 // Balanced Performance: phones/tablets use low-end mode; confirmed TVs use data-mz-tv.
 const isMobile = !isMzTV() && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
@@ -360,8 +360,8 @@ const TV_POST_KEYUP_DEBOUNCE_MS = 400;
 const detailActivationGuard = {
   lastTrustedActivationAt: -Infinity,
   viewportBlockedUntil: -Infinity,
-  tvActivationArmed: !isMzTV(),
-  tvActivationAllowedAt: (!isMzTV()) ? -Infinity : Infinity,
+  tvActivationArmed: !isMzTVStrictActivation(),
+  tvActivationAllowedAt: (!isMzTVStrictActivation()) ? -Infinity : Infinity,
   tvInteractionEpoch: 0
 };
 
@@ -370,12 +370,25 @@ function detailNow() {
 }
 
 function isMzTVMode() {
-  return false; // TV Mode disabled to run exactly like Laptop
+  // Same signal as isMzTV(); kept as a separate function because it gates the
+  // rendering/perf budget (card caps, instant scrolling) rather than layout.
+  return isMzTV();
+}
+
+// The strict TV launch guard below is a SEPARATE decision from "are we on a TV".
+// It disarms activation until a fresh key release proves intent, which protects
+// against a TV launcher's carried-over OK key auto-opening a title — but it also
+// made the first OK press on a card a no-op, because resetTVLaunchActivation()
+// runs on every DOMContentLoaded/pageshow. TVs behave like keyboard devices, so
+// activation follows the laptop path and this stays off until it can be tested
+// on real hardware. Flip this to isMzTV() to re-enable the strict guard.
+function isMzTVStrictActivation() {
+  return false;
 }
 
 
 function resetTVLaunchActivation() {
-  if (!isMzTVMode()) return;
+  if (!isMzTVStrictActivation()) return;
   detailActivationGuard.tvActivationArmed = false;
   detailActivationGuard.tvActivationAllowedAt = Infinity;
   detailActivationGuard.lastTrustedActivationAt = -Infinity;
@@ -383,7 +396,7 @@ function resetTVLaunchActivation() {
 }
 
 function armTVDetailActivation(fromActivationKeyRelease) {
-  if (!isMzTVMode()) return;
+  if (!isMzTVStrictActivation()) return;
   const now = detailNow();
   detailActivationGuard.tvActivationArmed = true;
   detailActivationGuard.tvActivationAllowedAt = fromActivationKeyRelease
@@ -404,7 +417,7 @@ const recordPointerActivation = (event) => {
   if (!event.isTrusted || (event.button != null && event.button !== 0)) return;
   const now = detailNow();
   if (now < detailActivationGuard.viewportBlockedUntil) return;
-  if (isMzTVMode()) armTVDetailActivation(false);
+  if (isMzTVStrictActivation()) armTVDetailActivation(false);
   detailActivationGuard.lastTrustedActivationAt = now;
 };
 
@@ -429,7 +442,7 @@ document.addEventListener('keydown', (event) => {
   if (event.repeat) return;
   // Always record the trusted activation time (needed for TV search fallback)
   // But only fully arm if TV activation is ready
-  if (isMzTVMode() && (!detailActivationGuard.tvActivationArmed || now < detailActivationGuard.tvActivationAllowedAt)) {
+  if (isMzTVStrictActivation() && (!detailActivationGuard.tvActivationArmed || now < detailActivationGuard.tvActivationAllowedAt)) {
     // Still record the time so tvSearchFallback can use it
     detailActivationGuard.lastTrustedActivationAt = now;
     return;
@@ -509,7 +522,7 @@ function claimExplicitDetailActivation(event) {
   const now = detailNow();
   if (now < detailActivationGuard.viewportBlockedUntil) return false;
 
-  const tvActivationReady = !isMzTVMode() || (
+  const tvActivationReady = !isMzTVStrictActivation() || (
     detailActivationGuard.tvActivationArmed &&
     now >= detailActivationGuard.tvActivationAllowedAt
   );
@@ -525,7 +538,7 @@ function claimExplicitDetailActivation(event) {
   
   // On TV: Allow activation if user has active navigator.userActivation (proves recent real interaction)
   // This handles the case where search dropdown item.click() is called from searchInput's Enter handler
-  const tvSearchFallback = isMzTVMode() && !trustedAccessibleClick && !trustedDirectKey && !hasRecentTrustedInput &&
+  const tvSearchFallback = isMzTVStrictActivation() && !trustedAccessibleClick && !trustedDirectKey && !hasRecentTrustedInput &&
     navigator.userActivation && navigator.userActivation.isActive &&
     now - detailActivationGuard.lastTrustedActivationAt <= 3000;
 

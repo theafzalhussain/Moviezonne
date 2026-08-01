@@ -5,7 +5,10 @@
   "main": "moviezone.js",
   "scripts": {
     "build": "cleancss -o moviezone.min.css moviezone.css && cleancss -o tv-mode.min.css tv-mode.css && terser moviezone.js -o moviezone.min.js -c -m && terser tv-mode.js -o tv-mode.min.js -c -m",
-    "test": "node test-fixes.js && node tv-mode.test.js",
+    "test": "node tv-mode.test.js && node tv-mode.browser.test.js && node pwa-assets.test.js && node tmdb-e2e.js && node tmdb-stale.js",
+    "test:offline": "node tv-mode.test.js && node tv-mode.browser.test.js && node pwa-assets.test.js",
+    "test:tv": "node tv-mode.test.js && node tv-mode.browser.test.js",
+    "verify:tv": "node tv-e2e-check.js",
     "start": "pm2-runtime start ecosystem.config.js",
     "dev": "node server.js"
   },

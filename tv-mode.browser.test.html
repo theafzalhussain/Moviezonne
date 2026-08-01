@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<!--
+  Browser-side integration harness for tv-mode.js.
+  Driven by tv-mode.browser.test.js, which loads this page in headless Chrome/Edge
+  and reads the JSON result block out of the dumped DOM. Nothing here ships.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MovieZone TV mode — browser harness</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #03030a; color: #fff; font-family: sans-serif; }
+  /* Absolute positioning keeps every rect deterministic so spatial-navigation
+     assertions cannot be broken by a stylesheet change. */
+  #movieGrid { position: relative; height: 1000px; }
+  .movie-card { position: absolute; width: 200px; height: 300px; background: #12121f; }
+  .overlay { position: fixed; inset: 0; background: #000; display: none; }
+  .overlay.open { display: block; }
+  #navbar { position: relative; height: 60px; }
+  .nav-links a { position: absolute; top: 10px; width: 100px; height: 30px; display: block; }
+</style>
+<script>
+  // Pretend to be a Samsung Tizen TV before tv-mode.js reads the user agent.
+  Object.defineProperty(navigator, 'userAgent', {
+    get: function () { return 'Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.0) AppleWebKit/538.1 (KHTML, like Gecko) Version/6.0 TV Safari/538.1'; },
+    configurable: true
+  });
+</script>
+<script src="tv-mode.js"></script>
+</head>
+<body>
+
+<nav id="navbar">
+  <ul class="nav-links" id="navLinks">
+    <li><a href="#" id="navHome" style="left:0">Home</a></li>
+    <li><a href="#" id="navSeries" style="left:120px">Series</a></li>
+  </ul>
+  <div class="nav-search">
+    <input type="text" id="searchInput" placeholder="Search" style="position:absolute;left:400px;top:10px;width:200px;height:30px;">
+    <div class="search-results-dropdown" id="searchDropdown"></div>
+  </div>
+</nav>
+
+<div class="main-content" id="movies-section">
+  <div class="cat-tabs" id="catTabs">
+    <button class="cat-tab active" id="tabAll">All</button>
+    <button class="cat-tab" id="tabTv">Web Series</button>
+  </div>
+  <div class="movie-grid" id="movieGrid"></div>
+</div>
+
+<!-- Overlays mirroring index.html so the Back-key priority chain is exercised. -->
+<div id="modal-overlay" class="overlay">
+  <button class="modal-close" id="modalClose">close</button>
+  <button class="btn-play" id="btnPlay">Play Now</button>
+  <button class="btn-watchlist" id="btnWatchlist">Watchlist</button>
+</div>
+<div id="upcoming-detail-overlay" class="overlay upcoming-detail-overlay">
+  <button class="ud-btn" id="udTrailerBtn">Trailer</button>
+</div>
+<div id="collections-hub-overlay" class="overlay collections-hub-overlay">
+  <button class="ch-back-btn" id="chBackBtn">Back</button>
+  <div class="ch-grid" id="chGrid"><div class="ch-card" id="chCard1">Universe</div></div>
+</div>
+<div id="pwa-install-tv-overlay" class="overlay">
+  <button class="pwa-tv-dismiss" id="pwaTvDismissBtn">OK, Got It</button>
+</div>
+
+<pre id="mztv-results"></pre>
+
+<script>
+(function () {
+  'use strict';
+
+  var results = [];
+  var clicks = [];
+  var hookCalls = [];
+
+  function check(label, condition, detail) {
+    results.push({ label: label, pass: !!condition, detail: detail == null ? '' : String(detail) });
+  }
+  function eq(label, actual, expected) {
+    check(label, actual === expected, 'expected ' + JSON.stringify(expected) + ', got ' + JSON.stringify(actual));
+  }
+
+  /* ── Build a 4 x 3 poster grid with deterministic geometry ── */
+  var grid = document.getElementById('movieGrid');
+  var CARDS = 12;
+  var COLS = 4;
+  for (var i = 0; i < CARDS; i++) {
+    var card = document.createElement('div');
+    card.className = 'movie-card';
+    card.id = 'card' + i;
+    card.tabIndex = 0;
+    card.style.left = (i % COLS) * 220 + 'px';
+    card.style.top = Math.floor(i / COLS) * 320 + 'px';
+    card.innerHTML = '<img width="171" height="256" alt="">';
+    (function (index) {
+      card.addEventListener('click', function () { clicks.push('card' + index); });
+    })(i);
+    grid.appendChild(card);
+  }
+
+  ['modalClose', 'btnPlay', 'btnWatchlist', 'udTrailerBtn', 'chBackBtn', 'pwaTvDismissBtn', 'tabAll', 'tabTv']
+    .forEach(function (id) {
+      var el = document.getElementById(id);
+      el.addEventListener('click', function () { clicks.push(id); });
+    });
+
+  /* ── Register the same hooks moviezone.js registers ── */
+  var flags = { fullscreen: false, searchResults: false, fullViewMovies: false, fullViewUpcoming: false };
+  window.MovieZoneTV.configure({
+    isSearchResultsMode: function () { return flags.searchResults; },
+    isFullViewMovies: function () { return flags.fullViewMovies; },
+    isFullViewUpcoming: function () { return flags.fullViewUpcoming; },
+    closeModal: function () { hookCalls.push('closeModal'); document.getElementById('modal-overlay').classList.remove('open'); },
+    closeDropdown: function () { hookCalls.push('closeDropdown'); document.getElementById('searchDropdown').classList.remove('open'); },
+    goHome: function () { hookCalls.push('goHome'); },
+    closeUpcomingDetail: function () { hookCalls.push('closeUpcomingDetail'); document.getElementById('upcoming-detail-overlay').classList.remove('open'); },
+    handleCollectionsBack: function () { hookCalls.push('handleCollectionsBack'); document.getElementById('collections-hub-overlay').classList.remove('open'); },
+    isFullscreen: function () { return flags.fullscreen; },
+    exitFullscreen: function () { hookCalls.push('exitFullscreen'); flags.fullscreen = false; }
+  });
+
+  /* ── Key dispatch helpers ──
+     tv-mode.js throttles D-pad repeats, so every press is spaced out. */
+  var KEY_CODES = {
+    ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40,
+    Enter: 13, Escape: 27, PageDown: 34, PageUp: 33
+  };
+  function press(key, extra) {
+    var init = {
+      key: key,
+      keyCode: KEY_CODES[key] || 0,
+      bubbles: true,
+      cancelable: true
+    };
+    if (extra) for (var k in extra) init[k] = extra[k];
+    var event = new KeyboardEvent('keydown', init);
+    // keyCode is read-only on modern engines; expose it the way TV firmware does.
+    try {
+      Object.defineProperty(event, 'keyCode', { get: function () { return init.keyCode; } });
+      Object.defineProperty(event, 'which', { get: function () { return init.keyCode; } });
+    } catch (err) {}
+    document.dispatchEvent(event);
+    return event;
+  }
+  function pressCode(keyCode) {
+    var event = new KeyboardEvent('keydown', { key: 'Unidentified', bubbles: true, cancelable: true });
+    try {
+      Object.defineProperty(event, 'keyCode', { get: function () { return keyCode; } });
+    } catch (err) {}
+    document.dispatchEvent(event);
+    return event;
+  }
+  function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  var STEP = 160; // comfortably above the low-tier 110ms move throttle
+  function focusedId() { return document.activeElement ? document.activeElement.id : null; }
+
+  var MARK_A = 'MZTV' + '_RESULTS_BEGIN';
+  var MARK_B = 'MZTV' + '_RESULTS_END';
+  var reported = false;
+
+  // Primary channel: POST the verdict back to the Node runner. The <pre> mirror
+  // stays for eyeballing the page in a normal browser.
+  function publish(final) {
+    var node = document.getElementById('mztv-results');
+    if (node) node.textContent = MARK_A + JSON.stringify(results) + MARK_B;
+    if (!final || reported) return;
+    reported = true;
+    try {
+      var payload = JSON.stringify(results);
+      if (navigator.sendBeacon) navigator.sendBeacon('/__results', payload);
+      else {
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', '/__results', true);
+        xhr.send(payload);
+      }
+    } catch (err) { /* nothing else we can do from here */ }
+  }
+
+  // Watchdog: if a step ever hangs, report whatever completed instead of the
+  // runner timing out with no information at all.
+  setTimeout(function () {
+    if (reported) return;
+    results.push({ label: 'harness watchdog fired (a step hung)', pass: false, detail: 'completed ' + results.length + ' checks' });
+    publish(true);
+  }, 30000);
+
+  /* ── The suite ── */
+  async function run() {
+    var root = document.documentElement;
+
+    // tv-mode.js boots on DOMContentLoaded; wait for it plus one frame so its
+    // observers and first DOM sweep have run before we assert anything.
+    if (document.readyState === 'loading') {
+      await new Promise(function (r) { document.addEventListener('DOMContentLoaded', r, { once: true }); });
+    }
+    await new Promise(function (r) { requestAnimationFrame(function () { requestAnimationFrame(r); }); });
+
+    /* 1. Detection + tagging happened at script-execution time */
+    eq('html[data-mz-tv] is set', root.getAttribute('data-mz-tv'), 'true');
+    eq('platform is tizen', root.getAttribute('data-mz-tv-platform'), 'tizen');
+    eq('tier is low for tizen', root.getAttribute('data-mz-tv-tier'), 'low');
+    eq('confidence is confirmed', root.getAttribute('data-mz-tv-confidence'), 'confirmed');
+    check('window.MovieZoneTV exists', typeof window.MovieZoneTV === 'object');
+    check('MovieZoneTV.isTV() is true', window.MovieZoneTV.isTV() === true);
+    eq('boot marked the module ready', root.getAttribute('data-mz-tv-ready'), 'true');
+
+    /* 2. Focusability promotion: .ch-card had no tabindex in the markup */
+    eq('.ch-card was granted a tab index', document.getElementById('chCard1').getAttribute('tabindex'), '0');
+
+    /* 2b. Opening an overlay must hand focus to it, or the remote is stranded */
+    var udOverlay = document.getElementById('upcoming-detail-overlay');
+    udOverlay.classList.add('open');
+    await wait(120);
+    check('opening the upcoming overlay pulls focus inside it',
+      udOverlay.contains(document.activeElement),
+      'active=' + (document.activeElement ? document.activeElement.tagName + '#' + document.activeElement.id : 'none'));
+    udOverlay.classList.remove('open');
+    await wait(40);
+
+    /* 3. D-pad inside the poster grid */
+    document.getElementById('card0').focus();
+    eq('focus starts on card0', focusedId(), 'card0');
+
+    var moved = press('ArrowRight');
+    await wait(STEP);
+    eq('ArrowRight -> next column', focusedId(), 'card1');
+    check('ArrowRight was consumed (preventDefault)', moved.defaultPrevented === true);
+
+    press('ArrowDown'); await wait(STEP);
+    eq('ArrowDown -> same column, next row', focusedId(), 'card5');
+
+    press('ArrowLeft'); await wait(STEP);
+    eq('ArrowLeft -> previous column', focusedId(), 'card4');
+
+    press('ArrowUp'); await wait(STEP);
+    eq('ArrowUp -> same column, previous row', focusedId(), 'card0');
+
+    /* 4. Row edge continues in reading order instead of dead-ending */
+    document.getElementById('card3').focus(); await wait(STEP);
+    press('ArrowRight'); await wait(STEP);
+    eq('ArrowRight at the row edge wraps to the next row', focusedId(), 'card4');
+
+    document.getElementById('card4').focus(); await wait(STEP);
+    press('ArrowLeft'); await wait(STEP);
+    eq('ArrowLeft at the row start wraps to the previous row', focusedId(), 'card3');
+
+    /* 5. Repeat throttling: a burst must not skip several tiles at once */
+    document.getElementById('card0').focus(); await wait(STEP);
+    press('ArrowRight');
+    press('ArrowRight');
+    press('ArrowRight');
+    await wait(STEP);
+    eq('a key burst advances exactly one tile', focusedId(), 'card1');
+
+    /* 6. OK activates a non-native element (a div card fires no native click) */
+    clicks.length = 0;
+    document.getElementById('card2').focus();
+    press('Enter');
+    await wait(40);
+    check('Enter clicked the focused card', clicks.indexOf('card2') > -1, clicks.join(','));
+
+    /* 7. Text fields keep their own key handling */
+    var input = document.getElementById('searchInput');
+    input.focus();
+    press('ArrowDown'); await wait(STEP);
+    eq('ArrowDown inside the search box does not move focus', focusedId(), 'searchInput');
+    press('ArrowRight'); await wait(STEP);
+    eq('ArrowRight inside the search box does not move focus', focusedId(), 'searchInput');
+    var okInInput = press('Enter');
+    await wait(40);
+    check('Enter inside the search box is left alone', okInInput.defaultPrevented === false);
+    input.blur();
+
+    /* 8. Back-key priority chain, innermost surface first */
+    hookCalls.length = 0;
+    flags.fullscreen = true;
+    press('Escape'); await wait(40);
+    eq('Back exits fullscreen before anything else', hookCalls.join(','), 'exitFullscreen');
+
+    hookCalls.length = 0;
+    document.getElementById('modal-overlay').classList.add('open');
+    press('Escape'); await wait(40);
+    eq('Back closes the video modal', hookCalls.join(','), 'closeModal');
+
+    hookCalls.length = 0;
+    document.getElementById('upcoming-detail-overlay').classList.add('open');
+    press('Escape'); await wait(40);
+    eq('Back closes the upcoming detail overlay', hookCalls.join(','), 'closeUpcomingDetail');
+
+    hookCalls.length = 0;
+    document.getElementById('collections-hub-overlay').classList.add('open');
+    press('Escape'); await wait(40);
+    eq('Back closes the collections hub', hookCalls.join(','), 'handleCollectionsBack');
+
+    hookCalls.length = 0;
+    clicks.length = 0;
+    document.getElementById('pwa-install-tv-overlay').classList.add('open');
+    press('Escape'); await wait(40);
+    check('Back dismisses the TV install prompt', clicks.indexOf('pwaTvDismissBtn') > -1, clicks.join(','));
+    document.getElementById('pwa-install-tv-overlay').classList.remove('open');
+
+    hookCalls.length = 0;
+    flags.searchResults = true;
+    press('Escape'); await wait(40);
+    eq('Back leaves search results for the home view', hookCalls.join(','), 'goHome');
+    flags.searchResults = false;
+
+    hookCalls.length = 0;
+    var backAtHome = press('Escape'); await wait(40);
+    eq('Back at home calls no hook', hookCalls.join(','), '');
+    check('Back at home lets the platform handle the key', backAtHome.defaultPrevented === false);
+
+    /* 9. Platform-specific Back codes reach the same chain */
+    hookCalls.length = 0;
+    document.getElementById('modal-overlay').classList.add('open');
+    pressCode(10009); await wait(40);          // Tizen
+    eq('Tizen Back (10009) closes the modal', hookCalls.join(','), 'closeModal');
+
+    hookCalls.length = 0;
+    document.getElementById('modal-overlay').classList.add('open');
+    pressCode(461); await wait(40);            // webOS
+    eq('webOS Back (461) closes the modal', hookCalls.join(','), 'closeModal');
+
+    /* 10. Focus is trapped inside an open overlay */
+    document.activeElement.blur();
+    document.getElementById('modal-overlay').classList.add('open');
+    await wait(120);
+    var modalEl = document.getElementById('modal-overlay');
+    check('opening an overlay pulls focus inside it',
+      modalEl.contains(document.activeElement),
+      'active=' + (document.activeElement ? document.activeElement.tagName + '#' + document.activeElement.id : 'none') +
+      ' ready=' + document.documentElement.getAttribute('data-mz-tv-ready'));
+    document.getElementById('btnPlay').focus(); await wait(STEP);
+    press('ArrowDown'); await wait(STEP);
+    check('D-pad cannot escape an open overlay',
+      document.getElementById('modal-overlay').contains(document.activeElement), focusedId());
+
+    /* 11. Media keys */
+    clicks.length = 0;
+    pressCode(415); await wait(40);            // Play
+    check('Play starts playback from the open modal', clicks.indexOf('btnPlay') > -1, clicks.join(','));
+
+    hookCalls.length = 0;
+    pressCode(413); await wait(40);            // Stop
+    eq('Stop closes the modal', hookCalls.join(','), 'closeModal');
+    document.getElementById('modal-overlay').classList.remove('open');
+
+    /* 12. Channel / page keys scroll the view */
+    window.scrollTo(0, 0);
+    var pageEvent = press('PageDown');
+    await wait(60);
+    check('PageDown scrolls down', window.scrollY > 0, 'scrollY=' + window.scrollY);
+    check('PageDown was consumed', pageEvent.defaultPrevented === true);
+    press('PageUp'); await wait(60);
+    check('PageUp scrolls back up', window.scrollY === 0, 'scrollY=' + window.scrollY);
+
+    /* 13. Unmapped keys are never swallowed (typing must keep working) */
+    var letter = new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true });
+    document.dispatchEvent(letter);
+    check('a plain letter key is left untouched', letter.defaultPrevented === false);
+
+    /* 14. No focus yet: the first D-pad press adopts something on screen */
+    document.activeElement.blur();
+    window.scrollTo(0, 0);
+    await wait(STEP);
+    press('ArrowDown'); await wait(STEP);
+    check('first D-pad press with nothing focused adopts an on-screen target',
+      focusedId() !== null && focusedId() !== '', focusedId());
+
+    publish(true);
+  }
+
+  run().catch(function (err) {
+    results.push({ label: 'harness crashed', pass: false, detail: String((err && err.stack) || err) });
+    publish(true);
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,4 +1,7 @@
-const CACHE_NAME = 'moviezone-v43';
+// v44: tv-mode.css / tv-mode.js now exist. While they were missing, cache.addAll()
+// rejected on their 404 and the service worker never finished installing at all,
+// so every client stayed uncached. Bumping the name forces a clean reinstall.
+const CACHE_NAME = 'moviezone-v44';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

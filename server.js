@@ -14,22 +14,46 @@ const axios = require('axios'); // 7. Robust HTTP Client
 const axiosRetry = require('axios-retry').default; // 8. Automatic Retry with Backoff
 
 // ══════════════════════════════════════════════════════════════
-//  TMDB API CLIENT — Axios with Keep-Alive, Retry & Backoff
+//  TMDB API CLIENT — Keep-Alive + Host Failover + Retry/Backoff
 // ══════════════════════════════════════════════════════════════
+//
+//  WHY THE HOST FAILOVER EXISTS (the ECONNRESET storm):
+//  Many ISPs (very common on Indian broadband/mobile) run SNI-based deep packet
+//  inspection that fires a TCP RST while the TLS ClientHello for the hostname
+//  "api.themoviedb.org" is still in flight. Measured behaviour from this network:
+//    • ~60-75% of BRAND-NEW connections die with ECONNRESET after ~240ms
+//    • the RST arrives before TLS completes, so it is not TMDB rate limiting
+//    • an already-established keep-alive socket is never touched (~130ms replies)
+//  "api.tmdb.org" is TMDB's own alias for the same /3 API (valid certificate,
+//  identical JSON) but it carries a different SNI, so the filter ignores it.
+//  Strategy: keep sockets alive aggressively, probe both hosts at boot, pin the
+//  healthy one, flip hosts mid-retry on connection errors, and re-probe so we
+//  return to the primary once the network behaves again.
 
-// Persistent HTTPS Agent — reuses TCP connections (prevents ECONNRESET)
+const TMDB_HOSTS = ['api.themoviedb.org', 'api.tmdb.org'];
+const HOST_PENALTY_MS = 5 * 60 * 1000;   // sideline a resetting host for 5 minutes
+const HOST_REPROBE_MS = 10 * 60 * 1000;  // re-measure both hosts every 10 minutes
+const HOST_FAIL_THRESHOLD = 2;           // connection errors before switching away
+
+const buildBaseUrl = (host) => `https://${host}/3`;
+const hostHealth = new Map(TMDB_HOSTS.map(h => [h, { fails: 0, penaltyUntil: 0 }]));
+let activeHost = TMDB_HOSTS[0];
+
+// Persistent HTTPS Agent — a live socket never gets reset, so hold on to them.
+// 'lifo' reuses the hottest socket, which means far fewer new TLS handshakes
+// (each handshake is another chance for the ISP filter to kill us).
 const keepAliveAgent = new https.Agent({
   keepAlive: true,
-  keepAliveMsecs: 30000,
-  maxSockets: 15,
-  maxFreeSockets: 5,
+  keepAliveMsecs: 60000,
+  maxSockets: 12,
+  maxFreeSockets: 12,
   timeout: 20000,
-  scheduling: 'fifo'
+  scheduling: 'lifo'
 });
 
 // Create dedicated axios instance for TMDB
 const tmdbClient = axios.create({
-  baseURL: 'https://api.themoviedb.org/3',
+  baseURL: buildBaseUrl(activeHost),
   timeout: 15000,
   httpsAgent: keepAliveAgent,
   headers: {
@@ -40,38 +64,138 @@ const tmdbClient = axios.create({
   }
 });
 
-// Axios Retry Interceptor — exponential backoff with jitter
+function hostOfConfig(config) {
+  try { return new URL(config?.baseURL || buildBaseUrl(activeHost)).hostname; }
+  catch { return activeHost; }
+}
+
+const isHostUsable = (host) => (hostHealth.get(host)?.penaltyUntil ?? 0) <= Date.now();
+
+// Pick the best alternative to `exclude`; falls back to any host rather than none.
+function pickAlternateHost(exclude) {
+  return TMDB_HOSTS.find(h => h !== exclude && isHostUsable(h))
+      || TMDB_HOSTS.find(h => h !== exclude)
+      || exclude;
+}
+
+function setActiveHost(host, reason) {
+  if (activeHost === host) return;
+  const from = activeHost;
+  activeHost = host;
+  tmdbClient.defaults.baseURL = buildBaseUrl(host);
+  console.warn(`🔀 TMDB host switched: ${from} → ${host} (${reason})`);
+}
+
+function recordHostFailure(host) {
+  const state = hostHealth.get(host);
+  if (!state) return;
+  state.fails += 1;
+  if (state.fails < HOST_FAIL_THRESHOLD) return;
+  state.fails = 0;
+  state.penaltyUntil = Date.now() + HOST_PENALTY_MS;
+  const alternate = pickAlternateHost(host);
+  if (alternate !== host && activeHost === host) {
+    setActiveHost(alternate, 'repeated connection resets');
+  }
+}
+
+// Success only clears the error streak. Un-sidelining a host is the probe's job,
+// otherwise one lucky retry drags us straight back onto a filtered hostname.
+function recordHostSuccess(host) {
+  const state = hostHealth.get(host);
+  if (state) state.fails = 0;
+}
+
+tmdbClient.interceptors.response.use(
+  (response) => { recordHostSuccess(hostOfConfig(response.config)); return response; },
+  (error) => Promise.reject(error)
+);
+
+// Axios Retry Interceptor — fast first retries, host flip on connection errors
 axiosRetry(tmdbClient, {
-  retries: 5,
-  retryDelay: (retryCount) => {
-    // Exponential backoff: 300ms, 600ms, 1200ms, 2400ms, 4800ms + random jitter
-    const delay = Math.min(300 * Math.pow(2, retryCount - 1), 5000);
-    const jitter = Math.random() * 200;
-    return delay + jitter;
+  retries: 6,
+  shouldResetTimeout: true, // every attempt gets a full 15s, not a shared budget
+  retryDelay: (retryCount, error) => {
+    const retryAfter = Number(error?.response?.headers?.['retry-after']);
+    if (error?.response?.status === 429 && Number.isFinite(retryAfter)) {
+      return Math.min(retryAfter * 1000, 10000);
+    }
+    // Filtered connections die in ~240ms and the very next attempt usually
+    // succeeds, so stay snappy early: 150ms, 300ms, 600ms, 1.2s, 2.4s, 4s.
+    return Math.min(150 * Math.pow(2, retryCount - 1), 4000) + Math.random() * 150;
   },
   retryCondition: (error) => {
-    // Retry on network errors and specific codes
-    if (!error.response) {
-      // Network error (ECONNRESET, ETIMEDOUT, EPIPE, etc.)
-      return true;
-    }
-    // Retry on 429 (rate limit), 500, 502, 503, 504
-    return [429, 500, 502, 503, 504].includes(error.response.status);
+    if (!error.response) return true; // ECONNRESET / ETIMEDOUT / EPIPE / DNS
+    return [408, 429, 500, 502, 503, 504].includes(error.response.status);
   },
-  onRetry: (retryCount, error) => {
-    if (retryCount >= 3) {
-      console.warn(`⚠️ TMDB retry ${retryCount}/5 (${error.code || error.message})`);
+  onRetry: (retryCount, error, requestConfig) => {
+    const usedHost = hostOfConfig(requestConfig);
+    if (!error.response) {
+      recordHostFailure(usedHost);
+      // Retry over the other hostname — a different SNI usually walks straight through.
+      const alternate = pickAlternateHost(usedHost);
+      if (alternate !== usedHost) requestConfig.baseURL = buildBaseUrl(alternate);
+    }
+    if (retryCount >= 4) {
+      console.warn(`⚠️ TMDB retry ${retryCount}/6 via ${hostOfConfig(requestConfig)} (${error.code || error.message})`);
     }
   }
 });
 
+// Measures both hostnames with a few raw (un-retried) probes and pins the winner.
+async function probeTmdbHosts({ samples = 3, quiet = false } = {}) {
+  const token = process.env.TMDB_TOKEN;
+  if (!token) return null;
+
+  const scores = await Promise.all(TMDB_HOSTS.map(async (host) => {
+    let ok = 0;
+    let lastCode = null;
+    for (let i = 0; i < samples; i++) {
+      try {
+        await axios.get(`${buildBaseUrl(host)}/configuration`, {
+          timeout: 8000,
+          httpsAgent: keepAliveAgent,
+          headers: { Authorization: `Bearer ${token}`, 'User-Agent': 'MovieZone/1.0 (health probe)' }
+        });
+        ok++;
+      } catch (err) {
+        lastCode = err.code || err.response?.status || err.message;
+      }
+    }
+    return { host, ratio: ok / samples, lastCode };
+  }));
+
+  const best = scores.reduce((a, b) => (b.ratio > a.ratio ? b : a));
+  const primary = scores[0];
+
+  // Only leave the primary when it is clearly unhealthy and something better exists.
+  const primaryState = hostHealth.get(primary.host);
+  const bestState = hostHealth.get(best.host);
+  if (primary.ratio >= 0.67) {
+    if (primaryState) primaryState.penaltyUntil = 0;
+    recordHostSuccess(primary.host);
+    setActiveHost(primary.host, 'primary healthy again');
+  } else if (best.ratio > primary.ratio) {
+    if (primaryState) primaryState.penaltyUntil = Date.now() + HOST_PENALTY_MS;
+    if (bestState) bestState.penaltyUntil = 0;
+    recordHostSuccess(best.host);
+    setActiveHost(best.host, `primary resets ${Math.round((1 - primary.ratio) * 100)}% of new connections`);
+  }
+
+  if (!quiet) {
+    const summary = scores.map(s => `${s.host} ${Math.round(s.ratio * 100)}%${s.lastCode ? ` (${s.lastCode})` : ''}`).join(' | ');
+    console.log(`🩺 TMDB reachability: ${summary} → using ${activeHost}`);
+  }
+  return { scores, activeHost };
+}
+
 // Simple wrapper to match previous fetchWithRetry interface
 async function fetchWithRetry(url, options = {}) {
   const parsed = new URL(url);
-  // Strip /3 prefix since axios baseURL already includes it
+  // Strip the /3 prefix — the axios baseURL already carries it (host-agnostic).
   let path = parsed.pathname + parsed.search;
   if (path.startsWith('/3/')) path = path.slice(2); // /3/trending -> /trending
-  
+
   const response = await tmdbClient.get(path, {
     headers: options.headers || {}
   });
@@ -110,10 +234,36 @@ const ASSET_DIRS = [__dirname, path.join(__dirname, 'public'), path.join(__dirna
 
 function resolveAsset(fileName) {
   for (const dir of ASSET_DIRS) {
-    const candidate = path.join(dir, fileName);
+    const root = path.resolve(dir);
+    const candidate = path.resolve(root, fileName);
+    // Never step outside the asset directory, whatever the caller passed in.
+    if (candidate !== root && !candidate.startsWith(root + path.sep)) continue;
     if (fs.existsSync(candidate)) return candidate;
   }
   return null;
+}
+
+// Manifest/HTML asset references are URLs, not filenames — they routinely carry a
+// cache-busting query ("/icon-192.png?v=2") or percent-encoding. Strip the URL parts
+// before touching the filesystem, otherwise the file is reported missing when it exists.
+// Returns null for anything not checkable on local disk (remote URLs, data:, traversal).
+function assetPathFromUrl(src) {
+  if (typeof src !== 'string' || !src.trim()) return null;
+  if (/^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(src) || /^data:/i.test(src)) return null;
+
+  let relative;
+  try {
+    // Dummy base makes relative and root-relative refs parse identically;
+    // .pathname discards ?query and #hash for us.
+    relative = decodeURIComponent(new URL(src, 'http://asset.local/').pathname);
+  } catch {
+    return null;
+  }
+
+  relative = relative.replace(/^\/+/, '');
+  const segments = relative.split('/').filter(Boolean);
+  if (!segments.length || segments.includes('..')) return null;
+  return path.join(...segments);
 }
 
 // Last-resort manifest: served inline if manifest.json is missing, unreadable, or
@@ -572,9 +722,60 @@ app.get('/api/push/stats', async (req, res) => {
 /*  */// Backend Advanced Cache: Initialize NodeCache with a standard TTL of 2 hours (7200 seconds) for faster loads
 const apiCache = new NodeCache({ stdTTL: 7200 });
 
+// Stale-fallback cache: keeps the last known-good payload for 24h so a network
+// hiccup (ISP resets, TMDB outage) degrades into slightly old data instead of a 503.
+const staleCache = new NodeCache({ stdTTL: 86400 });
+
+// In-flight request map: collapses duplicate concurrent requests for the same URL
+// into a single upstream call. Fewer parallel TLS handshakes = fewer resets.
+const inFlight = new Map();
+
+function fetchTmdbOnce(url) {
+  const pending = inFlight.get(url);
+  if (pending) return pending;
+
+  const task = (async () => {
+    const response = await fetchWithRetry(url);
+    if (!response.ok) {
+      const errText = await response.text();
+      const err = new Error(`TMDB responded ${response.status}`);
+      err.tmdbStatus = response.status;
+      err.tmdbBody = errText;
+      throw err;
+    }
+    return response.json();
+  })().finally(() => inFlight.delete(url));
+
+  inFlight.set(url, task);
+  return task;
+}
+
+// Server-side only (never serialised to clients) — lets tests and diagnostics reach
+// the cache/host state without exporting a public API surface.
+app.locals.tmdbInternals = { apiCache, staleCache, inFlight, hostHealth, TMDB_HOSTS, probeTmdbHosts, setActiveHost };
+
 // Health Check / Ping Endpoint: UptimeRobot ko server jagaye rakhne ke liye
 app.get('/ping', (req, res) => {
   res.status(200).send('Pong! Server is awake.');
+});
+
+// TMDB connectivity diagnostics — shows which upstream host is in use and why.
+app.get('/api/tmdb-health', (req, res) => {
+  res.json({
+    activeHost,
+    hosts: TMDB_HOSTS.map(host => {
+      const state = hostHealth.get(host) || { fails: 0, penaltyUntil: 0 };
+      return {
+        host,
+        usable: state.penaltyUntil <= Date.now(),
+        recentConnectionErrors: state.fails,
+        sidelinedForMs: Math.max(0, state.penaltyUntil - Date.now())
+      };
+    }),
+    cachedEntries: apiCache.keys().length,
+    staleEntries: staleCache.keys().length,
+    inFlight: inFlight.size
+  });
 });
 
 // Serve favicon
@@ -584,57 +785,58 @@ app.get('/favicon.ico', (req, res) => {
 
 // Proxy Endpoint: Frontend yahan request bhejega
 app.use('/api/tmdb', apiLimiter, async (req, res) => {
+  const safeUrl = req.url.replace(/^\/api\/tmdb/, '');
+  const endpoint = safeUrl.startsWith('/') ? safeUrl : '/' + safeUrl;
+  // Cache key stays on the canonical host so a host failover never splits the cache.
+  const url = `${TMDB_BASE_URL}${endpoint}`;
+
   try {
     if (!TMDB_TOKEN) {
       console.error('CRITICAL ERROR: TMDB_TOKEN is missing in environment variables!');
       return res.status(500).json({ error: 'API token not configured' });
     }
 
-    // Request path aur query parameters extract karna
-    // Bulletproof URL extraction (Handles all Vercel/Express rewrite behaviors)
-    const safeUrl = req.url.replace(/^\/api\/tmdb/, '');
-    const endpoint = safeUrl.startsWith('/') ? safeUrl : '/' + safeUrl;
-    const url = `${TMDB_BASE_URL}${endpoint}`;
-
     // Check if data is already in node-cache
     const cachedData = apiCache.get(url);
     if (cachedData) {
       res.setHeader('Cache-Control', 'public, max-age=7200, s-maxage=86400, stale-while-revalidate=86400');
+      res.setHeader('X-Cache', 'HIT');
       return res.json(cachedData);
     }
 
-    const response = await fetchWithRetry(url);
-
-    // Agar TMDB se error aaye, toh error bhejo aur cache headers mat lagao (bura data cache nahi hoga)
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error(`TMDB API Error: ${response.status} - ${errText} for URL: ${url}`);
-      return res.status(response.status).json({ error: 'Failed to fetch data from TMDB' });
-    }
-
-    const data = await response.json();
+    // Coalesced fetch: parallel callers for the same URL share one upstream request
+    const data = await fetchTmdbOnce(url);
 
     // CDN & Browser Caching (Only cache successful responses)
     res.setHeader('Cache-Control', 'public, max-age=7200, s-maxage=86400, stale-while-revalidate=86400');
+    res.setHeader('X-Cache', 'MISS');
 
     // Naya data memory me save karo (TTL is automatically handled by node-cache)
     apiCache.set(url, data);
+    staleCache.set(url, data); // long-lived copy for the fallback path below
 
     res.json(data);
   } catch (error) {
-    // Axios error handling
-    const code = error.code || error.response?.status || 'UNKNOWN';
-    const msg = error.message || 'Unknown error';
-    console.error(`TMDB Proxy Error [${code}]: ${msg}`);
-    
-    if (error.response) {
-      // TMDB returned an error response (after all retries)
-      return res.status(error.response.status).json({ error: 'TMDB API error', detail: error.response.statusText });
+    const upstreamStatus = error.tmdbStatus || error.response?.status || null;
+    const code = error.code || upstreamStatus || 'UNKNOWN';
+    console.error(`TMDB Proxy Error [${code}]: ${error.message || 'Unknown error'} for ${endpoint}`);
+
+    // Serve slightly stale data rather than an error — the user never sees a dead page.
+    const stale = staleCache.get(url);
+    if (stale) {
+      res.setHeader('Cache-Control', 'public, max-age=60, must-revalidate');
+      res.setHeader('X-Cache', 'STALE');
+      res.setHeader('X-Stale-Reason', String(code));
+      return res.json(stale);
     }
-    
-    const isTimeout = error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT';
-    const isNetwork = error.code === 'ECONNRESET' || error.code === 'ENOTFOUND' || error.code === 'EPIPE';
-    
+
+    if (upstreamStatus) {
+      return res.status(upstreamStatus).json({ error: 'TMDB API error', detail: error.response?.statusText || 'Upstream error' });
+    }
+
+    const isTimeout = code === 'ECONNABORTED' || code === 'ETIMEDOUT';
+    const isNetwork = ['ECONNRESET', 'ENOTFOUND', 'EPIPE', 'EAI_AGAIN', 'ENETUNREACH', 'ECONNREFUSED'].includes(code);
+
     if (isTimeout) {
       return res.status(504).json({ error: 'TMDB request timed out. Please retry.' });
     }
@@ -656,6 +858,7 @@ async function warmupCache() {
     if (response.ok) {
       const data = await response.json();
       apiCache.set(trendingUrl, data);
+      staleCache.set(trendingUrl, data);
       console.log('🔥 Luxury Cache Warmup Complete: Trending movies loaded into memory instantly.');
     }
   } catch (err) { console.error('Cache warmup failed:', err.message); }
@@ -678,9 +881,16 @@ function verifyPwaAssets() {
       console.warn(`⚠️  manifest.json is missing required fields: ${absent.join(', ')} — inline fallback will be served`);
       return false;
     }
-    const badIcons = (m.icons || []).filter(i => !resolveAsset(i.src.replace(/^\//, '')));
+    const badIcons = [...new Set(
+      (m.icons || [])
+        .filter(i => {
+          const relative = assetPathFromUrl(i.src);
+          return relative ? !resolveAsset(relative) : false; // remote icons aren't ours to verify
+        })
+        .map(i => i.src)
+    )];
     if (badIcons.length) {
-      console.warn(`⚠️  manifest icons not found on disk: ${badIcons.map(i => i.src).join(', ')}`);
+      console.warn(`⚠️  manifest icons not found on disk: ${badIcons.join(', ')}`);
       return false;
     }
     return true;
@@ -689,6 +899,9 @@ function verifyPwaAssets() {
     return false;
   }
 }
+
+// Server-side only — lets tests exercise the asset resolution logic directly.
+app.locals.pwaInternals = { resolveAsset, assetPathFromUrl, verifyPwaAssets, ASSET_DIRS };
 
 // Server ko start karne ke liye (Local + Render support)
 if (require.main === module) {
@@ -707,9 +920,17 @@ if (require.main === module) {
     console.log(`   🔑 Push Subscribers     — MongoDB (permanent)`);
     console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     console.log(`🌐 Open: http://localhost:${PORT}`);
-    warmupCache();
+    // Measure both TMDB hostnames first, pin the healthy one, then warm the cache.
+    probeTmdbHosts()
+      .catch(err => console.warn('TMDB reachability probe failed:', err.message))
+      .finally(() => warmupCache());
     setTimeout(() => processDueNotifications().catch(err => console.error('Initial notification check failed:', err)), 5000);
   });
+
+  // Re-measure periodically so we hop back to the primary host once the ISP/network recovers.
+  const hostProbeTimer = setInterval(() => {
+    probeTmdbHosts({ samples: 2, quiet: true }).catch(() => {});
+  }, HOST_REPROBE_MS);
 
   const notificationTimer = setInterval(() => {
     processDueNotifications().catch(err => console.error('Scheduled notification check failed:', err));
@@ -719,6 +940,7 @@ if (require.main === module) {
   process.on('SIGINT', () => {
     console.log(`🛑 PM2 stopping worker PID: ${process.pid}. Closing connections gracefully...`);
     clearInterval(notificationTimer);
+    clearInterval(hostProbeTimer);
     server.close(() => {
       console.log('✅ Server gracefully shut down.');
       process.exit(0);

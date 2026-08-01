@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<!--
+  Regression harness: tv-mode.js must be completely inert on a normal desktop
+  browser. A TV feature that hijacks arrow keys for laptop users is a bug.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MovieZone TV mode — non-TV regression harness</title>
+<style>
+  html, body { margin: 0; background: #03030a; color: #fff; }
+  #movieGrid { position: relative; height: 800px; }
+  .movie-card { position: absolute; width: 200px; height: 300px; background: #12121f; }
+  .overlay { position: fixed; inset: 0; background: #000; display: none; }
+  .overlay.open { display: block; }
+</style>
+<!-- No user-agent spoofing and no ?tv=1: this is a plain desktop Chrome run. -->
+<script src="tv-mode.js"></script>
+</head>
+<body>
+
+<div class="movie-grid" id="movieGrid"></div>
+<div id="modal-overlay" class="overlay"><button class="btn-play" id="btnPlay">Play</button></div>
+<input type="text" id="searchInput">
+<div class="ch-card" id="chCard1">Universe</div>
+
+<pre id="mztv-results"></pre>
+
+<script>
+(function () {
+  'use strict';
+  var results = [];
+  var reported = false;
+  var clicks = [];
+
+  function check(label, condition, detail) {
+    results.push({ label: label, pass: !!condition, detail: detail == null ? '' : String(detail) });
+  }
+  function eq(label, actual, expected) {
+    check(label, actual === expected, 'expected ' + JSON.stringify(expected) + ', got ' + JSON.stringify(actual));
+  }
+  function publish() {
+    if (reported) return;
+    reported = true;
+    var payload = JSON.stringify(results);
+    document.getElementById('mztv-results').textContent = payload;
+    try {
+      if (navigator.sendBeacon) navigator.sendBeacon('/__results', payload);
+      else { var x = new XMLHttpRequest(); x.open('POST', '/__results', true); x.send(payload); }
+    } catch (err) {}
+  }
+  setTimeout(function () {
+    if (!reported) {
+      results.push({ label: 'non-TV harness watchdog fired', pass: false, detail: 'completed ' + results.length });
+      publish();
+    }
+  }, 20000);
+
+  var grid = document.getElementById('movieGrid');
+  for (var i = 0; i < 8; i++) {
+    var card = document.createElement('div');
+    card.className = 'movie-card';
+    card.id = 'card' + i;
+    card.tabIndex = 0;
+    card.style.left = (i % 4) * 220 + 'px';
+    card.style.top = Math.floor(i / 4) * 320 + 'px';
+    (function (n) { card.addEventListener('click', function () { clicks.push('card' + n); }); })(i);
+    grid.appendChild(card);
+  }
+
+  function press(key, keyCode) {
+    var event = new KeyboardEvent('keydown', { key: key, bubbles: true, cancelable: true });
+    try { Object.defineProperty(event, 'keyCode', { get: function () { return keyCode || 0; } }); } catch (e) {}
+    document.dispatchEvent(event);
+    return event;
+  }
+  function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  async function run() {
+    if (document.readyState === 'loading') {
+      await new Promise(function (r) { document.addEventListener('DOMContentLoaded', r, { once: true }); });
+    }
+    await wait(200); // well past tv-mode.js's boot point, had it decided to boot
+
+    var root = document.documentElement;
+    eq('desktop: data-mz-tv is not set', root.getAttribute('data-mz-tv'), null);
+    eq('desktop: no platform attribute', root.getAttribute('data-mz-tv-platform'), null);
+    eq('desktop: no tier attribute', root.getAttribute('data-mz-tv-tier'), null);
+    eq('desktop: module never marks itself ready', root.getAttribute('data-mz-tv-ready'), null);
+
+    check('desktop: MovieZoneTV is still exposed', typeof window.MovieZoneTV === 'object' && window.MovieZoneTV !== null);
+    eq('desktop: MovieZoneTV.isTV() is false', window.MovieZoneTV.isTV(), false);
+    check('desktop: configure() is safe to call', window.MovieZoneTV.configure({ goHome: function () {} }) === window.MovieZoneTV);
+
+    // The critical regression: arrow keys must reach the page untouched.
+    document.getElementById('card0').focus();
+    var right = press('ArrowRight', 39);
+    await wait(60);
+    eq('desktop: ArrowRight does not move focus', document.activeElement.id, 'card0');
+    check('desktop: ArrowRight is not consumed', right.defaultPrevented === false);
+
+    var down = press('ArrowDown', 40);
+    await wait(60);
+    eq('desktop: ArrowDown does not move focus', document.activeElement.id, 'card0');
+    check('desktop: ArrowDown is not consumed', down.defaultPrevented === false);
+
+    var esc = press('Escape', 27);
+    await wait(40);
+    check('desktop: Escape is left to moviezone.js', esc.defaultPrevented === false);
+
+    // No tabindex should be injected, and no <img> should be parked.
+    eq('desktop: .ch-card is not given a tab index', document.getElementById('chCard1').getAttribute('tabindex'), null);
+
+    document.getElementById('modal-overlay').classList.add('open');
+    await wait(150);
+    check('desktop: opening an overlay does not steal focus',
+      document.activeElement.id === 'card0',
+      'active=' + document.activeElement.id);
+
+    publish();
+  }
+
+  run().catch(function (err) {
+    results.push({ label: 'non-TV harness crashed', pass: false, detail: String((err && err.stack) || err) });
+    publish();
+  });
+})();
+</script>
+</body>
+</html>
