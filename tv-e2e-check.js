@@ -1,7 +1,15 @@
-/* Ad-hoc end-to-end check: boot the real server, load the real index.html in
-   headless Chrome over the DevTools protocol with a Smart TV user agent, and
-   confirm TV mode engages on the actual app (not a harness page).
-   Not part of `npm test` — it needs both a browser and live TMDB access. */
+/* ═══════════════════════════════════════════════════════════════════════════
+   tv-e2e-check.js — verifies TV mode against the REAL app, not a harness.
+
+   Boots server.js, then drives headless Chrome over the DevTools protocol to
+   load the actual index.html twice: once with a Smart TV user agent and once
+   with a desktop one. The central assertion is LAYOUT IDENTITY — TV mode is a
+   performance layer, so every measured dimension, font size and grid track must
+   match the laptop exactly. Only motion and blur are allowed to differ.
+
+   Not part of `npm test`: it needs a browser and live TMDB access.
+   Run: npm run verify:tv
+   ═══════════════════════════════════════════════════════════════════════════ */
 process.env.PORT = process.env.PORT || '3993';
 require('dotenv').config();
 
@@ -14,7 +22,9 @@ const path = require('path');
 const CHROME = [
   path.join(process.env['ProgramFiles'] || '', 'Google\\Chrome\\Application\\chrome.exe'),
   path.join(process.env['ProgramFiles(x86)'] || '', 'Google\\Chrome\\Application\\chrome.exe'),
-  path.join(process.env['ProgramFiles(x86)'] || '', 'Microsoft\\Edge\\Application\\msedge.exe')
+  path.join(process.env['ProgramFiles(x86)'] || '', 'Microsoft\\Edge\\Application\\msedge.exe'),
+  '/usr/bin/google-chrome',
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 ].find(p => p && fs.existsSync(p));
 
 const TV_UA = 'Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.0) AppleWebKit/538.1 (KHTML, like Gecko) Version/6.0 TV Safari/538.1';
@@ -100,11 +110,51 @@ function connect(wsUrl) {
   });
 }
 
-// Runs inside the page; returns everything we want to assert in one round trip.
+// Runs inside the page; one round trip returns everything we assert on.
 const PROBE = `(function () {
   var root = document.documentElement;
+
+  // Normalise before measuring: an install prompt or modal locks body scroll,
+  // which removes the scrollbar and shifts every width by a few pixels. Without
+  // this the two runs are not comparable.
+  Array.prototype.forEach.call(document.querySelectorAll('.open'), function (el) {
+    el.classList.remove('open');
+  });
+  document.body.style.overflow = '';
+  root.style.overflowY = 'scroll';
+
+  var card = document.querySelector('.movie-card');
+  var grid = document.getElementById('movieGrid');
+  var title = document.querySelector('.card-title');
+  var heading = document.getElementById('sectionHeading');
+  var style = function (el, prop) { return el ? getComputedStyle(el)[prop] : null; };
+  var round = function (n) { return Math.round(n * 100) / 100; };
+  var boxWidth = function (el) { return el ? round(el.getBoundingClientRect().width) : null; };
+
+  // Layout fingerprint, captured BEFORE anything is focused or scrolled.
+  var layout = {
+    rootFontSize: getComputedStyle(root).fontSize,
+    bodyFontSize: getComputedStyle(document.body).fontSize,
+    gridColumns: style(grid, 'gridTemplateColumns'),
+    gridGap: style(grid, 'gap'),
+    cardWidth: boxWidth(card),
+    cardHeight: card ? round(card.getBoundingClientRect().height) : null,
+    cardRadius: style(card, 'borderRadius'),
+    cardTitleFontSize: style(title, 'fontSize'),
+    headingFontSize: style(heading, 'fontSize'),
+    navbarWidth: boxWidth(document.getElementById('navbar')),
+    sectionPaddingLeft: style(document.getElementById('movies-section'), 'paddingLeft')
+  };
+
+  var viewport = {
+    innerWidth: window.innerWidth,
+    clientWidth: root.clientWidth,
+    scrollbar: window.innerWidth - root.clientWidth,
+    docHeight: Math.round(root.scrollHeight),
+    dpr: window.devicePixelRatio
+  };
+
   return JSON.stringify({
-    ua: navigator.userAgent,
     mzTv: root.getAttribute('data-mz-tv'),
     platform: root.getAttribute('data-mz-tv-platform'),
     tier: root.getAttribute('data-mz-tv-tier'),
@@ -115,90 +165,61 @@ const PROBE = `(function () {
     tvModeIsTv: window.MovieZoneTV ? window.MovieZoneTV.isTV() : null,
     isMzTvAgrees: typeof window.MovieZoneTV === 'object'
       ? window.MovieZoneTV.isTV() === (root.getAttribute('data-mz-tv') === 'true') : null,
-    tvCssApplied: (function () {
-      // A custom property is the cleanest TV-only signal: moviezone.css already
-      // uses content-visibility on cards for every device, so that proves nothing.
-      return getComputedStyle(document.documentElement).getPropertyValue('--mz-tv-safe-x').trim() || null;
+    layout: layout,
+    viewport: viewport,
+    lowEndMode: root.classList.contains('low-end-mode'),
+    tvSheetActive: getComputedStyle(root).getPropertyValue('--mz-tv-active').trim() || null,
+    cardTransitionDuration: style(card, 'transitionDuration'),
+    cardAnimationName: style(card, 'animationName'),
+    navbarBackdrop: (function () {
+      var nav = document.getElementById('navbar');
+      if (!nav) return null;
+      var cs = getComputedStyle(nav);
+      // getPropertyValue is the reliable read; the camelCase alias is missing in
+      // some engines and silently yields undefined.
+      return cs.getPropertyValue('backdrop-filter') ||
+             cs.getPropertyValue('-webkit-backdrop-filter') || 'none';
     })(),
-    cardContentVisibility: (function () {
-      var card = document.querySelector('.movie-card');
-      return card ? getComputedStyle(card).contentVisibility || 'unsupported' : null;
-    })(),
-    gridColumns: (function () {
-      var grid = document.getElementById('movieGrid');
-      return grid ? getComputedStyle(grid).gridTemplateColumns : null;
-    })(),
-    cssDiag: (function () {
-      var out = { sheets: [], outlineRules: [], cardMatches: null };
-      var card = document.querySelector('.movie-card');
-      if (card) { card.scrollIntoView({ block: 'center' }); card.focus(); }
-      for (var i = 0; i < document.styleSheets.length; i++) {
-        var sheet = document.styleSheets[i];
-        var info = { href: sheet.href ? sheet.href.split('/').pop() : '(inline)', rules: null, error: null };
-        try { info.rules = sheet.cssRules.length; } catch (e) { info.error = e.name; }
-        out.sheets.push(info);
 
-        if (!info.rules || !card) continue;
-        for (var j = 0; j < sheet.cssRules.length; j++) {
-          var rule = sheet.cssRules[j];
-          if (!rule.selectorText || !rule.style || !rule.style.outline && !rule.style.outlineStyle) continue;
-          if (rule.selectorText.indexOf('movie-card') === -1 && rule.selectorText.indexOf(':focus') === -1) continue;
-          var matches = false;
-          try { matches = card.matches(rule.selectorText); } catch (e) {}
-          out.outlineRules.push({
-            sheet: info.href,
-            selector: rule.selectorText.slice(0, 120),
-            outline: rule.style.outline || rule.style.outlineStyle,
-            important: rule.style.getPropertyPriority('outline') || rule.style.getPropertyPriority('outline-style'),
-            matchesFocusedCard: matches
-          });
-        }
-      }
-      if (card) {
-        try { out.cardMatches = card.matches('html[data-mz-tv="true"] .movie-card:focus'); } catch (e) { out.cardMatches = 'error'; }
-      }
-      return out;
-    })(),
-    focusRing: (function () {
-      var card = document.querySelector('.movie-card');
-      if (!card) return null;
-      // The grid sits below the fold and cards use content-visibility:auto, so
-      // bring it on screen before measuring or the style is still skipped.
-      card.scrollIntoView({ block: 'center' });
-      card.focus();
-      var cs = getComputedStyle(card);
-      return {
-        active: document.activeElement === card,
-        outlineWidth: cs.outlineWidth,
-        outlineStyle: cs.outlineStyle,
-        outlineColor: cs.outlineColor,
-        varWidth: cs.getPropertyValue('--mz-tv-focus-width').trim()
-      };
-    })(),
+    // D-pad, driven exactly the way a remote drives it.
     dpad: (function () {
       var cards = document.querySelectorAll('.movie-card');
       if (cards.length < 2) return 'too-few-cards';
+      cards[0].scrollIntoView({ block: 'center' });
       cards[0].focus();
       var before = document.activeElement;
       var ev = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true });
       try { Object.defineProperty(ev, 'keyCode', { get: function () { return 39; } }); } catch (e) {}
       document.dispatchEvent(ev);
-      return { moved: document.activeElement !== before, consumed: ev.defaultPrevented };
+      var focused = document.activeElement;
+      var cs = getComputedStyle(focused);
+      return {
+        moved: focused !== before,
+        consumed: ev.defaultPrevented,
+        outlineWidth: cs.outlineWidth,
+        outlineStyle: cs.outlineStyle,
+        outlineColor: cs.outlineColor,
+        matchesFocus: focused.matches(':focus'),
+        matchesFocusVisible: (function () {
+          try { return focused.matches(':focus-visible'); } catch (e) { return 'unsupported'; }
+        })(),
+        widthWhileFocused: boxWidth(focused)
+      };
     })()
   });
 })()`;
 
 async function probe(cdp, userAgent, url) {
   await cdp.send('Emulation.setUserAgentOverride', { userAgent });
-  // Headless windows have no system focus, so :focus / :focus-visible never match
-  // and every focus-ring assertion would be meaningless without this.
+  // Headless windows have no system focus, so :focus / :focus-visible would
+  // never match and every focus assertion would be meaningless.
   try { await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true }); } catch (e) {}
   await cdp.send('Page.enable');
   const loaded = cdp.waitForEvent('Page.loadEventFired', 45000);
   await cdp.send('Page.navigate', { url });
   await loaded;
-  await sleep(4000); // let TMDB data land and the grid render
-  const result = await cdp.send('Runtime.evaluate', { expression: PROBE, returnByValue: true, awaitPromise: false });
+  await sleep(4500); // let TMDB data land and the grid render
+  const result = await cdp.send('Runtime.evaluate', { expression: PROBE, returnByValue: true });
   if (result.exceptionDetails) throw new Error('probe threw: ' + JSON.stringify(result.exceptionDetails.text));
   return JSON.parse(result.result.value);
 }
@@ -244,39 +265,67 @@ async function probe(cdp, userAgent, url) {
     say(tv.tier === 'low', 'render tier is low (got ' + tv.tier + ')');
     say(tv.ready === 'true', 'tv-mode.js finished booting');
     say(tv.tvModeLoaded === true, 'window.MovieZoneTV is available to moviezone.js');
-    say(tv.tvModeIsTv === true, 'MovieZoneTV.isTV() is true');
-    say(tv.isMzTvAgrees === true, 'the attribute and the API agree');
+    say(tv.tvModeIsTv === true && tv.isMzTvAgrees === true, 'MovieZoneTV.isTV() agrees with the attribute');
+    say(tv.tvSheetActive === '1', 'tv-mode.css matched (--mz-tv-active=' + tv.tvSheetActive + ')');
     say(tv.movieCards > 0, 'real movie cards rendered: ' + tv.movieCards);
     say(tv.movieCards <= 30, 'card count respects the TV memory cap (<=30)');
-    say(tv.cardsWithTabIndex === tv.movieCards, 'every card is reachable by the D-pad (' + tv.cardsWithTabIndex + '/' + tv.movieCards + ')');
-    say(tv.tvCssApplied === '2.5vw', 'tv-mode.css is active (--mz-tv-safe-x=' + tv.tvCssApplied + ')');
-    say(tv.cardContentVisibility === 'auto', 'cards skip offscreen rendering (content-visibility=' + tv.cardContentVisibility + ')');
-    say(/260px|300px|210px|400px/.test(String(tv.gridColumns)) || String(tv.gridColumns).split(' ').length <= 7,
-      'grid uses the wider TV columns: ' + tv.gridColumns);
-    say(tv.focusRing && tv.focusRing.active === true, 'a card can take focus');
-    say(tv.focusRing && parseFloat(tv.focusRing.outlineWidth) >= 4,
-      'TV focus ring is >=4px (width=' + (tv.focusRing && tv.focusRing.outlineWidth) +
-      ' style=' + (tv.focusRing && tv.focusRing.outlineStyle) +
-      ' color=' + (tv.focusRing && tv.focusRing.outlineColor) +
-      ' var=' + (tv.focusRing && tv.focusRing.varWidth) + ')');
-    if (!(tv.focusRing && parseFloat(tv.focusRing.outlineWidth) >= 4)) {
-      console.log('      diag: selector matches focused card = ' + JSON.stringify(tv.cssDiag.cardMatches));
-      console.log('      diag: stylesheets = ' + JSON.stringify(tv.cssDiag.sheets));
-      tv.cssDiag.outlineRules.slice(0, 12).forEach(r => console.log('      diag: ' + JSON.stringify(r)));
-    }
-    say(tv.dpad && tv.dpad.moved === true, 'ArrowRight moves focus in the real grid');
+    say(tv.cardsWithTabIndex === tv.movieCards, 'every card is D-pad reachable (' + tv.cardsWithTabIndex + '/' + tv.movieCards + ')');
+
+    console.log('\n--- performance layer engaged ---');
+    say(tv.navbarBackdrop === 'none', 'navbar backdrop blur removed (got ' + tv.navbarBackdrop + ')');
+    say(tv.cardTransitionDuration === '0s', 'card hover transitions removed (got ' + tv.cardTransitionDuration + ')');
+    say(tv.cardAnimationName === 'none', 'card entrance animation removed (got ' + tv.cardAnimationName + ')');
+
+    console.log('\n--- D-pad on the real grid ---');
+    say(tv.dpad && tv.dpad.moved === true, 'ArrowRight moves focus');
     say(tv.dpad && tv.dpad.consumed === true, 'ArrowRight is consumed by tv-mode.js');
+    say(tv.dpad && tv.dpad.matchesFocus === true, 'the focused card matches :focus');
+    say(tv.dpad && tv.dpad.outlineStyle === 'solid', 'focus ring is drawn (style=' + (tv.dpad && tv.dpad.outlineStyle) + ')');
+    say(tv.dpad && parseFloat(tv.dpad.outlineWidth) === 2,
+      'focus ring is the laptop 2px (got ' + (tv.dpad && tv.dpad.outlineWidth) + ')');
+    say(tv.dpad && tv.dpad.outlineColor === 'rgb(255, 193, 7)',
+      'focus ring is the brand gold (got ' + (tv.dpad && tv.dpad.outlineColor) + ')');
 
     console.log('\n--- same page, desktop Chrome user agent ---');
     const desk = await probe(cdp, DESKTOP_UA, url);
     say(desk.mzTv === null, 'TV mode does NOT engage on desktop');
     say(desk.tier === null, 'no tier attribute on desktop');
     say(desk.tvModeIsTv === false, 'MovieZoneTV.isTV() is false on desktop');
+    say(desk.tvSheetActive === null, 'tv-mode.css stays inert on desktop');
     say(desk.movieCards > 0, 'desktop cards rendered: ' + desk.movieCards);
     say(desk.dpad && desk.dpad.moved === false, 'ArrowRight does not hijack focus on desktop');
     say(desk.dpad && desk.dpad.consumed === false, 'ArrowRight is not consumed on desktop');
-    say(desk.tvCssApplied === null, 'tv-mode.css stays inert on desktop (--mz-tv-safe-x=' + desk.tvCssApplied + ')');
-    say(desk.gridColumns !== tv.gridColumns, 'desktop keeps its own grid columns: ' + desk.gridColumns);
+    // In headless the app's own frame sampler often drops the desktop run into
+    // low-end-mode, which strips the blur itself — only demand the blur when it did not.
+    say(desk.lowEndMode === true || desk.navbarBackdrop !== 'none',
+      'desktop navbar blur intact unless the app self-downgraded (blur=' + desk.navbarBackdrop +
+      ', low-end-mode=' + desk.lowEndMode + ')');
+
+    console.log('\n--- LAYOUT IDENTITY: TV must look exactly like the laptop ---');
+    console.log('      viewport TV     : ' + JSON.stringify(tv.viewport));
+    console.log('      viewport laptop : ' + JSON.stringify(desk.viewport));
+    say(tv.viewport.clientWidth === desk.viewport.clientWidth,
+      'both runs measured the same viewport width (' + tv.viewport.clientWidth + ' vs ' + desk.viewport.clientWidth + ')');
+    const KEYS = [
+      ['rootFontSize', 'root font size'],
+      ['bodyFontSize', 'body font size'],
+      ['gridColumns', 'movie grid columns'],
+      ['gridGap', 'movie grid gap'],
+      ['cardWidth', 'movie card width'],
+      ['cardHeight', 'movie card height'],
+      ['cardRadius', 'movie card corner radius'],
+      ['cardTitleFontSize', 'card title font size'],
+      ['headingFontSize', 'section heading font size'],
+      ['navbarWidth', 'navbar width'],
+      ['sectionPaddingLeft', 'content left padding']
+    ];
+    KEYS.forEach(([key, label]) => {
+      say(tv.layout[key] === desk.layout[key],
+        label + ' identical: ' + JSON.stringify(tv.layout[key]) +
+        (tv.layout[key] === desk.layout[key] ? '' : ' (TV) vs ' + JSON.stringify(desk.layout[key]) + ' (laptop)'));
+    });
+    say(tv.dpad.widthWhileFocused === desk.dpad.widthWhileFocused,
+      'a focused card is the same size on both (' + tv.dpad.widthWhileFocused + ' vs ' + desk.dpad.widthWhileFocused + ')');
   } catch (err) {
     say(false, 'harness error: ' + err.message);
   } finally {

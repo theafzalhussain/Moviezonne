@@ -290,12 +290,49 @@ const tvModeJs = readFile('tv-mode.js');
   });
 
 check('tv-mode.css targets the TV attribute', tvModeCss.indexOf('html[data-mz-tv="true"]') > -1);
-['low', 'high'].forEach(tier =>
-  check('tv-mode.css has a ' + tier + '-tier block', tvModeCss.indexOf('data-mz-tv-tier="' + tier + '"') > -1));
+check('tv-mode.css has a low-tier block', tvModeCss.indexOf('data-mz-tv-tier="low"') > -1);
 check('tv-mode.css forces instant scrolling', /scroll-behavior:\s*auto\s*!important/.test(tvModeCss));
 check('tv-mode.css strips backdrop-filter', /backdrop-filter:\s*none\s*!important/.test(tvModeCss));
-check('tv-mode.css uses content-visibility for offscreen cards', /content-visibility:\s*auto/.test(tvModeCss));
-check('tv-mode.css keeps an overscan-safe area', tvModeCss.indexOf('--mz-tv-safe-x') > -1);
+check('tv-mode.css disables card entrance animations', /animation:\s*none\s*!important/.test(tvModeCss));
+check('tv-mode.css exposes the --mz-tv-active marker', tvModeCss.indexOf('--mz-tv-active') > -1);
+
+/* ── DESIGN RULE: the TV must look exactly like the laptop ──
+   tv-mode.css is a performance sheet, not a re-skin. These guards fail the build
+   if a sizing/typography/spacing override ever creeps back in, which is what
+   made cards render huge and the whole UI look different on TV. */
+function declarationsIn(css, property) {
+  // Matches "property:" only where it starts a declaration, ignoring comments.
+  const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const pattern = new RegExp('(^|[;{]\\s*)' + property + '\\s*:', 'g');
+  return (withoutComments.match(pattern) || []).length;
+}
+
+const FORBIDDEN_IN_TV_CSS = [
+  'font-size',              // scaled the entire type system up
+  'grid-template-columns',  // made the movie cards huge
+  'width',
+  'min-width',
+  'max-width',
+  'height',
+  'gap',
+  'letter-spacing',
+  'line-height'
+];
+FORBIDDEN_IN_TV_CSS.forEach(property => {
+  const count = declarationsIn(tvModeCss, property);
+  check('tv-mode.css never overrides ' + property + ' (design must match laptop)', count === 0,
+    count + ' declaration(s) found');
+});
+
+// Padding/margin are allowed only as scroll-* properties, which move nothing.
+['padding', 'margin'].forEach(property => {
+  const count = declarationsIn(tvModeCss, property);
+  check('tv-mode.css never overrides ' + property, count === 0, count + ' declaration(s) found');
+});
+
+check('tv-mode.css does not rescale the root font', !/html\[data-mz-tv="true"\]\s*\{[^}]*font-size/.test(tvModeCss));
+check('tv-mode.css keeps the laptop focus ring width (2px)', /outline:\s*2px solid var\(--gold\)/.test(tvModeCss));
+check('tv-mode.css mirrors laptop focus styling onto :focus', /\.movie-card:focus\s*\{/.test(tvModeCss));
 
 check('service worker precaches tv-mode.css', swJs.indexOf('tv-mode.css') > -1);
 check('service worker precaches tv-mode.js', swJs.indexOf('tv-mode.js') > -1);

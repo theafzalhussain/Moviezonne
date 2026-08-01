@@ -1,266 +1,125 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    MOVIEZONE — TV MODE STYLES
-   Activated only when tv-mode.js confirms real TV hardware and sets
-   html[data-mz-tv="true"]. Phones, tablets and desktops never match, so this
-   file is inert everywhere else.
+   Active only when tv-mode.js confirms real TV hardware and sets
+   html[data-mz-tv="true"]. Phones, tablets and desktops never match this file.
 
-   Three goals, in priority order:
-     1. NEVER DROP FRAMES. TV SoCs have a fraction of a phone's GPU fill rate,
-        so blur, large shadows, filters and continuous animation are removed.
-     2. READABLE FROM THE SOFA. 10-foot UI: bigger type, fewer columns, a focus
-        ring you can see across the room.
-     3. NOTHING CROPPED. Panels overscan up to ~5% of the signal, so content
-        keeps a safe margin from every edge.
+   DESIGN RULE FOR THIS FILE: the TV must look EXACTLY like the laptop.
+   No font scaling, no grid changes, no card resizing, no colour or spacing
+   changes, no border-radius changes. Anything that moves a pixel of layout or
+   changes a colour belongs in moviezone.css, not here.
 
-   Tiers set by tv-mode.js: data-mz-tv-tier="low|mid|high".
+   What this file is allowed to do is remove CONTINUOUS GPU WORK — the things a
+   TV chipset cannot afford and a viewer three metres away cannot see anyway:
+     • backdrop blur (an offscreen pass per element per frame)
+     • infinite / hover animations and transitions (no pointer exists on a TV)
+     • the Ken-Burns hero pan (repaints a full-screen image every frame)
+     • the ambient particle canvas (a permanent requestAnimationFrame loop)
+     • smooth scrolling (the main reason a remote feels laggy)
+   Every focused/active END STATE is preserved at its laptop values, so the
+   highlight looks identical — it simply arrives instantly instead of easing in.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ═══════════════════════════════════════════════════════════════
-   1. BASELINE — applies to every TV
+   1. BASELINE — every TV
    ═══════════════════════════════════════════════════════════════ */
 
 html[data-mz-tv="true"] {
-  /* Overscan-safe inset. Panels crop the signal edges; 2.5% keeps the navbar
-     and the footer on screen on even the most aggressive sets. */
-  --mz-tv-safe-x: 2.5vw;
-  --mz-tv-safe-y: 2vh;
+  /* Diagnostic marker: lets tests and the console confirm this stylesheet
+     matched, without depending on any visual property. */
+  --mz-tv-active: 1;
 
-  /* Focus ring tuned for viewing distance — thin outlines vanish at 3 metres. */
-  --mz-tv-focus: #ffc107;
-  --mz-tv-focus-width: 4px;
-  --mz-tv-focus-offset: 5px;
-
-  /* Instant scrolling everywhere. Smooth scrolling is the #1 cause of the
-     "remote feels laggy" complaint on TV browsers. */
+  /* Instant scrolling. Smooth scrolling is the single biggest cause of the
+     "the remote feels laggy" complaint on TV browsers. Layout is untouched. */
   scroll-behavior: auto !important;
-  /* Text is read from far away, so scale the whole type system up slightly. */
-  font-size: 18px;
 }
 
-html[data-mz-tv="true"] body {
-  scroll-behavior: auto !important;
-  /* A remote cannot drag a scrollbar; hide it and reclaim the pixels. */
-  scrollbar-width: none;
-}
-html[data-mz-tv="true"] body::-webkit-scrollbar { width: 0; height: 0; display: none; }
+html[data-mz-tv="true"] body { scroll-behavior: auto !important; }
 
-/* ── Kill GPU-expensive effects globally ──────────────────────────────────
-   backdrop-filter forces an offscreen pass per element per frame — on a Fire TV
-   stick a single blurred navbar can cost 20ms/frame on its own. */
+/* ── Remove per-frame GPU work ───────────────────────────────────────────── */
+
+/* backdrop-filter forces an offscreen composite pass for every element that
+   uses it, every frame. On a Fire TV stick the navbar alone can cost ~20ms. */
 html[data-mz-tv="true"] * {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  text-shadow: none !important;
+  /* A permanent will-change pins a GPU layer per card and exhausts TV VRAM. */
   will-change: auto !important;
 }
 
-/* Mouse-driven affordances are dead weight without a pointer. */
+/* The navbar's frosted look comes from blur over a translucent gradient. With
+   the blur gone, the same gradient at full opacity is the closest possible
+   match — same colours, same radius, same shadow, same size. */
+html[data-mz-tv="true"] #navbar {
+  background: linear-gradient(180deg, rgb(15, 15, 25) 0%, rgb(5, 5, 10) 100%) !important;
+}
+
+/* No pointer exists, so the custom cursor layers are pure overhead. */
 html[data-mz-tv="true"] #cursor-glow,
 html[data-mz-tv="true"] #cursor-ring,
-html[data-mz-tv="true"] #cursor-dot,
+html[data-mz-tv="true"] #cursor-dot {
+  display: none !important;
+}
+html[data-mz-tv="true"] * { cursor: none !important; }
+
+/* Ambient canvases run an endless requestAnimationFrame loop that repaints a
+   full-screen surface. moviezone.js already skips them on TV; this makes sure
+   nothing is left painting if that path ever changes. */
 html[data-mz-tv="true"] .ambient-particles,
-html[data-mz-tv="true"] .ch-particle-canvas,
-html[data-mz-tv="true"] #hero::before,
-html[data-mz-tv="true"] #hero::after {
+html[data-mz-tv="true"] .ch-particle-canvas {
   display: none !important;
 }
 
-html[data-mz-tv="true"] * { cursor: none !important; }
-
-/* Continuous transforms on a full-screen backdrop repaint the entire panel
-   every frame. Freeze the Ken-Burns pan. */
-html[data-mz-tv="true"] .slide-bg,
-html[data-mz-tv="true"] .carousel-slide.active .slide-bg {
-  transform: none !important;
+/* Film-grain overlays are animated noise filters over the whole hero. */
+html[data-mz-tv="true"] #hero::before,
+html[data-mz-tv="true"] #hero::after {
   animation: none !important;
 }
 
-/* ── Focus visibility ─────────────────────────────────────────────────────
-   On TV the highlight IS the cursor, so it must be obvious for :focus too —
-   not only :focus-visible, because programmatic focus() from the D-pad handler
-   does not always satisfy the heuristic on TV browsers. */
-html[data-mz-tv="true"] :focus,
-html[data-mz-tv="true"] :focus-visible {
-  outline: var(--mz-tv-focus-width) solid var(--mz-tv-focus) !important;
-  outline-offset: var(--mz-tv-focus-offset) !important;
-  box-shadow: none !important; /* glow costs a blur pass; the outline is enough */
-  border-radius: inherit;
+/* The Ken-Burns pan continuously transforms a full-bleed backdrop image, which
+   means a full-screen repaint every single frame. Freeze it at rest — the
+   image, its size and its position are unchanged. */
+html[data-mz-tv="true"] .slide-bg,
+html[data-mz-tv="true"] .carousel-slide.active .slide-bg {
+  animation: none !important;
+  transition: none !important;
 }
 
-/* Cards get a solid ring plus a flat tint instead of a shadow/scale animation. */
-html[data-mz-tv="true"] .movie-card:focus,
-html[data-mz-tv="true"] .movie-card:focus-visible,
-html[data-mz-tv="true"] .upcoming-card:focus,
-html[data-mz-tv="true"] .upcoming-card:focus-visible,
-html[data-mz-tv="true"] .ch-card:focus,
-html[data-mz-tv="true"] .ch-card:focus-visible {
-  outline: var(--mz-tv-focus-width) solid var(--mz-tv-focus) !important;
-  outline-offset: 0 !important;
-  background-color: rgba(255, 193, 7, 0.1) !important;
-  transform: none !important;
-  z-index: 2;
-}
-
-/* Hover states are unreachable without a pointer and only cause flicker when a
-   TV browser synthesises hover on the focused element. */
-html[data-mz-tv="true"] .movie-card:hover,
-html[data-mz-tv="true"] .upcoming-card:hover,
-html[data-mz-tv="true"] .cat-tab:hover,
-html[data-mz-tv="true"] .nav-links a:hover {
-  transform: none !important;
-  box-shadow: none !important;
-}
-
-/* ── Safe area ───────────────────────────────────────────────────────────── */
-html[data-mz-tv="true"] #navbar {
-  padding-left: calc(var(--mz-tv-safe-x) + 0.5rem) !important;
-  padding-right: calc(var(--mz-tv-safe-x) + 0.5rem) !important;
-  /* A translucent, blurred bar is expensive; make it opaque. */
-  background: #05050d !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-html[data-mz-tv="true"] .main-content,
-html[data-mz-tv="true"] #upcoming,
-html[data-mz-tv="true"] #continue-watching,
-html[data-mz-tv="true"] .site-footer {
-  padding-left: var(--mz-tv-safe-x) !important;
-  padding-right: var(--mz-tv-safe-x) !important;
-}
-
-html[data-mz-tv="true"] .site-footer { padding-bottom: calc(var(--mz-tv-safe-y) + 1rem) !important; }
-
-/* Focused items must never hide behind the sticky navbar. */
-html[data-mz-tv="true"] .movie-grid,
-html[data-mz-tv="true"] .upcoming-grid,
-html[data-mz-tv="true"] .continue-watching-grid,
-html[data-mz-tv="true"] .ch-grid {
-  scroll-padding-top: 7rem;
-  scroll-padding-bottom: 4rem;
-}
+/* ── Animations off, end states kept ──────────────────────────────────────
+   Cards, tabs and nav links animate on hover/focus. A TV has no pointer, and
+   easing 24 cards is exactly what drops frames. Transitions are removed so the
+   highlight snaps; the focused APPEARANCE below is untouched. */
 html[data-mz-tv="true"] .movie-card,
 html[data-mz-tv="true"] .upcoming-card,
 html[data-mz-tv="true"] .ch-card,
 html[data-mz-tv="true"] .cat-tab,
-html[data-mz-tv="true"] .carousel-thumb {
-  scroll-margin: 7rem var(--mz-tv-safe-x) 4rem;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   2. 10-FOOT LAYOUT — fewer, larger tiles
-   ═══════════════════════════════════════════════════════════════ */
-
-/* 1080p is still the most common TV browser viewport (many 4K sets report
-   1920x1080 CSS pixels). Six columns keeps posters legible from the sofa. */
-html[data-mz-tv="true"] .movie-grid {
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)) !important;
-  gap: 1.8rem !important;
-  /* Isolate each grid so a re-render never relayouts the whole page. */
-  contain: layout style paint;
-}
-
-html[data-mz-tv="true"] .upcoming-grid {
-  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)) !important;
-  gap: 1.8rem !important;
-  contain: layout style paint;
-}
-
-html[data-mz-tv="true"] .card-title { font-size: 1.05rem !important; line-height: 1.3; }
-html[data-mz-tv="true"] .card-meta,
-html[data-mz-tv="true"] .card-genres { font-size: 0.8rem !important; }
-html[data-mz-tv="true"] .section-title h2 { font-size: 2.2rem !important; }
-
-/* Tab strips are navigated one step at a time, so give them room and stop the
-   text from shrinking below readable size. */
-html[data-mz-tv="true"] .cat-tabs,
-html[data-mz-tv="true"] .ch-category-tabs {
-  gap: 0.9rem !important;
-  flex-wrap: wrap !important;
-}
-html[data-mz-tv="true"] .cat-tab,
-html[data-mz-tv="true"] .ch-cat-tab {
-  font-size: 1rem !important;
-  padding: 0.7rem 1.4rem !important;
-}
-
-html[data-mz-tv="true"] .nav-links a { font-size: 1rem !important; }
-
-/* The search field is driven by an on-screen keyboard; make it a big target. */
-html[data-mz-tv="true"] #searchInput {
-  font-size: 1.05rem !important;
-  padding-top: 0.7rem !important;
-  padding-bottom: 0.7rem !important;
-}
-html[data-mz-tv="true"] .search-result-item { padding: 0.85rem 1rem !important; }
-
-/* Modal / detail pages: bigger type, no entry animation. */
-html[data-mz-tv="true"] .modal-title { font-size: 2.6rem !important; }
-html[data-mz-tv="true"] .modal-desc { font-size: 1.05rem !important; }
-html[data-mz-tv="true"] .modal-box,
-html[data-mz-tv="true"] .upcoming-detail-box {
-  animation: none !important;
-  box-shadow: none !important;
-}
-html[data-mz-tv="true"] #modal-overlay.open { animation: none !important; }
-
-/* Action buttons are the most-used focus targets in the app. */
-html[data-mz-tv="true"] .btn-play,
-html[data-mz-tv="true"] .btn-watchlist,
-html[data-mz-tv="true"] .btn-download,
-html[data-mz-tv="true"] .ud-btn,
-html[data-mz-tv="true"] .load-more-btn {
-  font-size: 1.05rem !important;
-  padding: 0.85rem 1.6rem !important;
-  box-shadow: none !important;
-}
-
-/* Native select popups are usable with a remote, but they need to be readable. */
-html[data-mz-tv="true"] .lang-select,
-html[data-mz-tv="true"] .quality-select {
-  font-size: 1rem !important;
-  padding: 0.6rem 0.9rem !important;
-}
-
-/* The player fills the screen on TV — that is the whole point of the device. */
-html[data-mz-tv="true"] .video-embed { border-radius: 0 !important; }
-html[data-mz-tv="true"] .video-embed iframe { border-radius: 0 !important; }
-
-/* ═══════════════════════════════════════════════════════════════
-   3. RENDER BUDGET — cut everything that repaints continuously
-   ═══════════════════════════════════════════════════════════════ */
-
-/* Off-screen cards cost nothing to keep in the DOM once the browser is allowed
-   to skip their layout and paint. This is the single largest win on weak TVs
-   and it is why long grids stop stuttering. */
-html[data-mz-tv="true"] .movie-card,
-html[data-mz-tv="true"] .upcoming-card,
-html[data-mz-tv="true"] .ch-card {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 380px;
-  /* Entry animations on 24+ cards at once are a guaranteed frame drop. */
-  animation: none !important;
-  animation-delay: 0s !important;
-  opacity: 1 !important;
-  transition: outline-color 0.1s linear, background-color 0.1s linear !important;
-  box-shadow: none !important;
-}
-
-html[data-mz-tv="true"] .upcoming-card { contain-intrinsic-size: auto 260px; }
-
-/* Poster images: no filters, no scaling transitions, GPU-cheap rendering. */
-html[data-mz-tv="true"] .movie-card .card-poster img,
-html[data-mz-tv="true"] .upcoming-card .upcoming-poster img {
-  filter: none !important;
-  transform: none !important;
+html[data-mz-tv="true"] .ch-cat-tab,
+html[data-mz-tv="true"] .nav-links a,
+html[data-mz-tv="true"] .card-poster img,
+html[data-mz-tv="true"] .upcoming-poster img,
+html[data-mz-tv="true"] .card-play-btn,
+html[data-mz-tv="true"] #navbar {
   transition: none !important;
 }
 
-/* Decorative pseudo-element sweeps/shines run forever and are invisible from
-   the sofa anyway. */
-html[data-mz-tv="true"] .movie-card::before,
-html[data-mz-tv="true"] .movie-card::after,
+/* Card entrance animations fire for every tile in a freshly rendered grid —
+   a guaranteed stall on a weak SoC. Cards appear immediately instead. */
+html[data-mz-tv="true"] .movie-card,
+html[data-mz-tv="true"] .upcoming-card,
+html[data-mz-tv="true"] .ch-card {
+  animation: none !important;
+  animation-delay: 0s !important;
+  opacity: 1 !important;
+}
+
+/* The shine sweep animates a gradient across a poster on every focus change,
+   which on a D-pad means on every single key press. */
 html[data-mz-tv="true"] .card-poster::after,
-html[data-mz-tv="true"] .upcoming-poster::after,
+html[data-mz-tv="true"] .upcoming-poster::after {
+  animation: none !important;
+  display: none !important;
+}
+
+/* Decorative underline/line sweeps loop forever. */
 html[data-mz-tv="true"] .nav-links a::before,
 html[data-mz-tv="true"] .nav-links a::after,
 html[data-mz-tv="true"] .title-line,
@@ -268,109 +127,140 @@ html[data-mz-tv="true"] .section-sep {
   animation: none !important;
 }
 
-/* The skeleton shimmer animates the whole grid area before data arrives. */
-html[data-mz-tv="true"] .skeleton { animation: none !important; background: #12121f !important; }
+/* The skeleton shimmer animates the entire grid area before data lands. The
+   colour is left to moviezone.css; only the animation stops. */
+html[data-mz-tv="true"] .skeleton { animation: none !important; }
 
-/* Isolate the big overlays so opening the modal cannot relayout the page below. */
+/* Modal entrance animation: the overlay still appears, just without the slide. */
+html[data-mz-tv="true"] #modal-overlay.open,
+html[data-mz-tv="true"] .modal-box,
+html[data-mz-tv="true"] .upcoming-detail-box {
+  animation: none !important;
+}
+
+/* ── D-pad focus: keep the laptop look, guarantee it shows up ─────────────
+   moviezone.css styles cards through :focus-visible, which Chrome/Android TV
+   matches for keyboard focus. Some TV browsers (older webOS, Tizen, HbbTV) have
+   a weaker heuristic and never match it for programmatic focus() — leaving the
+   viewer with no visible highlight at all. These rules repeat the EXACT laptop
+   :focus-visible values under plain :focus as a safety net. Values copied from
+   moviezone.css: do not "improve" them here or TV and laptop will drift. */
+
+html[data-mz-tv="true"] :focus {
+  outline: 2px solid var(--gold) !important;
+  outline-offset: 3px !important;
+  box-shadow: 0 0 20px rgba(245, 197, 24, 0.4) !important;
+  border-radius: inherit;
+}
+
+html[data-mz-tv="true"] .movie-card:focus {
+  border-color: rgba(245, 197, 24, 0.3) !important;
+  z-index: 10;
+  box-shadow:
+    0 45px 100px rgba(0, 0, 0, 0.7),
+    0 0 40px rgba(245, 197, 24, 0.1) !important;
+}
+html[data-mz-tv="true"] .movie-card:focus::before { opacity: 1; }
+html[data-mz-tv="true"] .movie-card:focus .card-poster img {
+  transform: scale(1.03);
+  filter: saturate(1.15) contrast(1.07) brightness(1);
+}
+html[data-mz-tv="true"] .movie-card:focus .card-overlay { opacity: 1; }
+html[data-mz-tv="true"] .movie-card:focus .card-play-btn {
+  transform: translateY(0) scale(1) rotate(0deg);
+  box-shadow:
+    0 14px 36px rgba(230, 57, 70, 0.45),
+    0 0 0 8px rgba(245, 197, 24, 0.12),
+    0 0 24px rgba(245, 197, 24, 0.25);
+}
+
+html[data-mz-tv="true"] .upcoming-card:focus {
+  border-color: rgba(245, 197, 24, 0.32) !important;
+  transform: translateY(-6px) scale(1.01);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(245, 197, 24, 0.12),
+    0 0 24px rgba(245, 197, 24, 0.07) !important;
+  z-index: 10;
+}
+
+/* Note on hover: TV browsers synthesise :hover on whatever is focused, so a
+   focused card picks up the laptop's hover lift (translateY -12px, scale 1.04).
+   That is left alone on purpose — it is exactly what the laptop looks like when
+   you point at a card. The transitions above are removed, so it snaps instead of
+   easing, which is the part that cost frames. */
+
+/* ── Scroll positioning (no visual change) ────────────────────────────────
+   The navbar is fixed, so a focused card in the top row would otherwise scroll
+   to sit underneath it. This only affects where scrolling stops. */
+html[data-mz-tv="true"] .movie-grid,
+html[data-mz-tv="true"] .upcoming-grid,
+html[data-mz-tv="true"] .continue-watching-grid,
+html[data-mz-tv="true"] .ch-grid {
+  scroll-padding-top: 7rem;
+  scroll-padding-bottom: 3rem;
+}
+html[data-mz-tv="true"] .movie-card,
+html[data-mz-tv="true"] .upcoming-card,
+html[data-mz-tv="true"] .ch-card,
+html[data-mz-tv="true"] .cat-tab,
+html[data-mz-tv="true"] .carousel-thumb {
+  scroll-margin: 7rem 1.5rem 3rem;
+}
+
+/* Isolate the big overlays so opening the modal cannot relayout the page under
+   it. Purely a containment hint — nothing moves. */
 html[data-mz-tv="true"] #modal-overlay,
 html[data-mz-tv="true"] .upcoming-detail-overlay,
 html[data-mz-tv="true"] .collections-hub-overlay {
   contain: layout style paint;
 }
 
+/* A poster parked by tv-mode.js (src removed to relieve decode pressure on the
+   weakest boxes) should read as an empty tile, not a broken image. The card
+   keeps its exact size because width/height are set on the <img>. */
+html[data-mz-tv="true"] img[data-mztv-src] { visibility: hidden; }
+
 /* ═══════════════════════════════════════════════════════════════
-   4. LOW TIER — sticks, 2016-era panels, or a measured frame drop
-   (tv-mode.js also sets this after its frame watchdog sees <22fps)
+   2. LOW TIER — sticks and 2016-era panels, or a measured frame drop
+   (tv-mode.js sets tier="low" up front, and downgrades to it if its
+   frame watchdog measures under ~22fps)
+
+   Still no layout or colour changes: only the remaining motion and the
+   large blur passes go away.
    ═══════════════════════════════════════════════════════════════ */
 
-html[data-mz-tv="true"][data-mz-tv-tier="low"] * {
+html[data-mz-tv="true"][data-mz-tv-tier="low"] *,
+html[data-mz-tv="true"][data-mz-tv-tier="low"] *::before,
+html[data-mz-tv="true"][data-mz-tv-tier="low"] *::after {
   animation: none !important;
   transition: none !important;
-  filter: none !important;
-  box-shadow: none !important;
-  border-radius: 6px;
 }
 
-/* Gradients are re-rasterised on every repaint; flat fills are free. */
-html[data-mz-tv="true"][data-mz-tv-tier="low"] .movie-card,
-html[data-mz-tv="true"][data-mz-tv-tier="low"] .upcoming-card,
-html[data-mz-tv="true"][data-mz-tv-tier="low"] .modal-box,
-html[data-mz-tv="true"][data-mz-tv-tier="low"] .cat-tab,
-html[data-mz-tv="true"][data-mz-tv-tier="low"] .ch-card {
-  background-image: none !important;
-  background: #0d0d1a !important;
-}
-
-html[data-mz-tv="true"][data-mz-tv-tier="low"] .modal-gradient,
-html[data-mz-tv="true"][data-mz-tv-tier="low"] .ud-hero-gradient,
+/* Carousel auto-advance and hero glow pulses are the last continuous repaints. */
 html[data-mz-tv="true"][data-mz-tv-tier="low"] .ch-hero-glow,
-html[data-mz-tv="true"][data-mz-tv-tier="low"] .ch-hero-mosaic {
-  display: none !important;
+html[data-mz-tv="true"][data-mz-tv-tier="low"] .hero-glow {
+  animation: none !important;
 }
 
-/* Fewer, larger tiles: less to lay out, decode and paint per screen. */
-html[data-mz-tv="true"][data-mz-tv-tier="low"] .movie-grid {
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)) !important;
-  gap: 1.5rem !important;
-}
-html[data-mz-tv="true"][data-mz-tv-tier="low"] .upcoming-grid {
-  grid-template-columns: repeat(auto-fill, minmax(460px, 1fr)) !important;
-}
-
-/* Carousel thumbnails are pure decoration and cost a second image set. */
-html[data-mz-tv="true"][data-mz-tv-tier="low"] .carousel-thumbs { display: none !important; }
-
-/* A parked poster (src removed by tv-mode.js) should read as a calm placeholder
-   rather than a broken image. */
-html[data-mz-tv="true"] img[data-mztv-src] {
-  background: #12121f;
-  visibility: hidden;
+/* Blur filters on large surfaces are the most expensive thing left. Note this
+   is `filter`, not `background` — colours and layout are untouched. */
+html[data-mz-tv="true"][data-mz-tv-tier="low"] .modal-image-wrapper img,
+html[data-mz-tv="true"][data-mz-tv-tier="low"] .ud-backdrop-img,
+html[data-mz-tv="true"][data-mz-tv-tier="low"] .slide-bg {
+  filter: none !important;
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   5. HIGH TIER — consoles and Apple TV can afford a little polish
+   3. PLATFORM SWITCHES
    ═══════════════════════════════════════════════════════════════ */
 
-html[data-mz-tv="true"][data-mz-tv-tier="high"] .movie-card {
-  transition: outline-color 0.12s linear, background-color 0.12s linear, transform 0.12s ease-out !important;
-}
-html[data-mz-tv="true"][data-mz-tv-tier="high"] .movie-card:focus,
-html[data-mz-tv="true"][data-mz-tv-tier="high"] .movie-card:focus-visible {
-  transform: scale(1.04) !important;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   6. VIEWPORT TUNING
-   ═══════════════════════════════════════════════════════════════ */
-
-/* 720p panels and 1280x720 TV browsers (common on older webOS/Tizen). */
-@media (max-width: 1366px) {
-  html[data-mz-tv="true"] { font-size: 16px; }
-  html[data-mz-tv="true"] .movie-grid {
-    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)) !important;
-    gap: 1.2rem !important;
-  }
-  html[data-mz-tv="true"] .upcoming-grid {
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)) !important;
-  }
-  html[data-mz-tv="true"] .section-title h2 { font-size: 1.7rem !important; }
-  html[data-mz-tv="true"] .modal-title { font-size: 2rem !important; }
-}
-
-/* True 4K viewports (some Android TV browsers report 3840 CSS px). */
-@media (min-width: 2560px) {
-  html[data-mz-tv="true"] { font-size: 24px; }
-  html[data-mz-tv="true"] .movie-grid {
-    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)) !important;
-    gap: 2.4rem !important;
-  }
-  html[data-mz-tv="true"] .upcoming-grid {
-    grid-template-columns: repeat(auto-fill, minmax(620px, 1fr)) !important;
-  }
-  html[data-mz-tv="true"] { --mz-tv-focus-width: 6px; }
-}
-
-/* Respect the platform's own reduced-motion switch on top of everything else. */
+/* Honour the platform's own reduced-motion preference on top of the above. */
 @media (prefers-reduced-motion: reduce) {
-  html[data-mz-tv="true"] * { animation: none !important; transition: none !important; }
+  html[data-mz-tv="true"] *,
+  html[data-mz-tv="true"] *::before,
+  html[data-mz-tv="true"] *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }
