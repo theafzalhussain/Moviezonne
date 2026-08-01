@@ -266,8 +266,11 @@
     if (tier === 'high' && e.screenWidth >= 3840) tier = 'mid';
 
     if (tier === 'low') {
+      // prefetch:1 — one warmed title at a time. A remote fires no mouseenter, so
+      // without this every Play on a TV is a cold fetch; one request is cheap and
+      // the proxy caches it, while a bigger number would compete with scrolling.
       return { tier: 'low', maxCards: 24, posterWidth: 185, deferOffscreenImages: true,
-        animations: false, particles: false, blur: false, prefetch: 0, focusScrollBlock: 'nearest' };
+        animations: false, particles: false, blur: false, prefetch: 1, focusScrollBlock: 'nearest' };
     }
     if (tier === 'high') {
       return { tier: 'high', maxCards: 60, posterWidth: 342, deferOffscreenImages: false,
@@ -433,11 +436,59 @@
     '.carousel-dot'
   ].join(',');
 
-  // Collects focusables in document order with their rects. Called per keypress;
-  // one layout flush for ~24-60 elements is cheap even on a Fire TV stick.
-  function collectFocusables() {
-    var scope = activeScope() || document.body;
+  /* Focusable cache.
+     Rebuilding the candidate list meant a querySelectorAll plus one
+     getBoundingClientRect per element on EVERY key press. With a few hundred
+     tiles in an infinite-scroll grid that is a forced synchronous layout per
+     press — measured as the single most repeated cost during D-pad use.
+
+     Two changes fix it:
+       1. the list is cached and only rebuilt when the DOM or the viewport changes
+       2. geometry is stored in DOCUMENT space (rect + scroll offset), which does
+          not change while scrolling, so scrolling never invalidates the cache.
+     Spatial navigation is purely relative, so document space works unchanged. */
+  var focusCache = { entries: null, scope: null, byElement: null };
+
+  function invalidateFocusCache() {
+    focusCache.entries = null;
+    focusCache.byElement = null;
+  }
+
+  /* Reading window.pageXOffset / scrollTop forces the browser to flush layout, so
+     these are read at most once per key event and reused. */
+  var scrollSnapshot = { x: 0, y: 0, valid: false };
+
+  function refreshScrollSnapshot() {
+    scrollSnapshot.x = window.pageXOffset || document.documentElement.scrollLeft || 0;
+    scrollSnapshot.y = window.pageYOffset || document.documentElement.scrollTop || 0;
+    scrollSnapshot.valid = true;
+  }
+
+  function scrollOffsetX() {
+    if (!scrollSnapshot.valid) refreshScrollSnapshot();
+    return scrollSnapshot.x;
+  }
+  function scrollOffsetY() {
+    if (!scrollSnapshot.valid) refreshScrollSnapshot();
+    return scrollSnapshot.y;
+  }
+  function invalidateScrollSnapshot() { scrollSnapshot.valid = false; }
+
+  function toDocRect(rect, offsetX, offsetY) {
+    return {
+      left: rect.left + offsetX,
+      top: rect.top + offsetY,
+      right: rect.right + offsetX,
+      bottom: rect.bottom + offsetY,
+      width: rect.width,
+      height: rect.height
+    };
+  }
+
+  function buildFocusables(scope) {
     var nodes = scope.querySelectorAll(FOCUSABLE_SELECTOR);
+    var offsetX = scrollOffsetX();
+    var offsetY = scrollOffsetY();
     var out = [];
     for (var i = 0; i < nodes.length; i++) {
       var el = nodes[i];
@@ -446,28 +497,109 @@
       if (el.closest('[hidden]')) continue;
       var rect = el.getBoundingClientRect();
       if (!isVisibleRect(rect)) continue; // display:none / collapsed / closed overlay
-      out.push({ el: el, rect: rect });
+      out.push({ el: el, rect: toDocRect(rect, offsetX, offsetY) });
     }
     return out;
+  }
+
+  // Returns focusables with document-space rects, rebuilding only when needed.
+  function collectFocusables() {
+    var scope = activeScope() || document.body;
+    if (focusCache.entries && focusCache.scope === scope) return focusCache.entries;
+    focusCache.entries = buildFocusables(scope);
+    focusCache.scope = scope;
+    focusCache.byElement = null;
+    return focusCache.entries;
+  }
+
+  // Cached element -> entry lookup, so the focused element's geometry costs a map
+  // hit instead of a getBoundingClientRect (which forces a full layout flush).
+  function cachedEntryFor(el) {
+    var entries = collectFocusables();
+    if (!focusCache.byElement) {
+      var map = typeof Map === 'function' ? new Map() : null;
+      if (map) {
+        for (var i = 0; i < entries.length; i++) map.set(entries[i].el, entries[i]);
+      }
+      focusCache.byElement = map;
+    }
+    if (focusCache.byElement) return focusCache.byElement.get(el) || null;
+    for (var j = 0; j < entries.length; j++) {
+      if (entries[j].el === el) return entries[j];
+    }
+    return null;
+  }
+
+  /* ── Prefetch on rest (makes Play feel instant) ────────────────────────────
+     moviezone.js warms a title's details and the player hosts on `mouseenter`
+     or `touchstart`. A remote fires neither, so on TV every Play was a cold
+     fetch. Once the highlight has rested on a card we hand moviezone.js the
+     same `mouseenter` it expects, so the detail page and player are already
+     warm by the time OK is pressed.
+
+     Debounced so sweeping across a row costs nothing, and skipped entirely on
+     the weakest boxes where the extra work would compete with scrolling. */
+  var PREFETCH_REST_MS = profile.tier === 'low' ? 900 : 650;
+  var prefetchTimer = null;
+
+  function schedulePrefetch(el) {
+    if (!profile.prefetch) return;              // low tier opts out
+    if (!el || !el.classList) return;
+    if (!el.classList.contains('movie-card') && !el.classList.contains('upcoming-card')) return;
+    if (el.hasAttribute('data-mztv-prefetched')) return;
+
+    if (prefetchTimer) clearTimeout(prefetchTimer);
+    prefetchTimer = setTimeout(function () {
+      prefetchTimer = null;
+      if (document.activeElement !== el) return; // moved on already
+      el.setAttribute('data-mztv-prefetched', '1');
+      try {
+        // Synthetic, so it never affects :hover styling — it only triggers the
+        // prefetch listener moviezone.js attached to each card.
+        el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false, cancelable: false }));
+      } catch (err) {}
+    }, PREFETCH_REST_MS);
   }
 
   function focusEntry(entry, direction) {
     if (!entry || !entry.el) return false;
     var el = entry.el;
     try { el.focus({ preventScroll: true }); } catch (err) { el.focus(); }
-    scrollFocusIntoView(el, direction);
+    scrollFocusIntoView(el, direction, entry.rect);
+    schedulePrefetch(el);
     return true;
   }
 
-  // Instant, centred scrolling. Smooth scrolling on TV chipsets is the single
-  // biggest source of the "remote feels laggy" complaint.
-  function scrollFocusIntoView(el, direction) {
+  /* Scrolling is the most expensive thing a TV browser does: every scroll forces
+     layout and repaint of everything on screen. Two rules keep it cheap:
+       1. work from the CACHED document-space rect — a live getBoundingClientRect
+          here forces a full layout flush on every single key press, which
+          profiling showed to be the largest self-time cost of the whole session
+       2. only scroll when the target is actually hidden behind the navbar or off
+          an edge. Most D-pad moves land on something already visible, and the
+          cheapest scroll is no scroll. */
+  var TOP_KEEPOUT = 112;    // sticky navbar + breathing room
+  var BOTTOM_KEEPOUT = 24;
+
+  function scrollFocusIntoView(el, direction, docRect) {
+    var viewportH = window.innerHeight || 720;
+    var viewportW = window.innerWidth || 1280;
+
+    var rect = docRect
+      ? { top: docRect.top - scrollOffsetY(), bottom: docRect.bottom - scrollOffsetY(),
+          left: docRect.left - scrollOffsetX(), right: docRect.right - scrollOffsetX() }
+      : el.getBoundingClientRect();
+
+    var needsVertical = rect.top < TOP_KEEPOUT || rect.bottom > viewportH - BOTTOM_KEEPOUT;
+    var needsHorizontal = rect.left < 0 || rect.right > viewportW;
+    if (!needsVertical && !needsHorizontal) return; // already visible — do nothing
+
     var vertical = direction === 'up' || direction === 'down';
     try {
       el.scrollIntoView({
         behavior: 'auto',
-        block: vertical ? profile.focusScrollBlock : 'nearest',
-        inline: vertical ? 'nearest' : 'center'
+        block: needsVertical ? (vertical ? profile.focusScrollBlock : 'nearest') : 'nearest',
+        inline: needsHorizontal ? 'center' : 'nearest'
       });
     } catch (err) {
       el.scrollIntoView(direction === 'up' || direction === 'left');
@@ -476,12 +608,18 @@
 
   /* ── D-pad movement ────────────────────────────────────────────────────── */
 
+  // Geometry comes from the cache; only an element we have never indexed costs a
+  // live measurement.
   function currentFocus() {
     var el = document.activeElement;
     if (!el || el === document.body || el === document.documentElement) return null;
+
+    var cached = cachedEntryFor(el);
+    if (cached) return cached;
+
     var rect = el.getBoundingClientRect();
     if (!isVisibleRect(rect)) return null;
-    return { el: el, rect: rect };
+    return { el: el, rect: toDocRect(rect, scrollOffsetX(), scrollOffsetY()) };
   }
 
   // No focus yet (fresh launch): start from whatever sits top-left on screen.
@@ -489,12 +627,14 @@
     var entries = collectFocusables();
     if (!entries.length) return false;
     var viewportH = window.innerHeight || 720;
+    var offsetY = scrollOffsetY();
     var best = null;
     var bestScore = Infinity;
     for (var i = 0; i < entries.length; i++) {
       var r = entries[i].rect;
-      if (r.bottom < 0 || r.top > viewportH) continue;
-      var score = r.top * 2 + r.left;
+      var viewTop = r.top - offsetY;
+      if (viewTop + r.height < 0 || viewTop > viewportH) continue;
+      var score = viewTop * 2 + r.left;
       if (score < bestScore) { bestScore = score; best = entries[i]; }
     }
     return focusEntry(best || entries[0], direction);
@@ -685,6 +825,9 @@
     var action = mapRemoteKey(event);
     if (!action) return;
 
+    // One scroll-position read per key event, reused by every geometry helper.
+    invalidateScrollSnapshot();
+
     var focused = document.activeElement;
 
     // Text fields, number spinners and <select> keep their native key handling
@@ -803,18 +946,27 @@
 
   function ensurePosterObserver() {
     if (posterObserver || typeof IntersectionObserver !== 'function') return posterObserver;
+    // Purely observer-driven: no getBoundingClientRect anywhere, because a rect
+    // read forces a synchronous layout of the whole grid.
     posterObserver = new IntersectionObserver(function (entries) {
       for (var i = 0; i < entries.length; i++) {
-        if (!entries[i].isIntersecting) continue;
         var img = entries[i].target;
-        posterObserver.unobserve(img);
-        var parked = img.getAttribute('data-mztv-src');
-        if (parked) {
-          img.setAttribute('src', parked);
-          img.removeAttribute('data-mztv-src');
+        if (entries[i].isIntersecting) {
+          var parked = img.getAttribute('data-mztv-src');
+          if (parked) {
+            img.setAttribute('src', parked);
+            img.removeAttribute('data-mztv-src');
+          }
+          continue;
         }
+        // Out of range and still loading: park the download/decode until needed.
+        if (img.complete || img.getAttribute('data-mztv-src')) continue;
+        var src = img.getAttribute('src');
+        if (!src) continue;
+        img.setAttribute('data-mztv-src', src);
+        img.removeAttribute('src'); // width/height attributes keep the layout stable
       }
-    }, { rootMargin: '600px 0px' });
+    }, { rootMargin: '400px 0px' });
     return posterObserver;
   }
 
@@ -823,19 +975,10 @@
     var observer = ensurePosterObserver();
     if (!observer) return;
 
-    var viewportH = window.innerHeight || 720;
     var imgs = document.querySelectorAll('.movie-card img:not([data-mztv-seen]), .upcoming-card img:not([data-mztv-seen])');
     for (var i = 0; i < imgs.length; i++) {
-      var img = imgs[i];
-      img.setAttribute('data-mztv-seen', '1');
-      if (img.complete) continue;
-      var rect = img.getBoundingClientRect();
-      if (rect.top < viewportH * 2 && rect.bottom > -viewportH) continue; // needed soon
-      var src = img.getAttribute('src');
-      if (!src) continue;
-      img.setAttribute('data-mztv-src', src);
-      img.removeAttribute('src'); // width/height attributes keep the layout stable
-      observer.observe(img);
+      imgs[i].setAttribute('data-mztv-seen', '1');
+      observer.observe(imgs[i]);
     }
   }
 
@@ -843,6 +986,7 @@
     sweepScheduled = false;
     ensureFocusable();
     parkOffscreenPosters();
+    invalidateFocusCache(); // tab indexes may have changed the candidate set
   }
 
   function scheduleSweep() {
@@ -858,6 +1002,52 @@
     // Safety net: several TV browsers throttle rAF once they decide the page is
     // idle, and the sweep is what makes new cards reachable by the D-pad.
     setTimeout(once, 60);
+  }
+
+  /* ── Render-budget containment ────────────────────────────────────────────
+     Infinite scroll grows the grid without limit — measured at 137 tiles after a
+     short browse, and moviezone.js's own card cap (getMaxCards) is dead code that
+     nothing calls.
+
+     The heavy lifting is left to the browser: moviezone.css already marks cards
+     `content-visibility: auto`, and tv-mode.css adds `contain-intrinsic-size:
+     auto ...` so a skipped tile keeps its remembered box instead of collapsing to
+     the hard-coded 200x320 (that 2px-per-row mismatch was forcing a relayout of
+     the whole grid every time a row scrolled in).
+
+     An earlier version tagged every distant tile from an IntersectionObserver and
+     applied `content-visibility: hidden`. Measured result: worst frame improved
+     but the MEDIAN frame more than doubled, because scrolling flipped attributes
+     on dozens of tiles and each flip invalidated style. Native `auto` does the
+     same job off the main thread, so the per-tile bookkeeping is gone.
+
+     Whole sections are different: there are only four of them, they flip rarely,
+     and the hero keeps cross-fading a full-screen backdrop image even when it is
+     far above the viewport. Those are worth an observer. */
+
+  // Sections are skipped only while completely off screen, so nothing visible changes.
+  var IDLE_SECTION_IDS = ['hero', 'continue-watching', 'upcoming'];
+  var IDLE_SECTION_SELECTORS = ['.site-footer'];
+
+  function watchIdleSections() {
+    if (typeof IntersectionObserver !== 'function') return;
+    var observer = new IntersectionObserver(function (entries) {
+      for (var i = 0; i < entries.length; i++) {
+        var el = entries[i].target;
+        if (entries[i].isIntersecting) el.removeAttribute('data-mztv-idle');
+        else el.setAttribute('data-mztv-idle', '1');
+      }
+      invalidateFocusCache(); // a skipped section removes its focusables
+    }, { rootMargin: '25% 0px' });
+
+    IDLE_SECTION_IDS.forEach(function (id) {
+      var el = byId(id);
+      if (el) observer.observe(el);
+    });
+    IDLE_SECTION_SELECTORS.forEach(function (selector) {
+      var el = document.querySelector(selector);
+      if (el) observer.observe(el);
+    });
   }
 
   function setupDomSweep() {
@@ -900,8 +1090,15 @@
 
   function boot() {
     watchOverlays();
+    watchIdleSections();
     setupDomSweep();
     watchFrameBudget();
+    // Layout-affecting events invalidate the cached navigation geometry.
+    window.addEventListener('resize', invalidateFocusCache, { passive: true });
+    window.addEventListener('orientationchange', invalidateFocusCache, { passive: true });
+    window.addEventListener('load', invalidateFocusCache, { once: true });
+    // Flag-only: no layout read here, so this stays free during scrolling.
+    window.addEventListener('scroll', invalidateScrollSnapshot, { passive: true });
     state.ready = true;
     root.setAttribute('data-mz-tv-ready', 'true');
   }

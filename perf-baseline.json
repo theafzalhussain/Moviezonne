@@ -1,0 +1,42 @@
+{
+  "mode": "tv",
+  "throttle": 6,
+  "tvMode": true,
+  "tier": "low",
+  "cards": 137,
+  "load": {
+    "firstCardMs": 4438,
+    "longTaskCount": 20,
+    "longTaskTotalMs": 7628,
+    "worstLongTaskMs": 1381
+  },
+  "scroll": {
+    "frameCount": 146,
+    "medianFrame": 31.6,
+    "p95Frame": 539.9,
+    "worstFrame": 4919.5,
+    "droppedFrames": 66,
+    "jankyFrames": 52,
+    "scrollY": 314
+  },
+  "fetch": {
+    "payloadKB": 17,
+    "tenWritesMs": 14.8,
+    "tenReadsMs": 10.8,
+    "cacheKeys": 19,
+    "deferredWrites": false
+  },
+  "engine": {
+    "scriptDurationS": 3.676,
+    "recalcStyleDurationS": 3.298,
+    "layoutDurationS": 7.162,
+    "taskDurationS": 30.68,
+    "layoutCount": 210,
+    "recalcStyleCount": 214
+  },
+  "memory": {
+    "heapMB": 3,
+    "parkedPosters": 12,
+    "downgraded": false
+  }
+}

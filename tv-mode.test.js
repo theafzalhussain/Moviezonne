@@ -240,7 +240,9 @@ eq('low tier caps cards at 24', lowProfile.maxCards, 24);
 check('low tier disables animations', lowProfile.animations === false);
 check('low tier disables blur', lowProfile.blur === false);
 check('low tier defers offscreen images', lowProfile.deferOffscreenImages === true);
-eq('low tier stops prefetching', lowProfile.prefetch, 0);
+eq('low tier prefetches at most one title', lowProfile.prefetch, 1);
+check('higher tiers prefetch more aggressively',
+  TV.computePerfProfile({ platform: 'xbox', deviceMemory: 8, hardwareConcurrency: 8 }).prefetch > lowProfile.prefetch);
 check('no tier ever enables particles',
   ['low', 'mid', 'high'].every(t => TV.computePerfProfile({ platform: t === 'high' ? 'xbox' : 'fire-tv' }).particles === false));
 

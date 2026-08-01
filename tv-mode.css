@@ -208,6 +208,62 @@ html[data-mz-tv="true"] .carousel-thumb {
   scroll-margin: 7rem 1.5rem 3rem;
 }
 
+/* ── Render budget: take invisible work out of layout and paint ────────────
+   Infinite scroll grows the grid past a hundred tiles (moviezone.js's own card
+   cap, getMaxCards(), is dead code that nothing calls).
+
+   moviezone.css already marks cards `content-visibility: auto`, which lets the
+   browser skip rendering tiles it considers off screen. The missing piece was the
+   intrinsic size: it was pinned at a hard-coded 200x320 while the real tile is
+   223x322, so every row scrolling into view resized and forced a relayout of the
+   whole grid. `auto` makes the browser remember each tile's real rendered size,
+   so a skipped tile keeps the exact box it had and nothing shifts or reflows.
+
+   The lengths below only apply to a tile that has never been rendered once, and
+   match moviezone.css's own values. */
+
+html[data-mz-tv="true"] .movie-card,
+html[data-mz-tv="true"] .upcoming-card,
+html[data-mz-tv="true"] .ch-card {
+  contain-intrinsic-size: auto 200px auto 320px;
+}
+
+/* Sections completely off screen: the hero keeps cross-fading a full-screen
+   backdrop image, and the upcoming grid holds its own tiles. Neither is visible
+   while you browse the main grid, so neither should cost a frame. tv-mode.js
+   sets data-mztv-idle only once a section is fully outside the viewport. */
+html[data-mz-tv="true"] #hero[data-mztv-idle],
+html[data-mz-tv="true"] #continue-watching[data-mztv-idle],
+html[data-mz-tv="true"] #upcoming[data-mztv-idle],
+html[data-mz-tv="true"] .site-footer[data-mztv-idle] {
+  content-visibility: hidden;
+  contain-intrinsic-size: auto 1px auto 600px;
+}
+
+/* ── Composited layer budget ──────────────────────────────────────────────
+   moviezone.css gives every card `transform: perspective(1000px) translateZ(0)`
+   and `backface-visibility: hidden` to force a GPU layer — a good trick on a
+   desktop with plenty of VRAM, a bad one on a TV where 137 tiles means 137
+   layers and the compositor starts thrashing.
+
+   Both declarations are visually IDENTITY transforms: perspective + translateZ(0)
+   moves nothing and renders nothing differently. Dropping them on resting tiles
+   costs nothing visually and removes the layers. The hover/focus transform in
+   moviezone.css is untouched, so a highlighted tile still lifts exactly as it
+   does on the laptop. */
+
+html[data-mz-tv="true"] .movie-card:not(:hover):not(:focus),
+html[data-mz-tv="true"] .upcoming-card:not(:hover):not(:focus) {
+  transform: none !important;
+}
+
+html[data-mz-tv="true"] .movie-card:not(:hover):not(:focus) img,
+html[data-mz-tv="true"] .upcoming-card:not(:hover):not(:focus) img {
+  transform: none !important;
+  backface-visibility: visible !important;
+  -webkit-backface-visibility: visible !important;
+}
+
 /* Isolate the big overlays so opening the modal cannot relayout the page under
    it. Purely a containment hint — nothing moves. */
 html[data-mz-tv="true"] #modal-overlay,

@@ -9,6 +9,7 @@
     "test:offline": "node tv-mode.test.js && node tv-mode.browser.test.js && node pwa-assets.test.js",
     "test:tv": "node tv-mode.test.js && node tv-mode.browser.test.js",
     "verify:tv": "node tv-e2e-check.js",
+    "perf:tv": "node tv-perf-check.js",
     "start": "pm2-runtime start ecosystem.config.js",
     "dev": "node server.js"
   },
