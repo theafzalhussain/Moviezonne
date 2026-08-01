@@ -1879,6 +1879,11 @@ async function loadMovies(cat, isLoadMore = false) {
       const seen = new Set();
       combined.forEach(m => { if (m && m.id && !seen.has(m.id)) { seen.add(m.id); movies.push(m); } });
     } else {
+      const base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: 'en-US' });
+      const res = await Promise.all([
+        tmdb('/discover/movie', Object.assign({}, base, { page: p1 })),
+        tmdb('/discover/movie', Object.assign({}, base, { page: p2 }))
+      ]);
       res.forEach(r => { movies = movies.concat(r.results||[]); });
     }
   } catch(e) { console.warn(e); }
