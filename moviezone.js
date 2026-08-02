@@ -3889,20 +3889,6 @@ function ensureAnilistThenReload(m, season, srcIdx, lang, quality, type) {
 const playerSources = [
   // ⚡ #0 ALL-ROUNDER: Anime + Cartoons + Movies + Web Series, with real Hindi dub tracks.
   // Anime ke liye AniList route (hindi/dub/sub), baaki sab ke liye TMDB route.
-  // { name: 'AllRounder Hindi', dubbed: true, anime: true, url: (id, lang, type, s, e) => {
-  //   const m = currentModalMovie;
-  //   const track = animeAudioTrack(lang);
-  //   if (isAnimeContent(m)) {
-  //     const anilistId = getAnilistIdSync(m, s);
-  //     if (anilistId) {
-  //       const ep = String(parseInt(e, 10) || 1);
-  //       return `https://vidnest.fun/anime/${anilistId}/${ep}/${track}`;
-  //     }
-  //   }
-  //   return type === 'tv'
-  //     ? `https://vidnest.fun/tv/${id}/${s}/${e}`
-  //     : `https://vidnest.fun/movie/${id}`;
-  // }},
   // ⚡ #1 ALL-ROUNDER 4K: Videasy — anime + movies + series, high bitrate, multi-audio
   { name: 'OmniPlay 4K', dubbed: true, is4K: true, anime: true, url: (id, lang, type, s, e) => {
     const m = currentModalMovie;

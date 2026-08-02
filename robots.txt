@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /sw.js
+
+# Sitemap location
+Sitemap: https://moviezone.dev/sitemap.xml
+
+# Crawl-delay (optional, for polite crawling)
+Crawl-delay: 1
