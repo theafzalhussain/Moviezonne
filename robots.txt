@@ -3,8 +3,11 @@ Allow: /
 Disallow: /api/
 Disallow: /sw.js
 
-# Sitemap location
+# Paginated category URLs are intentionally crawlable: each one carries a
+# rel=canonical and its own description, so Google can resolve duplicates
+# itself. Blocking them here would hide those signals instead.
+
+# Sitemap index — lists the static, movie and series child sitemaps
 Sitemap: https://moviezone.dev/sitemap.xml
 
-# Crawl-delay (optional, for polite crawling)
 Crawl-delay: 1

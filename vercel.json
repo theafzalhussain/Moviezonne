@@ -11,7 +11,7 @@
       "use": "@vercel/static"
     },
     {
-      "src": "{robots.txt,sitemap.xml}",
+      "src": "robots.txt",
       "use": "@vercel/static"
     },
     {
@@ -30,6 +30,38 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
+      "destination": "/server.js"
+    },
+    {
+      "source": "/movie/(.*)",
+      "destination": "/server.js"
+    },
+    {
+      "source": "/tv/(.*)",
+      "destination": "/server.js"
+    },
+    {
+      "source": "/movies",
+      "destination": "/server.js"
+    },
+    {
+      "source": "/movies/(.*)",
+      "destination": "/server.js"
+    },
+    {
+      "source": "/series",
+      "destination": "/server.js"
+    },
+    {
+      "source": "/series/(.*)",
+      "destination": "/server.js"
+    },
+    {
+      "source": "/sitemap.xml",
+      "destination": "/server.js"
+    },
+    {
+      "source": "/sitemap-(.*).xml",
       "destination": "/server.js"
     }
   ],

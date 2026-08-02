@@ -754,6 +754,58 @@ function fetchTmdbOnce(url) {
 // the cache/host state without exporting a public API surface.
 app.locals.tmdbInternals = { apiCache, staleCache, inFlight, hostHealth, TMDB_HOSTS, probeTmdbHosts, setActiveHost };
 
+// ══════════════════════════════════════════════════════════════
+//  SEO: SERVER-RENDERED PAGES + DYNAMIC SITEMAPS
+// ══════════════════════════════════════════════════════════════
+//
+//  The frontend is a hash-routed SPA, so before this the whole catalogue
+//  was a single indexable URL. seo-ssr.js adds real crawlable pages
+//  (/movie/550-fight-club, /movies/action, /sitemap.xml …), each with its
+//  own title, description and schema.org payload.
+//
+//  Registered AFTER express.static on purpose: static passes through with
+//  next() for paths that have no file on disk, so these routes only ever
+//  see genuine misses, and a real /sitemap-static.xml file would still win.
+
+/**
+ * Cached TMDB reader for the SSR layer. Same three-tier behaviour as the
+ * /api/tmdb proxy — fresh cache, coalesced upstream fetch, then the 24h
+ * stale copy — because a crawler hitting a cold cache must not get a 5xx.
+ */
+async function tmdbForSsr(endpoint, params) {
+  const query = params && Object.keys(params).length
+    ? '?' + Object.entries(params)
+      .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v))
+      .join('&')
+    : '';
+  const url = `${TMDB_BASE_URL}${endpoint}${query}`;
+
+  const hit = apiCache.get(url);
+  if (hit) return hit;
+
+  try {
+    const data = await fetchTmdbOnce(url);
+    apiCache.set(url, data);
+    staleCache.set(url, data);
+    return data;
+  } catch (err) {
+    const stale = staleCache.get(url);
+    if (stale) {
+      console.warn(`[seo-ssr] serving stale copy for ${endpoint} (${err.code || err.tmdbStatus || 'error'})`);
+      return stale;
+    }
+    throw err;
+  }
+}
+
+try {
+  const { registerSeoRoutes } = require('./seo-ssr');
+  registerSeoRoutes(app, { tmdb: tmdbForSsr, cache: apiCache });
+} catch (err) {
+  // A broken SEO layer must never stop the player from serving traffic.
+  console.error('⚠️  SEO SSR routes could not be registered:', err.message);
+}
+
 // Health Check / Ping Endpoint: UptimeRobot ko server jagaye rakhne ke liye
 app.get('/ping', (req, res) => {
   res.status(200).send('Pong! Server is awake.');
