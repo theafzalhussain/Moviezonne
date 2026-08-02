@@ -1616,7 +1616,13 @@ body.cursor-hover #cursor-dot {
   opacity: 1;
 }
 
-/* Thumbnail rail */
+/* Thumbnail rail
+   Sized against the VIEWPORT HEIGHT, not fixed pixels. Ten 82px thumbs plus
+   gaps and padding need ~936px of vertical space, which would demand a
+   985px-tall viewport at #hero's 95vh (1088px at the 86vh tablet size).
+   Almost no real device is that tall, so fixed sizing made the rail overflow
+   #hero and get sliced by its overflow:hidden. The min() calls cap the thumbs
+   at the intended design size on tall screens and shrink them below that. */
 .carousel-thumbs {
   position: absolute;
   right: 2.5%;
@@ -1625,7 +1631,9 @@ body.cursor-hover #cursor-dot {
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
+  gap: min(0.65rem, 0.85vh);
   padding: 0.7rem;
+  padding: min(0.7rem, 1vh);
   background: rgba(8,8,18,0.32);
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: 18px;
@@ -1633,11 +1641,25 @@ body.cursor-hover #cursor-dot {
   -webkit-backdrop-filter: blur(18px) saturate(160%);
   box-shadow: 0 16px 40px rgba(0,0,0,0.4);
   z-index: 10;
+  /* Last-resort guard: never taller than the hero it sits in. If a viewport
+     still cannot fit the rail, it scrolls internally instead of spilling. */
+  max-height: calc(100% - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
+.carousel-thumbs::-webkit-scrollbar { display: none; }
+
 .thumb {
+  /* Fixed values first as the fallback for engines without min() (older
+     Smart TV browsers), then the height-aware version overrides them. */
   width: 58px;
   height: 82px;
+  width: min(58px, 5.02vh);
+  height: min(82px, 7.1vh);
+  flex: 0 0 auto;
   border-radius: 10px;
   overflow: hidden;
   cursor: pointer;
@@ -1664,6 +1686,13 @@ body.cursor-hover #cursor-dot {
 }
 
 .thumb img { width: 100%; height: 100%; object-fit: cover; }
+
+/* Below roughly 560px of viewport height the 7vh thumbs render under ~40px
+   tall and stop being recognisable as posters. Drop the rail rather than show
+   a row of unreadable slivers — the dot navigation still switches slides. */
+@media (max-height: 560px) {
+  .carousel-thumbs { display: none; }
+}
 
 /* ═══════════════════════════════════════════════════════════════
    MAIN CONTENT SECTION

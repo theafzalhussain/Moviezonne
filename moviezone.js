@@ -1157,6 +1157,92 @@ function resumeAutoSlide() {
   }, { passive: true });
 })();
  
+/*  ══════════════════════════════════════════════════════════════════════
+ *  OTT PLATFORM IDs — VERIFIED AGAINST THE LIVE TMDB API
+ *  ══════════════════════════════════════════════════════════════════════
+ *  TMDB keeps watch-provider ids and network ids in SEPARATE namespaces, so
+ *  the same number means different things depending on the parameter. Mixing
+ *  them up is silent: the query still returns 200 with the wrong catalogue.
+ *
+ *  Values below were read from /watch/providers/{movie,tv}?watch_region=IN
+ *  and /network/{id}. Two bugs this table replaces:
+ *    • provider 122 ("Hotstar") is retired and NOT offered in region IN at
+ *      all, so the old JioHotstar movie query returned an empty list.
+ *    • network 122 is PBS Kids (US) — the old JioHotstar show query was
+ *      pulling American children's television into the section.
+ *
+ *  Rule of thumb: prefer with_watch_providers for "what can I stream on
+ *  platform X", because a network id describes who ORIGINALLY aired a show,
+ *  not who streams it now. JioHotstar licenses HBO/FOX/NBC content, so
+ *  network filtering cannot describe it — provider filtering can.
+ */
+const OTT = {
+  netflix:    { provider: '8',    regions: ['IN', 'US'], networks: '213' },
+  prime:      { provider: '119',  regions: ['IN'],       networks: '1024', providerUS: '9' },
+  jiohotstar: { provider: '2336', regions: ['IN'],       networks: '3919' },
+  zee5:       { provider: '232',  regions: ['IN'],       networks: '2590|526|6989' }
+};
+
+/*  Networks that are genuinely streaming platforms, for the "Web Series" tab.
+ *  The previous list carried five ids that do not resolve at all (2600, 2212,
+ *  2694, 3321, 3328 all 404) plus three that resolve to unrelated broadcasters
+ *  — 122 PBS Kids, 3295 Azteca Uno (MX), 3009 Imedi TV (GE) and 2583 World
+ *  Fishing Network (CA). Those were injecting junk into the web-series grid.
+ */
+const STREAMING_NETWORK_IDS = [
+  '213',   // Netflix
+  '1024',  // Prime Video
+  '3919',  // Disney+ Hotstar / JioHotstar originals
+  '2590',  // ZEE5
+  '453',   // Hulu
+  '49',    // HBO
+  '2552',  // Apple TV+
+  '3353',  // Peacock
+  '4330',  // Paramount+
+  '2531',  // SonyLIV
+  '4238'   // MX Player
+].join('|');
+
+// Linear Indian TV channels: daily soaps swamp the grid, so keep them out of
+// the web-series view even when they carry a streaming network id as well.
+const LINEAR_TV_EXCLUDE_IDS = '71|105|70|118|194|2584|3294';
+
+/** Build the discover calls for a platform tab. Shared by the loader and the
+ *  background prefetcher so the two can never drift apart. */
+function ottQueries(key, p1, p2) {
+  const cfg = OTT[key];
+  if (!cfg) return [];
+  const base = { sort_by: 'popularity.desc', language: 'en-US' };
+  const out = [];
+
+  // Provider-filtered series and movies, two pages each. Two pages per load is
+  // what makes the infinite scroll feel endless: ~80 fresh candidates per step.
+  [p1, p2].forEach((page) => {
+    out.push({ endpoint: '/discover/tv', type: 'tv', params: Object.assign({}, base, {
+      with_watch_providers: cfg.provider, watch_region: 'IN', page
+    }) });
+    out.push({ endpoint: '/discover/movie', type: 'movie', params: Object.assign({}, base, {
+      with_watch_providers: cfg.provider, watch_region: 'IN', page
+    }) });
+  });
+
+  // Originals, via the platform's own network id(s).
+  if (cfg.networks) {
+    out.push({ endpoint: '/discover/tv', type: 'tv', params: Object.assign({}, base, {
+      with_networks: cfg.networks, page: p1
+    }) });
+  }
+
+  // US catalogue widens the pool for the global platforms.
+  if (cfg.regions.includes('US')) {
+    out.push({ endpoint: '/discover/movie', type: 'movie', params: Object.assign({}, base, {
+      with_watch_providers: cfg.providerUS || cfg.provider, watch_region: 'US', page: p1
+    }) });
+  }
+
+  return out;
+}
+
 // -- BACKGROUND PREFETCH HELPERS (For Instant "Load More") --
 function prefetchMoviesPage(cat, pageNum) {
   const pageStr = String(pageNum);
@@ -1176,8 +1262,8 @@ function prefetchMoviesPage(cat, pageNum) {
     tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p1 });
     tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p2 });
   } else if (cat === 'tv') {
-    const STREAMING_NETWORKS = '213|1024|122|3295|3009|193|2583|2600|2212|2552|453|49|3353|4330|2694|3321|3328'; // Netflix, Prime, Hotstar, Jio, MX, SonyLIV, ZEE5, AppleTV+, Hulu, HBO, aha, Hoichoi etc.
-    const TV_CHANNELS_TO_EXCLUDE = '71|105|70|118|194|2584|3294'; // Star Plus, Colors, Zee TV, Sony TV, SAB, &TV, Star Bharat
+    const STREAMING_NETWORKS = STREAMING_NETWORK_IDS;
+    const TV_CHANNELS_TO_EXCLUDE = LINEAR_TV_EXCLUDE_IDS;
     tmdb('/discover/tv', { with_networks: STREAMING_NETWORKS, without_networks: TV_CHANNELS_TO_EXCLUDE, with_original_language: 'hi', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
     tmdb('/discover/tv', { with_networks: STREAMING_NETWORKS, without_networks: TV_CHANNELS_TO_EXCLUDE, with_original_language: 'en', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
     tmdb('/discover/tv', { with_networks: STREAMING_NETWORKS, without_networks: TV_CHANNELS_TO_EXCLUDE, with_original_language: 'ko', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
@@ -1238,23 +1324,9 @@ function prefetchMoviesPage(cat, pageNum) {
     tmdb('/discover/tv', { with_original_language: 'ko', sort_by: 'popularity.desc', page: p2, language: 'en-US' });
     tmdb('/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
   }
-  else if (cat === 'netflix') {
-    tmdb('/discover/tv', { with_networks: '213', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-    tmdb('/discover/tv', { with_networks: '213', sort_by: 'popularity.desc', page: p2, language: 'en-US' });
-    tmdb('/discover/movie', { with_watch_providers: '8', watch_region: 'IN', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-    tmdb('/discover/movie', { with_watch_providers: '8', watch_region: 'US', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-  }
-  else if (cat === 'prime') {
-    tmdb('/discover/tv', { with_networks: '1024', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-    tmdb('/discover/tv', { with_networks: '1024', sort_by: 'popularity.desc', page: p2, language: 'en-US' });
-    tmdb('/discover/movie', { with_watch_providers: '119', watch_region: 'IN', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-    tmdb('/discover/movie', { with_watch_providers: '9', watch_region: 'US', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-  }
-  else if (cat === 'jiohotstar') {
-    tmdb('/discover/tv', { with_networks: '3919', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-    tmdb('/discover/tv', { with_networks: '122', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-    tmdb('/discover/movie', { with_watch_providers: '122', watch_region: 'IN', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-    tmdb('/discover/movie', { with_watch_providers: '122', watch_region: 'IN', sort_by: 'popularity.desc', page: p2, language: 'en-US' });
+  else if (OTT[cat]) {
+    // Netflix / Prime / JioHotstar / Zee5 all share one query builder.
+    ottQueries(cat, p1, p2).forEach(q => tmdb(q.endpoint, q.params));
   }
   else {
     const base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: 'en-US' });
@@ -1585,9 +1657,9 @@ async function loadMovies(cat, isLoadMore = false) {
       movies.push(...diverseGrid);
     } else if (cat === 'tv') {
       // EXPANDED OTT LIST: Now includes JioCinema, MX Player, HBO, aha, Hoichoi and more major platforms.
-      const STREAMING_NETWORKS = '213|1024|122|3295|3009|193|2583|2600|2212|2552|453|49|3353|4330|2694|3321|3328'; // Netflix, Prime, Hotstar, Jio, MX, SonyLIV, ZEE5, AppleTV+, Hulu, HBO, aha, Hoichoi etc.
+      const STREAMING_NETWORKS = STREAMING_NETWORK_IDS;
       // EXCLUSION LIST: Traditional Indian TV channels to strictly remove from Web Series section
-      const TV_CHANNELS_TO_EXCLUDE = '71|105|70|118|194|2584|3294'; // Star Plus, Colors, Zee TV, Sony TV, SAB, &TV, Star Bharat
+      const TV_CHANNELS_TO_EXCLUDE = LINEAR_TV_EXCLUDE_IDS;
 
       // Fetch a diverse set of web series from major streaming platforms, removing traditional TV shows.
       const res = await Promise.allSettled([
@@ -1830,54 +1902,34 @@ async function loadMovies(cat, isLoadMore = false) {
       });
       const seen = new Set();
       combined.forEach(m => { if (m && m.id && !seen.has(m.id)) { seen.add(m.id); movies.push(m); } });
-    } else if (cat === 'netflix') {
-      // NETFLIX ORIGINALS: Netflix network (213) ke movies + shows
-      const res = await Promise.allSettled([
-        tmdb('/discover/tv', { with_networks: '213', sort_by: 'popularity.desc', page: p1, language: 'en-US' }),
-        tmdb('/discover/tv', { with_networks: '213', sort_by: 'popularity.desc', page: p2, language: 'en-US' }),
-        tmdb('/discover/movie', { with_watch_providers: '8', watch_region: 'IN', sort_by: 'popularity.desc', page: p1, language: 'en-US' }),
-        tmdb('/discover/movie', { with_watch_providers: '8', watch_region: 'US', sort_by: 'popularity.desc', page: p1, language: 'en-US' })
-      ]);
+    } else if (OTT[cat]) {
+      // ── PLATFORM TABS: Netflix / Prime Video / JioHotstar / Zee5 ──
+      // Provider-filtered, two pages of series AND two pages of movies per
+      // step, so the infinite scroll keeps yielding new titles instead of
+      // running dry after the first screen.
+      const queries = ottQueries(cat, p1, p2);
+      const res = await Promise.allSettled(queries.map(q => tmdb(q.endpoint, q.params)));
       const combined = [];
       res.forEach((r, idx) => {
         if (r.status === 'fulfilled' && r.value && r.value.results) {
-          r.value.results.forEach(item => { item.media_type = idx < 2 ? 'tv' : 'movie'; combined.push(item); });
+          const type = queries[idx].type;
+          r.value.results.forEach(item => { item.media_type = type; combined.push(item); });
         }
       });
+      // Interleave series and movies so one type does not monopolise the top
+      // of the grid — provider endpoints return them in separate batches.
+      const tvItems = combined.filter(m => m.media_type === 'tv');
+      const movieItems = combined.filter(m => m.media_type === 'movie');
       const seen = new Set();
-      combined.forEach(m => { if (m && m.id && !seen.has(m.id)) { seen.add(m.id); movies.push(m); } });
-    } else if (cat === 'prime') {
-      // AMAZON PRIME VIDEO: Prime network (1024) shows + Prime Video provider (119 IN / 9 US) movies
-      const res = await Promise.allSettled([
-        tmdb('/discover/tv', { with_networks: '1024', sort_by: 'popularity.desc', page: p1, language: 'en-US' }),
-        tmdb('/discover/tv', { with_networks: '1024', sort_by: 'popularity.desc', page: p2, language: 'en-US' }),
-        tmdb('/discover/movie', { with_watch_providers: '119', watch_region: 'IN', sort_by: 'popularity.desc', page: p1, language: 'en-US' }),
-        tmdb('/discover/movie', { with_watch_providers: '9', watch_region: 'US', sort_by: 'popularity.desc', page: p1, language: 'en-US' })
-      ]);
-      const combined = [];
-      res.forEach((r, idx) => {
-        if (r.status === 'fulfilled' && r.value && r.value.results) {
-          r.value.results.forEach(item => { item.media_type = idx < 2 ? 'tv' : 'movie'; combined.push(item); });
-        }
-      });
-      const seen = new Set();
-      combined.forEach(m => { if (m && m.id && !seen.has(m.id)) { seen.add(m.id); movies.push(m); } });
-    } else if (cat === 'jiohotstar') {
-      // JIOHOTSTAR: Disney+ Hotstar / Hotstar networks (3919|122) shows + Hotstar provider (122 IN) movies
-      const res = await Promise.allSettled([
-        tmdb('/discover/tv', { with_networks: '3919', sort_by: 'popularity.desc', page: p1, language: 'en-US' }),
-        tmdb('/discover/tv', { with_networks: '122', sort_by: 'popularity.desc', page: p1, language: 'en-US' }),
-        tmdb('/discover/movie', { with_watch_providers: '122', watch_region: 'IN', sort_by: 'popularity.desc', page: p1, language: 'en-US' }),
-        tmdb('/discover/movie', { with_watch_providers: '122', watch_region: 'IN', sort_by: 'popularity.desc', page: p2, language: 'en-US' })
-      ]);
-      const combined = [];
-      res.forEach((r, idx) => {
-        if (r.status === 'fulfilled' && r.value && r.value.results) {
-          r.value.results.forEach(item => { item.media_type = idx < 2 ? 'tv' : 'movie'; combined.push(item); });
-        }
-      });
-      const seen = new Set();
-      combined.forEach(m => { if (m && m.id && !seen.has(m.id)) { seen.add(m.id); movies.push(m); } });
+      const maxLen = Math.max(tvItems.length, movieItems.length);
+      for (let i = 0; i < maxLen; i++) {
+        [movieItems[i], tvItems[i]].forEach(m => {
+          if (m && m.id && !seen.has(m.media_type + '-' + m.id)) {
+            seen.add(m.media_type + '-' + m.id);
+            movies.push(m);
+          }
+        });
+      }
     } else {
       const base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: 'en-US' });
       const res = await Promise.all([
@@ -2127,7 +2179,7 @@ const CAT_HEADINGS = {
   adult:'18+ ADULT MOVIES & WEB SERIES',
   trending:'🔥 TRENDING NOW', uhd4k:'💎 4K ULTRA HD', toprated:'⭐ TOP RATED',
   kdrama:'K-DRAMA & KOREAN', netflix:'NETFLIX ORIGINALS',
-  prime:'AMAZON PRIME VIDEO', jiohotstar:'JIOHOTSTAR',
+  prime:'AMAZON PRIME VIDEO', jiohotstar:'JIOHOTSTAR', zee5:'ZEE5 MOVIES & WEB SERIES',
   adventure:'ADVENTURE', fantasy:'FANTASY', crime:'CRIME', documentary:'DOCUMENTARY', family:'FAMILY'
 };
 function filterCat(cat, e) {

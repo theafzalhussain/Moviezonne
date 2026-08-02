@@ -406,6 +406,43 @@ const CATEGORIES = {
     intro: 'A 4K stream only helps if the film was finished at that resolution, so this page is restricted to well-reviewed releases from 2015 onward where a genuine Ultra HD master exists.'
   },
 
+  // ── Streaming platform catalogues ───────────────────────────────────
+  // Filtered by TMDB watch provider for region IN. Provider ids are verified
+  // against /watch/providers/movie?watch_region=IN — see the OTT table in
+  // moviezone.js for why network ids cannot be used for these.
+  netflix: {
+    family: 'movies', kind: 'movie', heading: 'Netflix Movies',
+    endpoint: '/discover/movie',
+    params: { with_watch_providers: '8', watch_region: 'IN', sort_by: 'popularity.desc' },
+    title: 'Netflix Movies in India — Full List, Watch Online in HD & 4K',
+    description: 'Every movie streaming on Netflix India right now, sorted by popularity. Browse Netflix originals, Bollywood titles and Hollywood licences with ratings, runtimes and full synopses.',
+    intro: 'This list is filtered by what Netflix actually carries in India, so it reflects the Indian catalogue rather than the US one — the two differ substantially on licensed films.'
+  },
+  'prime-video': {
+    family: 'movies', kind: 'movie', heading: 'Amazon Prime Video Movies',
+    endpoint: '/discover/movie',
+    params: { with_watch_providers: '119', watch_region: 'IN', sort_by: 'popularity.desc' },
+    title: 'Amazon Prime Video Movies India — Full List in HD & 4K',
+    description: 'The complete movie catalogue on Amazon Prime Video India, ranked by popularity. Find Prime originals, regional Indian cinema and international films with ratings and details.',
+    intro: 'Prime carries the deepest regional Indian film library of the major platforms, so this page runs long on Tamil, Telugu and Malayalam titles alongside the Hindi and English ones.'
+  },
+  jiohotstar: {
+    family: 'movies', kind: 'movie', heading: 'JioHotstar Movies',
+    endpoint: '/discover/movie',
+    params: { with_watch_providers: '2336', watch_region: 'IN', sort_by: 'popularity.desc' },
+    title: 'JioHotstar Movies — Full List, Watch Online in HD & 4K',
+    description: 'Movies streaming on JioHotstar in India, sorted by popularity. Browse Disney and HBO licensed films, Hindi releases and regional cinema with ratings, cast and synopses.',
+    intro: 'JioHotstar is the merged Disney+ Hotstar and JioCinema service, which is why its catalogue mixes Disney, HBO and Star studio output with a large Indian film library.'
+  },
+  zee5: {
+    family: 'movies', kind: 'movie', heading: 'Zee5 Movies',
+    endpoint: '/discover/movie',
+    params: { with_watch_providers: '232', watch_region: 'IN', sort_by: 'popularity.desc' },
+    title: 'Zee5 Movies — Full List, Watch Zee5 Films Online in HD',
+    description: 'Every movie on Zee5 India, ranked by popularity. Browse Zee Studios releases, Hindi, Marathi, Bengali, Tamil and Telugu films with ratings, runtimes and full details.',
+    intro: 'Zee5 is the strongest of the major platforms for regional-language cinema outside the big four industries, particularly Marathi, Bengali, Gujarati and Punjabi film.'
+  },
+
   // ── Series families → /series/:slug ─────────────────────────────────
   'web-series': {
     family: 'series', kind: 'tv', heading: 'Web Series',
@@ -451,6 +488,30 @@ const CATEGORIES = {
     title: 'Kids Shows & Cartoons — Watch Online Free in HD',
     description: 'Watch cartoons and kids shows online in HD with Hindi dubbed audio. Stream animated series for children with episode selection and safe, all-ages content.',
     intro: 'Everything on this page carries a Kids classification. Hindi dubbed audio is available for most of the long-running cartoon series.'
+  },
+  'zee5-series': {
+    family: 'series', kind: 'tv', heading: 'Zee5 Web Series',
+    endpoint: '/discover/tv',
+    params: { with_watch_providers: '232', watch_region: 'IN', sort_by: 'popularity.desc' },
+    title: 'Zee5 Web Series — Watch Zee5 Originals Online in HD',
+    description: 'All web series streaming on Zee5 India, ranked by popularity. Watch Zee5 originals and serials in Hindi, Marathi, Bengali, Tamil and Telugu with complete season playback.',
+    intro: 'Zee5 mixes short-run originals with very long-running daily serials, so sorting matters here — the originals sit near the top while the serials dominate by sheer episode count.'
+  },
+  'jiohotstar-series': {
+    family: 'series', kind: 'tv', heading: 'JioHotstar Web Series',
+    endpoint: '/discover/tv',
+    params: { with_watch_providers: '2336', watch_region: 'IN', sort_by: 'popularity.desc' },
+    title: 'JioHotstar Web Series — Watch Shows Online in HD & 4K',
+    description: 'Web series and shows streaming on JioHotstar India. Watch HBO series, Disney originals, Hotstar Specials and Indian shows with season and episode selection in HD.',
+    intro: 'This is where the HBO catalogue lives in India, alongside Hotstar Specials and the Star network back catalogue, so the range runs from prestige drama to daily programming.'
+  },
+  'netflix-series': {
+    family: 'series', kind: 'tv', heading: 'Netflix Series',
+    endpoint: '/discover/tv',
+    params: { with_watch_providers: '8', watch_region: 'IN', sort_by: 'popularity.desc' },
+    title: 'Netflix Series India — Full List, Watch Online in HD & 4K',
+    description: 'Every series streaming on Netflix India, sorted by popularity. Browse Netflix originals, Korean drama, anime and licensed international shows with ratings and episode counts.',
+    intro: 'Netflix India carries a large share of its global originals slate, so this list overlaps heavily with the international catalogue — the licensed third-party shows are where it differs.'
   }
 };
 
@@ -663,6 +724,17 @@ ${body}
           <li><a href="/series/anime">Anime</a></li>
           <li><a href="/series/kdrama">Korean drama</a></li>
           <li><a href="/series/kids">Kids &amp; cartoons</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>By platform</h3>
+        <ul>
+          <li><a href="/movies/netflix">Netflix movies</a></li>
+          <li><a href="/movies/prime-video">Prime Video movies</a></li>
+          <li><a href="/movies/jiohotstar">JioHotstar movies</a></li>
+          <li><a href="/movies/zee5">Zee5 movies</a></li>
+          <li><a href="/series/zee5-series">Zee5 web series</a></li>
+          <li><a href="/series/jiohotstar-series">JioHotstar shows</a></li>
         </ul>
       </div>
       <div>
