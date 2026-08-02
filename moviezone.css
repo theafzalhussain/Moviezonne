@@ -4803,6 +4803,29 @@ body.cursor-hover #cursor-dot {
   color: var(--text3);
 }
 
+/* The TMDB notice is a fixed, mandated sentence and is longer than the
+   copyright line, so cap its measure and let it wrap instead of stretching
+   the flex row. Right-aligned only on wide screens; the existing mobile
+   rules switch .footer-bottom to a left-aligned column. */
+.footer-bottom .tmdb-attribution {
+  max-width: 46ch;
+  line-height: 1.5;
+}
+
+.footer-bottom .tmdb-attribution a {
+  color: var(--text2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.footer-bottom .tmdb-attribution a:hover {
+  color: var(--gold);
+}
+
+@media (min-width: 769px) {
+  .footer-bottom .tmdb-attribution { text-align: right; }
+}
+
 /* ═══════════════════════════════════════════════════════════════
    TOAST NOTIFICATION — Premium slide
    ═══════════════════════════════════════════════════════════════ */

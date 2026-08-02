@@ -603,6 +603,31 @@ test('every category renders without throwing and yields a unique title', () => 
 section('sitemaps');
 // ══════════════════════════════════════════════════════════════════════
 
+test('every rendered page carries the verbatim TMDB attribution notice', () => {
+  // TMDB's API Terms of Use mandate this exact sentence. Paraphrasing it is a
+  // terms breach, so the wording is asserted rather than trusted to review.
+  const REQUIRED = /This product uses the\s+(?:<[^>]+>\s*)?TMDb API\s*(?:<\/[^>]+>\s*)?but is not endorsed or certified by TMDb\./;
+  const pages = [
+    ['movie detail', movieHtml],
+    ['series detail', seriesHtml],
+    ['category', catHtml],
+    ['category page 3', catPage3]
+  ];
+  pages.forEach(([label, html]) => {
+    const collapsed = html.replace(/\s+/g, ' ');
+    assert.ok(REQUIRED.test(collapsed), 'TMDB attribution notice missing/reworded on the ' + label + ' page');
+  });
+});
+
+test('the SPA homepage carries the verbatim TMDB attribution notice', () => {
+  const html = require('fs').readFileSync(require('path').join(__dirname, 'index.html'), 'utf8')
+    .replace(/\s+/g, ' ');
+  assert.ok(/This product uses the .*TMDb API.* but is not endorsed or certified by TMDb\./.test(html),
+    'index.html is missing the required TMDB attribution notice');
+  assert.ok(!/Powered by <a[^>]*>TMDB API<\/a>/.test(html),
+    'the old non-compliant "Powered by TMDB API" wording is still present');
+});
+
 test('sitemap index lists the three child sitemaps', () => {
   const xml = seo.buildSitemapIndex();
   assert.ok(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>'));

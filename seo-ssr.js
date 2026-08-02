@@ -675,9 +675,12 @@ ${body}
         </ul>
       </div>
     </div>
-    <p>&copy; 2025-2026 ${esc(SITE_NAME)}. Metadata, posters and ratings provided by
-      <a href="https://www.themoviedb.org/" rel="noopener noreferrer nofollow" target="_blank">TMDB</a>.
-      ${esc(SITE_NAME)} is not endorsed or certified by TMDB.</p>
+    <p>&copy; 2025-2026 ${esc(SITE_NAME)}. All rights reserved.</p>
+    <!-- Attribution notice required verbatim by the TMDB API Terms of Use.
+         Do not reword: TMDB specifies this exact sentence. -->
+    <p>This product uses the
+      <a href="https://www.themoviedb.org/" rel="noopener noreferrer nofollow" target="_blank">TMDb API</a>
+      but is not endorsed or certified by TMDb.</p>
   </div>
 </footer>
 </body>
