@@ -1696,10 +1696,8 @@ function prefetchMoviesPage(cat, pageNum) {
     tmdb('/discover/tv', { with_networks: STREAMING_NETWORKS, without_networks: TV_CHANNELS_TO_EXCLUDE, with_original_language: 'ko', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
     tmdb('/discover/tv', { with_networks: STREAMING_NETWORKS, without_networks: TV_CHANNELS_TO_EXCLUDE, sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
   } else if (cat === 'kids') {
-    tmdb('/discover/tv', { with_genres: '10762', with_original_language: 'hi', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-    tmdb('/discover/tv', { with_genres: '10762', with_original_language: 'ja', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-    tmdb('/discover/tv', { with_genres: '10762', with_original_language: 'en', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-    tmdb('/discover/movie', { with_genres: '16,10751', without_genres: '27,53,18', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
+    // Cartoon engine ke active-mode sources chupke se warm kar do
+    buildCartoonQueries(currentCartoonMode, pageNum).forEach(q => tmdb(q.endpoint, q.params));
   } else if (cat === 'anime') {
     // Anime engine ke saare active-mode sources ko chupke se warm kar do
     buildAnimeQueries(currentAnimeMode, pageNum).forEach(q => tmdb(q.endpoint, q.params));
@@ -1999,7 +1997,386 @@ function setAnimeMode(mode) {
   updateAnimeHeading();
   loadMovies('anime');
 }
- 
+
+/* ══════════════════════════════════════════════════════════════════════════
+   POWERFUL CARTOON ENGINE  (Cartoons tab — cat 'kids')
+   ──────────────────────────────────────────────────────────────────────────
+   Do problem the section me the:
+     1. Query sirf TMDB genre 10762 ("Kids") par chal rahi thi. Kids ek
+        AUDIENCE tag hai, animation ka tag nahi — isliye Baalveer,
+        Shaka Laka Boom Boom, Tenali Rama, Sesame Street, Jessie jaise
+        LIVE-ACTION shows (aur "Sex Chat with Pappu & Papa" tak) grid me
+        aa jaate the. Verified: /discover/tv?with_genres=10762&…lang=hi ka
+        top result hi Baalveer hai (genres: Kids/Comedy/Sci-Fi, koi
+        Animation nahi).
+     2. Sab kuch round-robin interleave hota tha, koi ranking nahi thi, to
+        famous cartoons top par aane ki koi guarantee nahi thi.
+
+   Fix:
+     • ANIMATION GENRE (16) LAZMI. Yahi ek gate live-action kids shows ko
+       100% bahar rakhta hai. Sirf curated cartoon IDs is gate ko bypass kar
+       sakti hain (kuch Indian cartoons TMDB par bina genre ke pade hain,
+       jaise Little Singham).
+     • Japanese/Chinese/Korean content sirf tab aata hai jab wo kids/family
+       cartoon ho ya curated famous ho — warna Jujutsu Kaisen/Naruto type
+       anime (aur TMDB ka ja adult-animation kachra) yahan ghus jaata tha.
+       Pure anime ke liye alag ANIME tab already hai.
+     • FAMOUS-FIRST RANKING: curated tier-1 (Doraemon, Shinchan, Tom & Jerry,
+       Oggy, Ben 10, Motu Patlu, Pokemon…) sabse upar, phir global legends,
+       phir trending, phir popularity + vote weight.
+     • 12 sub-filter chips (Trending / All Time Famous / Hindi / Doraemon & Co
+       / Series / Movies / Cartoon Network / Nickelodeon / Disney / Action /
+       New) — anime engine ke jaise.
+   ══════════════════════════════════════════════════════════════════════════ */
+const CARTOON_GENRE_ANIMATION = '16';
+const CARTOON_GENRE_KIDS      = '10762';
+const CARTOON_GENRE_FAMILY    = '10751';
+
+// Kids-channel network ids (TMDB /network/<id> se verify kiye gaye):
+// 56/4945 Cartoon Network, 13/8053 Nickelodeon, 54 Disney Channel, 44 Disney XD,
+// 523/8726 Boomerang, 1439 Pogo, 6622 Discovery Kids, 103 tv asahi
+// (Doraemon/Shin Chan/Ninja Hattori), 2854 ABC Kids, 15 CBBC, 112 CITV, 2638 Gulli.
+const CARTOON_NET_ALL    = '56|4945|13|8053|54|44|523|8726|1439|6622|103|2854|15|112|2638';
+const CARTOON_NET_CN     = '56|4945|523|8726';
+const CARTOON_NET_NICK   = '13|8053';
+const CARTOON_NET_DISNEY = '54|44';
+const CARTOON_NET_INDIA  = '4945|8053|1439|6622';
+const CARTOON_NET_JAPAN  = '103';
+
+/* Tier 1 — jo cartoons India me sabse zyada dekhe jaate hain. Ye grid ke top
+   par pin hote hain. Saari ids TMDB se verify ki gayi hain. */
+const CARTOON_ICON_IDS = new Set([
+  // Japanese classics (Hindi dub par hi bade hue hain)
+  65733, 57911,          // Doraemon (2005 / 1979)
+  30623, 254063, 67324,  // Shin Chan + dubs/spin-off
+  80885, 158198,         // Ninja Hattori-kun
+  80609, 300626,         // Kiteretsu Daihyakka
+  65739, 132791,         // Perman / SUPERKID
+  60572, 220150, 8910,   // Pokemon + Horizons + Chronicles
+  20214,                 // The Jungle Book: Adventures of Mowgli
+  // Cartoon Network / Nick / Disney evergreens
+  47480, 676, 7842, 4274,        // Tom & Jerry (all shows)
+  2777, 131721,                  // Oggy and the Cockroaches
+  4686, 68295, 6040, 31109, 46922, // Ben 10 (2005 → Omniverse)
+  387, 4229, 2085, 607, 37606, 1877,
+  18123, 926, 652,               // Scooby-Doo
+  2530,                          // Mr. Bean: The Animated Series
+  590, 240, 1769, 17572,
+  45140, 63401, 15260, 31132, 40075,
+  79, 4269, 1848,                // Dora, Transformers, Winx Club
+  65763, 102321, 670, 32605,     // Looney Tunes
+  8392, 4606, 18352, 14693, 5559,// Popeye, Garfield, Pink Panther
+  12225, 57532, 3022, 4630, 51817, 160, 33765, 68073, 2129, 7869, 65334,
+  3934, 46879,                   // Mickey Mouse
+  // Indian cartoons
+  70058, 216999, 88393, 32035, 90982, 110264,
+  133665, 251006, 126463, 283124, 113312, 137505,
+  249066, 232840, 232838, 155835, 115983, 41780, 252106, 219676
+]);
+
+/* Tier 2 — global cartoon legends / all-time classics. */
+const CARTOON_LEGEND_IDS = new Set([
+  246, 82728, 46080, 3902, 38693, 194916, 7011, 34860,
+  67667, 54728, 226688, 37807,   // Beyblade
+  12971,                          // Dragon Ball Z
+  513, 1618, 84200, 68837,        // Batman Beyond / Justice League
+  5622, 3570, 10826, 720, 72350, 2745, 1585, 10938,
+  73811, 38503, 30563, 129959, 10926, 66562, 5200,
+  57775, 153485, 209246, 56426, 32910, 157747, 286822
+]);
+
+/* Mature / adult animation — Cartoons tab me kabhi nahi. */
+const CARTOON_BLOCK_IDS = new Set([
+  1434, 2190, 60625, 74204, 95557, 456, 97645, 2122
+]);
+const CARTOON_BLOCK_RE = /\b(family guy|south park|rick and morty|big mouth|invincible|the simpsons|solar opposites|king of the hill|american dad|bojack|archer|paradise pd|brickleberry|beavis|f is for family|disenchantment|smiling friends|hazbin hotel|helluva boss|velma|praise petey)\b/i;
+/* Explicit / ecchi animation (TMDB ke ja animation results me kaafi hai). */
+const CARTOON_NSFW_RE = /(hentai|ecchi|erotic|uncensored|\bxxx\b|\bsex\b|\bnude\b|naked|lewd|\byaoi\b|\byuri\b|\bharem\b|seduc|\blust\b|shikiyoku|junketsu|netorare|\bmilf\b|18\+)/i;
+
+/* Ghar-ghar ke naam — curated id list se choot jaane par bhi boost mile. */
+const CARTOON_FAMOUS_RE = /\b(doraemon|shin[\s-]?chan|shinchan|crayon shin|ninja hattori|kiteretsu|perman|pokemon|pok[eé]mon|tom and jerry|tom & jerry|oggy|spongebob|dexter's laboratory|courage the cowardly|powerpuff|gumball|phineas and ferb|scooby|mr\.? bean|we bare bears|teen titans|adventure time|regular show|gravity falls|rugrats|peppa pig|paw patrol|bluey|masha and the bear|shaun the sheep|fairly odd|ninja turtles|loud house|jimmy neutron|penguins of madagascar|miraculous|motu patlu|chhota bheem|chota bheem|little bheem|mighty raju|bandbudh|simple samosa|little singham|roll no|rat-a-tat|pakdam|ben 10|my little pony|the last airbender|ninjago|chiikawa|bernard|rantaro|beyblade|johnny test|kick buttowski|dragon ball|looney tunes|bugs bunny|mickey mouse|donald duck|tweety|popeye|garfield|pink panther|richie rich|dora the explorer|noddy|winx club|transformers|smurfs|flintstones|jetsons|inspector gadget|swat kats|justice league|batman|superman|spider-verse|winnie the pooh|toy story|frozen|moana|zootopia|minions|despicable me|shrek|kung fu panda|madagascar|ice age|finding nemo|incredibles|lion king|aladdin|tangled|encanto|ratatouille|monsters, inc|inside out|jungle book|mowgli|super mario|sonic x|hagemaru|kochikame|duck ?tales|jackie chan adventures|eena meena deeka)\b/i;
+
+const CARTOON_MODES = [
+  { id: 'all',       label: 'All Cartoons',    icon: '🎨' },
+  { id: 'trending',  label: 'Trending',        icon: '🔥' },
+  { id: 'legends',   label: 'All Time Famous', icon: '👑' },
+  { id: 'hindi',     label: 'Hindi Cartoons',  icon: '🇮🇳' },
+  { id: 'japanese',  label: 'Doraemon & Co',   icon: '🇯🇵' },
+  { id: 'series',    label: 'Cartoon Series',  icon: '📺' },
+  { id: 'movies',    label: 'Cartoon Movies',  icon: '🎬' },
+  { id: 'cn',        label: 'Cartoon Network', icon: '🌀' },
+  { id: 'nick',      label: 'Nickelodeon',     icon: '🟠' },
+  { id: 'disney',    label: 'Disney',          icon: '🏰' },
+  { id: 'superhero', label: 'Action & Heroes', icon: '🦸' },
+  { id: 'latest',    label: 'New Cartoons',    icon: '🆕' }
+];
+
+let currentCartoonMode = 'all';
+
+function cartoonISTDate(offsetDays) {
+  const d = new Date(Date.now() + (5.5 * 60 * 60 * 1000) + ((offsetDays || 0) * 86400000));
+  return d.toISOString().split('T')[0];
+}
+
+function cartoonGenreIds(m) {
+  if (!m) return [];
+  if (Array.isArray(m.genre_ids)) return m.genre_ids;
+  if (Array.isArray(m.genres)) return m.genres.map(g => g && g.id).filter(Boolean);
+  return [];
+}
+
+function cartoonTitleOf(m) {
+  if (!m) return '';
+  return (m.name || m.title || '') + ' ' + (m.original_name || m.original_title || '');
+}
+
+/** Curated ya ghar-ghar ka naam wala cartoon? */
+function isFamousCartoon(m) {
+  if (!m) return false;
+  return CARTOON_ICON_IDS.has(m.id) || CARTOON_LEGEND_IDS.has(m.id) ||
+         CARTOON_FAMOUS_RE.test(cartoonTitleOf(m));
+}
+
+/**
+ * Cartoons tab ka strict gate — sirf animated content pass karta hai.
+ * Live-action kids serials (Baalveer, Shaka Laka Boom Boom, Shinchan ke
+ * live remakes), reality kids shows, aur adult animation sab block.
+ */
+function isStrictCartoon(m) {
+  if (!m || !m.poster_path) return false;
+  if (m.adult === true) return false;
+  if (CARTOON_BLOCK_IDS.has(m.id)) return false;
+
+  const title = cartoonTitleOf(m);
+  if (CARTOON_BLOCK_RE.test(title) || CARTOON_NSFW_RE.test(title)) return false;
+
+  const g = cartoonGenreIds(m);
+  // Animation genre lazmi. Sirf hand-verified cartoon ids hi bypass kar sakti
+  // hain (TMDB par kuch Indian cartoons ke genres blank pade hain).
+  const curated = CARTOON_ICON_IDS.has(m.id) || CARTOON_LEGEND_IDS.has(m.id);
+  if (!g.includes(16) && !curated) return false;
+
+  // Reality / talk / news / soap / documentary kabhi cartoon nahi hote.
+  if (g.some(id => id === 10764 || id === 10767 || id === 10763 || id === 10766 || id === 99)) return false;
+  // War & Politics animation bachchon ke section me nahi.
+  if (g.includes(10768) && !curated) return false;
+
+  // ja/zh/ko: sirf kids/family cartoons (Doraemon, Shin Chan, Pokemon) —
+  // shonen/seinen anime ANIME tab ka kaam hai.
+  const lang = m.original_language;
+  if (lang === 'ja' || lang === 'zh' || lang === 'ko') {
+    if (!isFamousCartoon(m) && !g.includes(10762) && !g.includes(10751)) return false;
+  }
+  return true;
+}
+
+/** Famous + trending + popular ko top par laane wala score. */
+function cartoonScore(m, isTrendingSource) {
+  const g = cartoonGenreIds(m);
+  let s = 0;
+  if (CARTOON_ICON_IDS.has(m.id)) s += 26000;          // India ke evergreen cartoons
+  else if (CARTOON_LEGEND_IDS.has(m.id)) s += 14000;   // global legends
+  else if (CARTOON_FAMOUS_RE.test(cartoonTitleOf(m))) s += 8000;
+  if (isTrendingSource) s += 3500;
+  s += Math.min(m.popularity || 0, 400) * 9;
+  const v = m.vote_count || 0;
+  if (v > 0) s += Math.log10(v + 1) * 600;
+  if (g.includes(10762)) s += 500;   // official Kids classification
+  if (g.includes(10751)) s += 250;   // Family
+  return s;
+}
+
+/**
+ * Mode ke hisaab se TMDB request plan. Har query me Animation genre ya kids
+ * network hota hai, isliye live-action pehle hi source par cut jaata hai.
+ */
+function buildCartoonQueries(mode, page) {
+  const p1 = String(page * 2 - 1);
+  const p2 = String(page * 2);
+  const pg = String(page);
+  const today = cartoonISTDate(0);
+  const base = { language: 'en-US', include_adult: 'false' };
+  const A  = CARTOON_GENRE_ANIMATION;
+  const AK = CARTOON_GENRE_ANIMATION + ',' + CARTOON_GENRE_KIDS;    // Animation AND Kids
+  const AF = CARTOON_GENRE_ANIMATION + ',' + CARTOON_GENRE_FAMILY;  // Animation AND Family
+  const q = [];
+  const push = (endpoint, params, type) => q.push({ endpoint, params: Object.assign({}, base, params), type });
+
+  switch (mode) {
+    case 'trending':
+      push('/trending/tv/week',    { page: pg }, 'tv');
+      push('/trending/movie/week', { page: pg }, 'movie');
+      push('/trending/tv/day',     { page: pg }, 'tv');
+      push('/trending/movie/day',  { page: pg }, 'movie');
+      push('/discover/tv',    { with_genres: AK, sort_by: 'popularity.desc', page: pg }, 'tv');
+      push('/discover/movie', { with_genres: AF, sort_by: 'popularity.desc', page: pg }, 'movie');
+      break;
+
+    case 'legends':
+      push('/discover/tv',    { with_genres: AK, sort_by: 'vote_count.desc', page: p1 }, 'tv');
+      push('/discover/tv',    { with_genres: A, with_networks: CARTOON_NET_ALL, sort_by: 'vote_count.desc', page: p1 }, 'tv');
+      push('/discover/tv',    { with_genres: AF, sort_by: 'vote_count.desc', page: p1 }, 'tv');
+      push('/discover/movie', { with_genres: AF, sort_by: 'vote_count.desc', page: p1 }, 'movie');
+      push('/discover/tv',    { with_genres: AK, sort_by: 'vote_count.desc', page: p2 }, 'tv');
+      push('/discover/movie', { with_genres: AF, sort_by: 'vote_count.desc', page: p2 }, 'movie');
+      break;
+
+    case 'hindi':
+      push('/discover/tv',    { with_genres: A, with_original_language: 'hi', sort_by: 'popularity.desc', page: p1 }, 'tv');
+      push('/discover/tv',    { with_genres: AK, with_original_language: 'hi', sort_by: 'popularity.desc', page: p1 }, 'tv');
+      push('/discover/tv',    { with_genres: A, with_networks: CARTOON_NET_INDIA, sort_by: 'popularity.desc', page: p1 }, 'tv');
+      push('/discover/movie', { with_genres: A, with_original_language: 'hi', sort_by: 'popularity.desc', page: p1 }, 'movie');
+      push('/discover/tv',    { with_genres: A, with_original_language: 'hi', sort_by: 'popularity.desc', page: p2 }, 'tv');
+      break;
+
+    case 'japanese':
+      push('/discover/tv',    { with_genres: AK, with_original_language: 'ja', sort_by: 'popularity.desc', page: p1 }, 'tv');
+      push('/discover/tv',    { with_genres: AF, with_original_language: 'ja', sort_by: 'popularity.desc', page: p1 }, 'tv');
+      push('/discover/tv',    { with_genres: A,  with_networks: CARTOON_NET_JAPAN, sort_by: 'popularity.desc', page: p1 }, 'tv');
+      push('/discover/tv',    { with_genres: AK, with_original_language: 'ja', sort_by: 'vote_count.desc', page: p1 }, 'tv');
+      push('/discover/movie', { with_genres: AF, with_original_language: 'ja', sort_by: 'popularity.desc', page: p1 }, 'movie');
+      break;
+
+    case 'movies':
+      push('/discover/movie', { with_genres: AF, sort_by: 'popularity.desc', page: p1 }, 'movie');
+      push('/discover/movie', { with_genres: AF, sort_by: 'popularity.desc', page: p2 }, 'movie');
+      push('/discover/movie', { with_genres: A, without_genres: '27,53,80', sort_by: 'popularity.desc', page: p1 }, 'movie');
+      push('/discover/movie', { with_genres: AF, sort_by: 'vote_count.desc', page: p1 }, 'movie');
+      push('/discover/movie', { with_genres: AF, sort_by: 'vote_count.desc', page: p2 }, 'movie');
+      break;
+
+    case 'series':
+      push('/discover/tv', { with_genres: AK, sort_by: 'popularity.desc', page: p1 }, 'tv');
+      push('/discover/tv', { with_genres: AF, sort_by: 'popularity.desc', page: p1 }, 'tv');
+      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_ALL, sort_by: 'popularity.desc', page: p1 }, 'tv');
+      push('/discover/tv', { with_genres: AK, sort_by: 'popularity.desc', page: p2 }, 'tv');
+      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_ALL, sort_by: 'vote_count.desc', page: p1 }, 'tv');
+      break;
+
+    case 'cn':
+      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_CN, sort_by: 'popularity.desc', page: p1 }, 'tv');
+      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_CN, sort_by: 'vote_count.desc', page: p1 }, 'tv');
+      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_CN, sort_by: 'popularity.desc', page: p2 }, 'tv');
+      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_CN, sort_by: 'vote_count.desc', page: p2 }, 'tv');
+      break;
+
+    case 'nick':
+      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_NICK, sort_by: 'popularity.desc', page: p1 }, 'tv');
+      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_NICK, sort_by: 'vote_count.desc', page: p1 }, 'tv');
+      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_NICK, sort_by: 'popularity.desc', page: p2 }, 'tv');
+      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_NICK, sort_by: 'vote_count.desc', page: p2 }, 'tv');
+      break;
+
+    case 'disney':
+      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_DISNEY, sort_by: 'popularity.desc', page: p1 }, 'tv');
+      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_DISNEY, sort_by: 'vote_count.desc', page: p1 }, 'tv');
+      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_DISNEY, sort_by: 'popularity.desc', page: p2 }, 'tv');
+      push('/discover/movie', { with_genres: AF, with_companies: '2|3|6125', sort_by: 'popularity.desc', page: p1 }, 'movie');
+      break;
+
+    case 'superhero':
+      push('/discover/tv',    { with_genres: A + ',10759', without_genres: '18', sort_by: 'popularity.desc', page: p1 }, 'tv');
+      push('/discover/tv',    { with_genres: A + ',10759', without_genres: '18', sort_by: 'vote_count.desc', page: p1 }, 'tv');
+      push('/discover/movie', { with_genres: A + ',28', without_genres: '27', sort_by: 'popularity.desc', page: p1 }, 'movie');
+      push('/discover/tv',    { with_genres: A, with_networks: CARTOON_NET_ALL, sort_by: 'popularity.desc', page: p2 }, 'tv');
+      break;
+
+    case 'latest':
+      push('/discover/tv',    { with_genres: AK, sort_by: 'first_air_date.desc', 'first_air_date.lte': today, 'vote_count.gte': '3', page: p1 }, 'tv');
+      push('/discover/movie', { with_genres: AF, sort_by: 'primary_release_date.desc', 'primary_release_date.lte': today, 'vote_count.gte': '5', page: p1 }, 'movie');
+      push('/discover/tv',    { with_genres: A, with_networks: CARTOON_NET_ALL, sort_by: 'first_air_date.desc', 'first_air_date.lte': today, 'vote_count.gte': '2', page: p1 }, 'tv');
+      push('/discover/tv',    { with_genres: AK, sort_by: 'popularity.desc', 'first_air_date.gte': cartoonISTDate(-540), 'first_air_date.lte': today, page: p1 }, 'tv');
+      break;
+
+    case 'all':
+    default:
+      // Famous + popular + legendary + trending + Hindi + movies — sab ek mix.
+      push('/discover/tv',    { with_genres: AK, sort_by: 'popularity.desc', page: p1 }, 'tv');
+      push('/discover/tv',    { with_genres: AF, sort_by: 'popularity.desc', page: p1 }, 'tv');
+      push('/discover/tv',    { with_genres: A, with_networks: CARTOON_NET_ALL, sort_by: 'popularity.desc', page: p1 }, 'tv');
+      push('/discover/tv',    { with_genres: A, with_networks: CARTOON_NET_ALL, sort_by: 'vote_count.desc', page: p1 }, 'tv');
+      push('/discover/tv',    { with_genres: AK, with_original_language: 'ja', sort_by: 'popularity.desc', page: p1 }, 'tv');
+      push('/discover/tv',    { with_genres: A, with_original_language: 'hi', sort_by: 'popularity.desc', page: p1 }, 'tv');
+      push('/discover/tv',    { with_genres: AK, sort_by: 'vote_count.desc', page: p1 }, 'tv');
+      push('/discover/movie', { with_genres: AF, sort_by: 'popularity.desc', page: p1 }, 'movie');
+      push('/discover/movie', { with_genres: AF, sort_by: 'vote_count.desc', page: p1 }, 'movie');
+      push('/trending/tv/week',    { page: pg }, 'tv');
+      push('/trending/movie/week', { page: pg }, 'movie');
+      push('/discover/tv',    { with_genres: AK, sort_by: 'popularity.desc', page: p2 }, 'tv');
+      push('/discover/movie', { with_genres: AF, sort_by: 'popularity.desc', page: p2 }, 'movie');
+      break;
+  }
+  return q;
+}
+
+/** Active cartoon mode ke saare sources fetch + filter + famous-first sort. */
+async function fetchCartoonMovies(mode, page) {
+  const plan = buildCartoonQueries(mode, page);
+  const res = await Promise.allSettled(plan.map(p => tmdb(p.endpoint, p.params)));
+
+  const picked = new Map();
+  res.forEach((r, idx) => {
+    const list = (r.status === 'fulfilled' && r.value && r.value.results) ? r.value.results : [];
+    const src = plan[idx];
+    const fromTrending = src.endpoint.indexOf('/trending/') === 0;
+    list.forEach(raw => {
+      if (!raw) return;
+      const item = Object.assign({}, raw);
+      item.media_type = src.type || item.media_type || 'movie';
+      if (!isStrictCartoon(item)) return;
+      const key = item.media_type + '-' + item.id;
+      const score = cartoonScore(item, fromTrending);
+      const prev = picked.get(key);
+      if (!prev || score > prev._cartoonScore) {
+        item._cartoonScore = score;
+        picked.set(key, item);
+      }
+    });
+  });
+
+  return Array.from(picked.values()).sort((a, b) => b._cartoonScore - a._cartoonScore);
+}
+
+// ── CARTOON SUB-FILTER BAR (chips under category tabs) ──
+function renderCartoonFilterBar() {
+  const catTabs = document.getElementById('catTabs');
+  if (!catTabs) return;
+  let bar = document.getElementById('cartoonFilterBar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'cartoonFilterBar';
+    bar.className = 'anime-filter-bar';   // same chip styling as the anime bar
+    bar.setAttribute('role', 'tablist');
+    bar.setAttribute('aria-label', 'Cartoon filters');
+    catTabs.insertAdjacentElement('afterend', bar);
+  }
+  bar.innerHTML = CARTOON_MODES.map(m => {
+    const active = m.id === currentCartoonMode;
+    return `<button type="button" class="anime-chip${active ? ' active' : ''}" role="tab" tabindex="0" aria-selected="${active}" onclick="setCartoonMode('${m.id}')"><span class="anime-chip-icon" aria-hidden="true">${m.icon}</span><span>${m.label}</span></button>`;
+  }).join('');
+  bar.style.display = 'flex';
+}
+
+function hideCartoonFilterBar() {
+  const bar = document.getElementById('cartoonFilterBar');
+  if (bar) bar.style.display = 'none';
+}
+
+function updateCartoonHeading() {
+  const h = document.getElementById('sectionHeading');
+  if (!h) return;
+  const m = CARTOON_MODES.find(x => x.id === currentCartoonMode) || CARTOON_MODES[0];
+  h.textContent = currentCartoonMode === 'all' ? 'CARTOONS' : ('CARTOONS • ' + m.label.toUpperCase());
+}
+
+function setCartoonMode(mode) {
+  if (!CARTOON_MODES.some(m => m.id === mode)) mode = 'all';
+  currentCartoonMode = mode;
+  renderCartoonFilterBar();
+  updateCartoonHeading();
+  loadMovies('kids');
+}
+
 async function loadMovies(cat, isLoadMore = false) {
   const grid = document.getElementById('movieGrid');
   if (!grid) return;
@@ -2174,23 +2551,8 @@ async function loadMovies(cat, isLoadMore = false) {
       ]);
       res.forEach(r => { movies = movies.concat(r.results||[]); });
     } else if (cat === 'kids') {
-      const res = await Promise.all([
-        tmdb('/discover/tv', { with_genres: '10762', with_original_language: 'hi', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Indian (Motu Patlu, Chhota Bheem)
-        tmdb('/discover/tv', { with_genres: '10762', with_original_language: 'ja', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Japanese (Doraemon, Shinchan, Pokemon)
-        tmdb('/discover/tv', { with_genres: '10762', with_original_language: 'en', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // English (Ben 10, Tom & Jerry)
-        tmdb('/discover/movie', { with_genres: '16,10751', without_genres: '27,53,18', sort_by: 'popularity.desc', page: p1, language: 'en-US' }) // Animation Movies
-      ]);
-      let maxLength = 0;
-      res.forEach(r => { if (r.results && r.results.length > maxLength) maxLength = r.results.length; });
-      for (let i = 0; i < maxLength; i++) {
-        res.forEach((r, idx) => {
-          if (r.results && i < r.results.length) {
-            const item = r.results[i];
-            item.media_type = idx === 3 ? 'movie' : 'tv'; // Fix: Cartoon series ab 'tv' show hongi
-            movies.push(item);
-          }
-        });
-      }
+      // POWERFUL CARTOON ENGINE: strictly animated content only, famous first
+      movies = movies.concat(await fetchCartoonMovies(currentCartoonMode, currentMoviePage));
     } else if (cat === 'anime') {
       // POWERFUL ANIME ENGINE: mode ke hisaab se 4-9 sources parallel fetch
       movies = movies.concat(await fetchAnimeMovies(currentAnimeMode, currentMoviePage));
@@ -2388,8 +2750,8 @@ async function loadMovies(cat, isLoadMore = false) {
     if (!m.poster_path) return false;
     const rDate = m.release_date || m.first_air_date;
     // Agar release date hi nahi hai, toh bhi sirf popular + high votes wali movies pass karein (already released)
-    // Anime exception: naye/niche anime ke votes kam hote hain, unhe drop nahi karna
-    if (!rDate) return (m.vote_count > 50 || cat === 'anime');
+    // Anime/Cartoon exception: naye/niche titles ke votes kam hote hain, unhe drop nahi karna
+    if (!rDate) return (m.vote_count > 50 || cat === 'anime' || cat === 'kids');
     // Agar date future ki hai, toh isko normal list se strict block kar do
     if (rDate > realToday) return false;
     return true;
@@ -2522,44 +2884,24 @@ function renderMovies(movies, append = false) {  const grid = document.getElemen
     fragment.appendChild(card);
   scrollObserver.observe(card);
 
-    // Premium 3D Tilt Effect on Hover (Desktop only - causes lag on mobile/TV)
+    // Premium hover lift (Desktop only - causes lag on mobile/TV)
+    // A prior version tilted the card in 3D via rotateX/rotateY based on
+    // mouse position. That tilt swings the card's corners outward unevenly
+    // (top-left one moment, top-right the next) and, combined with the
+    // scale, was spilling into whichever neighboring card sat in that
+    // direction. A flat lift cannot do that: the card's footprint never
+    // changes shape, so it can't reach past its own grid cell.
     if (!isMzTV() && !isMobile) {
-      let tiltRAF;
-      let cachedRect = null; // Cache to stop Layout Thrashing
-      card.addEventListener('mouseenter', () => { 
-        card.style.transition = 'transform 0.1s ease-out'; 
-        card.style.willChange = 'transform'; 
-        cachedRect = card.getBoundingClientRect();
-      });
-      card.addEventListener('mousemove', (e) => {
-        if (tiltRAF) cancelAnimationFrame(tiltRAF);
-        tiltRAF = requestAnimationFrame(() => {
-          if (!cachedRect) cachedRect = card.getBoundingClientRect();
-          const rect = cachedRect;
-          const x = e.clientX - rect.left;
-          const y = e.clientY - rect.top;
-          const centerX = rect.width / 2;
-          const centerY = rect.height / 2;
-          // ENHANCED 3D TILT: More responsive and attractive values
-          const rotateX = ((y - centerY) / centerY) * -12; 
-          const rotateY = ((x - centerX) / centerX) * 12;
-          const shadowX = (x - centerX) * -0.2;
-          const shadowY = (y - centerY) * -0.2;
-          
-          card.style.transform = `perspective(1000px) translateY(-15px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.05, 1.05, 1.05)`;
-          card.style.boxShadow = `${shadowX}px ${shadowY + 40}px 80px rgba(0,0,0,0.7), 0 0 20px rgba(245,197,24,0.1)`;
-        });
+      card.addEventListener('mouseenter', () => {
+        card.style.transition = 'transform 0.25s ease-out, box-shadow 0.25s ease-out';
+        card.style.transform = 'perspective(1000px) translateY(-10px)';
+        card.style.boxShadow = '0 30px 70px rgba(0,0,0,0.6), 0 0 20px rgba(245,197,24,0.1)';
       });
       card.addEventListener('mouseleave', () => {
-        if (tiltRAF) cancelAnimationFrame(tiltRAF);
         card.style.transition = 'transform 0.3s ease, box-shadow 0.3s ease';
-        card.style.willChange = 'auto';
         card.style.transform = '';
         card.style.boxShadow = '';
-        cachedRect = null; // Clear cache
       });
-      // Update cache on scroll if hovering
-      card.addEventListener('wheel', () => cachedRect = null, {passive: true});
     }
  
   });
@@ -2571,7 +2913,7 @@ const CAT_HEADINGS = {
   all:'ALL MOVIES & SHOWS', tv: 'WEB SERIES', hollywood:'HOLLYWOOD', bollywood:'BOLLYWOOD',
   south:'SOUTH INDIAN', tollywood:'TOLLYWOOD', action:'ACTION',
   comedy:'COMEDY', horror:'HORROR', thriller:'THRILLER', romance:'ROMANCE',
-  scifi:'SCI-FI', animation:'ANIMATION', kids:'KIDS & CARTOONS', anime:'ANIME SERIES & MOVIES',
+  scifi:'SCI-FI', animation:'ANIMATION', kids:'CARTOONS', anime:'ANIME SERIES & MOVIES',
   dubbed:'HINDI DUBBED MOVIES', // <-- YE LINE ADD KI HAI
   adult:'18+ ADULT MOVIES & WEB SERIES',
   trending:'🔥 TRENDING NOW', uhd4k:'💎 4K ULTRA HD', toprated:'⭐ TOP RATED',
@@ -2801,6 +3143,8 @@ function filterCat(cat, e) {
   if (h) h.textContent = CAT_HEADINGS[cat] || 'MOVIES';
   // Anime ke liye extra sub-filter bar (Trending / Latest / Airing / Top Rated ...)
   if (cat === 'anime') { renderAnimeFilterBar(); updateAnimeHeading(); } else { hideAnimeFilterBar(); }
+  // Cartoons ke liye apna sub-filter bar (Trending / Famous / Hindi / Doraemon & Co ...)
+  if (cat === 'kids') { renderCartoonFilterBar(); updateCartoonHeading(); } else { hideCartoonFilterBar(); }
   const sec = document.getElementById('movies-section');
   if (sec) sec.scrollIntoView({ behavior: isMzTVMode() ? 'auto' : 'smooth' });
   loadMovies(cat);
@@ -5758,6 +6102,30 @@ window.addEventListener('scroll', () => {
 
   panel.querySelector('.mz-mp-close').addEventListener('click', closePanel);
   if (mobileNavOverlay) mobileNavOverlay.addEventListener('click', closePanel);
+
+  // Escape closes it, same as every other overlay in the app.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && panel.classList.contains('open')) closePanel();
+  });
+
+  /* Viewport changes must not leave the menu in a broken state. The panel is
+     display:none above the hamburger band, so a menu opened on a tablet and
+     then resized/rotated to a desktop width would vanish while still holding
+     document.body.style.overflow = 'hidden' — the page would silently refuse
+     to scroll with no visible menu to close. Close it whenever the hamburger
+     itself is no longer on screen. */
+  let navResizeRaf = 0;
+  const syncNavToViewport = () => {
+    if (navResizeRaf) return;
+    navResizeRaf = requestAnimationFrame(() => {
+      navResizeRaf = 0;
+      if (!panel.classList.contains('open')) return;
+      const burgerHidden = getComputedStyle(hamburgerBtn).display === 'none' || !hamburgerBtn.offsetParent;
+      if (burgerHidden) closePanel();
+    });
+  };
+  window.addEventListener('resize', syncNavToViewport, { passive: true });
+  window.addEventListener('orientationchange', syncNavToViewport, { passive: true });
 
   // Handle link clicks — trigger the original nav link actions
   panel.querySelectorAll('.mz-mp-link').forEach((link, idx) => {

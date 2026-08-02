@@ -430,7 +430,7 @@
   var STORAGE_KEY = 'mz_pwa_prompt_dismissed_at';
   var TV_STORAGE_KEY = 'mz_pwa_tv_prompt_dismissed_at';
   var INSTALLED_KEY = 'mz_app_installed';
-  var SHOW_DELAY_MS = 3000; // uninstalled users see the popup on every refresh
+  var SHOW_DELAY_MS = 3000; // first-ever-visit delay before the popup auto-opens
   var popupTimer = null;
   var popupShownThisLoad = false;
   var installedState = null;
@@ -465,6 +465,14 @@
 
   function hasInstalledMarker() {
     try { return localStorage.getItem(INSTALLED_KEY) === '1'; } catch (e) { return false; }
+  }
+
+  function hasAutoPopupBeenShown() {
+    try { return localStorage.getItem(STORAGE_KEY) !== null; } catch (e) { return false; }
+  }
+
+  function hasTvAutoPopupBeenShown() {
+    try { return localStorage.getItem(TV_STORAGE_KEY) !== null; } catch (e) { return false; }
   }
 
   function setInstalledMarker(installed) {
@@ -1248,11 +1256,20 @@
   window.__mzShowInstallHelp = showInstallHelp;
 
   function scheduleInstallPopup(delay) {
+    // Auto-open only on the visitor's first-ever visit (nothing recorded under
+    // STORAGE_KEY yet). Every later visit skips straight past this — the
+    // popup no longer appears on every refresh. The navbar Install button
+    // stays visible and clickable the whole time via handleInstallClick, so
+    // the user can still open it manually whenever they want, right up until
+    // the app is actually installed (applyInstalledState hides that button).
     if (installedState === true || popupShownThisLoad || popupTimer) return;
+    if (isMzTV() ? hasTvAutoPopupBeenShown() : hasAutoPopupBeenShown()) return;
     popupTimer = setTimeout(function () {
       popupTimer = null;
       refreshInstalledState('before-auto-popup').then(function (installed) {
         if (installed || popupShownThisLoad) return;
+        if (isMzTV() ? hasTvAutoPopupBeenShown() : hasAutoPopupBeenShown()) return;
+        markDismissed(isMzTV() ? TV_STORAGE_KEY : STORAGE_KEY);
         if (isMzTV()) {
           openTvPopup(false);
           setTimeout(function () { if (tvDismissBtn) tvDismissBtn.focus(); }, 100);

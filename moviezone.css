@@ -108,8 +108,11 @@ nav, footer, .modal-box {
   transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
   will-change: transform;
 }
+/* Lift + scale kept small enough that the growth stays inside the grid gap
+   (1.4rem / 22.4px) on every side — a bigger scale here was pushing the
+   hovered card's edges into the neighboring cards above and to the side. */
 .movie-card:hover, .upcoming-card:hover {
-  transform: perspective(1000px) translateY(-12px) scale(1.04) translateZ(0);
+  transform: perspective(1000px) translateY(-8px)translateZ(0);
 }
 .movie-card img, .upcoming-card img {
   backface-visibility: hidden;
@@ -496,11 +499,18 @@ body.cursor-hover #cursor-dot {
 
 #mzMobilePanel .mz-mp-links {
   flex: 1;
+  /* min-height:0 is what makes overflow-y actually clip. A flex item defaults
+     to min-height:auto, so on short viewports (landscape phones, small desktop
+     windows) the link list grew past the panel instead of scrolling — the last
+     entries ended up below the fold with no way to reach them. */
+  min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 1.2rem 1rem;
   gap: 0.2rem;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 #mzMobilePanel .mz-mp-link {
@@ -554,9 +564,30 @@ body.cursor-hover #cursor-dot {
   text-transform: uppercase;
 }
 
-/* Hide panel on desktop */
-@media (min-width: 769px) {
+/* Short viewports — landscape phones and small desktop windows. The header and
+   footer chrome ate most of a 360px-tall panel, leaving the link list with
+   almost no room; trim the chrome so the links stay the tallest part. */
+@media (max-height: 560px) {
+  #mzMobilePanel .mz-mp-header { padding: 0.85rem 1.1rem 0.7rem; }
+  #mzMobilePanel .mz-mp-brand { font-size: 1.05rem; letter-spacing: 2px; }
+  #mzMobilePanel .mz-mp-close { width: 32px; height: 32px; border-radius: 10px; font-size: 1.25rem; }
+  #mzMobilePanel .mz-mp-links { padding: 0.6rem 0.8rem; }
+  #mzMobilePanel .mz-mp-link { padding: 0.6rem 1rem; font-size: 0.92rem; border-radius: 11px; }
+  #mzMobilePanel .mz-mp-footer { padding: 0.6rem 1.1rem; }
+}
+
+/* Hide the slide-in panel only where the hamburger is hidden too.
+   ─────────────────────────────────────────────────────────────────
+   This boundary MUST stay in step with the hamburger band further down
+   (`@media (max-width: 1024px) and (min-width: 769px)` shows .hamburger-btn and
+   hides .nav-links). This rule used to start at 769px, so every viewport from
+   769px to 1024px — iPad portrait and landscape, foldables, any windowed
+   browser under ~1025px — showed the hamburger, hid the inline links, and then
+   had the only menu that could replace them killed by display:none. Tapping the
+   button dimmed the screen and produced no links at all. */
+@media (min-width: 1025px) {
   #mzMobilePanel { display: none !important; }
+  .mobile-nav-overlay { display: none !important; }
 }
 
 /* ── Ripple Effect ── */
@@ -5148,6 +5179,29 @@ html[data-mz-tv="true"] .cat-group-item {
   .slide-content { left: 5%; max-width: 680px; }
 }
 
+/* Tablets and foldables (769px-1024px) sat between the two breakpoints above:
+   too wide for the phone hamburger to kick in, too narrow to fit the full nav
+   link row + search box + install button on one line without everything
+   getting crushed (labels clipped, search placeholder truncated, "Install"
+   shrunk to "Instal"). Give this band the same collapsed-nav treatment as
+   phones, just without the phone-only hero/grid/footer overrides below. */
+@media (max-width: 1024px) and (min-width: 769px) {
+  #navbar {
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .hamburger-btn { display: flex; margin-left: auto; order: 1; }
+  .nav-links { display: none !important; }
+  .nav-search {
+    order: 2;
+    max-width: 100%;
+    width: 100%;
+    flex: 1 1 100%;
+    margin-left: 0;
+    margin-top: 0.5rem;
+  }
+}
+
 @media (max-width: 768px) {
   /* ✨ Mobile Performance & Premium Compact UI Boost */
   body { background-image: none !important; } /* Heavy gradients removed */
@@ -5935,6 +5989,23 @@ html[data-mz-tv="true"] .cat-group-item {
 @media (max-width: 768px) {
   .nav-install-btn span { display: none; }
   .nav-install-btn { padding: 8px 10px; margin-left: 6px; }
+}
+/* Icon-only on phones: the 18x18 SVG plus 8-10px padding read as an
+   oversized button once the "Install" label is hidden. Shrink the tap
+   target and the icon itself so it sits compactly next to the logo. */
+@media (max-width: 480px) {
+  .nav-install-btn {
+    padding: 6px;
+    gap: 0;
+    margin-left: 4px;
+    width: 30px;
+    height: 30px;
+    justify-content: center;
+  }
+  .nav-install-btn svg {
+    width: 14px;
+    height: 14px;
+  }
 }
 
 /* === PWA INSTALL BANNER === */

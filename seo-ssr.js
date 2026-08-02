@@ -482,12 +482,12 @@ const CATEGORIES = {
     intro: 'Most K-dramas run a single self-contained season of 12 to 20 episodes, so you can start almost anywhere on this page without needing prior context.'
   },
   kids: {
-    family: 'series', kind: 'tv', heading: 'Kids Shows & Cartoons',
+    family: 'series', kind: 'tv', heading: 'Cartoons',
     endpoint: '/discover/tv',
-    params: { with_genres: '10762', sort_by: 'popularity.desc' },
-    title: 'Kids Shows & Cartoons — Watch Online Free in HD',
-    description: 'Watch cartoons and kids shows online in HD with Hindi dubbed audio. Stream animated series for children with episode selection and safe, all-ages content.',
-    intro: 'Everything on this page carries a Kids classification. Hindi dubbed audio is available for most of the long-running cartoon series.'
+    params: { with_genres: '16,10762', sort_by: 'popularity.desc' },
+    title: 'Cartoons — Watch Cartoon Series Online Free in HD',
+    description: 'Watch cartoons online in HD with Hindi dubbed audio. Stream animated cartoon series for children with episode selection and safe, all-ages content.',
+    intro: 'Every title here carries both the Animation and Kids classification, so live-action children\'s serials never appear on this page. Hindi dubbed audio is available for most of the long-running cartoon series.'
   },
   'zee5-series': {
     family: 'series', kind: 'tv', heading: 'Zee5 Web Series',
@@ -723,7 +723,7 @@ ${body}
           <li><a href="/series/web-series">Web series</a></li>
           <li><a href="/series/anime">Anime</a></li>
           <li><a href="/series/kdrama">Korean drama</a></li>
-          <li><a href="/series/kids">Kids &amp; cartoons</a></li>
+          <li><a href="/series/kids">Cartoons</a></li>
         </ul>
       </div>
       <div>
