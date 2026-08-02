@@ -341,6 +341,13 @@ let carouselMovies = [];
 let autoSlideTimer = null;
 let isLoadingMore = false;
 let isSearchResultsMode = false;
+/*  The watchlist is a finite, local list, so infinite scroll must not run while
+ *  it is on screen. This used to be inferred by checking whether the active
+ *  .cat-tab's onclick contained "showWatchlist" — that broke the moment the
+ *  Watchlist pill was removed from the strip, because with no matching tab the
+ *  guard silently stopped firing and paged "all" movies into the watchlist grid.
+ *  An explicit flag cannot be defeated by markup changes. */
+let isWatchlistMode = false;
 let currentModalMovie = null;
 let watchlist = JSON.parse(localStorage.getItem('mz_watchlist') || '[]');
 let isFullViewMovies = false;
@@ -712,14 +719,7 @@ function setupInfiniteScroll() {
         const entry = entries[0];
         if (entry.isIntersecting && !isLoadingMore) {
             if (isSearchResultsMode) return; // Search results are a fixed, related set — no infinite scroll
-            const activeTab = document.querySelector('.cat-tab.active');
-            if (activeTab) {
-                const onclickAttr = activeTab.getAttribute('onclick') || '';
-                if (onclickAttr.includes("showWatchlist")) {
-                    return; // Don't infinite scroll on watchlist
-                }
-            }
-            
+            if (isWatchlistMode) return;     // Watchlist is a finite local list
             loadMoreMoviesAction();
         }
     }, {
@@ -2182,14 +2182,91 @@ const CAT_HEADINGS = {
   prime:'AMAZON PRIME VIDEO', jiohotstar:'JIOHOTSTAR', zee5:'ZEE5 MOVIES & WEB SERIES',
   adventure:'ADVENTURE', fantasy:'FANTASY', crime:'CRIME', documentary:'DOCUMENTARY', family:'FAMILY'
 };
+/*  ══════════════════════════════════════════════════════════════════════
+ *  GROUPED CATEGORY DROPDOWNS — "OTT Platform" and "Category"
+ *  ══════════════════════════════════════════════════════════════════════
+ *  The tab strip had grown to 27 pills across three wrapped rows. The
+ *  platform and genre filters now live in two dropdowns, leaving only the
+ *  primary destinations on the strip itself.
+ *
+ *  Menu items keep class="cat-tab" deliberately. Two existing functions
+ *  depend on it and would break silently otherwise:
+ *    • filterCat() marks the active filter by scanning .cat-tab elements
+ *    • loadMoreMoviesAction() reads .cat-tab.active's onclick to decide which
+ *      category the infinite scroll should page next
+ *  A closed menu is display:none, but querySelector still finds elements
+ *  inside it, so paging keeps working while the menu is shut.
+ */
+function closeCatGroups(except) {
+  document.querySelectorAll('.cat-group.is-open').forEach(group => {
+    if (group === except) return;
+    group.classList.remove('is-open');
+    group.removeAttribute('data-align');
+    const trigger = group.querySelector('.cat-group-trigger');
+    if (trigger) trigger.setAttribute('aria-expanded', 'false');
+  });
+}
+
+// Flip the panel to the right edge if opening it left-aligned would push it
+// off-screen — happens on narrow viewports where the group wraps to the end.
+function alignCatGroupMenu(group) {
+  const menu = group.querySelector('.cat-group-menu');
+  if (!menu) return;
+  group.removeAttribute('data-align');
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth - 8) group.setAttribute('data-align', 'end');
+}
+
+function toggleCatGroup(group) {
+  if (!group) return;
+  const wasOpen = group.classList.contains('is-open');
+  closeCatGroups();
+  if (wasOpen) return;
+  group.classList.add('is-open');
+  const trigger = group.querySelector('.cat-group-trigger');
+  if (trigger) trigger.setAttribute('aria-expanded', 'true');
+  alignCatGroupMenu(group);
+}
+
+/** Show a marker on a trigger when the active filter lives inside its menu,
+ *  so the user can still see which group they are filtering by once it closes. */
+function syncCatGroupTriggers() {
+  document.querySelectorAll('.cat-group').forEach(group => {
+    const trigger = group.querySelector('.cat-group-trigger');
+    if (!trigger) return;
+    trigger.classList.toggle('has-active', !!group.querySelector('.cat-group-item.active'));
+  });
+}
+
+// Delegated: survives the tabs that other code injects at DOMContentLoaded.
+document.addEventListener('click', (e) => {
+  const trigger = e.target.closest('.cat-group-trigger');
+  if (trigger) {
+    e.preventDefault();
+    toggleCatGroup(trigger.closest('.cat-group'));
+    return;
+  }
+  // The item's own inline onclick has already run filterCat by this point.
+  if (e.target.closest('.cat-group-item')) { closeCatGroups(); return; }
+  if (!e.target.closest('.cat-group')) closeCatGroups();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!document.querySelector('.cat-group.is-open')) return;
+  closeCatGroups();
+});
+
 function filterCat(cat, e) {
   if (e) e.preventDefault();
   isSearchResultsMode = false;
+  isWatchlistMode = false;
   const scrollTrigger = document.getElementById('infiniteScrollTrigger');
   if (scrollTrigger) scrollTrigger.style.display = '';
   document.querySelectorAll('.cat-tab').forEach(t => { t.classList.remove('active'); });
   const tabs = document.querySelectorAll('.cat-tab');
   tabs.forEach(t => { if ((t.getAttribute('onclick')||'').indexOf("'"+cat+"'") !== -1) t.classList.add('active'); });
+  syncCatGroupTriggers();
   const h = document.getElementById('sectionHeading');
   if (h) h.textContent = CAT_HEADINGS[cat] || 'MOVIES';
   // Anime ke liye extra sub-filter bar (Trending / Latest / Airing / Top Rated ...)
@@ -2241,12 +2318,16 @@ function updateModalWatchlistBtn(id) {
 function showWatchlist(e) {
   if (e) e.preventDefault();
   isSearchResultsMode = false;
+  isWatchlistMode = true;
   hideAnimeFilterBar();
+  // Nothing to page here, so take the sentinel out of the viewport entirely
+  // rather than relying on the observer callback to bail.
   const scrollTrigger = document.getElementById('infiniteScrollTrigger');
-  if (scrollTrigger) scrollTrigger.style.display = '';
+  if (scrollTrigger) scrollTrigger.style.display = 'none';
   document.querySelectorAll('.cat-tab').forEach(t => t.classList.remove('active'));
   const tabs = document.querySelectorAll('.cat-tab');
   tabs.forEach(t => { if ((t.getAttribute('onclick')||'').includes('showWatchlist')) t.classList.add('active'); });
+  syncCatGroupTriggers();
   const h = document.getElementById('sectionHeading');
   if (h) {
     h.innerHTML = 'MY WATCHLIST' + (watchlist.length > 0 ? ' <button onclick="clearWatchlist()" class="clear-watchlist-btn"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg> Clear All</button>' : '');
@@ -5041,48 +5122,31 @@ document.addEventListener('DOMContentLoaded', () => {
     tvTab.innerHTML = 'Web Series';
   }
 
-  // -- DYNAMICALLY ADD KIDS TAB --
-  const catTabs = document.querySelector('.cat-tabs');
-  if (catTabs && !document.querySelector('.cat-tab[onclick*="kids"]')) {
-    const kidsTab = document.createElement('button');
-    kidsTab.className = 'cat-tab';
-    kidsTab.tabIndex = 0;
-    kidsTab.setAttribute('onclick', "filterCat('kids')");
-    kidsTab.innerHTML = 'Cartoons';
-    catTabs.appendChild(kidsTab);
-  }
-  if (catTabs && !document.querySelector('.cat-tab[onclick*="anime"]')) {
-    const animeTab = document.createElement('button');
-    animeTab.className = 'cat-tab';
-    animeTab.tabIndex = 0;
-    animeTab.setAttribute('onclick', "filterCat('anime')");
-    animeTab.innerHTML = 'Anime';
-    catTabs.appendChild(animeTab);
-  }
-      
-      // -- DYNAMICALLY ADD 18+ ADULT TAB --
-      if (catTabs && !document.querySelector('.cat-tab[onclick*="adult"]')) {
-        const adultTab = document.createElement('button');
-        adultTab.className = 'cat-tab';
-        adultTab.tabIndex = 0;
-        adultTab.setAttribute('onclick', "filterCat('adult')");
-        adultTab.innerHTML = '18+';
-        catTabs.appendChild(adultTab);
-      }
+  /*  Cartoons / Anime / 18+ / Hindi Dubbed used to be appended here at runtime.
+   *  Cartoons, Anime and 18+ are now declared on the strip in index.html and the
+   *  genres live in the "Category" dropdown, so injecting them again would push
+   *  duplicate pills onto the strip and undo the grouping. Hindi Dubbed was
+   *  dropped from the UI entirely; filterCat('dubbed') still works if called.
+   *  A safety sweep instead: if markup ever regresses and a category ends up
+   *  missing, log it rather than silently dropping the filter. */
+  (function verifyCategoryTabs() {
+    const required = ['kids', 'anime', 'adult', 'tv', 'zee5', 'netflix', 'prime', 'jiohotstar'];
+    const missing = required.filter(c =>
+      !document.querySelector('.cat-tab[onclick*="filterCat(\'' + c + '\')"]'));
+    if (missing.length) {
+      console.warn('[MovieZone] Category tabs missing from markup:', missing.join(', '));
+    }
+  })();
 
-            // -- DYNAMICALLY ADD HINDI DUBBED TAB --
-      if (catTabs && !document.querySelector('.cat-tab[onclick*="dubbed"]')) {
-        const dubbedTab = document.createElement('button');
-        dubbedTab.className = 'cat-tab';
-        dubbedTab.tabIndex = 0;
-        dubbedTab.setAttribute('onclick', "filterCat('dubbed')");
-        dubbedTab.innerHTML = 'Hindi Dubbed';
-        catTabs.appendChild(dubbedTab);
-      }
+  // Reflect the starting filter on the group triggers.
+  if (typeof syncCatGroupTriggers === 'function') syncCatGroupTriggers();
 
   // Fluid Ripple Effect for buttons
   document.body.addEventListener('click', (e) => {
-    const btn = e.target.closest('.btn-play, .btn-info, .btn-watchlist, .btn-download, .load-more-btn, .premium-play-btn, .cat-tab, .carousel-arrow, .nav-btn');
+    // The dropdown triggers are excluded on purpose: a menu button should react
+    // instantly, and the injected ripple span is a layout hazard inside a flex
+    // button (see the specificity note next to .ripple-span in moviezone.css).
+    const btn = e.target.closest('.btn-play, .btn-info, .btn-watchlist, .btn-download, .load-more-btn, .premium-play-btn, .cat-tab:not(.cat-group-trigger), .carousel-arrow, .nav-btn');
     if (btn && !isMzTV()) {
       btn.classList.add('ripple-wrapper');
       const circle = document.createElement('span');
@@ -5236,7 +5300,9 @@ function goHome(e) {
   if (sep) sep.style.display = 'block';
   
   const h = document.getElementById('sectionHeading');
-  if (h && h.textContent === 'MY WATCHLIST') {
+  if (isWatchlistMode) {
+    // Stay on the watchlist and keep paging disabled for it.
+    if (scrollTrigger) scrollTrigger.style.display = 'none';
     renderMovies(watchlist);
   } else {
     const activeTab = document.querySelector('.cat-tab.active');

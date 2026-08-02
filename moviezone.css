@@ -561,7 +561,16 @@ body.cursor-hover #cursor-dot {
 
 /* ── Ripple Effect ── */
 .ripple-wrapper { position: relative; overflow: hidden; }
-.ripple-span {
+/*  Specificity guard. `.cat-tab span { position: relative }` (further down, for
+    label z-index) outranks a bare `.ripple-span` selector, which used to drag
+    the ripple back into flow. That was invisible on block-level buttons because
+    width/height do not apply to inline elements — but inside a flex button the
+    children are blockified, the inline width/height suddenly applied, and the
+    ripple became a real ~143px flex item that inflated the button. Keep this
+    selector at least as specific as any descendant rule that could reach it. */
+.ripple-span,
+.ripple-wrapper .ripple-span,
+.cat-tab .ripple-span {
   position: absolute;
   border-radius: 50%;
   transform: scale(0);
@@ -1979,6 +1988,160 @@ body.cursor-hover #cursor-dot {
     0 0 24px rgba(245,197,24,0.14),
     inset 0 1px 0 rgba(255,255,255,0.2);
   transform: translateY(-1px);
+}
+
+/* ══ GROUPED CATEGORY DROPDOWNS (OTT Platform / Category) ══
+   The trigger is a .cat-tab so it inherits the pill styling, and every item
+   inside a menu is ALSO a .cat-tab so filterCat() and loadMoreMoviesAction()
+   keep working unchanged — they both select on .cat-tab. */
+.cat-group {
+  position: relative;
+  display: inline-flex;
+}
+
+.cat-group-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  /* No transition and no ripple on the trigger: it is a menu button, so the
+     open/close state should read as instant rather than easing while the panel
+     is already on screen.
+     !important is deliberate. moviezone.js injects a perf stylesheet with
+     `.low-end-mode * { transition-duration: 0.2s !important }`, which is meant
+     as a CEILING for weak devices — without this it would instead raise this
+     element's duration from 0 back up to 0.2s. */
+  transition: none !important;
+}
+
+/* .cat-tab::before is the hover glow; on a menu button it just adds a delayed
+   wash after the panel has opened. */
+.cat-group-trigger::before { display: none; }
+
+.cat-group-chevron {
+  transition: none !important;
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+
+.cat-group.is-open .cat-group-chevron { transform: rotate(180deg); }
+
+/* Trigger reflects the state of its children: highlighted while the menu is
+   open, and marked when one of the categories inside it is the active filter. */
+.cat-group.is-open > .cat-group-trigger,
+.cat-group-trigger.has-active {
+  border-color: rgba(245,197,24,0.42);
+  color: #fff;
+}
+
+.cat-group-trigger.has-active {
+  background:
+    linear-gradient(180deg, rgba(245,197,24,0.18), rgba(245,197,24,0.06)),
+    rgba(10,10,20,0.68);
+}
+
+.cat-group-trigger.has-active::after {
+  content: '';
+  position: absolute;
+  top: 7px;
+  right: 9px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--gold);
+  box-shadow: 0 0 8px var(--gold);
+}
+
+.cat-group-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 0.55rem);
+  left: 0;
+  z-index: 40;
+  min-width: 208px;
+  max-width: min(88vw, 420px);
+  max-height: min(58vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.55rem;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(9,9,18,0.97);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  box-shadow: 0 22px 54px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06);
+  scrollbar-width: thin;
+}
+
+.cat-group.is-open > .cat-group-menu { display: flex; }
+
+.cat-group-menu::-webkit-scrollbar { width: 6px; }
+.cat-group-menu::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.16);
+  border-radius: 99px;
+}
+
+/* Inside a menu the pills sit full width so the list reads as a menu rather
+   than a second cloud of chips. */
+.cat-group-item {
+  flex: 1 1 100%;
+  text-align: left;
+  padding: 0.55rem 0.85rem;
+  border-radius: 10px;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* Right-aligned menu when the group sits near the viewport edge. */
+.cat-group[data-align="end"] .cat-group-menu { left: auto; right: 0; }
+
+/* ── TV MODE ──
+   D-pad focus in tv-mode.js skips elements with a zero-size rect, and its
+   focus cache only invalidates on childList mutations — toggling a class would
+   not refresh it. Rendering both menus permanently inline sidesteps both
+   issues and is faster to reach with a remote than a popup. */
+html[data-mz-tv="true"] .cat-group {
+  /* Deliberately NOT display:contents — that is unsupported on the Chromium
+     56-63 builds shipped in 2017-2019 Smart TVs, and would collapse the pills
+     into an unstyled row there. An inline-flex wrapper renders identically for
+     our purposes and works everywhere. */
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+html[data-mz-tv="true"] .cat-group-menu {
+  display: flex;
+  position: static;
+  min-width: 0;
+  max-width: none;
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+  background: none;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  gap: 0.65rem;
+}
+
+html[data-mz-tv="true"] .cat-group-trigger { display: none; }
+
+html[data-mz-tv="true"] .cat-group-item {
+  flex: 0 0 auto;
+  text-align: center;
+  padding: 0.6rem 1.2rem;
+  border-radius: 999px;
+}
+
+@media (max-width: 640px) {
+  .cat-group-menu {
+    min-width: 176px;
+    max-height: 52vh;
+  }
 }
 
 /* ══ PREMIUM HIGHLIGHT TABS (Trending / 4K / Top Rated) ══ */

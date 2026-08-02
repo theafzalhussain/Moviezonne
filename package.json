@@ -5,9 +5,10 @@
   "main": "moviezone.js",
   "scripts": {
     "build": "cleancss -o moviezone.min.css moviezone.css && cleancss -o tv-mode.min.css tv-mode.css && terser moviezone.js -o moviezone.min.js -c -m && terser tv-mode.js -o tv-mode.min.js -c -m",
-    "test": "node tv-mode.test.js && node tv-mode.browser.test.js && node pwa-assets.test.js && node seo-ssr.test.js && node carousel-fit-check.js && node tmdb-e2e.js && node tmdb-stale.js && node ott-check.js",
-    "test:offline": "node tv-mode.test.js && node tv-mode.browser.test.js && node pwa-assets.test.js && node seo-ssr.test.js && node carousel-fit-check.js",
+    "test": "node tv-mode.test.js && node tv-mode.browser.test.js && node pwa-assets.test.js && node seo-ssr.test.js && node carousel-fit-check.js && node cat-tabs.browser.test.js && node tmdb-e2e.js && node tmdb-stale.js && node ott-check.js",
+    "test:offline": "node tv-mode.test.js && node tv-mode.browser.test.js && node pwa-assets.test.js && node seo-ssr.test.js && node carousel-fit-check.js && node vercelignore-check.js",
     "test:tv": "node tv-mode.test.js && node tv-mode.browser.test.js",
+    "test:tabs": "node cat-tabs.browser.test.js",
     "test:seo": "node seo-ssr.test.js",
     "verify:seo": "node seo-live-check.js",
     "verify:tv": "node tv-e2e-check.js",

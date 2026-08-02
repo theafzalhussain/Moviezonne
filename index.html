@@ -402,29 +402,63 @@
     <button class="cat-tab cat-tab--trending" onclick="filterCat('trending')">🔥 Trending</button>
     <button class="cat-tab cat-tab--4k" onclick="filterCat('uhd4k')">💎 4K Ultra HD</button>
     <button class="cat-tab cat-tab--top" onclick="filterCat('toprated')">⭐ Top Rated</button>
-    <button class="cat-tab" onclick="filterCat('tv')">Web Series</button>
-    <button class="cat-tab" onclick="showWatchlist(event)">Watchlist</button>
     <button class="cat-tab" onclick="filterCat('hollywood')">Hollywood</button>
     <button class="cat-tab" onclick="filterCat('bollywood')">Bollywood</button>
     <button class="cat-tab" onclick="filterCat('south')">South Indian</button>
-    <button class="cat-tab" onclick="filterCat('tollywood')">Tollywood</button>
+    <button class="cat-tab" onclick="filterCat('tv')">Web Series</button>
     <button class="cat-tab" onclick="filterCat('kdrama')">K-Drama</button>
-    <button class="cat-tab" onclick="filterCat('netflix')">Netflix</button>
-    <button class="cat-tab" onclick="filterCat('prime')">Prime Video</button>
-    <button class="cat-tab" onclick="filterCat('jiohotstar')">JioHotstar</button>
-    <button class="cat-tab" onclick="filterCat('zee5')">Zee5</button>
-    <button class="cat-tab" onclick="filterCat('action')">Action</button>
-    <button class="cat-tab" onclick="filterCat('comedy')">Comedy</button>
-    <button class="cat-tab" onclick="filterCat('horror')">Horror</button>
-    <button class="cat-tab" onclick="filterCat('thriller')">Thriller</button>
-    <button class="cat-tab" onclick="filterCat('romance')">Romance</button>
-    <button class="cat-tab" onclick="filterCat('scifi')">Sci-Fi</button>
-    <button class="cat-tab" onclick="filterCat('adventure')">Adventure</button>
-    <button class="cat-tab" onclick="filterCat('fantasy')">Fantasy</button>
-    <button class="cat-tab" onclick="filterCat('crime')">Crime</button>
-    <button class="cat-tab" onclick="filterCat('documentary')">Documentary</button>
-    <button class="cat-tab" onclick="filterCat('family')">Family</button>
-    <button class="cat-tab" onclick="filterCat('animation')">Animation</button>
+    <button class="cat-tab" onclick="filterCat('anime')">Anime</button>
+    <button class="cat-tab" onclick="filterCat('kids')">Cartoons</button>
+    <button class="cat-tab" onclick="filterCat('adult')">18+</button>
+    <!-- Watchlist deliberately not repeated here: it is a personal list rather
+         than a filter, and the navbar already links to showWatchlist(). -->
+
+    <!-- ── OTT PLATFORMS (dropdown) ──
+         Items keep class="cat-tab" on purpose: filterCat() finds the active tab
+         by scanning .cat-tab elements, and loadMoreMoviesAction() reads the
+         active tab's onclick to know which category to page. Renaming the class
+         here would silently break infinite scroll inside these menus. -->
+    <div class="cat-group" data-cat-group="ott">
+      <button class="cat-tab cat-group-trigger" type="button" id="catGroupOttBtn"
+              aria-expanded="false" aria-controls="catGroupOttMenu" aria-haspopup="true">
+        <span>OTT Platform</span>
+        <svg class="cat-group-chevron" viewBox="0 0 24 24" width="13" height="13" fill="none"
+             stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"
+             aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </button>
+      <div class="cat-group-menu" id="catGroupOttMenu" role="menu" aria-labelledby="catGroupOttBtn">
+        <button class="cat-tab cat-group-item" role="menuitem" onclick="filterCat('netflix')">Netflix</button>
+        <button class="cat-tab cat-group-item" role="menuitem" onclick="filterCat('prime')">Prime Video</button>
+        <button class="cat-tab cat-group-item" role="menuitem" onclick="filterCat('jiohotstar')">JioHotstar</button>
+        <button class="cat-tab cat-group-item" role="menuitem" onclick="filterCat('zee5')">Zee5</button>
+      </div>
+    </div>
+
+    <!-- ── GENRES & MORE (dropdown) ── -->
+    <div class="cat-group" data-cat-group="genre">
+      <button class="cat-tab cat-group-trigger" type="button" id="catGroupGenreBtn"
+              aria-expanded="false" aria-controls="catGroupGenreMenu" aria-haspopup="true">
+        <span>Category</span>
+        <svg class="cat-group-chevron" viewBox="0 0 24 24" width="13" height="13" fill="none"
+             stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"
+             aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </button>
+      <div class="cat-group-menu" id="catGroupGenreMenu" role="menu" aria-labelledby="catGroupGenreBtn">
+        <button class="cat-tab cat-group-item" role="menuitem" onclick="filterCat('tollywood')">Tollywood</button>
+        <button class="cat-tab cat-group-item" role="menuitem" onclick="filterCat('action')">Action</button>
+        <button class="cat-tab cat-group-item" role="menuitem" onclick="filterCat('comedy')">Comedy</button>
+        <button class="cat-tab cat-group-item" role="menuitem" onclick="filterCat('horror')">Horror</button>
+        <button class="cat-tab cat-group-item" role="menuitem" onclick="filterCat('thriller')">Thriller</button>
+        <button class="cat-tab cat-group-item" role="menuitem" onclick="filterCat('romance')">Romance</button>
+        <button class="cat-tab cat-group-item" role="menuitem" onclick="filterCat('scifi')">Sci-Fi</button>
+        <button class="cat-tab cat-group-item" role="menuitem" onclick="filterCat('adventure')">Adventure</button>
+        <button class="cat-tab cat-group-item" role="menuitem" onclick="filterCat('fantasy')">Fantasy</button>
+        <button class="cat-tab cat-group-item" role="menuitem" onclick="filterCat('crime')">Crime</button>
+        <button class="cat-tab cat-group-item" role="menuitem" onclick="filterCat('documentary')">Documentary</button>
+        <button class="cat-tab cat-group-item" role="menuitem" onclick="filterCat('family')">Family</button>
+        <button class="cat-tab cat-group-item" role="menuitem" onclick="filterCat('animation')">Animation</button>
+      </div>
+    </div>
   </div>
   <div class="movie-grid" id="movieGrid">
     <!-- Skeletons -->

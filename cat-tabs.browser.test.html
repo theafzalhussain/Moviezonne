@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MovieZone — category tab grouping harness</title>
+</head>
+<body>
+<h1>Category tab grouping harness</h1>
+<p>Loads the real index.html in a same-origin iframe and drives the actual
+   category strip: the production markup, CSS and moviezone.js, not a copy.</p>
+<iframe id="app" src="/index.html" style="width:1280px;height:900px;border:1px solid #333"></iframe>
+
+<script>
+(function () {
+  var checks = [];
+  function ok(name, pass, detail) {
+    checks.push({ name: name, pass: !!pass, detail: detail || '' });
+  }
+  function report() {
+    try {
+      fetch('/__results', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(checks)
+      });
+    } catch (e) { /* the runner will time out and fail loudly */ }
+  }
+
+  // Categories that must remain reachable somewhere in the strip after grouping.
+  // 'dubbed' was intentionally dropped from the UI, so it is not listed.
+  var REQUIRED = ['all', 'trending', 'uhd4k', 'toprated', 'hollywood', 'bollywood',
+    'south', 'kdrama', 'anime', 'kids', 'adult', 'tv', 'tollywood', 'netflix',
+    'prime', 'jiohotstar', 'zee5', 'action', 'comedy', 'horror', 'thriller',
+    'romance', 'scifi', 'adventure', 'fantasy', 'crime', 'documentary', 'family',
+    'animation'];
+
+  // Only these belong on the strip itself (everything else moved to a dropdown).
+  var DIRECT = ['all', 'trending', 'uhd4k', 'toprated', 'hollywood', 'bollywood',
+    'south', 'tv', 'kdrama', 'anime', 'kids', 'adult'];
+
+  // Removed from the UI entirely by request.
+  var REMOVED = ['dubbed'];
+
+  var frame = document.getElementById('app');
+
+  frame.addEventListener('load', function () {
+    // moviezone.js wires the tab text and trigger state on DOMContentLoaded and
+    // fires network loads after; give it a moment to settle before asserting.
+    setTimeout(runChecks, 2500);
+  });
+
+  function catTabFor(doc, cat) {
+    return doc.querySelector('.cat-tab[onclick*="filterCat(\'' + cat + '\')"]');
+  }
+
+  function runChecks() {
+    var doc, win;
+    try {
+      doc = frame.contentDocument;
+      win = frame.contentWindow;
+    } catch (e) {
+      ok('same-origin access to the app frame', false, e.message);
+      report();
+      return;
+    }
+
+    var strip = doc.getElementById('catTabs');
+    ok('category strip exists', !!strip);
+    if (!strip) { report(); return; }
+
+    // ── 1. every category still reachable ────────────────────────────────
+    var missing = REQUIRED.filter(function (c) { return !catTabFor(doc, c); });
+    ok('all 30 categories still reachable', missing.length === 0, 'missing: ' + missing.join(', '));
+
+    // ── 2. no duplicate pill for the same category ───────────────────────
+    var dupes = REQUIRED.filter(function (c) {
+      return doc.querySelectorAll('.cat-tab[onclick*="filterCat(\'' + c + '\')"]').length > 1;
+    });
+    ok('no category is rendered twice', dupes.length === 0, 'duplicated: ' + dupes.join(', '));
+
+    // ── 3. strip holds only the direct tabs + watchlist + 2 triggers ──────
+    var stripChildren = Array.prototype.filter.call(strip.children, function (el) {
+      return el.classList.contains('cat-tab');
+    });
+    var stripCats = stripChildren.map(function (el) {
+      var m = /filterCat\('([^']+)'\)/.exec(el.getAttribute('onclick') || '');
+      return m ? m[1] : (/(showWatchlist)/.test(el.getAttribute('onclick') || '') ? 'watchlist' : '?');
+    });
+    var unexpected = stripCats.filter(function (c) {
+      return c !== 'watchlist' && DIRECT.indexOf(c) === -1;
+    });
+    ok('strip carries no genre or platform pills',
+      unexpected.length === 0, 'unexpected on strip: ' + unexpected.join(', '));
+
+    ok('18+ moved out of the dropdown onto the strip',
+      stripCats.indexOf('adult') !== -1 && !catTabFor(doc, 'adult').closest('.cat-group-menu'));
+
+    ok('Web Series sits on the strip, not in the dropdown',
+      stripCats.indexOf('tv') !== -1 && !catTabFor(doc, 'tv').closest('.cat-group-menu'));
+
+    ok('Web Series is adjacent to the industry tabs',
+      Math.abs(stripCats.indexOf('tv') - stripCats.indexOf('bollywood')) <= 2,
+      'bollywood@' + stripCats.indexOf('bollywood') + ' tv@' + stripCats.indexOf('tv'));
+
+    ok('Watchlist pill removed from the strip',
+      !strip.querySelector('.cat-tab[onclick*="showWatchlist"]'));
+
+    ok('Watchlist still reachable from the navbar',
+      !!doc.querySelector('#navLinks a[onclick*="showWatchlist"]'));
+
+    var stillPresent = REMOVED.filter(function (c) { return !!catTabFor(doc, c); });
+    ok('removed categories are gone from the UI',
+      stillPresent.length === 0, 'still present: ' + stillPresent.join(', '));
+
+    var groups = strip.querySelectorAll('.cat-group');
+    ok('two dropdown groups present', groups.length === 2, 'found ' + groups.length);
+
+    var ottMenu = doc.getElementById('catGroupOttMenu');
+    var genreMenu = doc.getElementById('catGroupGenreMenu');
+    // Assert the exact contents rather than a count, so an accidentally dropped
+    // entry is named in the failure instead of just shifting a threshold.
+    function menuCats(menu) {
+      return Array.prototype.map.call(menu.querySelectorAll('.cat-group-item'), function (el) {
+        var m = /filterCat\('([^']+)'\)/.exec(el.getAttribute('onclick') || '');
+        return m ? m[1] : '?';
+      });
+    }
+    var EXPECTED_OTT = ['netflix', 'prime', 'jiohotstar', 'zee5'];
+    var EXPECTED_GENRE = ['tollywood', 'action', 'comedy', 'horror', 'thriller',
+      'romance', 'scifi', 'adventure', 'fantasy', 'crime', 'documentary',
+      'family', 'animation'];
+
+    ok('OTT menu holds exactly the 4 platforms',
+      ottMenu && menuCats(ottMenu).join(',') === EXPECTED_OTT.join(','),
+      ottMenu ? menuCats(ottMenu).join(',') : 'no menu');
+    ok('Category menu holds exactly the genre list',
+      genreMenu && menuCats(genreMenu).join(',') === EXPECTED_GENRE.join(','),
+      genreMenu ? menuCats(genreMenu).join(',') : 'no menu');
+
+    // ── 4. menus start closed ────────────────────────────────────────────
+    ok('OTT menu starts hidden',
+      ottMenu && win.getComputedStyle(ottMenu).display === 'none',
+      ottMenu ? win.getComputedStyle(ottMenu).display : 'n/a');
+
+    var ottTrigger = doc.getElementById('catGroupOttBtn');
+    ok('trigger reports collapsed via aria-expanded',
+      ottTrigger && ottTrigger.getAttribute('aria-expanded') === 'false');
+
+    // ── 4b. THE SIZING REGRESSION ────────────────────────────────────────
+    // The global ripple handler injects a <span> whose inline width/height are
+    // set from the button's own size. `.cat-tab span { position: relative }`
+    // outranks `.ripple-span { position: absolute }`, so inside a flex button
+    // that span became an in-flow ~143px flex item and inflated the trigger
+    // from 145x37 to 294x164. Assert the trigger keeps its size across a click.
+    function boxOf(el) {
+      var r = el.getBoundingClientRect();
+      return { w: Math.round(r.width), h: Math.round(r.height) };
+    }
+    var before = boxOf(ottTrigger);
+    ok('trigger starts at a normal pill size',
+      before.h > 24 && before.h < 56 && before.w > 80 && before.w < 220,
+      before.w + 'x' + before.h);
+
+    ok('trigger has no click transition', 
+      win.getComputedStyle(ottTrigger).transitionDuration === '0s',
+      win.getComputedStyle(ottTrigger).transitionDuration);
+
+    // ── 5. trigger opens the menu ────────────────────────────────────────
+    ottTrigger.click();
+    var after = boxOf(ottTrigger);
+    ok('trigger does not grow when clicked',
+      after.w === before.w && after.h === before.h,
+      before.w + 'x' + before.h + ' -> ' + after.w + 'x' + after.h);
+    ok('no ripple span is injected into the trigger',
+      !ottTrigger.querySelector('.ripple-span'));
+    ok('group box stays pill-sized while open',
+      boxOf(ottTrigger.closest('.cat-group')).h === before.h,
+      String(boxOf(ottTrigger.closest('.cat-group')).h));
+
+    ok('clicking the trigger opens the menu',
+      win.getComputedStyle(ottMenu).display !== 'none',
+      win.getComputedStyle(ottMenu).display);
+    ok('aria-expanded flips to true', ottTrigger.getAttribute('aria-expanded') === 'true');
+
+    // A normal pill must still get its ripple — only triggers are excluded.
+    var plainPill = catTabFor(doc, 'bollywood');
+    plainPill.click();
+    ok('normal tabs keep their ripple effect', !!plainPill.querySelector('.ripple-span'));
+    ok('a normal tab does not grow from its ripple either',
+      boxOf(plainPill).h < 56, String(boxOf(plainPill).h));
+    ottTrigger.click();
+
+    // ── 6. opening one group closes the other ───────────────────────────
+    var genreTrigger = doc.getElementById('catGroupGenreBtn');
+    genreTrigger.click();
+    ok('opening the second group closes the first',
+      win.getComputedStyle(ottMenu).display === 'none'
+        && win.getComputedStyle(genreMenu).display !== 'none');
+
+    // ── 7. Escape closes ────────────────────────────────────────────────
+    doc.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    ok('Escape closes the open menu',
+      win.getComputedStyle(genreMenu).display === 'none');
+
+    // ── 8. outside click closes ─────────────────────────────────────────
+    ottTrigger.click();
+    doc.body.click();
+    ok('an outside click closes the menu',
+      win.getComputedStyle(ottMenu).display === 'none');
+
+    // ── 9. picking a platform filters, marks the trigger and closes ──────
+    ottTrigger.click();
+    var zee5 = catTabFor(doc, 'zee5');
+    ok('Zee5 lives inside the OTT menu', !!zee5 && !!zee5.closest('.cat-group-menu'));
+    zee5.click();
+
+    ok('selected item becomes the active tab', zee5.classList.contains('active'));
+    ok('menu closes after picking an item',
+      win.getComputedStyle(ottMenu).display === 'none');
+    ok('trigger is marked while its child is the active filter',
+      ottTrigger.classList.contains('has-active'));
+    var heading = doc.getElementById('sectionHeading');
+    ok('heading switched to the Zee5 label',
+      heading && /ZEE5/i.test(heading.textContent), heading ? heading.textContent : '');
+
+    // ── 10. THE INFINITE-SCROLL DEPENDENCY ──────────────────────────────
+    // loadMoreMoviesAction() resolves the category to page next by reading
+    // document.querySelector('.cat-tab.active').onclick. That element is now
+    // inside a display:none menu, so this asserts the lookup still works.
+    var activeTab = doc.querySelector('.cat-tab.active');
+    ok('active tab is still queryable inside the closed menu',
+      activeTab === zee5,
+      activeTab ? (activeTab.getAttribute('onclick') || activeTab.textContent) : 'null');
+    var parsed = activeTab && /'([^']+)'/.exec(activeTab.getAttribute('onclick') || '');
+    ok('infinite scroll can recover the category from it',
+      parsed && parsed[1] === 'zee5', parsed ? parsed[1] : 'unparsable');
+
+    ok('exactly one tab is active at a time',
+      doc.querySelectorAll('.cat-tab.active').length === 1,
+      String(doc.querySelectorAll('.cat-tab.active').length));
+
+    // ── 11. switching to a direct tab clears the group marker ────────────
+    catTabFor(doc, 'bollywood').click();
+    ok('group marker clears when a direct tab is chosen',
+      !ottTrigger.classList.contains('has-active'));
+    ok('direct tab becomes active', catTabFor(doc, 'bollywood').classList.contains('active'));
+
+    // ── 12. genre inside the dropdown still filters ─────────────────────
+    genreTrigger.click();
+    var horror = catTabFor(doc, 'horror');
+    horror.click();
+    ok('a genre inside the dropdown filters correctly',
+      horror.classList.contains('active')
+        && /HORROR/i.test(doc.getElementById('sectionHeading').textContent));
+    ok('genre trigger marked after selection',
+      genreTrigger.classList.contains('has-active'));
+
+    // ── 13. watchlist via the navbar; paging must be disabled for it ──────
+    var navWatchlist = doc.querySelector('#navLinks a[onclick*="showWatchlist"]');
+    navWatchlist.click();
+    ok('navbar watchlist switches the heading',
+      /WATCHLIST/i.test(doc.getElementById('sectionHeading').textContent));
+    ok('group markers clear on the watchlist view',
+      !genreTrigger.classList.contains('has-active')
+        && !ottTrigger.classList.contains('has-active'));
+    // Removing the Watchlist pill broke the old guard, which inferred the mode
+    // from the active tab's onclick. The sentinel must now be hidden outright so
+    // "all" movies cannot be paged into the watchlist grid.
+    var sentinel = doc.getElementById('infiniteScrollTrigger');
+    ok('infinite-scroll sentinel is hidden on the watchlist',
+      sentinel && win.getComputedStyle(sentinel).display === 'none',
+      sentinel ? win.getComputedStyle(sentinel).display : 'missing');
+
+    // Leaving the watchlist re-enables paging.
+    catTabFor(doc, 'all').click();
+    ok('paging is re-enabled after leaving the watchlist',
+      win.getComputedStyle(sentinel).display !== 'none',
+      win.getComputedStyle(sentinel).display);
+
+    // ── 14. no console errors while driving the UI ───────────────────────
+    ok('no uncaught error surfaced in the app frame',
+      !win.__mzHarnessError, win.__mzHarnessError || '');
+
+    runTvModeChecks();
+  }
+
+  /*  TV MODE
+   *  D-pad focus in tv-mode.js skips zero-size rects, and its focus cache only
+   *  invalidates on childList mutations — so a popup that toggles a class would
+   *  be unreachable by remote. Both menus are therefore rendered permanently
+   *  inline under TV mode. If that CSS ever regresses, every platform and genre
+   *  filter becomes unreachable on a television, so it is asserted here.  */
+  function runTvModeChecks() {
+    var tvFrame = document.createElement('iframe');
+    tvFrame.style.cssText = 'width:1920px;height:1080px;border:1px solid #333';
+    tvFrame.src = '/index.html?tv=1';
+    document.body.appendChild(tvFrame);
+
+    tvFrame.addEventListener('load', function () {
+      setTimeout(function () {
+        var tdoc, twin;
+        try {
+          tdoc = tvFrame.contentDocument;
+          twin = tvFrame.contentWindow;
+        } catch (e) {
+          ok('TV frame accessible', false, e.message);
+          report();
+          return;
+        }
+
+        ok('TV mode actually engaged in the second frame',
+          tdoc.documentElement.getAttribute('data-mz-tv') === 'true',
+          String(tdoc.documentElement.getAttribute('data-mz-tv')));
+
+        var tvOtt = tdoc.getElementById('catGroupOttMenu');
+        var tvGenre = tdoc.getElementById('catGroupGenreMenu');
+        ok('TV: OTT platforms are visible without opening a menu',
+          tvOtt && twin.getComputedStyle(tvOtt).display !== 'none',
+          tvOtt ? twin.getComputedStyle(tvOtt).display : 'n/a');
+        ok('TV: genre list is visible without opening a menu',
+          tvGenre && twin.getComputedStyle(tvGenre).display !== 'none',
+          tvGenre ? twin.getComputedStyle(tvGenre).display : 'n/a');
+
+        var tvTrigger = tdoc.getElementById('catGroupOttBtn');
+        ok('TV: the dropdown trigger is hidden (nothing to open)',
+          tvTrigger && twin.getComputedStyle(tvTrigger).display === 'none',
+          tvTrigger ? twin.getComputedStyle(tvTrigger).display : 'n/a');
+
+        // Every pill must have a real box so tv-mode's isVisibleRect accepts it.
+        var zeroSized = [];
+        var items = tdoc.querySelectorAll('.cat-group-item');
+        for (var i = 0; i < items.length; i++) {
+          var r = items[i].getBoundingClientRect();
+          if (r.width < 2 || r.height < 2) zeroSized.push(items[i].textContent.trim());
+        }
+        ok('TV: every grouped pill has a focusable box',
+          items.length > 0 && zeroSized.length === 0,
+          'zero-sized: ' + zeroSized.join(', '));
+
+        ok('TV: pills are keyboard reachable (tabIndex not negative)',
+          Array.prototype.every.call(items, function (el) { return el.tabIndex >= 0; }));
+
+        report();
+      }, 2500);
+    });
+  }
+
+  // Capture errors from inside the frame so a silent exception cannot pass.
+  frame.addEventListener('load', function () {
+    try {
+      frame.contentWindow.addEventListener('error', function (ev) {
+        frame.contentWindow.__mzHarnessError = ev.message;
+      });
+    } catch (e) { /* ignore */ }
+  });
+
+  setTimeout(function () {
+    if (!checks.length) {
+      ok('harness completed before timeout', false, 'no checks ran');
+      report();
+    }
+  }, 35000);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+# Files excluded from the Vercel deployment upload.
+#
+# WHY THIS FILE EXISTS
+# vercel.json builds every "*.{html,css,svg,png,jpg,jpeg,webp}" as a static
+# asset, which silently published the test harness pages — for example
+# https://moviezone.dev/tv-mode.browser.test.html was reachable in production.
+# The harnesses are dev tooling: they load index.html in an iframe and POST to
+# a /__results endpoint that only exists in the test runner, so on production
+# they are dead weight that also exposes internal test wiring.
+#
+# These stay in the repo (they are wired into `npm test` and guard against real
+# regressions) — they just stop shipping.
+
+# Browser test harness pages
+*.test.html
+
+# Node test suites
+*.test.js
+
+# One-off verification scripts (carousel geometry, OTT ids, SEO SSR, TV perf…)
+*-check.js
+
+# TV performance baseline, only read by tv-perf-check.js
+perf-baseline.json
