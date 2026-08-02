@@ -99,6 +99,14 @@ perfStyle.textContent = `
     #mzMobilePanel .mz-mp-link {
       transition-duration: 0.25s !important;
     }
+    /* Menu buttons stay instant. The dropdown panel is already on screen by the
+       time the pill would ease, so any duration here reads as lag. moviezone.css
+       sets "transition: none !important" on these, but this sheet is injected
+       AFTER it — so without an explicit exception the wildcard above wins and
+       silently puts the transition back. */
+    .cat-group-trigger, .cat-group-chevron {
+      transition-duration: 0s !important;
+    }
     
     /* Remove ALL hover effects on mobile */
     .movie-card:hover, .upcoming-card:hover { transform: none !important; box-shadow: none !important; }
@@ -176,6 +184,14 @@ perfStyle.textContent = `
   .low-end-mode .hamburger-btn span,
   .low-end-mode #mzMobilePanel .mz-mp-link {
     transition-duration: 0.3s !important;
+  }
+  /* Same exception as the mobile block above: low-end-mode is switched on for
+     every phone (and by the startup FPS probe on a loaded desktop), so without
+     this the menu buttons pick up a 0.2s ease that moviezone.css explicitly
+     turns off. */
+  .low-end-mode .cat-group-trigger,
+  .low-end-mode .cat-group-chevron {
+    transition-duration: 0s !important;
   }
   .low-end-mode .ambient-particles { display: none !important; }
   .low-end-mode #hero::before, .low-end-mode #hero::after { display: none !important; }
@@ -743,18 +759,425 @@ function setupUpcomingInfiniteScroll() {
     observer.observe(trigger);
 }
  
+/*  ══════════════════════════════════════════════════════════════════════
+ *  RELEASE → PRINT QUALITY TIMELINE  (single source of truth)
+ *  ══════════════════════════════════════════════════════════════════════
+ *  There is no external print-quality feed anywhere in this app, so quality is
+ *  derived from how long ago a title released: a movie is a CAM print in its
+ *  first weeks and works its way up to HD, FHD and finally 4K months later.
+ *
+ *  This table used to be duplicated — once inline in renderMovies() for the
+ *  badge, once as hard-coded day windows inside calculateMovieScore() for the
+ *  ranking. Both now read these tables, so a card can never show "HD" while
+ *  the ranking still believes the title is a CAM.
+ *
+ *  Each entry means "from this many days after release the print looks like
+ *  this". A stage can be conditional: a 4K/Blu-ray master is only assumed for
+ *  titles with real rating and traction, otherwise the print stays FHD.
+ *
+ *  `isRealPrint` marks the stages that are an actual quality release rather
+ *  than a better cam rip. Only those crossings count as a "quality upgrade":
+ *  a film going from CAM to TS three weeks in is not news and must not be
+ *  re-surfaced, whereas the HD/FHD/4K print landing months later is exactly
+ *  the event this feature exists for.
+ */
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const MOVIE_QUALITY_TIMELINE = [
+  { fromDay: 0,   qual: 'CAM',  cls: 'qual-cam'  },  // in theatres, cam rips only
+  { fromDay: 21,  qual: 'TS',   cls: 'qual-ts'   },
+  { fromDay: 45,  qual: 'HDTS', cls: 'qual-hdts' },
+  { fromDay: 75,  qual: 'HD',   cls: 'qual-hd',  isRealPrint: true },  // digital / OTT release
+  { fromDay: 120, qual: 'FHD',  cls: 'qual-fhd', isRealPrint: true },
+  { fromDay: 200, qual: '4K',   cls: 'qual-4k',  isRealPrint: true,    // 4K / Blu-ray window
+    minRating: 7.0, minPopularity: 50,
+    orElse: { qual: 'FHD', cls: 'qual-fhd' } }
+];
+
+/*  Web series and anime never go through a cam stage — they come straight off a
+ *  streaming platform — but they DO get better copies over time, which is the
+ *  same event a viewer waits for:
+ *    week 1     it has just dropped
+ *    to ~1 month  the early web rip
+ *    ~1 month     the clean full-season / better encode  ← worth re-surfacing
+ *    ~4 months    the 4K or Blu-ray master (anime BD batches land here)
+ *  Only those last two are real prints, so a series is not dragged back to the
+ *  top merely for leaving its first week. */
+const TV_QUALITY_TIMELINE = [
+  { fromDay: 0,   qual: 'NEW', cls: 'qual-new'  },
+  { fromDay: 7,   qual: 'HD',  cls: 'qual-hd'   },
+  { fromDay: 30,  qual: 'FHD', cls: 'qual-fhd', isRealPrint: true },
+  { fromDay: 120, qual: '4K',  cls: 'qual-4k',  isRealPrint: true,
+    minRating: 7.5, minPopularity: 60,
+    orElse: { qual: 'FHD', cls: 'qual-fhd' } }
+];
+
+function mediaTypeOf(title) {
+  return title.media_type || (title.name && !title.title ? 'tv' : 'movie');
+}
+
+function qualityTimelineFor(type) {
+  return type === 'movie' ? MOVIE_QUALITY_TIMELINE : TV_QUALITY_TIMELINE;
+}
+
+/** Resolves one timeline stage for a specific title, applying the conditional
+ *  stage rules. Returns { qual, cls }. */
+function qualityAtStage(timeline, stageIndex, title) {
+  const stage = timeline[stageIndex];
+  if (!stage) return null;
+  if (stage.minRating != null) {
+    const goodEnough = (title.vote_average || 0) >= stage.minRating
+      && (title.popularity || 0) >= stage.minPopularity;
+    if (!goodEnough) return stage.orElse;
+  }
+  return { qual: stage.qual, cls: stage.cls };
+}
+
+/*  Everything the UI and the ranking need to know about a title's print
+ *  quality, and — the point of this feature — HOW RECENTLY that print changed.
+ *  Works for movies, web series and anime; only the timeline differs.
+ *
+ *  Returns:
+ *    qual / cls          the badge to draw
+ *    daysOld             age since release (null when the date is unusable)
+ *    upgradedDaysAgo     days since the print improved, null if it never has
+ *    upgradedFrom        the label it replaced, for the "NEW HD" ribbon
+ *
+ *  `upgradedDaysAgo` is deliberately based on the label rather than the stage
+ *  index: crossing day 200 without meeting the 4K bar leaves the print at FHD,
+ *  which is not an upgrade and must not re-surface the title.
+ */
+function titleQualityState(title, nowMs) {
+  const now = nowMs || Date.now();
+  const type = mediaTypeOf(title);
+  const timeline = qualityTimelineFor(type);
+  const dateStr = title.release_date || title.first_air_date;
+  const state = {
+    type: type,
+    qual: 'HD',
+    cls: '',
+    daysOld: null,
+    stage: -1,
+    upgradedDaysAgo: null,
+    upgradedFrom: null
+  };
+  if (!dateStr) return state;
+
+  const releaseMs = new Date(dateStr).getTime();
+  if (!isFinite(releaseMs)) return state;
+  state.daysOld = (now - releaseMs) / DAY_MS;
+
+  // Which stage is the print at now? (Future-dated titles are filtered out of
+  // every feed, but if one slips through it keeps the neutral default.)
+  let stage = -1;
+  for (let i = 0; i < timeline.length; i++) {
+    if (state.daysOld >= timeline[i].fromDay) stage = i;
+  }
+  if (stage < 0) return state;
+
+  const resolved = qualityAtStage(timeline, stage, title);
+  state.stage = stage;
+  state.qual = resolved.qual;
+  state.cls = resolved.cls;
+
+  // Walk back to the first stage that produced THIS label: that crossing is the
+  // moment the print actually improved.
+  let firstStageOfLabel = stage;
+  while (firstStageOfLabel > 0) {
+    const previous = qualityAtStage(timeline, firstStageOfLabel - 1, title);
+    if (!previous || previous.qual !== resolved.qual) break;
+    firstStageOfLabel--;
+  }
+  // Only a real print counts as an upgrade. Three cases are filtered here: a
+  // better cam rip (CAM → TS → HDTS), a series merely leaving its first week
+  // (NEW → HD), and crossing the last stage without meeting the 4K bar, which
+  // walks back to the FHD stage and so is no upgrade at all.
+  if (firstStageOfLabel > 0 && timeline[firstStageOfLabel].isRealPrint) {
+    state.upgradedDaysAgo = state.daysOld - timeline[firstStageOfLabel].fromDay;
+    const previousLabel = qualityAtStage(timeline, firstStageOfLabel - 1, title);
+    state.upgradedFrom = previousLabel ? previousLabel.qual : null;
+  }
+  return state;
+}
+
+/*  How long ago the most recent thing worth surfacing happened.
+ *
+ *  For most titles that is simply the release. But a film that came out in a
+ *  cam print four months ago and just got its HD print — or a series whose
+ *  clean full-season encode just landed — is, as far as the catalogue is
+ *  concerned, new again today, so its upgrade date wins. This is what pulls it
+ *  back to the top of the ALL feed.
+ */
+function catalogueEventAgeDays(title, nowMs, qualityState) {
+  const state = qualityState || titleQualityState(title, nowMs);
+  if (state.daysOld == null) return Infinity;
+  if (state.upgradedDaysAgo != null && state.upgradedDaysAgo < state.daysOld) {
+    return Math.max(0, state.upgradedDaysAgo);
+  }
+  return Math.max(0, state.daysOld);
+}
+
+/*  FRESHNESS TIERS — how the ALL feed is ordered.
+ *
+ *  Sorting purely by a composite score buries a brand-new release under
+ *  years-old blockbusters with 8.5 ratings, which is why the feed never looked
+ *  "latest first". Sorting purely by date does the opposite and fills the top
+ *  with obscure titles nobody searched for.
+ *
+ *  So: bucket by how fresh the title is (release OR print upgrade), then use
+ *  the existing composite score to order within the bucket. Latest content
+ *  always sits on top, and the biggest title among equally fresh ones leads.
+ */
+/*  Tier boundaries in days. The top bucket is deliberately a whole week rather
+ *  than a day or two: at day granularity a no-name film released yesterday
+ *  would outrank a blockbuster from five days ago, which is not what any large
+ *  catalogue does. Within a week everything is "new", and the composite score
+ *  decides who leads — so the week's biggest new release sits first, with the
+ *  prints that just upgraded sitting right beside it. */
+const FRESH_TIER_DAYS = [7, 14, 30, 60, 120];
+
+/*  Relevance gate. TMDB lists thousands of tiny releases every week; without
+ *  this a no-name title with 2 votes would outrank a major release just for
+ *  being a day newer. Anything below the bar skips the tiers and is ordered by
+ *  score alone at the bottom. Seasonal anime made this matter: dozens of them
+ *  cross a print stage on the same day with almost no votes behind them. */
+const FRESH_TIER_MIN_POPULARITY = 20;
+const FRESH_TIER_MIN_VOTES = 20;
+
+/*  How long a card keeps its "NEW HD / NEW FHD / NEW 4K" ribbon after the print
+ *  improved. Roughly matches how long the top freshness tiers keep it lifted. */
+const QUALITY_UPGRADE_BADGE_DAYS = 21;
+
+function freshnessTier(title, eventAgeDays) {
+  const relevant = (title.popularity || 0) >= FRESH_TIER_MIN_POPULARITY
+    || (title.vote_count || 0) >= FRESH_TIER_MIN_VOTES;
+  if (!relevant || !isFinite(eventAgeDays)) return FRESH_TIER_DAYS.length;
+  for (let i = 0; i < FRESH_TIER_DAYS.length; i++) {
+    if (eventAgeDays <= FRESH_TIER_DAYS[i]) return i;
+  }
+  return FRESH_TIER_DAYS.length;
+}
+
+/*  STRICT ALL-FEED PRIORITY.
+ *
+ *  Freshness is deliberately evaluated inside these groups, never across them:
+ *    0 — relevant movies released inside the latest-release window
+ *    1 — relevant movies with a recent real quality upgrade
+ *    2 — every other movie
+ *    3 — relevant latest/trending web series and anime
+ *    4 — remaining series/anime fallback
+ *
+ *  This guarantees that an even fresher TV premiere cannot jump above a latest
+ *  movie release or a movie whose HD/FHD/4K print just landed. The relevance
+ *  gate still prevents obscure one-vote titles from entering a fresh group. */
+function allFeedPriorityGroup(title, qualityState, freshTier) {
+  const state = qualityState || titleQualityState(title);
+  const tier = freshTier == null
+    ? freshnessTier(title, catalogueEventAgeDays(title, Date.now(), state))
+    : freshTier;
+  const hasFreshRelevance = tier < FRESH_TIER_DAYS.length;
+
+  if (mediaTypeOf(title) === 'movie') {
+    if (hasFreshRelevance && state.daysOld != null && state.daysOld <= LATEST_WINDOW_DAYS) {
+      return 0;
+    }
+    if (hasFreshRelevance && state.upgradedDaysAgo != null
+        && state.upgradedDaysAgo < state.daysOld) {
+      return 1;
+    }
+    return 2;
+  }
+
+  return hasFreshRelevance ? 3 : 4;
+}
+
+/** Annotates a pool in place with ranking fields, then sorts by the strict
+ *  ALL-feed group first. Freshness and composite relevance only decide order
+ *  among titles in the same group. */
+function rankByFreshness(pool, nowMs) {
+  const now = nowMs || Date.now();
+  pool.forEach(m => {
+    const state = titleQualityState(m, now);
+    m._qualityState = state;
+    m._eventAgeDays = catalogueEventAgeDays(m, now, state);
+    m._freshTier = freshnessTier(m, m._eventAgeDays);
+    m._priorityGroup = allFeedPriorityGroup(m, state, m._freshTier);
+    m._rankScore = calculateMovieScore(m);
+  });
+  return pool.sort((a, b) =>
+    (a._priorityGroup - b._priorityGroup)
+    || (a._freshTier - b._freshTier)
+    || (b._rankScore - a._rankScore)
+    || (a._eventAgeDays - b._eventAgeDays));
+}
+
+/** Limits same-language runs without allowing an item to cross a strict
+ *  priority-group boundary. rankByFreshness() must run before this helper. */
+function diversifyByLanguageWithinPriority(pool) {
+  const output = [];
+  let start = 0;
+
+  while (start < pool.length) {
+    const group = pool[start]._priorityGroup;
+    let end = start + 1;
+    while (end < pool.length && pool[end]._priorityGroup === group) end++;
+
+    const groupOutput = [];
+    const skipped = [];
+    for (let i = start; i < end; i++) {
+      const item = pool[i];
+      const lang = item.original_language || 'en';
+      const lastThree = groupOutput.slice(-3);
+      if (lastThree.length >= 3
+          && lastThree.every(x => (x.original_language || 'en') === lang)) {
+        skipped.push(item);
+      } else {
+        groupOutput.push(item);
+      }
+    }
+    output.push(...groupOutput, ...skipped);
+    start = end;
+  }
+
+  return output;
+}
+
+/** IST calendar date, optionally shifted back by N days — used to build the
+ *  release-window queries. TMDB expects plain YYYY-MM-DD. */
+function istDateStr(daysAgo) {
+  const ms = Date.now() + (5.5 * 60 * 60 * 1000) - ((daysAgo || 0) * DAY_MS);
+  return new Date(ms).toISOString().split('T')[0];
+}
+
+/*  The two release windows the ALL feed fetches on purpose. Both are built here
+ *  so loadMovies() and prefetchMoviesPage() send byte-identical params — tmdb()
+ *  caches by full URL, so a single reordered key would cost a cache miss and a
+ *  duplicate request. */
+const LATEST_WINDOW_DAYS = 35;
+
+/** Most popular titles released in the last few weeks: guarantees the pool
+ *  always contains genuinely new releases. */
+function latestWindowQuery(page) {
+  return {
+    sort_by: 'popularity.desc',
+    'primary_release_date.gte': istDateStr(LATEST_WINDOW_DAYS),
+    'primary_release_date.lte': istDateStr(0),
+    'vote_count.gte': '5',
+    page: page,
+    language: 'en-US'
+  };
+}
+
+/** The print-upgrade cohort: titles old enough to have just crossed the HD
+ *  stage, young enough that their FHD crossing is also still ahead or recent.
+ *  Window is derived from the timeline so it can never drift out of step. */
+function printUpgradeWindowQuery(page) {
+  const hdDay = MOVIE_QUALITY_TIMELINE[3].fromDay;   // 75  — digital / HD
+  const fhdDay = MOVIE_QUALITY_TIMELINE[4].fromDay;  // 120 — FHD
+  return {
+    sort_by: 'popularity.desc',
+    'primary_release_date.gte': istDateStr(fhdDay + 15),
+    'primary_release_date.lte': istDateStr(hdDay - 2),
+    'vote_count.gte': '20',
+    page: page,
+    language: 'en-US'
+  };
+}
+
+/*  ── WEB SERIES + ANIME WINDOWS ──
+ *  The ALL feed used to fetch movies only, so no series or anime could ever
+ *  reach it however fresh they were. These three cover both halves of the
+ *  ranking: what just dropped, and what just got a better print.
+ *
+ *  Series queries are restricted to streaming networks and exclude linear TV
+ *  channels, the same guard the Web Series category uses — without it the feed
+ *  fills up with daily soaps that air a new episode every evening.
+ *
+ *  All three carry a vote floor. Sorting by popularity alone still let through
+ *  a long tail of no-name seasonal anime, and because a whole anime season
+ *  premieres in the same week, they all cross a print stage on the same day and
+ *  arrive as a block. The floor keeps the series and anime that reach the feed
+ *  to the ones with actual traction — the trending ones. */
+const LATEST_SERIES_WINDOW_DAYS = 45;
+const LATEST_ANIME_WINDOW_DAYS = 60;
+const SERIES_MIN_VOTES = '12';
+const ANIME_MIN_VOTES = '15';
+
+/** Newest streaming web series with real traction. */
+function latestSeriesWindowQuery(page) {
+  return {
+    with_networks: STREAMING_NETWORK_IDS,
+    without_networks: LINEAR_TV_EXCLUDE_IDS,
+    sort_by: 'popularity.desc',
+    'first_air_date.gte': istDateStr(LATEST_SERIES_WINDOW_DAYS),
+    'first_air_date.lte': istDateStr(0),
+    'vote_count.gte': SERIES_MIN_VOTES,
+    page: page,
+    language: 'en-US'
+  };
+}
+
+/** Series whose clean FHD encode (day 30) or BD/4K master (day 120) has just
+ *  landed — the series equivalent of the movie print-upgrade cohort. */
+function seriesUpgradeWindowQuery(page) {
+  const fhdDay = TV_QUALITY_TIMELINE[2].fromDay;  // 30  — clean full-season encode
+  const uhdDay = TV_QUALITY_TIMELINE[3].fromDay;  // 120 — BD / 4K master
+  return {
+    with_networks: STREAMING_NETWORK_IDS,
+    without_networks: LINEAR_TV_EXCLUDE_IDS,
+    sort_by: 'popularity.desc',
+    'first_air_date.gte': istDateStr(uhdDay + 15),
+    'first_air_date.lte': istDateStr(fhdDay - 2),
+    'vote_count.gte': SERIES_MIN_VOTES,
+    page: page,
+    language: 'en-US'
+  };
+}
+
+/** Newest anime seasons. Anime does not sit on the streaming-network list, so
+ *  it is matched by genre + original language instead. */
+function latestAnimeWindowQuery(page) {
+  return {
+    with_genres: '16',
+    with_original_language: 'ja',
+    sort_by: 'popularity.desc',
+    'first_air_date.gte': istDateStr(LATEST_ANIME_WINDOW_DAYS),
+    'first_air_date.lte': istDateStr(0),
+    'vote_count.gte': ANIME_MIN_VOTES,
+    page: page,
+    language: 'en-US'
+  };
+}
+
 // -- CAROUSEL (PROFESSIONAL DISCOVERY ALGORITHM)
 // Netflix/Hotstar-grade weighted scoring: fetches from ALL categories and ranks by composite score
 // Score = (rating_weight) + (popularity_weight) + (recency_boost) + (trending_velocity) + (vote_confidence) + (quality_upgrade_boost)
+
+/*  Bayesian prior for the rating term: how many votes of "average" a title is
+ *  assumed to carry before its own votes start to count, and what that average
+ *  is. 50 votes at 6.2 keeps a 9.0 from two voters out of the top slots without
+ *  punishing anything that has real traction. */
+const RATING_PRIOR_VOTES = 50;
+const RATING_PRIOR_MEAN = 6.2;
+
+/*  Below this many votes the popularity/votes ratio is noise, not velocity. */
+const TRENDING_MIN_VOTES = 20;
 
 function calculateMovieScore(movie) {
   const now = Date.now();
   const releaseDate = new Date(movie.release_date || movie.first_air_date || '2020-01-01');
   const daysSinceRelease = Math.max(0, (now - releaseDate) / (1000 * 60 * 60 * 24));
   
-  // 1. Rating Weight (0-10 scale, boosted): High-quality movies get exponential boost
+  // 1. Rating Weight — Bayesian-shrunk, then boosted exponentially.
+  // A raw 8.0 from three voters used to score exactly like an 8.0 from twenty
+  // thousand, which put no-name seasonal titles above real hits the moment the
+  // feed started ordering by freshness. Pulling the rating towards the catalogue
+  // mean in proportion to how few votes back it is the standard fix.
   const rating = movie.vote_average || 0;
-  const ratingScore = Math.pow(rating, 1.8) * 2; // Exponential: 8.0 → 98, 7.0 → 76, 6.0 → 56
+  const voteCount = movie.vote_count || 1;
+  const weightedRating = ((voteCount * rating) + (RATING_PRIOR_VOTES * RATING_PRIOR_MEAN))
+    / (voteCount + RATING_PRIOR_VOTES);
+  const ratingScore = Math.pow(weightedRating, 1.8) * 2; // Exponential: 8.0 → 98, 7.0 → 76, 6.0 → 56
   
   // 2. Popularity Weight (TMDB popularity is 0-5000+): Normalize and cap
   const popularity = Math.min(movie.popularity || 0, 5000);
@@ -770,9 +1193,12 @@ function calculateMovieScore(movie) {
   else if (daysSinceRelease <= 180) recencyBoost = 10; // Last 6 months
   else recencyBoost = 0;
   
-  // 4. Trending Velocity: If popularity is high relative to vote count, it's trending fast
-  const voteCount = movie.vote_count || 1;
-  const trendingVelocity = Math.min((popularity / Math.max(voteCount, 1)) * 5, 40);
+  // 4. Trending Velocity: If popularity is high relative to vote count, it's trending fast.
+  // Needs enough votes to mean anything — popularity/votes explodes for titles
+  // with two or three ratings and used to hand them a free 40 points.
+  const trendingVelocity = voteCount >= TRENDING_MIN_VOTES
+    ? Math.min((popularity / voteCount) * 5, 40)
+    : 0;
   
   // 5. Vote Confidence: More votes = more reliable score (logarithmic scale)
   const voteConfidence = Math.min(Math.log10(voteCount + 1) * 8, 30);
@@ -781,31 +1207,24 @@ function calculateMovieScore(movie) {
   const nowPlayingBonus = (daysSinceRelease <= 45 && daysSinceRelease >= 0) ? 25 : 0;
   
   // 7. QUALITY UPGRADE BOOST (Netflix-style "Newly Available in HD/4K")
-  // Jab movie theater se OTT/digital par aati hai (75-130 days), usko massive re-boost milta hai
-  // Isse purani movies wapas top par aa jaati hain jab unki HD/FHD/4K quality available hoti hai
+  // Jab title ka print upgrade hota hai (movie: CAM → HD → FHD → 4K; series aur
+  // anime: web rip → clean FHD → BD/4K), usko wapas massive boost milta hai,
+  // isse purani release dobara top par aa jaati hai. Windows timeline se aate
+  // hain, hardcoded din se nahi — badge aur ranking dono ek hi table padhte hain.
   let qualityUpgradeBoost = 0;
-  const mediaType = movie.media_type || (movie.name && !movie.title ? 'tv' : 'movie');
-  if (mediaType === 'movie') {
-    if (daysSinceRelease > 75 && daysSinceRelease <= 100) {
-      // JUST hit digital/OTT release (HD available) — treat as "newly available"
-      qualityUpgradeBoost = 70; // Almost as strong as a new release!
-    } else if (daysSinceRelease > 100 && daysSinceRelease <= 130) {
-      // FHD window — still fresh on digital platforms
-      qualityUpgradeBoost = 55;
-    } else if (daysSinceRelease > 130 && daysSinceRelease <= 160) {
-      // Late FHD / early 4K window — fading but still relevant
-      qualityUpgradeBoost = 35;
-    } else if (daysSinceRelease > 200 && daysSinceRelease <= 230) {
-      // 4K/Blu-ray just dropped — another small re-boost
-      qualityUpgradeBoost = 25;
-    }
-    // Extra boost for high-rated movies in quality upgrade window (blockbusters get more visibility)
-    if (qualityUpgradeBoost > 0 && rating >= 7.0) {
-      qualityUpgradeBoost += 15;
-    }
-    if (qualityUpgradeBoost > 0 && popularity >= 100) {
-      qualityUpgradeBoost += 10;
-    }
+  const upgradedDaysAgo = titleQualityState(movie, now).upgradedDaysAgo;
+  if (upgradedDaysAgo != null) {
+    if (upgradedDaysAgo <= 25) qualityUpgradeBoost = 70;       // print just landed — as strong as a new release
+    else if (upgradedDaysAgo <= 55) qualityUpgradeBoost = 55;  // still the current print everyone is looking for
+    else if (upgradedDaysAgo <= 85) qualityUpgradeBoost = 35;  // fading
+  }
+  // Extra visibility for high-rated titles inside the upgrade window
+  // (blockbusters and flagship series).
+  if (qualityUpgradeBoost > 0 && rating >= 7.0) {
+    qualityUpgradeBoost += 15;
+  }
+  if (qualityUpgradeBoost > 0 && popularity >= 100) {
+    qualityUpgradeBoost += 10;
   }
   
   return ratingScore + popularityScore + recencyBoost + trendingVelocity + voteConfidence + nowPlayingBonus + qualityUpgradeBoost;
@@ -1258,6 +1677,14 @@ function prefetchMoviesPage(cat, pageNum) {
     tmdb('/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
     tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
     tmdb('/movie/now_playing', { language: 'en-US', page: pageStr });
+    // Same freshness windows loadMovies('all') uses — identical params so the
+    // prefetch actually warms the cache instead of missing it.
+    tmdb('/discover/movie', latestWindowQuery(pageStr));
+    tmdb('/discover/movie', printUpgradeWindowQuery(pageStr));
+    tmdb('/trending/tv/week', { language: 'en-US', page: pageStr });
+    tmdb('/discover/tv', latestSeriesWindowQuery(pageStr));
+    tmdb('/discover/tv', seriesUpgradeWindowQuery(pageStr));
+    tmdb('/discover/tv', latestAnimeWindowQuery(pageStr));
   } else if (cat === 'hollywood') {
     tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p1 });
     tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p2 });
@@ -1599,6 +2026,21 @@ async function loadMovies(cat, isLoadMore = false) {
   try {
     if (cat === 'all') {
       // NETFLIX-STYLE DISCOVERY: Fetch diverse sources for maximum content freshness
+      //
+      // The last six queries exist for the freshness ranking below and are the
+      // reason it can actually work:
+      //   • LATEST WINDOWS — the most popular movies (last ~5 weeks), web series
+      //     (last ~6 weeks) and anime seasons (last ~2 months), so whatever just
+      //     released is always in the candidate pool rather than whatever
+      //     /movie/popular happens to return.
+      //   • PRINT-UPGRADE WINDOWS — the cohorts that just crossed a real print
+      //     stage: movies at the HD/FHD marks, series at their clean-encode and
+      //     BD/4K marks. Without deliberately fetching them, a four-month-old
+      //     film whose HD print just dropped would never appear in the pool, so
+      //     no amount of re-ranking could surface it.
+      //
+      // Series and anime are also the only way TV reaches this feed at all —
+      // before this it fetched movies exclusively.
       const res = await Promise.allSettled([
         tmdb('/movie/now_playing', { language: 'en-US', page: pageStr }),
         tmdb('/trending/movie/week', { language: 'en-US', page: pageStr }),
@@ -1608,53 +2050,53 @@ async function loadMovies(cat, isLoadMore = false) {
         tmdb('/discover/movie', { with_original_language: 'ta', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }),
         tmdb('/discover/movie', { with_original_language: 'te', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }),
         tmdb('/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }),
-        tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' })
+        tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }),
+        tmdb('/discover/movie', latestWindowQuery(pageStr)),
+        tmdb('/discover/movie', printUpgradeWindowQuery(pageStr)),
+        tmdb('/trending/tv/week', { language: 'en-US', page: pageStr }),
+        tmdb('/discover/tv', latestSeriesWindowQuery(pageStr)),
+        tmdb('/discover/tv', seriesUpgradeWindowQuery(pageStr)),
+        tmdb('/discover/tv', latestAnimeWindowQuery(pageStr))
       ]);
       
+      // /discover/tv results carry no media_type, so tag them here instead of
+      // relying on the name-vs-title guess further down the pipeline.
+      const TV_SOURCE_FROM = 11;
       const combinedMovies = [];
-      res.forEach(r => {
+      res.forEach((r, idx) => {
         if (r.status === 'fulfilled' && r.value && r.value.results) {
-          combinedMovies.push(...r.value.results);
+          r.value.results.forEach(item => {
+            if (!item) return;
+            if (idx >= TV_SOURCE_FROM && !item.media_type) item.media_type = 'tv';
+            combinedMovies.push(item);
+          });
         }
       });
       
-      // INTELLIGENT DEDUPLICATION: Keep the highest-popularity version
+      // INTELLIGENT DEDUPLICATION: Keep the highest-popularity version.
+      // Keyed by type+id, not id alone: TMDB numbers movies and series in
+      // separate namespaces, so a movie and a series can share an id and one
+      // would silently replace the other.
       const movieMap = new Map();
       for (const movie of combinedMovies) {
         if (!movie || !movie.id) continue;
-        const existing = movieMap.get(movie.id);
+        const key = mediaTypeOf(movie) + '-' + movie.id;
+        const existing = movieMap.get(key);
         if (!existing || (movie.popularity || 0) > (existing.popularity || 0)) {
-          movieMap.set(movie.id, movie);
+          movieMap.set(key, movie);
         }
       }
       const uniqueMovies = Array.from(movieMap.values());
       
-      // NETFLIX-STYLE COMPOSITE RANKING: Score each movie
-      uniqueMovies.forEach(m => { m._rankScore = calculateMovieScore(m); });
-      
-      // Sort by composite score (highest first)
-      uniqueMovies.sort((a, b) => b._rankScore - a._rankScore);
-      
-      // SIMPLE DIVERSITY: Just ensure not too many same-language in a row
-      const diverseGrid = [];
-      const skipped = [];
-      
-      for (const m of uniqueMovies) {
-        const lang = m.original_language || 'en';
-        const lastThree = diverseGrid.slice(-3);
-        
-        // If last 3 are all same language, skip this one for now
-        if (lastThree.length >= 3 && lastThree.every(x => (x.original_language || 'en') === lang)) {
-          skipped.push(m);
-        } else {
-          diverseGrid.push(m);
-        }
-      }
-      
-      // Add back any skipped movies at the end
-      diverseGrid.push(...skipped);
+      // STRICT PRIORITY RANKING: latest movie releases first, recent movie
+      // quality updates second, remaining movies next, and only then the
+      // latest/trending web series and anime.
+      rankByFreshness(uniqueMovies);
 
-      movies.push(...diverseGrid);
+      // Balance languages only inside each priority group. A skipped movie is
+      // reinserted before the next group, so this pass cannot lift a series
+      // above a movie release or quality update.
+      movies.push(...diversifyByLanguageWithinPriority(uniqueMovies));
     } else if (cat === 'tv') {
       // EXPANDED OTT LIST: Now includes JioCinema, MX Player, HBO, aha, Hoichoi and more major platforms.
       const STREAMING_NETWORKS = STREAMING_NETWORK_IDS;
@@ -2008,75 +2450,30 @@ function renderMovies(movies, append = false) {  const grid = document.getElemen
     const rDateStr = m.release_date || m.first_air_date;
     const isHot  = m.popularity > 100 && ((m.vote_count || 0) > 50 || (new Date() - new Date(rDateStr || '2000-01-01')) / (1000*60*60*24) < 60);
     
-    // -- PROFESSIONAL QUALITY BADGE DETECTION ALGORITHM --
-    // Mimics how real platforms detect quality: Release window + vote patterns + popularity signals
-    let qual = 'HD';
-    let qualClass = '';
-    if (rDateStr) {
-      const rDate = new Date(rDateStr);
-      const daysOld = (new Date() - rDate) / (1000 * 60 * 60 * 24);
-      
-      if (type === 'movie') {
-        if (daysOld >= 0 && daysOld <= 21) {
-          // 0-21 days: Movie just hit theaters, only CAM available
-          qual = 'CAM';
-          qualClass = 'qual-cam';
-        } else if (daysOld > 21 && daysOld <= 45) {
-          // 21-45 days: Better quality CAM/TS available (TeleSync)
-          qual = 'TS';
-          qualClass = 'qual-ts';
-        } else if (daysOld > 45 && daysOld <= 75) {
-          // 45-75 days: Pre-release HDTS/HDCAM or early digital leaks
-          qual = 'HDTS';
-          qualClass = 'qual-hdts';
-        } else if (daysOld > 75 && daysOld <= 120) {
-          // 75-120 days: Digital release window (OTT release likely)
-          qual = 'HD';
-          qualClass = 'qual-hd';
-        } else if (daysOld > 120 && daysOld <= 200) {
-          // 120-200 days: Full HD available on streaming platforms
-          qual = 'FHD';
-          qualClass = 'qual-fhd';
-        } else if (daysOld > 200) {
-          // 200+ days: 4K/Blu-ray release window
-          if (m.vote_average >= 7.0 && m.popularity >= 50) {
-            qual = '4K';
-            qualClass = 'qual-4k';
-          } else {
-            qual = 'FHD';
-            qualClass = 'qual-fhd';
-          }
-        }
-      } else {
-        // TV Shows / Web Series: Usually direct-to-digital (HD from day 1)
-        if (daysOld <= 7) {
-          qual = 'NEW';
-          qualClass = 'qual-new';
-        } else if (m.vote_average >= 8.0 && m.popularity >= 100) {
-          qual = '4K';
-          qualClass = 'qual-4k';
-        } else if (m.vote_average >= 6.5) {
-          qual = 'FHD';
-          qualClass = 'qual-fhd';
-        } else {
-          qual = 'HD';
-          qualClass = 'qual-hd';
-        }
-      }
-    }
+    // -- PRINT QUALITY BADGE --
+    // Derived from the release→quality timeline the ALL feed also ranks by
+    // (MOVIE_QUALITY_TIMELINE for films, TV_QUALITY_TIMELINE for series and
+    // anime), so the badge and the ordering can never disagree.
+    const qualityState = titleQualityState(m, Date.now());
+    let qual = qualityState.qual;
+    let qualClass = qualityState.cls;
     
     // -- 4K ULTRA HD CATEGORY: force 4K badge on these cards --
     if (m._force4K) { qual = '4K'; qualClass = 'qual-4k'; }
     
     // -- SMART RELEASE FRESHNESS BADGE --
+    // Two things earn the corner ribbon: a recent release, and a recent print
+    // upgrade. The second one is why a months-old film that just got its HD
+    // print looks new again — same event that lifts it back up the feed.
     let freshBadge = '';
-    if (rDateStr) {
-      const daysOld = (new Date() - new Date(rDateStr)) / (1000 * 60 * 60 * 24);
+    const daysOld = qualityState.daysOld;
+    if (daysOld != null) {
       if (daysOld >= 0 && daysOld <= 3) freshBadge = '<div class="card-fresh card-fresh-today">TODAY</div>';
       else if (daysOld <= 7) freshBadge = '<div class="card-fresh card-fresh-new">NEW</div>';
       else if (daysOld <= 14) freshBadge = '<div class="card-fresh card-fresh-recent">THIS WEEK</div>';
-      // Quality Upgrade: Movie just hit digital/OTT — show as "NEW" again (Netflix-style)
-      else if (type === 'movie' && daysOld > 75 && daysOld <= 100) freshBadge = '<div class="card-fresh card-fresh-new">NEW</div>';
+      else if (qualityState.upgradedDaysAgo != null && qualityState.upgradedDaysAgo <= QUALITY_UPGRADE_BADGE_DAYS) {
+        freshBadge = '<div class="card-fresh card-fresh-upgrade">NEW ' + escapeHTML(qual) + '</div>';
+      }
     }
     // -- HINDI DUBBED BADGE: Show on Hollywood/Japanese/Korean movies (likely dubbed)
     const dubbedLangs = ['en', 'ja', 'ko', 'fr', 'es', 'de']; // Languages that are commonly dubbed to Hindi
@@ -2202,20 +2599,146 @@ function closeCatGroups(except) {
     if (group === except) return;
     group.classList.remove('is-open');
     group.removeAttribute('data-align');
+    const menu = group.querySelector('.cat-group-menu');
+    if (menu) { menu.style.top = ''; menu.style.left = ''; }
     const trigger = group.querySelector('.cat-group-trigger');
     if (trigger) trigger.setAttribute('aria-expanded', 'false');
   });
 }
 
-// Flip the panel to the right edge if opening it left-aligned would push it
-// off-screen — happens on narrow viewports where the group wraps to the end.
+/*  Which ancestor is the containing block for a position:fixed descendant.
+ *  Normally that is the viewport (null here), but several common properties
+ *  hijack it — and this page has one: #movies-section carries
+ *  `content-visibility: auto`, which implies `contain: paint`. Without this the
+ *  panel lands offset by that section's own top (~640px too low on a phone). */
+function fixedContainingBlock(el) {
+  let node = el.parentElement;
+  while (node && node !== document.documentElement) {
+    const s = window.getComputedStyle(node);
+    const wc = s.willChange || '';
+    if ((s.transform && s.transform !== 'none')
+      || (s.perspective && s.perspective !== 'none')
+      || (s.filter && s.filter !== 'none')
+      || (s.backdropFilter && s.backdropFilter !== 'none')
+      || (s.contain && /paint|layout|strict|content/.test(s.contain))
+      || (s.contentVisibility && s.contentVisibility !== 'visible')
+      || (s.containerType && s.containerType !== 'normal')
+      || /transform|perspective|filter/.test(wc)) {
+      return node;
+    }
+    node = node.parentElement;
+  }
+  return null;
+}
+
+// Places the panel.
+//
+// Desktop: the panel is position:absolute inside .cat-group, so it only needs
+// flipping to the right edge when opening it left-aligned would push it
+// off-screen.
+//
+// Phones (<=768px, see the media query in moviezone.css): the tab strip is a
+// horizontal scroller and a scroll container clips its descendants on both
+// axes, which erased the absolutely positioned panel completely — tapping the
+// trigger looked like nothing happened. The panel is position:fixed there and
+// gets real viewport coordinates written here: anchored under the trigger,
+// clamped inside the viewport, flipped above when there is no room below.
 function alignCatGroupMenu(group) {
   const menu = group.querySelector('.cat-group-menu');
   if (!menu) return;
   group.removeAttribute('data-align');
-  const rect = menu.getBoundingClientRect();
-  if (rect.right > window.innerWidth - 8) group.setAttribute('data-align', 'end');
+  // Clear the previous run's coordinates before measuring — a stale `left`
+  // would skew the fresh rect.
+  menu.style.top = '';
+  menu.style.left = '';
+
+  const isFixed = window.getComputedStyle(menu).position === 'fixed';
+  const trigger = group.querySelector('.cat-group-trigger');
+
+  if (!isFixed || !trigger) {
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth - 8) group.setAttribute('data-align', 'end');
+    return;
+  }
+
+  const GAP = 8;
+  const EDGE = 10;
+  const t = trigger.getBoundingClientRect();
+  const m = menu.getBoundingClientRect();
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+
+  // Where the panel wants to sit, in viewport coordinates.
+  let left = t.left;
+  if (left + m.width > vw - EDGE) left = vw - EDGE - m.width;
+  if (left < EDGE) left = EDGE;
+
+  let top = t.bottom + GAP;
+  if (top + m.height > vh - EDGE) {
+    const above = t.top - GAP - m.height;
+    // Prefer flipping above the pill; if neither side fits (very short
+    // viewport) sit as low as the panel allows instead of overflowing.
+    top = above >= EDGE ? above : Math.max(EDGE, vh - EDGE - m.height);
+  }
+
+  // Translate those viewport coordinates into the containing block's box.
+  const cb = fixedContainingBlock(menu);
+  let ox = 0;
+  let oy = 0;
+  if (cb) {
+    const cbRect = cb.getBoundingClientRect();
+    const cbStyle = window.getComputedStyle(cb);
+    ox = cbRect.left + (parseFloat(cbStyle.borderLeftWidth) || 0);
+    oy = cbRect.top + (parseFloat(cbStyle.borderTopWidth) || 0);
+  }
+  menu.style.left = Math.round(left - ox) + 'px';
+  menu.style.top = Math.round(top - oy) + 'px';
+
+  /*  Safety net. The containing block above is derived from computed styles, so
+   *  a device/engine that resolves `fixed` differently could still park the
+   *  panel off screen — and an off-screen panel is exactly the symptom that
+   *  reads as "tapping the pill does nothing". Measure where it actually landed
+   *  and nudge it back inside the viewport; the measurement needs no assumption
+   *  about which ancestor won. Only runs when something is genuinely out of
+   *  view, so a correct placement is never disturbed, and the next alignment
+   *  pass recomputes from scratch anyway. */
+  const landed = menu.getBoundingClientRect();
+  if (landed.width > 0 && landed.height > 0) {
+    let fixX = 0;
+    let fixY = 0;
+    if (landed.right > vw - EDGE) fixX = (vw - EDGE) - landed.right;
+    if (landed.left + fixX < EDGE) fixX = EDGE - landed.left;
+    if (landed.bottom > vh - EDGE) fixY = (vh - EDGE) - landed.bottom;
+    if (landed.top + fixY < EDGE) fixY = EDGE - landed.top;
+    if (fixX || fixY) {
+      menu.style.left = Math.round(left - ox + fixX) + 'px';
+      menu.style.top = Math.round(top - oy + fixY) + 'px';
+    }
+  }
 }
+
+/*  A fixed panel does not travel with the trigger, so keep it glued to the
+ *  pill while the page or the tab strip scrolls. Repositioning (rather than
+ *  closing on scroll) also matters because focusing the trigger can make the
+ *  browser nudge the strip's scrollLeft by a few pixels right after the tap —
+ *  a close-on-scroll rule would shut the menu the instant it opened. */
+let catGroupReflowQueued = false;
+function scheduleCatGroupReflow() {
+  if (catGroupReflowQueued) return;
+  const open = document.querySelector('.cat-group.is-open');
+  if (!open) return;
+  catGroupReflowQueued = true;
+  requestAnimationFrame(() => {
+    catGroupReflowQueued = false;
+    const stillOpen = document.querySelector('.cat-group.is-open');
+    if (stillOpen) alignCatGroupMenu(stillOpen);
+  });
+}
+
+// Capture phase so scrolls inside .cat-tabs are seen too — those do not bubble.
+document.addEventListener('scroll', scheduleCatGroupReflow, { capture: true, passive: true });
+window.addEventListener('resize', scheduleCatGroupReflow);
+window.addEventListener('orientationchange', () => closeCatGroups());
 
 function toggleCatGroup(group) {
   if (!group) return;
@@ -2226,6 +2749,13 @@ function toggleCatGroup(group) {
   const trigger = group.querySelector('.cat-group-trigger');
   if (trigger) trigger.setAttribute('aria-expanded', 'true');
   alignCatGroupMenu(group);
+  // Second pass on the next frame. The tap can still move the pill under us:
+  // focusing the button makes the browser reveal it inside the horizontally
+  // scrolling strip, and `scroll-snap-type: x mandatory` then snaps that scroll
+  // to a pill edge. The first pass measured the pre-snap position.
+  requestAnimationFrame(() => {
+    if (group.classList.contains('is-open')) alignCatGroupMenu(group);
+  });
 }
 
 /** Show a marker on a trigger when the active filter lives inside its menu,

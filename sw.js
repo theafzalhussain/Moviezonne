@@ -1,15 +1,17 @@
-// v44: tv-mode.css / tv-mode.js now exist. While they were missing, cache.addAll()
-// rejected on their 404 and the service worker never finished installing at all,
-// so every client stayed uncached. Bumping the name forces a clean reinstall.
-const CACHE_NAME = 'moviezone-v44';
+// v47: ALL feed now mixes web series and anime behind movies, with the print
+// upgrade ranking in moviezone.js and the "NEW HD" ribbon in moviezone.css.
+// Keep these query strings in step with index.html on every asset bump — an
+// offline client is served exactly these URLs, so a stale entry here means a
+// phone keeps running old code with no way to tell.
+const CACHE_NAME = 'moviezone-v47';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/tv-mode.css?v=1.1',
-  '/moviezone.css?v=4.6',
+  '/moviezone.css?v=5.0',
   '/tv-mode.js?v=1.1',
   '/search-engine.js?v=1.1',
-  '/moviezone.js?v=5.5',
+  '/moviezone.js?v=5.9',
   '/pwa-install.js?v=1.6',
   '/manifest.json',
   '/moviezone-logo.png?v=2',

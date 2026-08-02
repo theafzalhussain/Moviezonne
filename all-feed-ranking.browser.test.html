@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MovieZone — ALL feed freshness ranking harness</title>
+</head>
+<body>
+<h1>ALL feed freshness ranking harness</h1>
+<p>Loads the real index.html in a same-origin iframe and drives the actual
+   ranking helpers and card renderer from moviezone.js — production code, not a
+   copy — with synthetic titles whose release dates are pinned relative to now.</p>
+<iframe id="app" src="/index.html" style="width:1280px;height:900px;border:1px solid #333"></iframe>
+
+<script>
+(function () {
+  /*  WHAT THIS PROTECTS
+   *  The ALL feed has strict product priority: relevant latest movie releases
+   *  first, recent movie print upgrades second, remaining movies next, and
+   *  latest/trending web series and anime last. Freshness tiers plus composite
+   *  relevance only order titles inside their own group.
+   *
+   *  Date arithmetic still drives release/upgrade detection, so an off-by-one
+   *  can silently put a title in the wrong group. These checks cover exact
+   *  quality boundaries, relevance floors, strict cross-group ordering,
+   *  group-safe language diversity, rendered badges, and all discover windows. */
+
+  var checks = [];
+  function ok(name, pass, detail) {
+    checks.push({ name: name, pass: !!pass, detail: detail == null ? '' : String(detail) });
+  }
+  function report() {
+    try {
+      fetch('/__results', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(checks)
+      });
+    } catch (e) { /* the runner will time out and fail loudly */ }
+  }
+  // Release dates are plain YYYY-MM-DD, so "N days old" lands anywhere in
+  // [N, N+1) depending on the time of day. Assertions allow for that.
+  function near(name, actual, expected, tolerance) {
+    var tol = tolerance == null ? 1.5 : tolerance;
+    ok(name, typeof actual === 'number' && Math.abs(actual - expected) <= tol,
+      'got ' + actual + ', expected ~' + expected);
+  }
+
+  var frame = document.getElementById('app');
+  frame.addEventListener('load', function () { setTimeout(run, 3000); });
+
+  function run() {
+    var win, doc;
+    try {
+      win = frame.contentWindow;
+      doc = frame.contentDocument;
+    } catch (e) {
+      ok('same-origin access to the app frame', false, e.message);
+      report();
+      return;
+    }
+
+    var DAY = 24 * 60 * 60 * 1000;
+    function releasedDaysAgo(days) {
+      return new Date(Date.now() - (days * DAY)).toISOString().slice(0, 10);
+    }
+    // A blockbuster clears the 4K bar (rating >= 7, popularity >= 50); a
+    // no-name title does not, which is what makes day 200 a non-upgrade for it.
+    function movie(days, extra) {
+      var m = { id: Math.floor(Math.random() * 1e9), title: 'T' + days,
+        release_date: releasedDaysAgo(days), poster_path: '/p.jpg',
+        vote_average: 8.0, vote_count: 900, popularity: 250, genre_ids: [28] };
+      for (var k in (extra || {})) m[k] = extra[k];
+      return m;
+    }
+    // Web series / anime: TMDB gives them `name` + `first_air_date`, and the
+    // ALL feed tags them media_type:'tv'.
+    function series(days, extra) {
+      var s = { id: Math.floor(Math.random() * 1e9), name: 'S' + days, media_type: 'tv',
+        first_air_date: releasedDaysAgo(days), poster_path: '/p.jpg',
+        vote_average: 8.2, vote_count: 900, popularity: 250, genre_ids: [18] };
+      for (var k in (extra || {})) s[k] = extra[k];
+      return s;
+    }
+
+    // ── 0. the helpers exist at all ──────────────────────────────────────
+    var required = ['titleQualityState', 'catalogueEventAgeDays',
+      'freshnessTier', 'allFeedPriorityGroup', 'rankByFreshness',
+      'diversifyByLanguageWithinPriority', 'calculateMovieScore', 'latestWindowQuery',
+      'printUpgradeWindowQuery', 'latestSeriesWindowQuery', 'seriesUpgradeWindowQuery',
+      'latestAnimeWindowQuery', 'renderMovies'];
+    var missing = required.filter(function (n) { return typeof win[n] === 'undefined'; });
+    ok('ranking helpers are reachable', missing.length === 0, 'missing: ' + missing.join(', '));
+    if (missing.length) { report(); return; }
+
+    // `const` at the top level of a classic script lives in the global lexical
+    // scope, not on window, so the tables are read through the frame's eval.
+    var timeline = win.eval('MOVIE_QUALITY_TIMELINE');
+    ok('the movie quality timeline is a single ascending table',
+      Array.isArray(timeline) && timeline.length === 6
+        && timeline.every(function (s, i) { return i === 0 || s.fromDay > timeline[i - 1].fromDay; }),
+      timeline ? timeline.map(function (s) { return s.fromDay + ':' + s.qual; }).join(' ') : 'missing');
+    var tvTimeline = win.eval('TV_QUALITY_TIMELINE');
+    ok('the series quality timeline is a single ascending table',
+      Array.isArray(tvTimeline) && tvTimeline.length === 4
+        && tvTimeline.every(function (s, i) { return i === 0 || s.fromDay > tvTimeline[i - 1].fromDay; }),
+      tvTimeline ? tvTimeline.map(function (s) { return s.fromDay + ':' + s.qual; }).join(' ') : 'missing');
+    ok('a series never starts on a cam print',
+      tvTimeline && tvTimeline.every(function (s) { return ['CAM', 'TS', 'HDTS'].indexOf(s.qual) === -1; }));
+
+    // ── 1. the print ladder, at every boundary ───────────────────────────
+    var ladder = [
+      { days: 1,   qual: 'CAM'  },
+      { days: 20,  qual: 'CAM'  },
+      { days: 22,  qual: 'TS'   },
+      { days: 44,  qual: 'TS'   },
+      { days: 46,  qual: 'HDTS' },
+      { days: 74,  qual: 'HDTS' },
+      { days: 76,  qual: 'HD'   },
+      { days: 119, qual: 'HD'   },
+      { days: 121, qual: 'FHD'  },
+      { days: 199, qual: 'FHD'  },
+      { days: 205, qual: '4K'   }
+    ];
+    var wrong = ladder.filter(function (c) {
+      return win.titleQualityState(movie(c.days)).qual !== c.qual;
+    }).map(function (c) {
+      return c.days + 'd -> ' + win.titleQualityState(movie(c.days)).qual + ' (want ' + c.qual + ')';
+    });
+    ok('movie print ladder is correct at every stage boundary', wrong.length === 0, wrong.join(', '));
+
+    // Series and anime take the other timeline: no cam stage, a clean encode at
+    // ~1 month and a BD/4K master at ~4 months.
+    var tvLadder = [
+      { days: 1,   qual: 'NEW' },
+      { days: 6,   qual: 'NEW' },
+      { days: 10,  qual: 'HD'  },
+      { days: 29,  qual: 'HD'  },
+      { days: 31,  qual: 'FHD' },
+      { days: 119, qual: 'FHD' },
+      { days: 130, qual: '4K'  }
+    ];
+    var tvWrong = tvLadder.filter(function (c) {
+      return win.titleQualityState(series(c.days)).qual !== c.qual;
+    }).map(function (c) {
+      return c.days + 'd -> ' + win.titleQualityState(series(c.days)).qual + ' (want ' + c.qual + ')';
+    });
+    ok('series/anime quality ladder is correct at every stage boundary', tvWrong.length === 0, tvWrong.join(', '));
+
+    ok('a low-rated title never reaches 4K',
+      win.titleQualityState(movie(400, { vote_average: 5.0, popularity: 10, vote_count: 40 })).qual === 'FHD',
+      win.titleQualityState(movie(400, { vote_average: 5.0, popularity: 10, vote_count: 40 })).qual);
+    ok('a low-rated series never reaches 4K either',
+      win.titleQualityState(series(400, { vote_average: 6.0, popularity: 20, vote_count: 40 })).qual === 'FHD',
+      win.titleQualityState(series(400, { vote_average: 6.0, popularity: 20, vote_count: 40 })).qual);
+
+    // ── 2. upgrade detection — the feature itself ────────────────────────
+    ok('a movie still in its cam window has no upgrade',
+      win.titleQualityState(movie(10)).upgradedDaysAgo === null,
+      String(win.titleQualityState(movie(10)).upgradedDaysAgo));
+
+    // A better cam rip is not a quality release. If these ever count as
+    // upgrades the whole top of the feed fills up with three-week-old TS prints
+    // wearing "NEW" ribbons, which is precisely what this guards.
+    ok('CAM to TS is not treated as a quality upgrade',
+      win.titleQualityState(movie(22)).upgradedDaysAgo === null,
+      'TS at 22d reported ' + win.titleQualityState(movie(22)).upgradedDaysAgo);
+    ok('TS to HDTS is not treated as a quality upgrade',
+      win.titleQualityState(movie(46)).upgradedDaysAgo === null,
+      'HDTS at 46d reported ' + win.titleQualityState(movie(46)).upgradedDaysAgo);
+    near('a cam-tier title is still ranked on its release date',
+      win.catalogueEventAgeDays(movie(30)), 30);
+
+    // The same idea on the series side: leaving week one is not an upgrade, so a
+    // series must not be dragged back to the top for merely turning eight days old.
+    ok('a series leaving its first week is not a quality upgrade',
+      win.titleQualityState(series(10)).upgradedDaysAgo === null,
+      'HD at 10d reported ' + win.titleQualityState(series(10)).upgradedDaysAgo);
+    near('a 10-day-old series is still ranked on its air date',
+      win.catalogueEventAgeDays(series(10)), 10);
+
+    var justHD = win.titleQualityState(movie(76));
+    near('HD print that landed yesterday reports ~1 day since upgrade', justHD.upgradedDaysAgo, 1);
+    ok('it remembers which print it replaced', justHD.upgradedFrom === 'HDTS', String(justHD.upgradedFrom));
+
+    near('FHD crossing is its own upgrade event',
+      win.titleQualityState(movie(122)).upgradedDaysAgo, 2);
+    near('4K crossing is its own upgrade event',
+      win.titleQualityState(movie(203)).upgradedDaysAgo, 3);
+
+    var seriesFhd = win.titleQualityState(series(31));
+    near('a series clean encode is an upgrade event', seriesFhd.upgradedDaysAgo, 1);
+    ok('the series upgrade knows what it replaced', seriesFhd.upgradedFrom === 'HD',
+      String(seriesFhd.upgradedFrom));
+    near('a series BD/4K master is an upgrade event too',
+      win.titleQualityState(series(122)).upgradedDaysAgo, 2);
+    near('a series is ranked on its upgrade date, not its air date',
+      win.catalogueEventAgeDays(series(31)), 1);
+
+    // The trap: day 200 without the 4K bar leaves the print at FHD. That is not
+    // an upgrade, so the title must NOT be treated as newly available.
+    var stuckAtFhd = win.titleQualityState(movie(203, { vote_average: 5.0, popularity: 10, vote_count: 40 }));
+    ok('crossing day 200 without qualifying for 4K is not an upgrade',
+      stuckAtFhd.qual === 'FHD' && stuckAtFhd.upgradedDaysAgo > 60,
+      stuckAtFhd.qual + ' upgradedDaysAgo=' + stuckAtFhd.upgradedDaysAgo);
+    var seriesStuck = win.titleQualityState(series(130, { vote_average: 6.0, popularity: 20, vote_count: 40 }));
+    ok('a series that misses the 4K bar is not re-surfaced at day 120',
+      seriesStuck.qual === 'FHD' && seriesStuck.upgradedDaysAgo > 60,
+      seriesStuck.qual + ' upgradedDaysAgo=' + seriesStuck.upgradedDaysAgo);
+
+    // ── 3. the ranking key ──────────────────────────────────────────────
+    near('a brand-new release is ranked on its release date',
+      win.catalogueEventAgeDays(movie(2)), 2);
+    near('a just-upgraded film is ranked on its upgrade date, not its release',
+      win.catalogueEventAgeDays(movie(76)), 1);
+    ok('a film with no usable date sinks to the bottom',
+      win.catalogueEventAgeDays({ id: 1, title: 'x' }) === Infinity);
+
+    // ── 4. freshness tiers ──────────────────────────────────────────────
+    ok('anything released this week is the top tier', win.freshnessTier(movie(1), 1) === 0
+      && win.freshnessTier(movie(6), 6) === 0);
+    ok('a fortnight old drops a tier', win.freshnessTier(movie(12), 12) === 1,
+      String(win.freshnessTier(movie(12), 12)));
+    ok('a month-old cam-tier title is well down the order',
+      win.freshnessTier(movie(30), 30) === 2, String(win.freshnessTier(movie(30), 30)));
+    ok('a year old falls to the last tier', win.freshnessTier(movie(365), 365) === 5);
+    ok('an obscure new title does not jump the queue',
+      win.freshnessTier(movie(1, { popularity: 2, vote_count: 1 }), 1) === 5,
+      String(win.freshnessTier(movie(1, { popularity: 2, vote_count: 1 }), 1)));
+
+    // ── 5. strict movie group ordering ───────────────────────────────────
+    var oldBlockbuster = movie(400, { title: 'OLD', vote_average: 8.7, popularity: 900, vote_count: 20000 });
+    var justUpgraded   = movie(76,  { title: 'UPGRADED', vote_average: 7.0, popularity: 120, vote_count: 400 });
+    var brandNew       = movie(2,   { title: 'NEW', vote_average: 6.4, popularity: 95, vote_count: 60 });
+    // At day 60 this movie is outside the latest-release window and has not
+    // reached a real-print stage, so it represents the remaining-movie group.
+    var midOld         = movie(60,  { title: 'MID', vote_average: 8.0, popularity: 300, vote_count: 5000 });
+
+    var order = win.rankByFreshness([oldBlockbuster, midOld, justUpgraded, brandNew])
+      .map(function (m) { return m.title; });
+    ok('strict groups order release, quality update, then remaining movies',
+      order.join(' > ') === 'NEW > UPGRADED > MID > OLD', order.join(' > '));
+    ok('a latest movie release beats an even fresher quality update',
+      order.indexOf('NEW') < order.indexOf('UPGRADED')
+        && brandNew._eventAgeDays > justUpgraded._eventAgeDays,
+      order.join(' > ') + ' / event ages ' + brandNew._eventAgeDays + ',' + justUpgraded._eventAgeDays);
+    ok('a recent movie quality update beats every remaining movie',
+      order.indexOf('UPGRADED') < order.indexOf('MID')
+        && order.indexOf('UPGRADED') < order.indexOf('OLD'), order.join(' > '));
+    ok('strict priority groups are annotated correctly',
+      brandNew._priorityGroup === 0 && justUpgraded._priorityGroup === 1
+        && midOld._priorityGroup === 2 && oldBlockbuster._priorityGroup === 2,
+      [brandNew._priorityGroup, justUpgraded._priorityGroup,
+        midOld._priorityGroup, oldBlockbuster._priorityGroup].join(','));
+    ok('ranking annotates every item', [oldBlockbuster, justUpgraded].every(function (m) {
+      return typeof m._priorityGroup === 'number' && typeof m._freshTier === 'number'
+        && typeof m._rankScore === 'number' && typeof m._eventAgeDays === 'number';
+    }));
+
+    // Equally fresh releases still use composite relevance, preserving the
+    // guard against obscure titles dominating a release week.
+    var smallNew = movie(2, { title: 'SMALL', vote_average: 5.5, popularity: 40, vote_count: 30 });
+    var bigNew   = movie(2, { title: 'BIG', vote_average: 8.2, popularity: 600, vote_count: 3000 });
+    var sameTier = win.rankByFreshness([smallNew, bigNew]).map(function (m) { return m.title; });
+    ok('within the latest-release group the bigger title leads', sameTier[0] === 'BIG', sameTier.join(' > '));
+
+    // ── 5b. series/anime stay after every movie group ────────────────────
+    var newSeries = series(3,   { name: 'SERIES-NEW', vote_average: 7.4, popularity: 260, vote_count: 300 });
+    var seriesUpg = series(31,  { name: 'SERIES-FHD', vote_average: 7.6, popularity: 180, vote_count: 900 });
+    var newAnime  = series(5,   { name: 'ANIME-NEW', original_language: 'ja', genre_ids: [16], vote_average: 8.1, popularity: 150, vote_count: 200 });
+    var animeUpg  = series(122, { name: 'ANIME-BD', original_language: 'ja', genre_ids: [16], vote_average: 8.4, popularity: 140, vote_count: 2000 });
+    var oldSeries = series(900, { name: 'SERIES-OLD', vote_average: 8.9, popularity: 800, vote_count: 30000 });
+
+    var mixedItems = [oldSeries, oldBlockbuster, newSeries, animeUpg, newAnime,
+      seriesUpg, midOld, justUpgraded, brandNew];
+    var mixed = win.rankByFreshness(mixedItems)
+      .map(function (m) { return m.title || m.name; });
+    ok('latest release leads a fresher movie update and even fresher series',
+      mixed.indexOf('NEW') < mixed.indexOf('UPGRADED')
+        && mixed.indexOf('UPGRADED') < mixed.indexOf('SERIES-NEW'),
+      mixed.join(' > '));
+    var moviePositions = mixedItems.filter(function (m) { return m.media_type !== 'tv'; })
+      .map(function (m) { return mixed.indexOf(m.title); });
+    var seriesPositions = mixedItems.filter(function (m) { return m.media_type === 'tv'; })
+      .map(function (m) { return mixed.indexOf(m.name); });
+    ok('every movie group stays above every web series and anime',
+      Math.max.apply(Math, moviePositions) < Math.min.apply(Math, seriesPositions), mixed.join(' > '));
+    ok('fresh relevant series and anime share the final featured group',
+      newSeries._priorityGroup === 3 && newAnime._priorityGroup === 3
+        && seriesUpg._priorityGroup === 3 && animeUpg._priorityGroup === 3,
+      [newSeries._priorityGroup, newAnime._priorityGroup,
+        seriesUpg._priorityGroup, animeUpg._priorityGroup].join(','));
+    ok('a stale series is kept in the last fallback group',
+      oldSeries._priorityGroup === 4 && mixed[mixed.length - 1] === 'SERIES-OLD',
+      oldSeries._priorityGroup + ' / ' + mixed.join(' > '));
+
+    // Inside the series group, freshness tiers and trending relevance still
+    // work: within one week, the title with stronger traction leads.
+    var newestSmallSeries = series(1, { name: 'SERIES-SMALL', vote_average: 6.5, popularity: 30, vote_count: 25 });
+    var trendingSeries = series(6, { name: 'SERIES-TRENDING', vote_average: 8.2, popularity: 600, vote_count: 3000 });
+    var seriesOrder = win.rankByFreshness([newestSmallSeries, trendingSeries])
+      .map(function (m) { return m.name; });
+    ok('within the latest-series tier the trending title leads',
+      seriesOrder[0] === 'SERIES-TRENDING', seriesOrder.join(' > '));
+
+    var obscureSeries = series(1, { name: 'SERIES-OBSCURE', popularity: 2, vote_count: 1 });
+    var establishedSeries = series(12, { name: 'SERIES-ESTABLISHED', popularity: 100, vote_count: 100 });
+    var relevanceOrder = win.rankByFreshness([obscureSeries, establishedSeries])
+      .map(function (m) { return m.name; });
+    ok('the relevance floor keeps obscure series out of the featured series group',
+      establishedSeries._priorityGroup === 3 && obscureSeries._priorityGroup === 4
+        && relevanceOrder[0] === 'SERIES-ESTABLISHED',
+      relevanceOrder.join(' > '));
+
+    // Four same-language releases force the fourth item through the diversity
+    // skip path. It must be restored before the next (series) priority group.
+    var diversityPool = [
+      movie(2, { title: 'EN-1', original_language: 'en' }),
+      movie(2, { title: 'EN-2', original_language: 'en' }),
+      movie(2, { title: 'EN-3', original_language: 'en' }),
+      movie(2, { title: 'EN-4', original_language: 'en' }),
+      series(1, { name: 'HI-SERIES', original_language: 'hi' })
+    ];
+    win.rankByFreshness(diversityPool);
+    var diversified = win.diversifyByLanguageWithinPriority(diversityPool)
+      .map(function (m) { return m.title || m.name; });
+    ok('language diversity cannot move a series above a skipped movie release',
+      diversified.indexOf('HI-SERIES') === 4, diversified.join(' > '));
+
+    // ── 6. the rendered card ────────────────────────────────────────────
+    win.renderMovies([justUpgraded]);
+    var card = doc.querySelector('#movieGrid .movie-card');
+    ok('a just-upgraded card shows the HD print badge',
+      card && /HD/.test(card.querySelector('.card-quality').textContent),
+      card ? card.querySelector('.card-quality').textContent : 'no card');
+    var ribbon = card && card.querySelector('.card-fresh');
+    ok('a just-upgraded card wears a "NEW HD" ribbon',
+      ribbon && ribbon.classList.contains('card-fresh-upgrade') && /NEW\s+HD/.test(ribbon.textContent),
+      ribbon ? ribbon.className + ' "' + ribbon.textContent + '"' : 'no ribbon');
+
+    win.renderMovies([brandNew]);
+    var freshCard = doc.querySelector('#movieGrid .movie-card');
+    ok('a brand-new release shows a cam print and a release ribbon',
+      freshCard && freshCard.querySelector('.card-quality').textContent === 'CAM'
+        && /TODAY|NEW/.test(freshCard.querySelector('.card-fresh').textContent),
+      freshCard ? freshCard.querySelector('.card-quality').textContent + ' / '
+        + freshCard.querySelector('.card-fresh').textContent : 'no card');
+
+    win.renderMovies([oldBlockbuster]);
+    var oldCard = doc.querySelector('#movieGrid .movie-card');
+    ok('an old title gets no upgrade ribbon',
+      oldCard && !oldCard.querySelector('.card-fresh'),
+      oldCard && oldCard.querySelector('.card-fresh') ? oldCard.querySelector('.card-fresh').textContent : 'none');
+
+    // The cam-tier trap, at the level the user actually sees it.
+    win.renderMovies([movie(30, { title: 'TS-ERA' })]);
+    var tsCard = doc.querySelector('#movieGrid .movie-card');
+    ok('a month-old TS print wears no "NEW" ribbon',
+      tsCard && tsCard.querySelector('.card-quality').textContent === 'TS'
+        && !tsCard.querySelector('.card-fresh'),
+      tsCard ? tsCard.querySelector('.card-quality').textContent + ' / '
+        + (tsCard.querySelector('.card-fresh') ? tsCard.querySelector('.card-fresh').textContent : 'no ribbon') : 'no card');
+
+    // Series and anime cards go down the same badge path.
+    win.renderMovies([seriesUpg]);
+    var seriesCard = doc.querySelector('#movieGrid .movie-card');
+    var seriesRibbon = seriesCard && seriesCard.querySelector('.card-fresh');
+    ok('a series whose clean encode landed wears a "NEW FHD" ribbon',
+      seriesCard && seriesCard.querySelector('.card-quality').textContent === 'FHD'
+        && seriesRibbon && seriesRibbon.classList.contains('card-fresh-upgrade')
+        && /NEW\s+FHD/.test(seriesRibbon.textContent),
+      seriesCard ? seriesCard.querySelector('.card-quality').textContent + ' / '
+        + (seriesRibbon ? seriesRibbon.textContent : 'no ribbon') : 'no card');
+
+    win.renderMovies([newSeries]);
+    var newSeriesCard = doc.querySelector('#movieGrid .movie-card');
+    ok('a freshly aired series is badged NEW, never CAM',
+      newSeriesCard && newSeriesCard.querySelector('.card-quality').textContent === 'NEW',
+      newSeriesCard ? newSeriesCard.querySelector('.card-quality').textContent : 'no card');
+
+    win.renderMovies([series(10, { name: 'WEEK-TWO' })]);
+    var weekTwoCard = doc.querySelector('#movieGrid .movie-card');
+    var weekTwoRibbon = weekTwoCard && weekTwoCard.querySelector('.card-fresh');
+    // A recency ribbon is fine here — an UPGRADE ribbon is not, because leaving
+    // week one is not a new print.
+    ok('a series in its second week gets no upgrade ribbon',
+      weekTwoCard && weekTwoCard.querySelector('.card-quality').textContent === 'HD'
+        && (!weekTwoRibbon || !weekTwoRibbon.classList.contains('card-fresh-upgrade')),
+      weekTwoCard ? weekTwoCard.querySelector('.card-quality').textContent + ' / '
+        + (weekTwoRibbon ? weekTwoRibbon.className : 'no ribbon') : 'no card');
+
+    // ── 7. the discover windows that feed the pool ──────────────────────
+    var latest = win.latestWindowQuery('1');
+    var upgradeWin = win.printUpgradeWindowQuery('1');
+    var seriesWin = win.latestSeriesWindowQuery('1');
+    var seriesUpgWin = win.seriesUpgradeWindowQuery('1');
+    var animeWin = win.latestAnimeWindowQuery('1');
+    function ageOf(dateStr) { return (Date.now() - new Date(dateStr).getTime()) / DAY; }
+
+    ok('latest window ends today', ageOf(latest['primary_release_date.lte']) < 1.5,
+      latest['primary_release_date.lte']);
+    near('latest window reaches back about five weeks', ageOf(latest['primary_release_date.gte']), 35);
+
+    var gteAge = ageOf(upgradeWin['primary_release_date.gte']);
+    var lteAge = ageOf(upgradeWin['primary_release_date.lte']);
+    ok('upgrade window is a valid range', gteAge > lteAge, 'gte=' + gteAge + 'd lte=' + lteAge + 'd');
+    // This is the assertion that keeps the feature alive: a film whose HD print
+    // just dropped has to be inside the window, or nothing can re-surface it.
+    ok('a film that just crossed into HD falls inside the upgrade window',
+      lteAge >= 72 && lteAge <= 76 && gteAge >= 130,
+      'window covers releases ' + Math.round(gteAge) + 'd..' + Math.round(lteAge) + 'd old');
+
+    ok('latest series window ends today', ageOf(seriesWin['first_air_date.lte']) < 1.5,
+      seriesWin['first_air_date.lte']);
+    near('latest series window reaches back about six weeks', ageOf(seriesWin['first_air_date.gte']), 45);
+    near('latest anime window reaches back about two months', ageOf(animeWin['first_air_date.gte']), 60);
+    ok('anime window is matched by genre and language, not by network',
+      animeWin.with_genres === '16' && animeWin.with_original_language === 'ja' && !animeWin.with_networks,
+      JSON.stringify(animeWin));
+    // Daily soaps would otherwise swamp a "latest series" window.
+    ok('series windows exclude linear TV channels',
+      !!seriesWin.without_networks && !!seriesUpgWin.without_networks
+        && !!seriesWin.with_networks && !!seriesUpgWin.with_networks);
+    // A whole anime season premieres in the same week, so without a traction
+    // floor the feed receives the entire no-name long tail as one block.
+    ok('series and anime windows only admit titles with traction',
+      Number(seriesWin['vote_count.gte']) > 0 && Number(seriesUpgWin['vote_count.gte']) > 0
+        && Number(animeWin['vote_count.gte']) > 0,
+      'series=' + seriesWin['vote_count.gte'] + ' seriesUpgrade=' + seriesUpgWin['vote_count.gte']
+        + ' anime=' + animeWin['vote_count.gte']);
+
+    var sGte = ageOf(seriesUpgWin['first_air_date.gte']);
+    var sLte = ageOf(seriesUpgWin['first_air_date.lte']);
+    ok('series upgrade window is a valid range', sGte > sLte, 'gte=' + sGte + 'd lte=' + sLte + 'd');
+    ok('a series that just crossed into FHD falls inside its upgrade window',
+      sLte >= 27 && sLte <= 31 && sGte >= 130,
+      'window covers premieres ' + Math.round(sGte) + 'd..' + Math.round(sLte) + 'd old');
+
+    ok('every window pages like the other sources',
+      latest.page === '1' && upgradeWin.page === '1' && seriesWin.page === '1'
+        && seriesUpgWin.page === '1' && animeWin.page === '1');
+
+    // ── 8. the feed really requests them ────────────────────────────────
+    // index.html boots straight into loadMovies('all'), so the window queries
+    // must show up as real requests, not just exist as functions.
+    var allUrls = (win.performance.getEntriesByType('resource') || [])
+      .map(function (e) { return e.name; });
+    var movieDiscover = allUrls.filter(function (n) { return n.indexOf('/api/tmdb/discover/movie') !== -1; });
+    var tvDiscover = allUrls.filter(function (n) { return n.indexOf('/api/tmdb/discover/tv') !== -1; });
+    ok('the ALL feed actually requests a dated movie release window',
+      movieDiscover.some(function (u) { return u.indexOf('primary_release_date.gte') !== -1; }),
+      movieDiscover.length + ' movie discover requests seen');
+    ok('the ALL feed actually requests dated series windows',
+      tvDiscover.some(function (u) { return u.indexOf('first_air_date.gte') !== -1; }),
+      tvDiscover.length + ' tv discover requests seen');
+    ok('the ALL feed actually requests the anime window',
+      tvDiscover.some(function (u) { return u.indexOf('with_genres=16') !== -1 && u.indexOf('first_air_date.gte') !== -1; }),
+      tvDiscover.length + ' tv discover requests seen');
+
+    ok('no uncaught error surfaced in the app frame', !win.__mzHarnessError, win.__mzHarnessError || '');
+    report();
+  }
+
+  frame.addEventListener('load', function () {
+    try {
+      frame.contentWindow.addEventListener('error', function (ev) {
+        frame.contentWindow.__mzHarnessError = ev.message;
+      });
+    } catch (e) { /* ignore */ }
+  });
+
+  setTimeout(function () {
+    if (!checks.length) {
+      ok('harness completed before timeout', false, 'no checks ran');
+      report();
+    }
+  }, 40000);
+})();
+</script>
+</body>
+</html>

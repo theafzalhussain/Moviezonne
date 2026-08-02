@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MovieZone — mobile category dropdown harness</title>
+</head>
+<body>
+<h1>Mobile category dropdown harness</h1>
+<p>Loads the real index.html in phone-sized, same-origin iframes and drives the
+   actual OTT Platform / Category dropdowns: production markup, CSS and
+   moviezone.js, not a copy.</p>
+
+<script>
+(function () {
+  /*  WHY THIS HARNESS EXISTS
+   *  Two phone-only regressions shipped unnoticed because every existing check
+   *  ran at 1280px:
+   *
+   *  1. Under 768px the tab strip turns into a horizontal scroller
+   *     (flex-wrap:nowrap + overflow-x:auto) and `.cat-tab` gets
+   *     `flex: 0 0 auto`. The `.cat-group` WRAPPER is not a .cat-tab, so it kept
+   *     the default shrink factor, collapsed to the min-content width of
+   *     "Platform", and its trigger button spilled ~21px over the next pill.
+   *  2. A scroll container clips its descendants on BOTH axes (setting
+   *     overflow-x:auto makes computed overflow-y `auto`), so the absolutely
+   *     positioned panel was rendered and then clipped away completely —
+   *     tapping the pill looked like nothing happened. The panel is
+   *     position:fixed on phones now, placed by alignCatGroupMenu(), which also
+   *     has to translate viewport coordinates into #movies-section's box
+   *     because its `content-visibility: auto` implies `contain: paint` and
+   *     therefore makes it the containing block for fixed descendants.
+   *
+   *  Both are invisible to a static read of the markup and to a desktop-width
+   *  browser test, hence real geometry + hit-testing at real phone sizes.  */
+
+  var DEVICES = [
+    { name: 'Pixel-ish 412x915', w: 412, h: 915 },
+    { name: 'small Android 360x640', w: 360, h: 640 }
+  ];
+
+  var checks = [];
+  function ok(name, pass, detail) {
+    checks.push({ name: name, pass: !!pass, detail: detail == null ? '' : String(detail) });
+  }
+  function report() {
+    try {
+      fetch('/__results', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(checks)
+      });
+    } catch (e) { /* the runner will time out and fail loudly */ }
+  }
+
+  function box(el) {
+    var b = el.getBoundingClientRect();
+    return {
+      l: Math.round(b.left), t: Math.round(b.top), r: Math.round(b.right),
+      b: Math.round(b.bottom), w: Math.round(b.width), h: Math.round(b.height)
+    };
+  }
+
+  // Every DOM poke needs a frame or two to settle: the strip snap-scrolls after
+  // a pill takes focus, and #movies-section is content-visibility:auto so its
+  // geometry only means anything once it is on screen.
+  function sequence(steps, done) {
+    (function next(i) {
+      if (i >= steps.length) { done(); return; }
+      try { steps[i](); } catch (e) { ok('harness step ' + i + ' threw', false, e.message); }
+      setTimeout(function () { next(i + 1); }, 350);
+    })(0);
+  }
+
+  function runDevice(device, done) {
+    var frame = document.createElement('iframe');
+    frame.style.cssText = 'width:' + device.w + 'px;height:' + device.h + 'px;border:1px solid #333';
+    frame.src = '/index.html';
+    document.body.appendChild(frame);
+
+    frame.addEventListener('load', function () {
+      try {
+        frame.contentWindow.addEventListener('error', function (ev) {
+          frame.contentWindow.__mzHarnessError = ev.message;
+        });
+      } catch (e) { /* ignore */ }
+      // moviezone.js wires the strip on DOMContentLoaded and fires network loads
+      // after; give it a moment before asserting on geometry.
+      setTimeout(function () { drive(device, frame, done); }, 2500);
+    });
+  }
+
+  function drive(device, frame, done) {
+    var P = device.name + ' — ';
+    var doc, win;
+    try {
+      doc = frame.contentDocument;
+      win = frame.contentWindow;
+    } catch (e) {
+      ok(P + 'same-origin access to the app frame', false, e.message);
+      done();
+      return;
+    }
+
+    var strip = doc.getElementById('catTabs');
+    var ottBtn = doc.getElementById('catGroupOttBtn');
+    var genBtn = doc.getElementById('catGroupGenreBtn');
+    var ottMenu = doc.getElementById('catGroupOttMenu');
+    var genMenu = doc.getElementById('catGroupGenreMenu');
+
+    ok(P + 'strip and both dropdowns exist', !!(strip && ottBtn && genBtn && ottMenu && genMenu));
+    if (!strip || !ottBtn || !genMenu) { done(); return; }
+
+    ok(P + 'viewport really is phone-sized', win.innerWidth === device.w,
+      win.innerWidth + 'x' + win.innerHeight);
+
+    // ── the premise: on phones the strip is a horizontal scroller ───────────
+    var stripStyle = win.getComputedStyle(strip);
+    ok(P + 'strip is a horizontal scroller', stripStyle.flexWrap === 'nowrap' && stripStyle.overflowX === 'auto',
+      'wrap=' + stripStyle.flexWrap + ' overflowX=' + stripStyle.overflowX + ' overflowY=' + stripStyle.overflowY);
+    ok(P + 'strip actually overflows (so clipping is in play)', strip.scrollWidth > strip.clientWidth + 20,
+      'scrollW=' + strip.scrollWidth + ' clientW=' + strip.clientWidth);
+
+    // ── REGRESSION 1: the group wrapper must not shrink ─────────────────────
+    var groupStyle = win.getComputedStyle(ottBtn.closest('.cat-group'));
+    ok(P + '.cat-group cannot shrink below its trigger', groupStyle.flexShrink === '0',
+      'flex-shrink=' + groupStyle.flexShrink);
+
+    // Tapping a pill focuses it, which makes the browser reveal it inside the
+    // strip, and `scroll-snap-type: x mandatory` then snaps that scroll. This is
+    // the sequence that used to leave the panel behind at its pre-snap spot.
+    function tap(el) { try { el.focus(); } catch (e) {} el.click(); }
+
+    sequence([
+      function () {
+        strip.scrollIntoView({ block: 'center', inline: 'nearest' });
+        strip.scrollLeft = strip.scrollWidth;
+      },
+      function () { checkPills(P, doc, win, strip, ottBtn, genBtn); },
+      function () { ok(P + 'menus start closed', win.getComputedStyle(ottMenu).display === 'none'
+        && win.getComputedStyle(genMenu).display === 'none'); },
+
+      // ── REGRESSION 2: the panel must survive the scroll container ─────────
+      function () { tap(ottBtn); },
+      function () { checkOpenPanel(P + 'OTT', doc, win, ottMenu, ottBtn); },
+
+      // A fixed panel does not travel with the pill on its own.
+      function () { strip.scrollLeft = Math.max(0, strip.scrollLeft - 70); },
+      function () { checkOpenPanel(P + 'OTT after the strip scrolls', doc, win, ottMenu, ottBtn); },
+
+      function () { tap(genBtn); },
+      function () {
+        checkOpenPanel(P + 'Category', doc, win, genMenu, genBtn);
+        ok(P + 'opening one group closes the other', win.getComputedStyle(ottMenu).display === 'none',
+          win.getComputedStyle(ottMenu).display);
+      },
+
+      // ── no room below: the panel has to flip above the pill ───────────────
+      function () {
+        win.scrollTo(0, Math.max(0, strip.getBoundingClientRect().top + win.scrollY - (win.innerHeight - 120)));
+      },
+      function () { tap(ottBtn); },
+      function () {
+        var mb = box(ottMenu), tb = box(ottBtn);
+        ok(P + 'with no room below, the panel flips above the pill',
+          win.getComputedStyle(ottMenu).display !== 'none'
+            && mb.t >= 0 && mb.b <= win.innerHeight && mb.b <= tb.t + 1,
+          'menu=' + JSON.stringify(mb) + ' trigger=' + JSON.stringify(tb) + ' vh=' + win.innerHeight);
+      },
+
+      // ── picking a platform still filters, and the panel is cleaned up ─────
+      function () { strip.scrollIntoView({ block: 'center', inline: 'nearest' }); },
+      function () { tap(ottBtn); },
+      function () { doc.querySelector('.cat-tab[onclick*="filterCat(\'netflix\')"]').click(); },
+      function () {
+        var netflix = doc.querySelector('.cat-tab[onclick*="filterCat(\'netflix\')"]');
+        ok(P + 'picking a platform filters', netflix.classList.contains('active'));
+        ok(P + 'panel closes after picking', win.getComputedStyle(ottMenu).display === 'none');
+        ok(P + 'inline coordinates are cleared on close', !ottMenu.style.top && !ottMenu.style.left,
+          'top=' + ottMenu.style.top + ' left=' + ottMenu.style.left);
+        ok(P + 'trigger is marked while its child is the active filter',
+          ottBtn.classList.contains('has-active'));
+        var heading = doc.getElementById('sectionHeading');
+        ok(P + 'heading switched to the Netflix label',
+          heading && /NETFLIX/i.test(heading.textContent), heading ? heading.textContent : '');
+      },
+
+      // Escape and outside taps still work at this size.
+      function () { tap(genBtn); },
+      function () { doc.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); },
+      function () {
+        ok(P + 'Escape closes the panel', win.getComputedStyle(genMenu).display === 'none');
+        ok(P + 'no uncaught error surfaced in the app frame',
+          !win.__mzHarnessError, win.__mzHarnessError || '');
+      }
+    ], done);
+  }
+
+  /*  The pills themselves: no trigger may render wider than the flex item that
+   *  holds it, and no pill may overlap another.  */
+  function checkPills(P, doc, win, strip, ottBtn, genBtn) {
+    [['OTT', ottBtn], ['Category', genBtn]].forEach(function (pair) {
+      var trigger = box(pair[1]);
+      var group = box(pair[1].closest('.cat-group'));
+      ok(P + pair[0] + ' trigger fits inside its own .cat-group',
+        trigger.w <= group.w && trigger.r <= group.r + 1,
+        'trigger ' + trigger.w + 'px (right=' + trigger.r + ') vs group ' + group.w + 'px (right=' + group.r + ')');
+    });
+
+    var items = Array.prototype.slice.call(strip.children).map(function (el) {
+      return { box: box(el), label: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 16) };
+    });
+    var overlaps = [];
+    for (var i = 0; i < items.length; i++) {
+      for (var j = i + 1; j < items.length; j++) {
+        var a = items[i].box, b = items[j].box;
+        var overX = Math.min(a.r, b.r) - Math.max(a.l, b.l);
+        var overY = Math.min(a.b, b.b) - Math.max(a.t, b.t);
+        if (overX > 1 && overY > 1) {
+          overlaps.push('"' + items[i].label + '" over "' + items[j].label + '" by ' + overX + 'px');
+        }
+      }
+    }
+    ok(P + 'no pill overlaps another pill on the strip', overlaps.length === 0, overlaps.join(' | '));
+  }
+
+  /*  An open panel is only useful if it is on screen AND on top: a clipped or
+   *  covered panel is what the user experiences as "the tap does nothing", and
+   *  neither shows up in a display/aria assertion.  */
+  function checkOpenPanel(label, doc, win, menu, trigger) {
+    var style = win.getComputedStyle(menu);
+    var mb = box(menu), tb = box(trigger);
+
+    ok(label + ': panel is open', style.display !== 'none', style.display);
+    ok(label + ': trigger reports expanded', trigger.getAttribute('aria-expanded') === 'true');
+    ok(label + ': panel escapes the scrolling strip (position:fixed)', style.position === 'fixed', style.position);
+    ok(label + ': panel is fully inside the viewport',
+      mb.l >= 0 && mb.r <= win.innerWidth && mb.t >= 0 && mb.b <= win.innerHeight,
+      JSON.stringify(mb) + ' viewport=' + win.innerWidth + 'x' + win.innerHeight);
+    ok(label + ': panel is anchored to its trigger',
+      Math.abs(mb.t - tb.b) <= 12 || Math.abs(tb.t - mb.b) <= 12,
+      'panel=' + JSON.stringify(mb) + ' trigger=' + JSON.stringify(tb));
+
+    var items = menu.querySelectorAll('.cat-group-item');
+    var unreachable = [];
+    Array.prototype.forEach.call(items, function (item) {
+      var ib = box(item);
+      var hit = doc.elementFromPoint(Math.round((ib.l + ib.r) / 2), Math.round((ib.t + ib.b) / 2));
+      if (!hit || !(hit === item || item.contains(hit))) {
+        unreachable.push((item.textContent || '').trim() + ' -> ' + (hit ? hit.tagName + '.' + hit.className : 'nothing'));
+      }
+    });
+    ok(label + ': every item is tappable (topmost at its own centre)',
+      items.length > 0 && unreachable.length === 0, unreachable.join(' | '));
+  }
+
+  (function nextDevice(i) {
+    if (i >= DEVICES.length) { report(); return; }
+    runDevice(DEVICES[i], function () { nextDevice(i + 1); });
+  })(0);
+
+  setTimeout(function () {
+    if (!checks.length) {
+      ok('harness completed before timeout', false, 'no checks ran');
+      report();
+    }
+  }, 55000);
+})();
+</script>
+</body>
+</html>

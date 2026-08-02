@@ -1997,12 +1997,24 @@ body.cursor-hover #cursor-dot {
 .cat-group {
   position: relative;
   display: inline-flex;
+  /* flex-shrink:0 is load-bearing on phones. Under 768px the strip becomes a
+     horizontal scroller (flex-wrap:nowrap + overflow-x:auto) and `.cat-tab`
+     gets `flex: 0 0 auto` — but this WRAPPER is not a .cat-tab, so it kept the
+     default shrink factor. It collapsed to the min-content width of "Platform"
+     (97px) while the trigger button inside it stayed at its natural 124px and
+     spilled ~21px over the next pill, which is what made "OTT Platform" and
+     "Category" look overlapped. */
+  flex: 0 0 auto;
 }
 
 .cat-group-trigger {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
+  /* The label must never be allowed to wrap or the pill grows a second line
+     inside a fixed-height strip. */
+  white-space: nowrap;
+  flex: 0 0 auto;
   /* No transition and no ripple on the trigger: it is a menu button, so the
      open/close state should read as instant rather than easing while the panel
      is already on screen.
@@ -2137,11 +2149,41 @@ html[data-mz-tv="true"] .cat-group-item {
   border-radius: 999px;
 }
 
-@media (max-width: 640px) {
+/* ── PHONES / SMALL TABLETS ──
+   Under 768px `.cat-tabs` becomes a horizontal scroller (flex-wrap:nowrap +
+   overflow-x:auto). A scroll container clips its descendants on BOTH axes —
+   setting overflow-x:auto makes the computed overflow-y `auto` too — so the
+   absolutely positioned panel was being rendered *and* clipped away entirely:
+   tapping the trigger looked like nothing happened.
+
+   The panel therefore switches to position:fixed on small screens, which
+   escapes the scroller. alignCatGroupMenu() in moviezone.js writes the top/left
+   for it (anchored under the trigger, clamped into the viewport, flipped above
+   when there is no room below) and repositions on scroll/resize. */
+@media (max-width: 768px) {
   .cat-group-menu {
-    min-width: 176px;
-    max-height: 52vh;
+    position: fixed;
+    /* Fallback coordinates for the split second before the JS runs. */
+    top: auto;
+    left: 0.75rem;
+    right: auto;
+    width: min(78vw, 300px);
+    min-width: 0;
+    max-width: none;
+    max-height: min(50vh, 340px);
+    /* Above the movie grid and its hover overlays, below the nav/modal layer. */
+    z-index: 900;
   }
+
+  /* data-align is only meaningful for the absolutely positioned desktop panel;
+     the fixed one is placed by JS and must not be yanked to the right edge. */
+  .cat-group[data-align="end"] .cat-group-menu { left: auto; right: auto; }
+
+  /* Inside the panel the pills wrap as chips instead of full-width rows, which
+     keeps all 13 genres visible without an inner scroll on a phone. (The later
+     `.cat-tab { flex: 0 0 auto }` mobile rule forces this anyway — stated here
+     so the layout does not depend on that rule's position in the file.) */
+  .cat-group-item { flex: 0 0 auto; padding: 0.62rem 0.9rem; }
 }
 
 /* ══ PREMIUM HIGHLIGHT TABS (Trending / 4K / Top Rated) ══ */
@@ -2413,6 +2455,12 @@ html[data-mz-tv="true"] .cat-group-item {
 .card-fresh-recent {
   background: linear-gradient(135deg, #06b6d4, #0891b2);
   box-shadow: 0 4px 12px rgba(6, 182, 212, 0.4);
+}
+/* Print upgraded — "NEW HD" / "NEW FHD" / "NEW 4K". Green so it reads as
+   "better copy available now" rather than "just released". */
+.card-fresh-upgrade {
+  background: linear-gradient(135deg, #22c55e, #15803d);
+  box-shadow: 0 4px 14px rgba(34, 197, 94, 0.45);
 }
 
 @keyframes freshPulse {
