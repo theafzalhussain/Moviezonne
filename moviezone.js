@@ -5351,12 +5351,32 @@ const playerSources = [
       ? `https://111movies.com/tv/${id}/${s}/${e}`
       : `https://111movies.com/movie/${id}`;
   }},
-  { name: 'VidPhantom Pro', dubbed: true, url: (id, lang, type, s, e) => {
-    // #3 PREMIUM: VidPhantom — AD-FREE, 115K Movies + 79K Episodes + 5.3K Anime
-    // Multi-provider failover, customizable player, watch progress, next episode hook
+  // ── ALL-ROUNDER: VidRock ───────────────────────────────────────────────
+  //   Movies      -> /movie/{TMDB}
+  //   Web Series  -> /tv/{TMDB}/{season}/{episode}
+  //   Cartoons + Anime bhi TMDB tv/movie entries se chalte hain.
+  // Live verify kiya gaya (player bundle ke andar se):
+  //   * language map: hi:"hindi" + tamil/telugu/bengali  -> Hindi audio/subtitle support
+  //   * real audio switcher: {audioTracks, currentAudioTrack, onSelectTrack}
+  //   * quality label "4K" maujood
+  //   * saare routes HTTP 200 aur koi X-Frame-Options nahi -> iframe me chalta hai
+  // Hindi track player ke Audio menu se choose karna hota hai (jahan available ho).
+  { name: 'VidRock 4K All-Rounder', dubbed: true, is4K: true, anime: true, url: (id, lang, type, s, e) => {
     return type === 'tv'
-      ? `https://vidphantom.com/tv/${id}/${s}/${e}?autoplay=true&sub_lang=${lang}`
-      : `https://vidphantom.com/movie/${id}?autoplay=true&sub_lang=${lang}`;
+      ? `https://vidrock.net/tv/${id}/${s}/${e}`
+      : `https://vidrock.net/movie/${id}`;
+  }},
+
+  // ── HINDI DUB SERVER: AnyEmbed / Smashystream ──────────────────────────
+  // Ye specially Hindi ke liye add kiya hai. Iske player bundle me confirm hua:
+  //   title:"Regional audio (Hindi, Tamil, Telugu)"  + multi_audio flag (India category)
+  //   {tag:"hi-IN", label:"Hindi"}                   + "switch audio hindi" command
+  // Player ke andar Audio menu se Hindi track choose kar sakte hain (jahan available ho).
+  // Movies + Web Series + Anime + Cartoons sab TMDB id se chalte hain.
+  // iframe embedding allowed hai (koi X-Frame-Options header nahi bhejta).
+  { name: 'Hindi Multi-Audio', dubbed: true, url: (id, lang, type, s, e) => {
+    const base = `https://embed.smashystream.com/playere.php?tmdb=${id}`;
+    return type === 'tv' ? `${base}&season=${s}&episode=${e}` : base;
   }},
     { name: 'Ultra HD', dubbed: true, url: (id, lang, type, s, e) => {
     // #6: AutoEmbed — India ke networks par blockage kam aati hai
@@ -5641,7 +5661,9 @@ const PLAYER_HOSTS = [
   'https://vidnest.fun',
   'https://player.videasy.net',
   'https://www.viduki.net',
-  'https://vidphantom.com',
+  'https://vidrock.net',
+  'https://vidrock.ru',
+  'https://embed.smashystream.com',
   'https://autoembed.co',
   'https://vidlink.pro',
   'https://vidsrc.pm',
