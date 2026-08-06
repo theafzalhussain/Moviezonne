@@ -5416,10 +5416,6 @@ function renderLanguageButtons(spokenLangs) {
   section.id = 'mz-lang-section';
   section.style.cssText = 'margin-top:14px; border-top:1px solid rgba(255,255,255,0.08); padding-top:12px;';
   section.innerHTML = `
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
-      <span style="font-size:0.7rem;font-weight:800;letter-spacing:1.8px;color:rgba(255,255,255,0.35);text-transform:uppercase;"> Audio Language</span>
-      <span style="font-size:0.68rem;color:#10b981;background:rgba(16,185,129,0.1);padding:2px 9px;border-radius:999px;border:1px solid rgba(16,185,129,0.2);"> = Dubbed available</span>
-    </div>
     <div style="display:flex;flex-wrap:wrap;gap:7px;">${btnsHtml}</div>
 
   `;
