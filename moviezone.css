@@ -10212,18 +10212,23 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 
   .pwa-actions {
+    flex-direction: column;
     gap: 0.5rem;
   }
 
   .pwa-btn-install {
-    height: 44px;
-    font-size: 0.86rem;
+    flex: none;
+    width: 100%;
+    height: 46px;
+    font-size: 0.88rem;
     border-radius: 12px;
   }
 
   .pwa-btn-later {
-    height: 44px;
-    font-size: 0.8rem;
+    flex: none;
+    width: 100%;
+    height: 42px;
+    font-size: 0.82rem;
     border-radius: 12px;
   }
 }
