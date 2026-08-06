@@ -4060,6 +4060,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  overflow-x: hidden;
 }
 
 .video-embed {
@@ -4622,6 +4623,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
   min-height: 50px;
+  min-width: 0;
   font-family: 'Outfit', sans-serif;
   flex: 0 0 auto;
 }
@@ -4673,6 +4675,8 @@ html[data-mz-tv="true"] .cat-group-menu {
   gap: 8px;
   width: 100%;
   justify-content: center;
+  min-width: 0;
+  overflow: hidden;
 }
 .srv-card__name {
   font-size: 0.82rem;
@@ -4680,6 +4684,9 @@ html[data-mz-tv="true"] .cat-group-menu {
   color: #fff;
   letter-spacing: 0.3px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 .srv-card__status {
   width: 7px;
@@ -5445,63 +5452,296 @@ html[data-mz-tv="true"] .cat-group-menu {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SERVER SECTIONS — SMALL SCREEN CENTERING
+   SERVER SECTIONS — SMALL SCREEN CENTERING & OVERFLOW FIX
    ═══════════════════════════════════════════════════════════════ */
 
 @media (max-width: 768px) {
+  /* Force modal-bottom to never overflow the viewport */
+  .modal-bottom {
+    overflow-x: hidden;
+    max-width: 100vw;
+  }
+
+  /* Stack sections vertically on mobile */
   .srv-container {
-    justify-content: center;
+    flex-direction: column;
     gap: 10px;
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
   }
+
   .srv-section {
-    width: auto;
-    flex: 1 1 auto;
+    width: 100%;
+    flex: none;
     min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
   }
+
   .srv-section__grid {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     justify-content: center;
+    width: 100%;
   }
+
+  /* Prevent card overflow */
+  .srv-card {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: calc(50% - 5px);
+    overflow: hidden;
+  }
+
+  .srv-card__name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+
+  .srv-card__badges {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
   .srv-section__header {
     justify-content: center;
     text-align: center;
+    flex-wrap: wrap;
   }
+
   .srv-master-header {
     justify-content: center;
     text-align: center;
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 8px;
+    max-width: 100%;
   }
+
   .external-sources {
     justify-content: center;
     align-items: center;
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  /* Language section buttons - prevent overflow */
+  #mz-lang-section {
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .player-chip {
+    max-width: 100%;
+    overflow: hidden;
   }
 }
 
 @media (max-width: 480px) {
-  .srv-section__grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    justify-content: center;
+  .srv-container {
+    flex-direction: column;
+    gap: 8px;
+    padding: 0;
   }
-  .srv-card {
-    flex: 0 1 auto;
-    min-width: 120px;
-    max-width: 160px;
-    padding: 8px 10px;
-    min-height: 44px;
-  }
-  .srv-card__name {
-    font-size: 0.72rem;
-  }
+
   .srv-section {
-    padding: 10px 10px;
+    width: 100%;
+    padding: 10px 8px;
+    border-radius: 12px;
   }
+
+  .srv-section__grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+    width: 100%;
+  }
+
+  .srv-card {
+    flex: none;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    padding: 8px 12px;
+    min-height: auto;
+    border-radius: 10px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .srv-card__inner {
+    gap: 6px;
+    min-width: 0;
+    justify-content: flex-start;
+    flex-shrink: 1;
+  }
+
+  .srv-card__name {
+    font-size: 0.74rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  .srv-card__badges {
+    gap: 4px;
+    flex-shrink: 0;
+    flex-wrap: nowrap;
+  }
+
+  .srv-badge {
+    font-size: 0.52rem;
+    padding: 2px 5px;
+    white-space: nowrap;
+  }
+
+  .srv-section__header {
+    gap: 6px;
+    padding-bottom: 6px;
+  }
+
+  .srv-section__title {
+    font-size: 0.68rem;
+    letter-spacing: 0.8px;
+  }
+
+  .srv-section__count {
+    font-size: 0.58rem;
+    padding: 2px 8px;
+  }
+
   .srv-master-header {
-    padding: 10px 14px;
+    padding: 8px 10px;
+    border-radius: 10px;
+  }
+
+  .srv-master-header__title {
+    font-size: 0.72rem;
+    letter-spacing: 1.5px;
+  }
+
+  /* External sources overall */
+  .external-sources {
+    gap: 8px;
+    padding: 0;
+  }
+
+  /* Language buttons on mobile */
+  .player-chip.mz-lang-btn {
+    padding: 6px 10px;
+    font-size: 0.75rem;
+    min-height: 36px;
+  }
+}
+
+@media (max-width: 380px) {
+  .srv-section__grid {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+
+  .srv-card {
+    padding: 8px 10px;
+    min-height: auto;
+    border-radius: 8px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .srv-card__inner {
+    gap: 5px;
+    justify-content: flex-start;
+    flex-shrink: 0;
+  }
+
+  .srv-card__name {
+    font-size: 0.68rem;
+  }
+
+  .srv-card__badges {
+    flex-wrap: nowrap;
+    gap: 3px;
+    flex-shrink: 0;
+  }
+
+  .srv-badge {
+    font-size: 0.48rem;
+    padding: 2px 4px;
+    white-space: nowrap;
+  }
+
+  .srv-card__glow {
+    display: none;
+  }
+
+  .srv-section {
+    padding: 8px 6px;
+  }
+
+  .srv-section__header {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .srv-section__title {
+    font-size: 0.62rem;
+    letter-spacing: 0.6px;
+  }
+
+  .srv-section__count {
+    font-size: 0.54rem;
+    padding: 2px 6px;
+  }
+
+  .srv-section__icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+  }
+
+  .srv-section__icon svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .srv-master-header {
+    padding: 6px 8px;
+    border-radius: 8px;
+  }
+
+  .srv-master-header__title {
+    font-size: 0.65rem;
+    letter-spacing: 1px;
+  }
+
+  .srv-master-header__icon {
+    width: 14px;
+    height: 14px;
+  }
+
+  .srv-master-header__live {
+    font-size: 0.55rem;
+    padding: 2px 8px;
+  }
+
+  .srv-live-dot {
+    width: 5px;
+    height: 5px;
+  }
+
+  .player-chip.mz-lang-btn {
+    padding: 5px 8px;
+    font-size: 0.7rem;
+    min-height: 32px;
   }
 }
 
