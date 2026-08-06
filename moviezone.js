@@ -5361,20 +5361,12 @@ const playerSources = [
   //   * quality label "4K" maujood
   //   * saare routes HTTP 200 aur koi X-Frame-Options nahi -> iframe me chalta hai
   // Hindi track player ke Audio menu se choose karna hota hai (jahan available ho).
-  { name: 'VidRock 4K All-Rounder', dubbed: true, is4K: true, anime: true, url: (id, lang, type, s, e) => {
+  { name: 'VidRock HD', dubbed: true, is4K: true, anime: true, url: (id, lang, type, s, e) => {
     return type === 'tv'
       ? `https://vidrock.net/tv/${id}/${s}/${e}`
       : `https://vidrock.net/movie/${id}`;
   }},
-
-  // ── HINDI DUB SERVER: AnyEmbed / Smashystream ──────────────────────────
-  // Ye specially Hindi ke liye add kiya hai. Iske player bundle me confirm hua:
-  //   title:"Regional audio (Hindi, Tamil, Telugu)"  + multi_audio flag (India category)
-  //   {tag:"hi-IN", label:"Hindi"}                   + "switch audio hindi" command
-  // Player ke andar Audio menu se Hindi track choose kar sakte hain (jahan available ho).
-  // Movies + Web Series + Anime + Cartoons sab TMDB id se chalte hain.
-  // iframe embedding allowed hai (koi X-Frame-Options header nahi bhejta).
-  { name: 'Hindi Multi-Audio', dubbed: true, url: (id, lang, type, s, e) => {
+  { name: 'Multi-Audio', dubbed: true, url: (id, lang, type, s, e) => {
     const base = `https://embed.smashystream.com/playere.php?tmdb=${id}`;
     return type === 'tv' ? `${base}&season=${s}&episode=${e}` : base;
   }},
