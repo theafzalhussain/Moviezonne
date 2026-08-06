@@ -2141,43 +2141,26 @@ body.cursor-hover #cursor-dot {
 .cat-group[data-align="end"] .cat-group-menu { left: auto; right: 0; }
 
 /* ── TV MODE ──
-   D-pad focus in tv-mode.js skips elements with a zero-size rect, and its
-   focus cache only invalidates on childList mutations — toggling a class would
-   not refresh it. Rendering both menus permanently inline sidesteps both
-   issues and is faster to reach with a remote than a popup. */
-html[data-mz-tv="true"] .cat-group {
-  /* Deliberately NOT display:contents — that is unsupported on the Chromium
-     56-63 builds shipped in 2017-2019 Smart TVs, and would collapse the pills
-     into an unstyled row there. An inline-flex wrapper renders identically for
-     our purposes and works everywhere. */
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 0.65rem;
-}
+   The strip is deliberately IDENTICAL to the laptop one: 12 chips plus the two
+   collapsed dropdowns. An earlier version rendered both menus permanently
+   inline on TV, which unfolded 17 extra pills into a three-row cloud that ran
+   into the grid below and made the categories unreadable across the room.
 
+   A real popup needs two things the D-pad did not have, both now provided by
+   watchCatGroups() in tv-mode.js: the focus cache is invalidated when
+   `.is-open` flips (the DOM-sweep observer only listens for childList, so a
+   class toggle went unnoticed and the freshly shown menu items stayed
+   unreachable), and the highlight is moved into the panel on open / back onto
+   the trigger on close. Back also closes the panel before anything else.
+
+   The single TV-specific tweak: no inner scroller. The desktop panel caps at
+   min(58vh, 420px), which on a 720p TV is ~417px — one row short of the 13
+   genres — and a nested scroll area is awkward to drive with a remote. On TV
+   the panel grows instead and the page scrolls to the highlight, which also
+   keeps every item measurable (a zero-size rect is skipped by the D-pad). */
 html[data-mz-tv="true"] .cat-group-menu {
-  display: flex;
-  position: static;
-  min-width: 0;
-  max-width: none;
   max-height: none;
   overflow: visible;
-  padding: 0;
-  background: none;
-  border: none;
-  box-shadow: none;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  gap: 0.65rem;
-}
-
-html[data-mz-tv="true"] .cat-group-trigger { display: none; }
-
-html[data-mz-tv="true"] .cat-group-item {
-  flex: 0 0 auto;
-  text-align: center;
-  padding: 0.6rem 1.2rem;
-  border-radius: 999px;
 }
 
 /* ── PHONES / SMALL TABLETS ──

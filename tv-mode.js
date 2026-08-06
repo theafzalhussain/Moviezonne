@@ -728,6 +728,10 @@
     var dropdown = byId('searchDropdown');
     if (dropdown && dropdown.classList.contains('open')) { callHook('closeDropdown'); return true; }
 
+    // An open OTT Platform / Category panel is the most-nested thing on the
+    // home screen; Back must dismiss it instead of exiting the app.
+    if (closeOpenCatGroup()) return true;
+
     if (isOpen('modal-overlay')) { callHook('closeModal'); return true; }
     if (isOpen('upcoming-detail-overlay')) { callHook('closeUpcomingDetail'); return true; }
     if (isOpen('collections-hub-overlay')) { callHook('handleCollectionsBack'); return true; }
@@ -916,6 +920,63 @@
     }
   }
 
+  /* ── Category dropdowns (OTT Platform / Category) ──────────────────────
+     The panels are shown by toggling `.is-open` on `.cat-group`. On TV the
+     strip uses the same popup as the laptop, and two things would strand the
+     remote unless handled here:
+
+       1. The focus cache is rebuilt only when the DOM-sweep observer sees a
+          childList mutation. Opening a panel is a class change, so the freshly
+          visible `.cat-group-item` pills were never added to the candidate list
+          and the D-pad could not reach them.
+       2. When a panel closes — a pill was picked, or Back was pressed — the
+          highlight is sitting on an element that just became display:none. An
+          element with no rect gives spatial navigation nothing to measure from,
+          so every further arrow press does nothing.
+
+     Kept here rather than in moviezone.js so the app code stays free of TV
+     branches. */
+  function focusCatGroupTrigger(group) {
+    var trigger = group ? group.querySelector('.cat-group-trigger') : null;
+    if (!trigger) return false;
+    focusEntry({ el: trigger }, 'up');
+    return true;
+  }
+
+  function closeOpenCatGroup() {
+    var group = document.querySelector('.cat-group.is-open');
+    if (!group) return false;
+    // moviezone.js owns the rest of the teardown (aria-expanded, inline
+    // top/left written by alignCatGroupMenu, data-align).
+    if (typeof window.closeCatGroups === 'function') window.closeCatGroups();
+    else group.classList.remove('is-open');
+    focusCatGroupTrigger(group);
+    return true;
+  }
+
+  function watchCatGroups() {
+    if (typeof MutationObserver !== 'function') return;
+    var groups = document.querySelectorAll('.cat-group');
+    if (!groups.length) return;
+    var observer = new MutationObserver(function (records) {
+      invalidateFocusCache(); // the set of visible candidates just changed
+      for (var i = 0; i < records.length; i++) {
+        var group = records[i].target;
+        if (!group.classList) continue;
+        var menu = group.querySelector('.cat-group-menu');
+        if (!menu) continue;
+        if (group.classList.contains('is-open')) {
+          if (!menu.contains(document.activeElement)) focusInto(menu);
+        } else if (menu.contains(document.activeElement)) {
+          focusCatGroupTrigger(group);
+        }
+      }
+    });
+    for (var j = 0; j < groups.length; j++) {
+      observer.observe(groups[j], { attributes: true, attributeFilter: ['class'] });
+    }
+  }
+
   /* ── DOM sweep: focusability + image pressure relief ────────────────────
      One MutationObserver drives both jobs so a fast-scrolling grid triggers a
      single rAF batch instead of two competing ones.
@@ -1090,6 +1151,7 @@
 
   function boot() {
     watchOverlays();
+    watchCatGroups();
     watchIdleSections();
     setupDomSweep();
     watchFrameBudget();

@@ -1535,10 +1535,32 @@ function goToSlide(n) {
   ensureSlideBg((currentSlide + 1) % len);
 }
  
+/* ── AUTOPLAY ─────────────────────────────────────────────────────────────
+   One constant drives every start/resume path — change the seconds here and
+   the progress bar follows.
+
+   Why the "holds": pausing used to be a plain `mouseenter` on #hero, and #hero
+   is 95vh. On a laptop the pointer is almost always somewhere inside it, so the
+   very first mouse move paused the carousel — and because `mouseleave` needs
+   another move (scrolling away does not fire one), it never resumed. Autoplay
+   was effectively dead on desktop. Hover now only holds the timer over the
+   controls the viewer may be aiming at, and the timer also stands down while
+   the tab is hidden or the hero is scrolled out of view. */
+const CAROUSEL_AUTOPLAY_MS = 6000;
+const HERO_PAUSE_ZONES = '.slide-actions, .carousel-dots, .carousel-thumbs';
+const autoSlideHolds = { pointer: false, hidden: false, offscreen: false };
+
+function autoSlideHeld() {
+  return autoSlideHolds.pointer || autoSlideHolds.hidden || autoSlideHolds.offscreen;
+}
+
+// Restarts the countdown from zero. Deliberately a no-op while held, so a click
+// on a dot cannot resurrect the timer behind a hidden tab.
 function startAutoSlide() {
-  if (autoSlideTimer) clearInterval(autoSlideTimer);
+  if (autoSlideTimer) { clearInterval(autoSlideTimer); autoSlideTimer = null; }
+  if (autoSlideHeld()) return;
   restartProgressBar();
-  autoSlideTimer = setInterval(() => { goToSlide(currentSlide + 1); }, 5500);
+  autoSlideTimer = setInterval(() => { goToSlide(currentSlide + 1); }, CAROUSEL_AUTOPLAY_MS);
 }
 function resetAutoSlide() { startAutoSlide(); }
  
@@ -1550,18 +1572,22 @@ function restartProgressBar() {
   bar.style.animationPlayState = 'running';
   // Force reflow so the animation restarts cleanly from 0%
   void bar.offsetWidth;
-  bar.style.animation = 'carouselProgressFill 5.5s linear forwards';
+  bar.style.animation = 'carouselProgressFill ' + (CAROUSEL_AUTOPLAY_MS / 1000) + 's linear forwards';
 }
-function pauseAutoSlide() {
+// reason: 'pointer' | 'hidden' | 'offscreen' — each holds independently, so
+// releasing one does not restart the timer while another still holds it.
+function pauseAutoSlide(reason) {
+  autoSlideHolds[reason || 'pointer'] = true;
   if (autoSlideTimer) { clearInterval(autoSlideTimer); autoSlideTimer = null; }
   const bar = document.getElementById('carouselProgress');
   if (bar) bar.style.animationPlayState = 'paused';
 }
-function resumeAutoSlide() {
-  if (autoSlideTimer) return;
+function resumeAutoSlide(reason) {
+  autoSlideHolds[reason || 'pointer'] = false;
+  if (autoSlideTimer || autoSlideHeld()) return;
   const bar = document.getElementById('carouselProgress');
   if (bar) bar.style.animationPlayState = 'running';
-  autoSlideTimer = setInterval(() => { goToSlide(currentSlide + 1); }, 5500);
+  autoSlideTimer = setInterval(() => { goToSlide(currentSlide + 1); }, CAROUSEL_AUTOPLAY_MS);
 }
  
 // -- HERO INTERACTIONS — pause-on-hover, swipe, arrow nav (premium UX) --
@@ -1569,10 +1595,37 @@ function resumeAutoSlide() {
   const hero = document.getElementById('hero');
   if (!hero) return;
  
-  // Pause autoplay while the user is looking closely (desktop hover)
-  if (!isMzTV()) {
-    hero.addEventListener('mouseenter', pauseAutoSlide);
-    hero.addEventListener('mouseleave', resumeAutoSlide);
+  // Hold autoplay only while the pointer is over something clickable, so
+  // resting the cursor on the artwork no longer freezes the carousel.
+  if (!isMzTV() && !isTouchOnly) {
+    hero.addEventListener('mouseover', (e) => {
+      if (e.target.closest && e.target.closest(HERO_PAUSE_ZONES)) pauseAutoSlide('pointer');
+    });
+    hero.addEventListener('mouseout', (e) => {
+      const zone = e.target.closest && e.target.closest(HERO_PAUSE_ZONES);
+      if (!zone) return;
+      // Ignore moves between children of the same zone (button -> its own svg).
+      if (e.relatedTarget && zone.contains(e.relatedTarget)) return;
+      resumeAutoSlide('pointer');
+    });
+  }
+ 
+  // A hidden tab keeps firing setInterval, so slides raced ahead in the
+  // background and the viewer came back to an arbitrary one.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) pauseAutoSlide('hidden');
+    else resumeAutoSlide('hidden');
+  });
+ 
+  // Scrolled past the hero: nothing on screen to animate, and every slide
+  // change repaints a full-screen backdrop (expensive on a TV chipset).
+  if (typeof IntersectionObserver === 'function') {
+    new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) resumeAutoSlide('offscreen');
+        else pauseAutoSlide('offscreen');
+      });
+    }, { threshold: 0.15 }).observe(hero);
   }
  
   // Prev / Next arrow buttons

@@ -285,11 +285,17 @@
   }
 
   /*  TV MODE
-   *  D-pad focus in tv-mode.js skips zero-size rects, and its focus cache only
-   *  invalidates on childList mutations — so a popup that toggles a class would
-   *  be unreachable by remote. Both menus are therefore rendered permanently
-   *  inline under TV mode. If that CSS ever regresses, every platform and genre
-   *  filter becomes unreachable on a television, so it is asserted here.  */
+   *  The strip must look EXACTLY like the laptop one: 12 chips plus two
+   *  collapsed dropdowns. It used to render both menus permanently inline on
+   *  TV, which unfolded 17 extra pills into a three-row cloud that ran into the
+   *  grid — unreadable across the room.
+   *
+   *  A popup only works with a remote because watchCatGroups() in tv-mode.js
+   *  invalidates the focus cache when `.is-open` flips (the DOM sweep observer
+   *  listens for childList only, so a class toggle went unnoticed and the fresh
+   *  items stayed unreachable) and moves the highlight into the panel / back to
+   *  the trigger. If any of that regresses, every platform and genre filter
+   *  becomes unreachable on a television, so it is all asserted here.  */
   function runTvModeChecks() {
     var tvFrame = document.createElement('iframe');
     tvFrame.style.cssText = 'width:1920px;height:1080px;border:1px solid #333';
@@ -314,33 +320,76 @@
 
         var tvOtt = tdoc.getElementById('catGroupOttMenu');
         var tvGenre = tdoc.getElementById('catGroupGenreMenu');
-        ok('TV: OTT platforms are visible without opening a menu',
-          tvOtt && twin.getComputedStyle(tvOtt).display !== 'none',
+        ok('TV: OTT menu starts collapsed, same as the laptop',
+          tvOtt && twin.getComputedStyle(tvOtt).display === 'none',
           tvOtt ? twin.getComputedStyle(tvOtt).display : 'n/a');
-        ok('TV: genre list is visible without opening a menu',
-          tvGenre && twin.getComputedStyle(tvGenre).display !== 'none',
+        ok('TV: genre menu starts collapsed, same as the laptop',
+          tvGenre && twin.getComputedStyle(tvGenre).display === 'none',
           tvGenre ? twin.getComputedStyle(tvGenre).display : 'n/a');
 
         var tvTrigger = tdoc.getElementById('catGroupOttBtn');
-        ok('TV: the dropdown trigger is hidden (nothing to open)',
-          tvTrigger && twin.getComputedStyle(tvTrigger).display === 'none',
+        ok('TV: the dropdown trigger is visible (there is something to open)',
+          tvTrigger && twin.getComputedStyle(tvTrigger).display !== 'none',
           tvTrigger ? twin.getComputedStyle(tvTrigger).display : 'n/a');
 
-        // Every pill must have a real box so tv-mode's isVisibleRect accepts it.
-        var zeroSized = [];
+        // The row must stay one line of chips, not a wrapped cloud.
+        var tvVisible = Array.prototype.filter.call(tdoc.querySelectorAll('.cat-tab'),
+          function (el) { return el.offsetParent !== null; });
+        ok('TV: only the direct chips + 2 triggers are on the strip',
+          tvVisible.length === DIRECT.length + 2,
+          'visible .cat-tab = ' + tvVisible.length + ', expected ' + (DIRECT.length + 2));
+
         var items = tdoc.querySelectorAll('.cat-group-item');
-        for (var i = 0; i < items.length; i++) {
-          var r = items[i].getBoundingClientRect();
-          if (r.width < 2 || r.height < 2) zeroSized.push(items[i].textContent.trim());
-        }
-        ok('TV: every grouped pill has a focusable box',
-          items.length > 0 && zeroSized.length === 0,
-          'zero-sized: ' + zeroSized.join(', '));
-
         ok('TV: pills are keyboard reachable (tabIndex not negative)',
-          Array.prototype.every.call(items, function (el) { return el.tabIndex >= 0; }));
+          items.length > 0 && Array.prototype.every.call(items, function (el) { return el.tabIndex >= 0; }));
 
-        report();
+        // OK on the focused trigger — exactly what a remote sends.
+        tvTrigger.focus();
+        tvTrigger.click();
+
+        setTimeout(function () {
+          ok('TV: OK on the trigger opens the panel',
+            twin.getComputedStyle(tvOtt).display === 'flex',
+            twin.getComputedStyle(tvOtt).display);
+
+          ok('TV: the highlight moves into the panel',
+            tvOtt.contains(tdoc.activeElement) &&
+            tdoc.activeElement.classList.contains('cat-group-item'),
+            tdoc.activeElement ? (tdoc.activeElement.className || tdoc.activeElement.tagName) : 'none');
+
+          // Every open pill needs a real box or tv-mode's isVisibleRect skips it.
+          var zeroSized = [];
+          for (var i = 0; i < items.length; i++) {
+            if (!tvOtt.contains(items[i])) continue;
+            var r = items[i].getBoundingClientRect();
+            if (r.width < 2 || r.height < 2) zeroSized.push(items[i].textContent.trim());
+          }
+          ok('TV: every pill in the open panel has a focusable box',
+            zeroSized.length === 0, 'zero-sized: ' + zeroSized.join(', '));
+
+          // The D-pad can only step down the list if the focus cache was rebuilt.
+          var firstItem = tdoc.activeElement;
+          tdoc.dispatchEvent(new twin.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+
+          setTimeout(function () {
+            ok('TV: D-pad moves between panel items (focus cache refreshed)',
+              tdoc.activeElement !== firstItem && tvOtt.contains(tdoc.activeElement),
+              'activeElement = ' + (tdoc.activeElement ? tdoc.activeElement.textContent.trim() : 'none'));
+
+            // Back must dismiss the panel instead of exiting the app.
+            tdoc.dispatchEvent(new twin.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+            setTimeout(function () {
+              ok('TV: Back closes the panel',
+                twin.getComputedStyle(tvOtt).display === 'none',
+                twin.getComputedStyle(tvOtt).display);
+              ok('TV: Back returns the highlight to the trigger (remote not stranded)',
+                tdoc.activeElement === tvTrigger,
+                tdoc.activeElement ? (tdoc.activeElement.id || tdoc.activeElement.tagName) : 'none');
+              report();
+            }, 400);
+          }, 300);
+        }, 400);
       }, 2500);
     });
   }

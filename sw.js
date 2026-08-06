@@ -1,17 +1,18 @@
-// v47: ALL feed now mixes web series and anime behind movies, with the print
-// upgrade ranking in moviezone.js and the "NEW HD" ribbon in moviezone.css.
+// v48: TV keeps the same collapsed category dropdowns as the laptop (popup +
+// D-pad support in tv-mode.js) and the hero carousel autoplays again on a 6s
+// timer that only pauses over the controls / hidden tab / off-screen hero.
 // Keep these query strings in step with index.html on every asset bump — an
 // offline client is served exactly these URLs, so a stale entry here means a
 // phone keeps running old code with no way to tell.
-const CACHE_NAME = 'moviezone-v47';
+const CACHE_NAME = 'moviezone-v48';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/tv-mode.css?v=1.1',
-  '/moviezone.css?v=5.0',
-  '/tv-mode.js?v=1.1',
-  '/search-engine.js?v=1.1',
-  '/moviezone.js?v=5.9',
+  '/moviezone.css?v=5.1',
+  '/tv-mode.js?v=1.2',
+  '/search-engine.js?v=2.0',
+  '/moviezone.js?v=6.2',
   '/pwa-install.js?v=1.6',
   '/manifest.json',
   '/moviezone-logo.png?v=2',
