@@ -5346,29 +5346,19 @@ const playerSources = [
       ? `https://flicky.host/embed/tv/?id=${id}&s=${s}&e=${e}`
       : `https://flicky.host/embed/movie/?id=${id}`;
   }},
-  { name: 'Turbo Stream', dubbed: true, url: (id, lang, type, s, e) => {
-    return type === 'tv'
-      ? `https://111movies.com/tv/${id}/${s}/${e}`
-      : `https://111movies.com/movie/${id}`;
-  }},
-  // ── ALL-ROUNDER: VidRock ───────────────────────────────────────────────
-  //   Movies      -> /movie/{TMDB}
-  //   Web Series  -> /tv/{TMDB}/{season}/{episode}
-  //   Cartoons + Anime bhi TMDB tv/movie entries se chalte hain.
-  // Live verify kiya gaya (player bundle ke andar se):
-  //   * language map: hi:"hindi" + tamil/telugu/bengali  -> Hindi audio/subtitle support
-  //   * real audio switcher: {audioTracks, currentAudioTrack, onSelectTrack}
-  //   * quality label "4K" maujood
-  //   * saare routes HTTP 200 aur koi X-Frame-Options nahi -> iframe me chalta hai
-  // Hindi track player ke Audio menu se choose karna hota hai (jahan available ho).
-  { name: 'VidRock HD', dubbed: true, is4K: true, anime: true, url: (id, lang, type, s, e) => {
+  { name: 'VidRock HD', dubbed: true, url: (id, lang, type, s, e) => {
     return type === 'tv'
       ? `https://vidrock.net/tv/${id}/${s}/${e}`
       : `https://vidrock.net/movie/${id}`;
   }},
-  { name: 'Multi-Audio', dubbed: true, url: (id, lang, type, s, e) => {
-    const base = `https://embed.smashystream.com/playere.php?tmdb=${id}`;
-    return type === 'tv' ? `${base}&season=${s}&episode=${e}` : base;
+  // { name: 'Hindi Multi-Audio', dubbed: true, url: (id, lang, type, s, e) => {
+  //   const base = `https://embed.smashystream.com/playere.php?tmdb=${id}`;
+  //   return type === 'tv' ? `${base}&season=${s}&episode=${e}` : base;
+  // }},
+  { name: 'Turbo Stream', dubbed: true, url: (id, lang, type, s, e) => {
+    return type === 'tv'
+      ? `https://111movies.com/tv/${id}/${s}/${e}`
+      : `https://111movies.com/movie/${id}`;
   }},
     { name: 'Ultra HD', dubbed: true, url: (id, lang, type, s, e) => {
     // #6: AutoEmbed — India ke networks par blockage kam aati hai
