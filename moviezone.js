@@ -5640,7 +5640,6 @@ function playNextEpisode() {
 const PLAYER_HOSTS = [
   'https://vidnest.fun',
   'https://player.videasy.net',
-  'https://vidfast.pro',
   'https://www.viduki.net',
   'https://vidphantom.com',
   'https://autoembed.co',
@@ -5710,53 +5709,25 @@ function destroyPrewarm() {
   _mzPrewarm = null;
 }
 
-/** Warms DNS/TLS + provider CDN cache without creating a frame (super cheap) */
+/** Warm only DNS/TLS. Fetching an embed can execute provider playback too early. */
 function warmPlayerConnection(id, type) {
   if (!id) return;
   const idx = effectiveSourceIdx();
   const url = buildPlayerUrl(id, type, idx);
   if (!url) return;
   try { preconnectHost(new URL(url).origin); } catch (e) {}
-  if (isDataSaver()) return;
-  try { fetch(url, { mode: 'no-cors', credentials: 'omit', cache: 'force-cache' }).catch(() => {}); } catch (e) {}
 }
 
 /**
- * Hidden iframe me stream pehle se resolve kar deta hai.
- * Autoplay permission jaan-bujhkar nahi di jati taaki background audio na baje.
+ * Warm the selected provider connection without creating a browsing context.
+ * The real iframe is created only by loadPlayer(), following an explicit play.
  */
 function prewarmPlayer(id, type, srcIdxOverride) {
-  if (!id || isDataSaver()) return;
-  const embedEl = document.getElementById('videoEmbed');
-  if (!embedEl) return;
-  if (document.getElementById('playerFrame')) return; // already playing — prewarm ki zarurat nahi
+  if (!id || isDataSaver() || document.getElementById('playerFrame')) return;
   const idx = (typeof srcIdxOverride === 'number') ? srcIdxOverride : effectiveSourceIdx();
   const url = buildPlayerUrl(id, type, idx);
   if (!url) return;
   try { preconnectHost(new URL(url).origin); } catch (e) {}
-  if (_mzPrewarm && _mzPrewarm.url === url && _mzPrewarm.iframe && _mzPrewarm.iframe.parentNode) return;
-
-  destroyPrewarm();
-  const frame = document.createElement('iframe');
-  frame.className = 'mz-prewarm-frame';
-  frame.id = 'mzPrewarmFrame';
-  frame.tabIndex = -1;
-  frame.setAttribute('aria-hidden', 'true');
-  frame.setAttribute('title', 'Preloading stream');
-  frame.setAttribute('frameborder', '0');
-  frame.setAttribute('scrolling', 'no');
-  frame.setAttribute('referrerpolicy', 'no-referrer');
-  frame.setAttribute('allow', 'encrypted-media'); // autoplay NAHI — silent prewarm
-  frame.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;opacity:0.001;pointer-events:none;z-index:0;';
-
-  const state = { url: url, iframe: frame, loaded: false, srcIdx: idx, id: id, type: type, startedAt: Date.now() };
-  frame.addEventListener('load', () => { state.loaded = true; });
-  try {
-    if (getComputedStyle(embedEl).position === 'static') embedEl.style.position = 'relative';
-  } catch (e) {}
-  embedEl.appendChild(frame);
-  frame.src = url;
-  _mzPrewarm = state;
 }
 
 /** Prewarmed frame ko claim karta hai agar wahi stream URL match kare */
@@ -5864,7 +5835,7 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   iframe.removeAttribute('aria-hidden');
   iframe.setAttribute('frameborder', '0');
   iframe.setAttribute('scrolling', 'no');
-  iframe.setAttribute('allow', 'fullscreen;autoplay;encrypted-media;picture-in-picture');
+  iframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
   /*  Console warning fix: "Allow attribute will take precedence over
    *  'allowfullscreen'". Jab `allow` present hota hai to browser legacy
    *  `allowfullscreen` ko ignore kar deta hai aur warn karta hai. Legacy

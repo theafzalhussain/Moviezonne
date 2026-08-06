@@ -4,7 +4,7 @@
 // Keep these query strings in step with index.html on every asset bump — an
 // offline client is served exactly these URLs, so a stale entry here means a
 // phone keeps running old code with no way to tell.
-const CACHE_NAME = 'moviezone-v49';
+const CACHE_NAME = 'moviezone-v50';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -12,7 +12,7 @@ const STATIC_ASSETS = [
   '/moviezone.css?v=5.2',
   '/tv-mode.js?v=1.2',
   '/search-engine.js?v=2.0',
-  '/moviezone.js?v=6.3',
+  '/moviezone.js?v=6.4',
   '/pwa-install.js?v=1.6',
   '/manifest.json',
   '/moviezone-logo.png?v=2',
