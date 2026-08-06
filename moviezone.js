@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿// Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
+﻿﻿﻿﻿﻿﻿// Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
 // TV detection is handled by tv-mode.js which sets html[data-mz-tv="true"].
 // This getter reads the data attribute set by the isolated TV module.
@@ -5865,8 +5865,15 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   iframe.setAttribute('frameborder', '0');
   iframe.setAttribute('scrolling', 'no');
   iframe.setAttribute('allow', 'fullscreen;autoplay;encrypted-media;picture-in-picture');
-  iframe.setAttribute('allowfullscreen', '');
-  iframe.setAttribute('webkitallowfullscreen', '');
+  /*  Console warning fix: "Allow attribute will take precedence over
+   *  'allowfullscreen'". Jab `allow` present hota hai to browser legacy
+   *  `allowfullscreen` ko ignore kar deta hai aur warn karta hai. Legacy
+   *  attributes sirf un purane browsers ke liye chahiye (kuch Smart TV
+   *  browsers) jo `allow` support nahi karte — isliye ab conditional. */
+  if (!('allow' in HTMLIFrameElement.prototype)) {
+    iframe.setAttribute('allowfullscreen', '');
+    iframe.setAttribute('webkitallowfullscreen', '');
+  }
   iframe.setAttribute('title', 'MovieZone video player');
   iframe.setAttribute('tabindex', '0');
   iframe.setAttribute('referrerpolicy', 'no-referrer');

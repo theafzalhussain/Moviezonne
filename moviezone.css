@@ -4060,7 +4060,6 @@ html[data-mz-tv="true"] .cat-group-menu {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
-  overflow-x: hidden;
 }
 
 .video-embed {
@@ -4623,7 +4622,6 @@ html[data-mz-tv="true"] .cat-group-menu {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
   min-height: 50px;
-  min-width: 0;
   font-family: 'Outfit', sans-serif;
   flex: 0 0 auto;
 }
@@ -4675,8 +4673,6 @@ html[data-mz-tv="true"] .cat-group-menu {
   gap: 8px;
   width: 100%;
   justify-content: center;
-  min-width: 0;
-  overflow: hidden;
 }
 .srv-card__name {
   font-size: 0.82rem;
@@ -4684,9 +4680,6 @@ html[data-mz-tv="true"] .cat-group-menu {
   color: #fff;
   letter-spacing: 0.3px;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
 }
 .srv-card__status {
   width: 7px;
@@ -5452,296 +5445,63 @@ html[data-mz-tv="true"] .cat-group-menu {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SERVER SECTIONS — SMALL SCREEN CENTERING & OVERFLOW FIX
+   SERVER SECTIONS — SMALL SCREEN CENTERING
    ═══════════════════════════════════════════════════════════════ */
 
 @media (max-width: 768px) {
-  /* Force modal-bottom to never overflow the viewport */
-  .modal-bottom {
-    overflow-x: hidden;
-    max-width: 100vw;
-  }
-
-  /* Stack sections vertically on mobile */
   .srv-container {
-    flex-direction: column;
+    justify-content: center;
     gap: 10px;
-    width: 100%;
-    max-width: 100%;
-    overflow: hidden;
   }
-
   .srv-section {
-    width: 100%;
-    flex: none;
+    width: auto;
+    flex: 1 1 auto;
     min-width: 0;
-    max-width: 100%;
-    overflow: hidden;
   }
-
   .srv-section__grid {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     justify-content: center;
-    width: 100%;
   }
-
-  /* Prevent card overflow */
-  .srv-card {
-    flex: 0 1 auto;
-    min-width: 0;
-    max-width: calc(50% - 5px);
-    overflow: hidden;
-  }
-
-  .srv-card__name {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
-  }
-
-  .srv-card__badges {
-    flex-wrap: wrap;
-    justify-content: center;
-  }
-
   .srv-section__header {
     justify-content: center;
     text-align: center;
-    flex-wrap: wrap;
   }
-
   .srv-master-header {
     justify-content: center;
     text-align: center;
     flex-wrap: wrap;
-    gap: 8px;
-    max-width: 100%;
+    gap: 10px;
   }
-
   .external-sources {
     justify-content: center;
     align-items: center;
-    width: 100%;
-    max-width: 100%;
-    overflow: hidden;
-  }
-
-  /* Language section buttons - prevent overflow */
-  #mz-lang-section {
-    max-width: 100%;
-    overflow: hidden;
-  }
-
-  .player-chip {
-    max-width: 100%;
-    overflow: hidden;
   }
 }
 
 @media (max-width: 480px) {
-  .srv-container {
-    flex-direction: column;
-    gap: 8px;
-    padding: 0;
-  }
-
-  .srv-section {
-    width: 100%;
-    padding: 10px 8px;
-    border-radius: 12px;
-  }
-
   .srv-section__grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 6px;
-    width: 100%;
-  }
-
-  .srv-card {
-    flex: none;
-    width: 100%;
-    min-width: 0;
-    max-width: 100%;
-    padding: 8px 12px;
-    min-height: auto;
-    border-radius: 10px;
-    flex-direction: row;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 8px;
-  }
-
-  .srv-card__inner {
-    gap: 6px;
-    min-width: 0;
-    justify-content: flex-start;
-    flex-shrink: 1;
-  }
-
-  .srv-card__name {
-    font-size: 0.74rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    min-width: 0;
-  }
-
-  .srv-card__badges {
-    gap: 4px;
-    flex-shrink: 0;
-    flex-wrap: nowrap;
-  }
-
-  .srv-badge {
-    font-size: 0.52rem;
-    padding: 2px 5px;
-    white-space: nowrap;
-  }
-
-  .srv-section__header {
-    gap: 6px;
-    padding-bottom: 6px;
-  }
-
-  .srv-section__title {
-    font-size: 0.68rem;
-    letter-spacing: 0.8px;
-  }
-
-  .srv-section__count {
-    font-size: 0.58rem;
-    padding: 2px 8px;
-  }
-
-  .srv-master-header {
-    padding: 8px 10px;
-    border-radius: 10px;
-  }
-
-  .srv-master-header__title {
-    font-size: 0.72rem;
-    letter-spacing: 1.5px;
-  }
-
-  /* External sources overall */
-  .external-sources {
-    gap: 8px;
-    padding: 0;
-  }
-
-  /* Language buttons on mobile */
-  .player-chip.mz-lang-btn {
-    padding: 6px 10px;
-    font-size: 0.75rem;
-    min-height: 36px;
-  }
-}
-
-@media (max-width: 380px) {
-  .srv-section__grid {
-    grid-template-columns: 1fr;
-    gap: 5px;
-  }
-
-  .srv-card {
-    padding: 8px 10px;
-    min-height: auto;
-    border-radius: 8px;
-    flex-direction: row;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 8px;
-  }
-
-  .srv-card__inner {
-    gap: 5px;
-    justify-content: flex-start;
-    flex-shrink: 0;
-  }
-
-  .srv-card__name {
-    font-size: 0.68rem;
-  }
-
-  .srv-card__badges {
-    flex-wrap: nowrap;
-    gap: 3px;
-    flex-shrink: 0;
-  }
-
-  .srv-badge {
-    font-size: 0.48rem;
-    padding: 2px 4px;
-    white-space: nowrap;
-  }
-
-  .srv-card__glow {
-    display: none;
-  }
-
-  .srv-section {
-    padding: 8px 6px;
-  }
-
-  .srv-section__header {
+    display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: 6px;
+    justify-content: center;
   }
-
-  .srv-section__title {
-    font-size: 0.62rem;
-    letter-spacing: 0.6px;
+  .srv-card {
+    flex: 0 1 auto;
+    min-width: 120px;
+    max-width: 160px;
+    padding: 8px 10px;
+    min-height: 44px;
   }
-
-  .srv-section__count {
-    font-size: 0.54rem;
-    padding: 2px 6px;
+  .srv-card__name {
+    font-size: 0.72rem;
   }
-
-  .srv-section__icon {
-    width: 24px;
-    height: 24px;
-    border-radius: 7px;
+  .srv-section {
+    padding: 10px 10px;
   }
-
-  .srv-section__icon svg {
-    width: 12px;
-    height: 12px;
-  }
-
   .srv-master-header {
-    padding: 6px 8px;
-    border-radius: 8px;
-  }
-
-  .srv-master-header__title {
-    font-size: 0.65rem;
-    letter-spacing: 1px;
-  }
-
-  .srv-master-header__icon {
-    width: 14px;
-    height: 14px;
-  }
-
-  .srv-master-header__live {
-    font-size: 0.55rem;
-    padding: 2px 8px;
-  }
-
-  .srv-live-dot {
-    width: 5px;
-    height: 5px;
-  }
-
-  .player-chip.mz-lang-btn {
-    padding: 5px 8px;
-    font-size: 0.7rem;
-    min-height: 32px;
+    padding: 10px 14px;
   }
 }
 
@@ -8269,4 +8029,115 @@ html[data-mz-tv="true"] .cat-group-menu {
   .srv-card:hover { transform: none !important; }
   .srv-card__glow { display: none; }
   .srv-section::before { transition: none !important; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SMALL-SCREEN RESPONSIVE FIX  (v1.1)
+   ─────────────────────────────────────────────────────────────────────────
+   PROBLEM (screenshots me jo dikha)
+     PLAYBACK SERVERS ke cards me naam dono taraf se kat raha tha:
+       "OmniPlay 4K"  -> "mniPlay 4K"
+       "AnimePahe HD" -> "imePahe HD"
+       "DUB" badge    -> "DU"
+     Sirf wahi cards toote jinke 3 badges the (4K + ANIME + DUB).
+
+   ROOT CAUSE — do bugs milkar
+     1. `.srv-section__grid` ka base rule `display: flex` hai. Uske baad 8
+        breakpoints me `grid-template-columns` diye gaye hain, par `display:
+        grid` kahin set nahi hua — to wo saare grid rules DEAD the. Asli
+        layout flex-wrap + `justify-content:center` tha.
+     2. `.srv-card` me `flex: 0 0 auto` (shrink nahi kar sakta) + `overflow:
+        hidden` + `max-width:160px`. Content 160px se chauda hua to card se
+        bahar nikla, aur center hone ki wajah se DONO taraf barabar kata.
+
+   SCOPE (jaan-boojh kar seemit)
+     Desktop/tablet pe koi overflow nahi tha (measure karke confirm kiya), aur
+     wahan cards content-width pe achhe dikhte hain. Isliye grid sirf 560px se
+     neeche apply hota hai. 560px se upar sirf "overflow safety" lagti hai jo
+     layout bilkul nahi badalti.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. UNIVERSAL SAFETY — layout waisa ka waisa, bas text kabhi bahar na nikle ──
+   Ye rules columns/width nahi badalte; sirf itna karte hain ki content apne
+   container se bahar na jaaye. Desktop pe iska koi visual asar nahi. */
+.srv-card            { max-width: 100%; box-sizing: border-box; }
+.srv-card__inner     { min-width: 0; max-width: 100%; }
+.srv-card__badges    { max-width: 100%; }
+.srv-badge           { flex-shrink: 0; }   /* badge khud kabhi na kate */
+.srv-container,
+.srv-section,
+.srv-section__header { min-width: 0; }
+.srv-section__title  { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* Naam ab beech se katega nahi — jagah kam pade to "…" lagega */
+.srv-card__name {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 2. ≤560px — yahan asli bug tha. Grid ko sach me grid banao. ── */
+@media (max-width: 560px) {
+  .srv-section__grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    align-items: stretch;
+  }
+  /* Card ab apne track ke andar hi rahega */
+  .srv-card {
+    flex: initial !important;     /* `flex: 0 0 auto` hataya */
+    width: 100% !important;
+    min-width: 0 !important;      /* purana min-width:120px overflow karata tha */
+    max-width: 100% !important;
+  }
+}
+
+/* ── 3. ≤400px — 1 column + row layout.
+       Naam bayein, badges dayein. 320px pe bhi pura naam readable rehta hai. ── */
+@media (max-width: 400px) {
+  .srv-section__grid { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .srv-card {
+    flex-direction: row !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 9px 11px !important;
+    min-height: 44px !important;   /* touch target 44px se kam na ho */
+  }
+  .srv-card__inner {
+    flex: 1 1 auto;                /* jagah kam padi to NAAM sikudta hai, badges nahi */
+    justify-content: flex-start !important;
+  }
+  .srv-card__badges {
+    flex: 0 0 auto;
+    flex-wrap: nowrap !important;
+  }
+  /* header wrap ho jaaye taaki "5 servers" pill na kate */
+  .srv-section__header { flex-wrap: wrap; row-gap: 4px; }
+  .srv-section__count  { margin-left: auto; }
+}
+
+/* ── 4. PWA install popup chhoti screen se bahar na jaaye ──
+       Bottom-sheet design wahi rahega, bas height cap + andar scroll. ── */
+@media (max-width: 480px) {
+  .pwa-card {
+    max-height: 88vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+}
+@media (max-width: 480px) and (max-height: 700px) {
+  .pwa-card { max-height: 92vh; padding: 1.1rem 1rem 1rem; }
+  .pwa-desc { margin-bottom: 0.8rem; }
+  .pwa-body { margin-bottom: 0.9rem; }
+}
+
+/* ── 5. Chhoti screen safety net: koi media element page ko chauda na kare ── */
+@media (max-width: 480px) {
+  img, video, canvas, iframe, svg { max-width: 100%; }
+  .modal-info, .ud-content, .ud-info { min-width: 0; }
 }
