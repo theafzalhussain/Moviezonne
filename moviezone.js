@@ -1,4 +1,4 @@
-﻿﻿﻿﻿// Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
+﻿﻿﻿﻿﻿// Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
 // TV detection is handled by tv-mode.js which sets html[data-mz-tv="true"].
 // This getter reads the data attribute set by the isolated TV module.
@@ -304,22 +304,39 @@ if (!isMzTV() && !isTouchOnly && !isMobile) {
   });
 }
 
-// -- SERVER PRECONNECT (FAST STREAMING) --
-// Background me sabhi servers se pehle se secure connection bana ke rakho jisse fetching instant ho
+// -- SERVER PRECONNECT (FAST STREAMING, LCP-SAFE) --
+// Pehle ye function turant 7 servers se preconnect (DNS+TCP+TLS) karta tha. Wo
+// 7 handshakes first poster download se compete karte the aur LCP (Google ka
+// Core Web Vitals ranking factor) late ho jata tha.
+// Ab: DNS resolve turant (sasta hai), TLS handshake page interactive hone ke
+// baad idle time me. Playback speed same, LCP fast. Movie khulte waqt
+// openModal() already preconnectPlayerHosts(4) call karta hai.
 (function preconnectServers() {
   const servers = ['https://www.viduki.net', 'https://cinextream.net', 'https://www.2embed.stream', 'https://vidnest.fun', 'https://vidsrc.sbs', 'https://multiembed.mov', 'https://autoembed.co'];
-  servers.forEach(url => {
-    const dns = document.createElement('link');
-    dns.rel = 'dns-prefetch';
-    dns.href = url;
-    document.head.appendChild(dns);
 
+  const addHint = (rel, url, crossOrigin) => {
     const link = document.createElement('link');
-    link.rel = 'preconnect';
+    link.rel = rel;
     link.href = url;
-    link.crossOrigin = 'anonymous';
+    if (crossOrigin) link.crossOrigin = 'anonymous';
     document.head.appendChild(link);
-  });
+  };
+
+  // Cheap: DNS only, no socket. Safe to do immediately.
+  servers.forEach(url => addHint('dns-prefetch', url));
+
+  const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (conn && (conn.saveData || ['slow-2g', '2g'].indexOf(conn.effectiveType) !== -1)) return;
+
+  // Expensive: full TLS handshake — only for the two most-used providers, and
+  // only once the browser is idle (i.e. after the first paint is done).
+  const warm = () => servers.slice(0, 2).forEach(url => addHint('preconnect', url, true));
+  const schedule = () => {
+    if ('requestIdleCallback' in window) requestIdleCallback(warm, { timeout: 4000 });
+    else setTimeout(warm, 2500);
+  };
+  if (document.readyState === 'complete') schedule();
+  else window.addEventListener('load', schedule, { once: true });
 })();
 
 // -- SCROLL REVEAL ANIMATIONS (Intersection Observer) --
@@ -1437,7 +1454,11 @@ function buildCarousel() {
       '<div class="slide-gradient"></div>' +
       '<div class="slide-content">' +
         '<div class="slide-badge">'+(m._badge || '🔥 TRENDING NOW')+'</div>' +
-        '<h1 class="slide-title">'+escapeHTML(m.title||m.name||'')+'</h1>' +
+        // SEO: carousel slides use <h2>, not <h1>. The page must expose exactly
+        // one <h1> (the one in index.html); 6 competing <h1>s split the topical
+        // signal Google reads from the page. Styling is class-based, so the
+        // .slide-title look is unchanged.
+        '<h2 class="slide-title">'+escapeHTML(m.title||m.name||'')+'</h2>' +
         '<div class="slide-meta">' +
           '<div class="slide-rating">RATING '+((m.vote_average||0).toFixed(1))+'</div>' +
           '<span class="slide-year">'+((m.release_date||'').slice(0,4))+'</span>' +
@@ -3602,32 +3623,149 @@ window.addEventListener('popstate', () => {
   }
 });
 
-// INTELLIGENT FUZZY SEARCH
-let searchTimer = null;
+/* ══════════════════════════════════════════════════════════════════════════
+ * INTELLIGENT SEARCH  v2.0
+ * ------------------------------------------------------------------------
+ *  1. DEBOUNCE ............ 350ms trailing debounce (MovieZoneSearch.debounce)
+ *                           => zero API calls while the user is still typing.
+ *  2. AUTO-SUGGESTIONS .... 2+ characters hit TMDb /search/movie (+ /search/tv
+ *                           and /search/multi for series & people) and render a
+ *                           live dropdown with poster thumbnails under the bar.
+ *  3. FUZZY / TYPO SAFE ... ranking runs through the Fuse.js-compatible engine
+ *                           in search-engine.js, so misspellings still match.
+ *  4. CLEAN UI ............ dropdown closes on outside click, Escape, selection,
+ *                           blur, page scroll, resize, tab-hide and hash change.
+ *                           A × button clears the box in one tap.
+ * ════════════════════════════════════════════════════════════════════════ */
+
+const SEARCH_DEBOUNCE_MS = 350;     // sweet spot inside the 300-400ms window
+const SEARCH_MIN_CHARS = 2;         // suggestions start at 2 characters
+const SEARCH_SUGGESTION_LIMIT = 8;  // rows shown in the dropdown
+
+let searchTimer = null;             // kept for backwards compatibility
 let searchRequestId = 0;
 let searchActiveIndex = -1;
 let searchCatalogPromise = null;
+let searchLastScrollY = 0;
 const intelligentSearchCache = new Map();
 const searchInput = document.getElementById('searchInput');
+const searchEngineApi = () => window.MovieZoneSearch || null;
 
+/* -- local fallback so the box still works if search-engine.js is blocked -- */
+function localDebounce(fn, wait) {
+  let timer = null;
+  const debounced = function () {
+    const args = arguments;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => { timer = null; fn.apply(this, args); }, wait);
+  };
+  debounced.cancel = () => { if (timer) clearTimeout(timer); timer = null; };
+  debounced.pending = () => timer !== null;
+  return debounced;
+}
+
+const makeDebounced = (fn, wait) => {
+  const engine = searchEngineApi();
+  return engine && typeof engine.debounce === 'function'
+    ? engine.debounce(fn, wait)
+    : localDebounce(fn, wait);
+};
+
+/* The single debounced entry point for every keystroke. */
+const debouncedSuggest = makeDebounced(query => {
+  const current = (searchInput?.value || '').trim();
+  if (current !== query || query.length < SEARCH_MIN_CHARS) return;
+  searchDropdownFill(query);
+}, SEARCH_DEBOUNCE_MS);
+
+/* -- Supplementary styles for the v2 dropbits (highlight + clear button) -- */
+(function injectSearchStyles() {
+  if (document.getElementById('mz-search-v2-css')) return;
+  const style = document.createElement('style');
+  style.id = 'mz-search-v2-css';
+  style.textContent = `
+.nav-search{position:relative}
+.mz-search-hl{background:rgba(245,197,24,.22);color:#f5c518;border-radius:3px;padding:0 1px;font-weight:800}
+.mz-search-clear{position:absolute;right:10px;top:50%;transform:translateY(-50%);display:none;align-items:center;justify-content:center;width:22px;height:22px;border:0;border-radius:50%;background:rgba(255,255,255,.09);color:rgba(255,255,255,.7);cursor:pointer;font-size:15px;line-height:1;padding:0;z-index:3;transition:background .18s ease,color .18s ease}
+.mz-search-clear:hover{background:rgba(245,197,24,.2);color:#f5c518}
+.mz-search-clear.visible{display:flex}
+.search-results-dropdown .mz-sugg-skeleton{display:flex;gap:10px;padding:9px 12px;align-items:center}
+.search-results-dropdown .mz-sugg-skeleton i{display:block;border-radius:6px;background:linear-gradient(90deg,rgba(255,255,255,.05),rgba(255,255,255,.12),rgba(255,255,255,.05));background-size:200% 100%;animation:mzSuggShimmer 1.1s linear infinite}
+.search-results-dropdown .mz-sugg-skeleton i.p{width:42px;height:60px;flex:0 0 42px}
+.search-results-dropdown .mz-sugg-skeleton i.l{height:11px;flex:1}
+@keyframes mzSuggShimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.search-results-dropdown .mz-sugg-skeleton i{animation:none}}`;
+  document.head.appendChild(style);
+})();
+
+/* -- One-tap clear button (part of the "clean UI" requirement) -- */
+const searchClearBtn = (function buildClearButton() {
+  if (!searchInput || !searchInput.parentElement) return null;
+  const existing = searchInput.parentElement.querySelector('.mz-search-clear');
+  if (existing) return existing;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'mz-search-clear';
+  btn.setAttribute('aria-label', 'Clear search');
+  btn.innerHTML = '&times;';
+  btn.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    resetSearchBox({ focus: true });
+  });
+  searchInput.parentElement.appendChild(btn);
+  return btn;
+})();
+
+function toggleSearchClear(show) {
+  if (searchClearBtn) searchClearBtn.classList.toggle('visible', !!show);
+}
+
+function resetSearchBox(options) {
+  if (searchInput) searchInput.value = '';
+  debouncedSuggest.cancel();
+  searchRequestId += 1;
+  toggleSearchClear(false);
+  closeDropdown();
+  if (options && options.focus && searchInput && !isMzTV()) searchInput.focus();
+}
+
+/* ------------------------------------------------------------------ *
+ * Input wiring
+ * ------------------------------------------------------------------ */
 if (searchInput) {
   searchInput.setAttribute('role', 'combobox');
   searchInput.setAttribute('aria-autocomplete', 'list');
   searchInput.setAttribute('aria-controls', 'searchDropdown');
   searchInput.setAttribute('aria-expanded', 'false');
+  searchInput.setAttribute('autocapitalize', 'none');
+  searchInput.setAttribute('autocorrect', 'off');
+  searchInput.setAttribute('spellcheck', 'false');
+  searchInput.setAttribute('enterkeyhint', 'search');
 
   searchInput.addEventListener('input', event => {
-    clearTimeout(searchTimer);
     searchActiveIndex = -1;
     const query = event.target.value.trim();
+    toggleSearchClear(query.length > 0);
+
+    // Nothing typed -> cancel any pending request and close cleanly.
     if (!query) {
-      searchRequestId++;
+      debouncedSuggest.cancel();
+      searchRequestId += 1;
       closeDropdown();
       return;
     }
-    showSearchLoading(query.length < 2 ? 'Type at least 2 letters' : 'Finding the best matches...');
-    if (query.length < 2) return;
-    searchTimer = setTimeout(() => searchDropdownFill(query), 260);
+
+    // 1 character -> no network call at all, just a hint.
+    if (query.length < SEARCH_MIN_CHARS) {
+      debouncedSuggest.cancel();
+      showSearchLoading('Type at least ' + SEARCH_MIN_CHARS + ' letters…', false);
+      return;
+    }
+
+    // 2+ characters -> show skeleton instantly, fire the request after 350ms.
+    showSearchLoading('Finding the best matches…', true);
+    debouncedSuggest(query);
   });
 
   searchInput.addEventListener('keydown', event => {
@@ -3643,25 +3781,94 @@ if (searchInput) {
       return;
     }
     if (event.key === 'Escape') {
+      debouncedSuggest.cancel();
       closeDropdown();
       return;
     }
     if (event.key === 'Enter') {
       event.preventDefault();
+      debouncedSuggest.cancel();          // don't let a queued call fire later
       if (searchActiveIndex >= 0 && items[searchActiveIndex]) {
         items[searchActiveIndex].click();
       } else {
         const query = event.target.value.trim();
         if (query) searchAndDisplay(query);
         closeDropdown();
+        if (!isMzTV()) searchInput.blur();  // hide the mobile keyboard
       }
     }
   });
+
+  // Re-open the last suggestions when the user comes back to a filled box.
+  searchInput.addEventListener('focus', () => {
+    const query = searchInput.value.trim();
+    toggleSearchClear(query.length > 0);
+    if (query.length < SEARCH_MIN_CHARS) return;
+    const dropdown = document.getElementById('searchDropdown');
+    if (dropdown && dropdown.childElementCount) {
+      dropdown.classList.add('open');
+      searchInput.setAttribute('aria-expanded', 'true');
+    }
+  });
+
+  // Blur -> close, unless focus moved INTO the dropdown (keyboard / TV remote).
+  searchInput.addEventListener('blur', event => {
+    const next = event.relatedTarget;
+    if (next && typeof next.closest === 'function' && next.closest('.nav-search')) return;
+    setTimeout(() => {
+      const active = document.activeElement;
+      if (active && typeof active.closest === 'function' && active.closest('.nav-search')) return;
+      closeDropdown();
+    }, 130);
+  });
 }
 
+/* ------------------------------------------------------------------ *
+ * CLEAN UI: every way the dropdown can be dismissed
+ * ------------------------------------------------------------------ */
+function isSearchDropdownOpen() {
+  const dropdown = document.getElementById('searchDropdown');
+  return !!dropdown && dropdown.classList.contains('open');
+}
+
+// Outside click / tap (pointerdown fires before blur, so it feels instant).
+function isInsideSearchBox(target) {
+  return !!(target && typeof target.closest === 'function' && target.closest('.nav-search'));
+}
+
+document.addEventListener('pointerdown', event => {
+  if (!isSearchDropdownOpen()) return;
+  if (!isInsideSearchBox(event.target)) {
+    debouncedSuggest.cancel();
+    closeDropdown();
+  }
+}, true);
+
+// Legacy click guard (covers synthetic clicks and non-pointer browsers).
 document.addEventListener('click', event => {
-  if (!event.target.closest('.nav-search')) closeDropdown();
+  if (!isInsideSearchBox(event.target)) closeDropdown();
 });
+
+// Escape anywhere on the page.
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && isSearchDropdownOpen()) {
+    debouncedSuggest.cancel();
+    closeDropdown();
+  }
+});
+
+// Meaningful page scroll (ignores the tiny scroll a mobile keyboard causes).
+window.addEventListener('scroll', () => {
+  if (!isSearchDropdownOpen()) { searchLastScrollY = window.scrollY; return; }
+  if (Math.abs(window.scrollY - searchLastScrollY) > 70) {
+    searchLastScrollY = window.scrollY;
+    closeDropdown();
+  }
+}, { passive: true });
+
+window.addEventListener('resize', () => { if (isSearchDropdownOpen()) closeDropdown(); }, { passive: true });
+window.addEventListener('hashchange', closeDropdown);
+document.addEventListener('visibilitychange', () => { if (document.hidden) closeDropdown(); });
 
 function setActiveSearchItem(index, items) {
   searchActiveIndex = index;
@@ -3670,13 +3877,25 @@ function setActiveSearchItem(index, items) {
     item.classList.toggle('active', active);
     item.setAttribute('aria-selected', active ? 'true' : 'false');
   });
-  items[index]?.scrollIntoView({ block: 'nearest' });
+  const activeItem = items[index];
+  if (activeItem) {
+    activeItem.scrollIntoView({ block: 'nearest' });
+    searchInput?.setAttribute('aria-activedescendant', activeItem.id || '');
+  }
 }
 
-function showSearchLoading(message) {
+/**
+ * Dropdown placeholder. `skeleton = true` renders shimmering poster rows so the
+ * 350ms debounce window never looks like a frozen UI.
+ */
+function showSearchLoading(message, skeleton) {
   const dropdown = document.getElementById('searchDropdown');
   if (!dropdown) return;
-  dropdown.innerHTML = '<div class="search-state"><span class="search-state-spinner"></span><span>' + escapeHTML(message) + '</span></div>';
+  const rows = skeleton
+    ? '<div class="mz-sugg-skeleton"><i class="p"></i><i class="l"></i></div>'.repeat(3)
+    : '';
+  dropdown.innerHTML =
+    '<div class="search-state"><span class="search-state-spinner"></span><span>' + escapeHTML(message) + '</span></div>' + rows;
   dropdown.classList.add('open');
   searchInput?.setAttribute('aria-expanded', 'true');
 }
@@ -3695,6 +3914,32 @@ function expandPersonResults(people) {
   });
   return expanded;
 }
+
+/** Wraps the part of the title the user actually typed in <mark>. */
+function highlightSearchMatch(title, query) {
+  const safeTitle = escapeHTML(title || '');
+  const engine = searchEngineApi();
+  const needle = (engine ? engine.normalizeSearchText(query) : String(query || '').toLowerCase()).trim();
+  if (!needle || needle.length < 2) return safeTitle;
+
+  const haystack = safeTitle.toLowerCase();
+  let index = haystack.indexOf(needle);
+  let length = needle.length;
+  if (index === -1) {
+    // Fall back to the longest leading fragment that still matches.
+    for (let cut = needle.length - 1; cut >= 2; cut -= 1) {
+      const fragment = needle.slice(0, cut);
+      index = haystack.indexOf(fragment);
+      if (index !== -1) { length = cut; break; }
+    }
+  }
+  if (index === -1) return safeTitle;
+  return safeTitle.slice(0, index) +
+    '<mark class="mz-search-hl">' + safeTitle.slice(index, index + length) + '</mark>' +
+    safeTitle.slice(index + length);
+}
+
+const SEARCH_POSTER_FALLBACK = 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2260%22><rect width=%2242%22 height=%2260%22 rx=%228%22 fill=%22%23181828%22/><text x=%2221%22 y=%2234%22 text-anchor=%22middle%22 fill=%22%23f5c518%22 font-size=%2214%22>MZ</text></svg>';
 
 async function loadSearchCatalog() {
   if (searchCatalogPromise) return searchCatalogPromise;
@@ -3732,36 +3977,74 @@ async function loadSearchCatalog() {
   return searchCatalogPromise;
 }
 
+/**
+ * The suggestion + results brain.
+ * Live TMDb endpoints used:
+ *   /search/movie  (primary — required for the auto-suggest dropdown)
+ *   /search/tv     (web series / anime coverage)
+ *   /search/multi  (actor & mixed matches)
+ * Everything is then re-ranked by the Fuse.js-compatible fuzzy engine.
+ */
 async function intelligentMovieSearch(query, limit = 20) {
-  const engine = window.MovieZoneSearch;
-  const cacheKey = engine?.normalizeSearchText(query) || query.toLowerCase();
+  const engine = searchEngineApi();
+  const cacheKey = (engine?.normalizeSearchText(query) || query.toLowerCase()) + '|' + limit;
   const cached = intelligentSearchCache.get(cacheKey);
   if (cached && Date.now() - cached.savedAt < 5 * 60 * 1000) return cached.value;
 
+  const baseParams = { language: 'en-US', page: '1', include_adult: 'false' };
   const aliasQuery = engine?.applyAliases(query) || query;
-  const searchPromises = [
-    tmdb('/search/multi', { query, language: 'en-US', page: '1', include_adult: 'false' }),
-    loadSearchCatalog()
+  const normalizedQuery = engine?.normalizeSearchText(query) || query.toLowerCase();
+
+  // Suggestion mode (small limit) stays deliberately lean: 2-3 requests so the
+  // dropdown feels instant. The full results page asks for wider coverage.
+  const deepMode = limit > 10;
+
+  const jobs = [
+    // PRIMARY suggestion source (TMDb movie search).
+    { tag: 'movie', promise: tmdb('/search/movie', { ...baseParams, query }) },
+    // Covers web series, anime and actor names in a single extra call.
+    { tag: 'multi', promise: tmdb('/search/multi', { ...baseParams, query }) },
+    { tag: 'catalog', promise: loadSearchCatalog() }
   ];
-  if (aliasQuery !== (engine?.normalizeSearchText(query) || query.toLowerCase())) {
-    searchPromises.push(tmdb('/search/multi', { query: aliasQuery, language: 'en-US', page: '1', include_adult: 'false' }));
+  // Alias/typo variant only when it actually differs (saves a request).
+  if (aliasQuery && aliasQuery !== normalizedQuery) {
+    jobs.push({ tag: 'movie', promise: tmdb('/search/movie', { ...baseParams, query: aliasQuery }) });
+  }
+  if (deepMode) {
+    jobs.push({ tag: 'tv', promise: tmdb('/search/tv', { ...baseParams, query }) });
+    if (aliasQuery && aliasQuery !== normalizedQuery) {
+      jobs.push({ tag: 'multi', promise: tmdb('/search/multi', { ...baseParams, query: aliasQuery }) });
+    }
   }
 
-  const settled = await Promise.allSettled(searchPromises);
-  const directResults = settled[0].status === 'fulfilled' ? settled[0].value?.results || [] : [];
-  const catalog = settled[1].status === 'fulfilled' ? settled[1].value : { media: [], people: [] };
-  const aliasResults = settled[2]?.status === 'fulfilled' ? settled[2].value?.results || [] : [];
-  const allDirect = directResults.concat(aliasResults);
-  const directPeople = allDirect.filter(item => item.media_type === 'person');
-  const directMedia = allDirect.filter(item => item.media_type !== 'person');
+  const settled = await Promise.allSettled(jobs.map(job => job.promise));
+  let catalog = { media: [], people: [] };
+  const directMedia = [];
+  const directPeople = [];
+
+  settled.forEach((result, index) => {
+    if (result.status !== 'fulfilled' || !result.value) return;
+    const tag = jobs[index].tag;
+    if (tag === 'catalog') { catalog = result.value || catalog; return; }
+    (result.value.results || []).forEach(item => {
+      if (!item || !item.id) return;
+      const type = item.media_type || (tag === 'tv' ? 'tv' : tag === 'movie' ? 'movie' : (item.name ? 'tv' : 'movie'));
+      if (type === 'person') directPeople.push({ ...item, media_type: 'person' });
+      else directMedia.push({ ...item, media_type: type });
+    });
+  });
+
   const localMedia = [...allMovies, ...carouselMovies, ...allUpcoming].map(item => ({
     ...item,
     media_type: item.media_type || (item.name ? 'tv' : 'movie')
   }));
 
+  // No engine (script blocked) -> still show plain TMDb order.
   if (!engine) {
     const fallback = directMedia.slice(0, limit);
-    return { results: fallback, correction: null };
+    const value = { results: fallback, correction: null };
+    intelligentSearchCache.set(cacheKey, { savedAt: Date.now(), value });
+    return value;
   }
 
   const rankedPeople = engine.rankSearchCandidates(query, directPeople.concat(catalog.people), 5);
@@ -3771,13 +4054,14 @@ async function intelligentMovieSearch(query, limit = 20) {
   let correction = engine.getCorrection(query, ranked);
 
   const bestPerson = rankedPeople[0];
-  if (bestPerson && bestPerson._searchScore >= 700) {
-    correction = bestPerson.name;
-  }
+  if (bestPerson && bestPerson._searchScore >= 700) correction = bestPerson.name;
 
-  if (correction && engine.normalizeSearchText(correction) !== engine.normalizeSearchText(query)) {
+  // One extra fetch on the corrected spelling (typo rescue). Only on the full
+  // results page — the dropdown already gets the right title from the fuzzy
+  // ranking, so suggestions never pay for this round-trip.
+  if (deepMode && correction && engine.normalizeSearchText(correction) !== normalizedQuery) {
     try {
-      const corrected = await tmdb('/search/multi', { query: correction, language: 'en-US', page: '1', include_adult: 'false' });
+      const corrected = await tmdb('/search/multi', { ...baseParams, query: correction });
       const correctedPeople = (corrected.results || []).filter(item => item.media_type === 'person');
       const correctedMedia = (corrected.results || []).filter(item => item.media_type !== 'person');
       pool = pool.concat(correctedMedia, expandPersonResults(correctedPeople));
@@ -3801,13 +4085,17 @@ function openSearchResult(item, activationEvent) {
   const isUpcomingMovie = type === 'movie' && releaseDate && releaseDate > new Date().toISOString().slice(0, 10);
   if (isUpcomingMovie && typeof openUpcomingDetail === 'function') openUpcomingDetail(item.id, undefined, activationEvent);
   else openModal(item.id, type, activationEvent);
+  // CLEAN UI: selecting a movie always tears the dropdown down.
+  debouncedSuggest.cancel();
   closeDropdown();
+  if (searchInput && !isMzTV()) searchInput.blur();
 }
 
 async function searchDropdownFill(query) {
   const requestId = ++searchRequestId;
   try {
-    const search = await intelligentMovieSearch(query, 8);
+    const search = await intelligentMovieSearch(query, SEARCH_SUGGESTION_LIMIT);
+    // Stale-response guard: ignore anything the user has already typed past.
     if (requestId !== searchRequestId || searchInput?.value.trim() !== query) return;
     renderSearchDropdown(query, search);
   } catch (error) {
@@ -3823,14 +4111,16 @@ function renderSearchDropdown(query, search) {
   const results = search.results || [];
   dropdown.innerHTML = '';
   dropdown.setAttribute('role', 'listbox');
+  dropdown.setAttribute('aria-label', 'Movie and web series suggestions');
 
   if (search.correction) {
     const suggestion = document.createElement('button');
     suggestion.type = 'button';
     suggestion.className = 'search-correction';
-    suggestion.innerHTML = '<span>Best match</span><strong>' + escapeHTML(search.correction) + '</strong><small>Typo-tolerant result</small>';
+    suggestion.innerHTML = '<span>Did you mean</span><strong>' + escapeHTML(search.correction) + '</strong><small>Typo-tolerant match</small>';
     suggestion.addEventListener('click', () => {
       searchInput.value = search.correction;
+      toggleSearchClear(true);
       searchAndDisplay(search.correction);
       closeDropdown();
     });
@@ -3840,36 +4130,42 @@ function renderSearchDropdown(query, search) {
   if (!results.length) {
     const empty = document.createElement('div');
     empty.className = 'search-empty';
-    empty.innerHTML = '<strong>No close match found</strong><span>Try another title, actor name, or a longer part of the movie name.</span>';
+    empty.innerHTML = '<strong>No close match found</strong><span>Try another title, an actor name, or a longer part of the movie name.</span>';
     dropdown.appendChild(empty);
   } else {
     const heading = document.createElement('div');
     heading.className = 'search-dropdown-heading';
-    heading.innerHTML = '<span>Top intelligent matches</span><small>' + results.length + ' results</small>';
+    heading.innerHTML = '<span>Top matches</span><small>' + results.length + ' suggestions</small>';
     dropdown.appendChild(heading);
 
     results.forEach((item, index) => {
       const type = getSearchMediaType(item);
       const releaseDate = item.release_date || item.first_air_date || '';
       const upcoming = releaseDate && releaseDate > new Date().toISOString().slice(0, 10);
+      const title = item.title || item.name || '';
       const resultItem = document.createElement('div');
       resultItem.className = 'search-result-item';
+      resultItem.id = 'mz-sugg-' + index;
       resultItem.tabIndex = -1;
       resultItem.dataset.searchResult = String(index);
       resultItem.setAttribute('role', 'option');
       resultItem.setAttribute('aria-selected', 'false');
-      const poster = item.poster_path
-        ? IMG + item.poster_path
-        : 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2260%22><rect width=%2242%22 height=%2260%22 rx=%228%22 fill=%22%23181828%22/><text x=%2221%22 y=%2234%22 text-anchor=%22middle%22 fill=%22%23f5c518%22 font-size=%2214%22>MZ</text></svg>';
+      resultItem.setAttribute('aria-label', title + ' (' + (type === 'tv' ? 'series' : 'movie') + ')');
+
+      const poster = item.poster_path ? IMG + item.poster_path : SEARCH_POSTER_FALLBACK;
       const quality = item._matchQuality || 'Related';
+
       resultItem.innerHTML =
-        '<img src="' + poster + '" alt="" width="42" height="60" loading="lazy" decoding="async">' +
-        '<div class="search-result-info"><div class="search-result-title-row"><h4>' + escapeHTML(item.title || item.name || '') + '</h4><span class="search-type-badge">' + (type === 'tv' ? 'SERIES' : 'MOVIE') + '</span></div>' +
-        '<p><span>' + escapeHTML((releaseDate || '----').slice(0, 4)) + '</span><span>★ ' + Number(item.vote_average || 0).toFixed(1) + '</span>' + (upcoming ? '<span class="search-upcoming">UPCOMING</span>' : '') + '</p>' +
+        '<img src="' + poster + '" alt="' + escapeHTML(title) + ' poster" width="42" height="60" loading="lazy" decoding="async">' +
+        '<div class="search-result-info"><div class="search-result-title-row"><h4>' + highlightSearchMatch(title, query) + '</h4>' +
+        '<span class="search-type-badge">' + (type === 'tv' ? 'SERIES' : 'MOVIE') + '</span></div>' +
+        '<p><span>' + escapeHTML((releaseDate || '----').slice(0, 4)) + '</span><span>★ ' + Number(item.vote_average || 0).toFixed(1) + '</span>' +
+        (upcoming ? '<span class="search-upcoming">UPCOMING</span>' : '') + '</p>' +
         '<small class="search-match-reason">' + escapeHTML(quality) + '</small></div>' +
         '<span class="search-result-arrow">›</span>';
+
       resultItem.addEventListener('mouseenter', () => setActiveSearchItem(index, Array.from(dropdown.querySelectorAll('[data-search-result]'))));
-      resultItem.addEventListener('click', (event) => openSearchResult(item, event));
+      resultItem.addEventListener('click', event => openSearchResult(item, event));
       dropdown.appendChild(resultItem);
     });
 
@@ -3885,8 +4181,10 @@ function renderSearchDropdown(query, search) {
   }
 
   searchActiveIndex = -1;
+  searchLastScrollY = window.scrollY;
   dropdown.classList.add('open');
   searchInput?.setAttribute('aria-expanded', 'true');
+  searchInput?.removeAttribute('aria-activedescendant');
 }
 
 async function searchAndDisplay(query) {
@@ -3911,6 +4209,8 @@ async function searchAndDisplay(query) {
         ? 'BEST RESULTS FOR "' + query.toUpperCase() + '" · DID YOU MEAN "' + search.correction.toUpperCase() + '"?'
         : 'RESULTS FOR "' + query.toUpperCase() + '"';
     }
+    // Keeps the page title aligned with what the user is actually looking at.
+    try { document.title = query.trim() + ' – Search results | MovieZone'; } catch (e) {}
     if (movies.length) renderMovies(movies);
     else grid.innerHTML = '<div class="search-grid-empty"><strong>No close matches found</strong><span>Try a title fragment, actor name, or check the spelling.</span></div>';
   } catch (error) {
@@ -3926,8 +4226,29 @@ function closeDropdown() {
   const dropdown = document.getElementById('searchDropdown');
   if (dropdown) dropdown.classList.remove('open');
   searchInput?.setAttribute('aria-expanded', 'false');
+  searchInput?.removeAttribute('aria-activedescendant');
+  document.querySelectorAll('#searchDropdown .search-result-item.active')
+    .forEach(item => { item.classList.remove('active'); item.setAttribute('aria-selected', 'false'); });
   searchActiveIndex = -1;
 }
+
+/* ------------------------------------------------------------------ *
+ * SEO: makes the Google "sitelinks searchbox" schema real.
+ * https://moviezone.dev/?search=jawan  -> runs that search on load.
+ * ------------------------------------------------------------------ */
+function runSearchFromUrl() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const query = (params.get('search') || params.get('q') || '').trim();
+    if (!query || query.length < SEARCH_MIN_CHARS) return;
+    if (searchInput) {
+      searchInput.value = query;
+      toggleSearchClear(true);
+    }
+    searchAndDisplay(query);
+  } catch (error) { /* no-op */ }
+}
+window.addEventListener('load', () => setTimeout(runSearchFromUrl, 350), { once: true });
  
 // MODAL
 async function openModal(id, type = 'movie', activationEvent) {
