@@ -2958,7 +2958,7 @@ function renderMovies(movies, append = false) {  const grid = document.getElemen
       _cardPrefetched = true;
       _mzHoverPrefetchCount++;
       try { tmdb('/' + type + '/' + m.id, { language: 'en-US', append_to_response: 'videos,credits' }); } catch (err) {}
-      try { preconnectPlayerHosts(2); } catch (err) {}
+      try { preconnectPlayerHosts(3); } catch (err) {}
     };
     // PERF FIX (TV): mouse aur touch TV pe exist hi nahi karte. Pehle har card pe
     // ye 2 dead listeners lagte the — 200 cards = 400 bekaar listeners.
@@ -4367,7 +4367,7 @@ async function openModal(id, type = 'movie', activationEvent) {
 
   // ⚡ SPEED: provider hosts se DNS+TLS handshake abhi shuru kar do (details aane se pehle)
   try {
-    preconnectPlayerHosts(4);
+    preconnectPlayerHosts(6);
     warmPlayerConnection(id, type);
   } catch(e){}
  
@@ -5709,31 +5709,89 @@ function destroyPrewarm() {
   _mzPrewarm = null;
 }
 
-/** Warm only DNS/TLS. Fetching an embed can execute provider playback too early. */
-function warmPlayerConnection(id, type) {
-  if (!id) return;
-  const idx = effectiveSourceIdx();
-  const url = buildPlayerUrl(id, type, idx);
+const _mzWarmedDocs = new Set();
+
+/**
+ * Warms the network path for an embed URL:
+ *   1. preconnect  -> DNS + TCP + TLS handshake done before the click
+ *   2. no-cors GET -> provider HTML lands in the HTTP cache
+ * No iframe and no media element is created here, so the provider cannot start
+ * video in a hidden frame (that is what produced the background-autoplay abort).
+ */
+function warmEmbedUrl(url) {
   if (!url) return;
   try { preconnectHost(new URL(url).origin); } catch (e) {}
+  if (isDataSaver() || _mzWarmedDocs.has(url)) return;
+  _mzWarmedDocs.add(url);
+  try {
+    fetch(url, {
+      mode: 'no-cors',
+      credentials: 'omit',
+      cache: 'force-cache',
+      referrerPolicy: 'no-referrer'
+    }).catch(() => {});
+  } catch (e) {}
+}
+
+function warmPlayerConnection(id, type) {
+  if (!id) return;
+  warmEmbedUrl(buildPlayerUrl(id, type, effectiveSourceIdx()));
 }
 
 /**
  * Warm the selected provider connection without creating a browsing context.
  * The real iframe is created only by loadPlayer(), following an explicit play.
  */
+function warmUrlVariant(url) {
+  // Autoplay params ko warmup ke liye off kar do (param ka exact casing preserve).
+  return url.replace(/([?&])(autoplay|autoPlay|autoplayNextEpisode|autoplaynextepisode)=true/g,
+    (m, sep, key) => sep + key + '=false');
+}
+
+/**
+ * INSTANT PLAY: modal khulne par provider ko ek hidden frame me load kar deta hai,
+ * lekin autoplay OFF ke saath ? isliye Chrome ka "background media paused to save
+ * power" abort nahi aata. Play dabane par usi frame ko real stream URL par navigate
+ * kiya jata hai: DNS/TLS, provider JS/CSS sab cached hote hain, to playback jaldi shuru.
+ */
 function prewarmPlayer(id, type, srcIdxOverride) {
   if (!id || isDataSaver() || document.getElementById('playerFrame')) return;
+  const embedEl = document.getElementById('videoEmbed');
+  if (!embedEl) return;
   const idx = (typeof srcIdxOverride === 'number') ? srcIdxOverride : effectiveSourceIdx();
-  const url = buildPlayerUrl(id, type, idx);
-  if (!url) return;
-  try { preconnectHost(new URL(url).origin); } catch (e) {}
+  const realUrl = buildPlayerUrl(id, type, idx);
+  if (!realUrl) return;
+  warmEmbedUrl(realUrl);
+  if (_mzPrewarm && _mzPrewarm.realUrl === realUrl && _mzPrewarm.iframe && _mzPrewarm.iframe.parentNode) return;
+
+  destroyPrewarm();
+  const frame = document.createElement('iframe');
+  frame.className = 'mz-prewarm-frame';
+  frame.id = 'mzPrewarmFrame';
+  frame.tabIndex = -1;
+  frame.setAttribute('aria-hidden', 'true');
+  frame.setAttribute('title', 'Preparing stream');
+  frame.setAttribute('frameborder', '0');
+  frame.setAttribute('scrolling', 'no');
+  frame.setAttribute('referrerpolicy', 'no-referrer');
+  frame.setAttribute('allow', 'encrypted-media'); // autoplay delegate NAHI
+  frame.setAttribute('loading', 'eager');
+  frame.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;opacity:0.001;pointer-events:none;z-index:0;';
+
+  const state = { realUrl: realUrl, iframe: frame, loaded: false, srcIdx: idx, id: id, type: type, startedAt: Date.now() };
+  frame.addEventListener('load', () => { state.loaded = true; });
+  try {
+    if (getComputedStyle(embedEl).position === 'static') embedEl.style.position = 'relative';
+  } catch (e) {}
+  embedEl.appendChild(frame);
+  frame.src = warmUrlVariant(realUrl);
+  _mzPrewarm = state;
 }
 
 /** Prewarmed frame ko claim karta hai agar wahi stream URL match kare */
 function takePrewarmedFrame(embedEl, src) {
   const st = _mzPrewarm;
-  if (!st || !src || st.url !== src) return null;
+  if (!st || !src || st.realUrl !== src) return null;
   if (!st.iframe || st.iframe.parentNode !== embedEl) return null;
   _mzPrewarm = null;
   return st;
@@ -5742,7 +5800,7 @@ function takePrewarmedFrame(embedEl, src) {
 /** Modal khulte hi (ya Play button hover par) playback ready karna */
 function schedulePlayerPrewarm(id, type, delay) {
   if (window._mzPrewarmTimer) clearTimeout(window._mzPrewarmTimer);
-  window._mzPrewarmTimer = setTimeout(() => prewarmPlayer(id, type), typeof delay === 'number' ? delay : 250);
+  window._mzPrewarmTimer = setTimeout(() => prewarmPlayer(id, type), typeof delay === 'number' ? delay : 120);
 }
 
 function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
@@ -5793,7 +5851,8 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   //    naya load karne ki zarurat nahi — sirf usi ready frame ko reveal karo
   const preState = takePrewarmedFrame(embedEl, src);
   const reusable = preState ? preState.iframe : null;
-  const preAlreadyLoaded = preState ? preState.loaded : false;
+  // Warm frame ko real (autoplay) URL par navigate karna padta hai, to loader dikhega.
+  const preAlreadyLoaded = false;
 
   if (reusable) {
     // Placeholder/loader hatao, prewarm frame ko waise hi rehne do (reparent = reload)
@@ -5850,10 +5909,9 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   iframe.setAttribute('referrerpolicy', 'no-referrer');
   iframe.setAttribute('fetchpriority', 'high');
   iframe.setAttribute('loading', 'eager');
-  if (!reusable) {
-    iframe.src = src;
-    embedEl.appendChild(iframe);
-  }
+  if (!reusable) embedEl.appendChild(iframe);
+  // Same element par navigate: connection + provider assets already warm.
+  iframe.src = src;
 
   // -- AUTO-RETRY SYSTEM: If server doesn't load in time, try next dubbed server --
   let hasLoaded = preAlreadyLoaded;
@@ -5876,7 +5934,7 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
 
   // Timeout-based auto-retry (prewarmed stream ko extra wait ki zarurat nahi)
   if (!hasLoaded) {
-    const retryAfter = reusable ? 6000 : 8000;
+    const retryAfter = reusable ? 4000 : 5000;
     window._mzRetryTimer = setTimeout(() => {
       if (!hasLoaded) {
         const loaderEl = document.getElementById('mzPlayerLoader');
@@ -5887,7 +5945,7 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
             <div class="player-spinner" style="width:28px; height:28px; border-width:2px; margin-top:10px;"></div>
           `;
         }
-        setTimeout(() => autoRetryNextServer(id, srcIdx, lang, quality, type), 900);
+        setTimeout(() => autoRetryNextServer(id, srcIdx, lang, quality, type), 400);
       }
     }, retryAfter);
   }
