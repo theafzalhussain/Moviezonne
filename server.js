@@ -389,9 +389,26 @@ ASSET_DIRS.slice(1).forEach((dir) => {
 });
 
 // API Rate Limiter: Bura traffic aur DDOS attacks block karega (Luxury stability)
+//
+// Sized against what one real session actually costs. A single homepage view
+// issues ~15 concurrent calls from loadMovies('all'), ~15 more from the
+// background prefetch 800 ms later, plus the carousel, and an OTT platform tab
+// adds another 10-20 for provider verification. So a handful of page views is
+// already in the low hundreds of requests.
+//
+// The old 300 was therefore under one user's normal browsing, and the failure
+// mode is bad: a 429 is not a slow response, it is no data at all, and users
+// behind one carrier NAT (very common on Indian mobile networks) share the IP
+// and would throttle each other. The proxy's own node-cache absorbs the
+// upstream cost, so a higher per-IP ceiling does not translate into more TMDB
+// traffic — it mostly serves cache hits.
+//
+// Override with API_RATE_LIMIT_MAX; the verification suites set it high because
+// they legitimately make several hundred provider lookups in one run.
+const API_RATE_LIMIT_MAX = Number(process.env.API_RATE_LIMIT_MAX) || 1500;
 const apiLimiter = rateLimit({
   windowMs: 5 * 60 * 1000, // 5 minutes window
-  max: 300, // Limit each IP to 300 API requests per 5 minutes
+  max: API_RATE_LIMIT_MAX,
   message: { error: 'Too many requests, please calm down and try again.' },
   standardHeaders: true,
 });

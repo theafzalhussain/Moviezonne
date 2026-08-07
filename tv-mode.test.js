@@ -265,11 +265,17 @@ const moviezoneJs = readFile('moviezone.js');
 const tvModeCss = readFile('tv-mode.css');
 const swJs = readFile('sw.js');
 
-check('index.html loads tv-mode.css', /<link[^>]+rel=["']stylesheet["'][^>]+tv-mode\.css/.test(indexHtml));
-check('index.html loads tv-mode.js', /<script[^>]+src=["']tv-mode\.js/.test(indexHtml));
+// These match the .min bundles as well as the plain names. index.html ships the
+// minified builds (see asset-perf-check.js) but the assertion is about WIRING —
+// that the TV stylesheet is linked and the TV script is loaded before the app
+// script — which holds either way. Pinning the exact filename here would make
+// this suite fail every time the build output changes, which is not what it is
+// meant to guard.
+check('index.html loads tv-mode.css', /<link[^>]+rel=["']stylesheet["'][^>]+tv-mode(\.min)?\.css/.test(indexHtml));
+check('index.html loads tv-mode.js', /<script[^>]+src=["']tv-mode(\.min)?\.js/.test(indexHtml));
 
-const tvScriptAt = indexHtml.indexOf('src="tv-mode.js');
-const appScriptAt = indexHtml.indexOf('src="moviezone.js');
+const tvScriptAt = indexHtml.search(/src="tv-mode(\.min)?\.js/);
+const appScriptAt = indexHtml.search(/src="moviezone(\.min)?\.js/);
 check('tv-mode.js is loaded before moviezone.js', tvScriptAt > -1 && appScriptAt > -1 && tvScriptAt < appScriptAt,
   'tv-mode at ' + tvScriptAt + ', moviezone at ' + appScriptAt);
 
@@ -336,8 +342,8 @@ check('tv-mode.css does not rescale the root font', !/html\[data-mz-tv="true"\]\
 check('tv-mode.css keeps the laptop focus ring width (2px)', /outline:\s*2px solid var\(--gold\)/.test(tvModeCss));
 check('tv-mode.css mirrors laptop focus styling onto :focus', /\.movie-card:focus\s*\{/.test(tvModeCss));
 
-check('service worker precaches tv-mode.css', swJs.indexOf('tv-mode.css') > -1);
-check('service worker precaches tv-mode.js', swJs.indexOf('tv-mode.js') > -1);
+check('service worker precaches tv-mode.css', /tv-mode(\.min)?\.css/.test(swJs));
+check('service worker precaches tv-mode.js', /tv-mode(\.min)?\.js/.test(swJs));
 
 const pkg = JSON.parse(readFile('package.json'));
 check('build script minifies tv-mode.css', pkg.scripts.build.indexOf('tv-mode.css') > -1);

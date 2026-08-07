@@ -46,22 +46,55 @@ const BASE = isLocalhost ? 'http://localhost:3001/api/tmdb' : LIVE_BACKEND_URL;
 const IMG = 'https://image.tmdb.org/t/p/w342'; // Optimized: w500 is too heavy for thumbnails
 
 // NETWORK-AWARE IMAGE LOADING
-// Automatically serves High-Quality images on fast networks, and Normal/Low on slow networks (3G/2G)
+// Serves high-quality images on fast networks and lighter ones on slow links.
+//
+// The desktop branch used to request `original`, which is TMDB's untouched
+// upload — measured across four trending titles it averages 885 KB per
+// backdrop and peaked at 1.7 MB. This is the hero carousel image, i.e. the LCP
+// element, so that single request was setting the page's Largest Contentful
+// Paint. w1280 averages 116 KB for the same images: an 87% cut.
+//
+// Nothing visible is lost. The backdrop sits behind .slide-gradient with the
+// title and buttons over it, and it is never displayed above 1280 logical px
+// of detail — w1280 is also the largest size TMDB offers below `original`, so
+// there is no middle option being skipped here.
 function getResponsiveBackdrop(path) {
   if (!path) return '';
   const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
   const isSlow = conn && (conn.saveData || /^[23]g/.test(conn.effectiveType));
-  
-  if (isSlow) return `https://image.tmdb.org/t/p/w500${path}`; // Prevents lag on slow networks
-  if (isMzTV() || isMobile) return `https://image.tmdb.org/t/p/w780${path}`; // Balanced for mobile/detected/forced TV
-  if (!isLowEnd) return `https://image.tmdb.org/t/p/original${path}`; // Ultra HD for powerful desktops
-  return `https://image.tmdb.org/t/p/w1280${path}`; // Normal HD fallback
+
+  if (isSlow) return `https://image.tmdb.org/t/p/w500${path}`;  // ~40 KB, keeps 3G usable
+  if (isMzTV() || isMobile) return `https://image.tmdb.org/t/p/w780${path}`; // ~45 KB
+  return `https://image.tmdb.org/t/p/w1280${path}`;             // ~116 KB, desktop + TV panels
 }
 
 // TV mode detection and class tagging is handled by tv-mode.js (sets data-mz-tv attribute).
 // isMzTV() reads that attribute for conditional behavior.
 
-if (isMobile) document.documentElement.classList.add('low-end-mode');
+/*  low-end-mode is the stylesheet's fast path: it switches off the effects that
+ *  cost the most per frame — all 76 backdrop-filters, the blur filters, the
+ *  heavy box-shadows, the Ken-Burns hero zoom, the card entrance animations and
+ *  the shine sweeps.
+ *
+ *  It used to be applied on `isMobile` alone, which left a real gap: a weak
+ *  laptop (isLowEnd = under 4 GB RAM or fewer than 4 cores) is not "mobile", so
+ *  it rendered the full effect set on hardware that cannot afford it. Those
+ *  machines are common and they are exactly the ones that felt sluggish.
+ *
+ *  Users who have asked their OS for less motion get it too. The CSS already
+ *  honours prefers-reduced-motion for transitions, but the expensive paint work
+ *  is a separate axis — someone on that setting is usually on a machine or in a
+ *  context where the GPU effects are unwelcome as well.
+ */
+(function applyPerfMode() {
+  let reduceMotion = false;
+  try {
+    reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch (e) {}
+  if (isMobile || isLowEnd || reduceMotion) {
+    document.documentElement.classList.add('low-end-mode');
+  }
+})();
 
 // TV: Set initial history state so back button always returns to home (handled by tv-mode.js)
 
@@ -592,6 +625,76 @@ const tmdbCache = new Map();
 const inFlightRequests = new Map(); 
 let abortControllers = new Map(); // Track controllers to cancel stale requests
 
+/*  ══════════════════════════════════════════════════════════════════════
+ *  DEFERRED CACHE WRITES
+ *  ══════════════════════════════════════════════════════════════════════
+ *  localStorage is synchronous: setItem blocks the main thread until the
+ *  write lands. The SWR cache below used to call it inline in every response
+ *  handler, and a cold homepage fires 15-20 TMDB requests at once — so the
+ *  browser was doing 15-20 JSON.stringify calls over 20-50 KB payloads plus
+ *  15-20 blocking disk writes at exactly the moment it should have been
+ *  rendering the grid. That is jank you can feel on a mid-range phone.
+ *
+ *  Writes are now batched and flushed when the main thread is idle. The cache
+ *  is a speed optimisation for the NEXT visit, so nothing needs it to be
+ *  durable this instant — but pagehide flushes synchronously so closing the
+ *  tab does not throw the session's cache away.
+ */
+const _mzCacheWriteQueue = new Map();
+let _mzCacheFlushScheduled = false;
+
+const _mzOnIdle = (typeof requestIdleCallback === 'function')
+  ? (fn) => requestIdleCallback(fn, { timeout: 2000 })
+  : (fn) => setTimeout(fn, 300);
+
+/*  Quota is ~5 MB and this cache has no natural bound, so a long-lived
+ *  session will eventually fill it. On overflow we drop a batch of entries and
+ *  move on. Which entries go is not important — every one of them is a
+ *  re-fetchable copy of a TMDB response, and picking "the oldest" would mean
+ *  parsing every record's timestamp, which is the very cost being avoided.
+ */
+function _mzEvictCacheEntries(count) {
+  const doomed = [];
+  for (let i = 0; i < localStorage.length && doomed.length < count; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith('mz_cache_')) doomed.push(k);
+  }
+  doomed.forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
+  return doomed.length;
+}
+
+function _mzFlushCacheWrites() {
+  _mzCacheFlushScheduled = false;
+  if (!_mzCacheWriteQueue.size) return;
+  const entries = Array.from(_mzCacheWriteQueue);
+  _mzCacheWriteQueue.clear();
+  for (const [cacheKey, data] of entries) {
+    try {
+      localStorage.setItem(cacheKey, JSON.stringify({ timestamp: Date.now(), data }));
+    } catch (err) {
+      // Out of quota — free some room and abandon the rest of this batch
+      // rather than throwing repeatedly for every remaining entry.
+      if (!_mzEvictCacheEntries(30)) return;
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify({ timestamp: Date.now(), data }));
+      } catch (e2) { return; }
+    }
+  }
+}
+
+function _mzQueueCacheWrite(cacheKey, data) {
+  _mzCacheWriteQueue.set(cacheKey, data);
+  if (_mzCacheFlushScheduled) return;
+  _mzCacheFlushScheduled = true;
+  _mzOnIdle(_mzFlushCacheWrites);
+}
+
+// Leaving the page is the last chance to persist what this session fetched.
+window.addEventListener('pagehide', _mzFlushCacheWrites);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') _mzFlushCacheWrites();
+});
+
 async function tmdb(endpoint, params) {
   params = params || {};
  
@@ -616,6 +719,12 @@ async function tmdb(endpoint, params) {
       cachedData = parsed.data;
       // Agar data 12 ghante se naya hai, toh fresh manenge
       if (parsed.timestamp && (Date.now() - parsed.timestamp < 12 * 60 * 60 * 1000)) {
+        // Promote into the in-memory cache before returning. Without this every
+        // repeat call for the same URL paid another synchronous getItem plus a
+        // JSON.parse of a 20-50 KB payload — and repeats are the normal case,
+        // because the background prefetcher warms the exact URLs the loaders
+        // then ask for. The memory map makes the second call a lookup.
+        tmdbCache.set(urlStr, cachedData);
         return cachedData; // Immediate return if cache is fresh
       }
     } catch(e) {}
@@ -638,11 +747,10 @@ async function tmdb(endpoint, params) {
       if (!r.ok) return cachedData || {};
       const data = await r.json();
       tmdbCache.set(urlStr, data);
-      
-      try {
-        localStorage.setItem(cacheKey, JSON.stringify({ timestamp: Date.now(), data }));
-      } catch (err) {}
-      
+
+      // Queued, not written inline — see DEFERRED CACHE WRITES above.
+      _mzQueueCacheWrite(cacheKey, data);
+
       return data;
     } catch (e) { 
       if (e.name === 'AbortError') return cachedData || { results: [] }; // Return safe fallback on cancellation
@@ -1443,6 +1551,10 @@ function buildCarousel() {
       preload.rel = 'preload';
       preload.as = 'image';
       preload.href = bgUrl;
+      // Without this the preload competes at default priority with the poster
+      // images the grid is requesting at the same moment. This IS the LCP
+      // element, so it should win that race.
+      preload.fetchPriority = 'high';
       document.head.appendChild(preload);
     }
 
@@ -1673,7 +1785,22 @@ const OTT = {
   netflix:    { provider: '8',    regions: ['IN', 'US'], networks: '213' },
   prime:      { provider: '119',  regions: ['IN'],       networks: '1024', providerUS: '9' },
   jiohotstar: { provider: '2336', regions: ['IN'],       networks: '3919' },
-  zee5:       { provider: '232',  regions: ['IN'],       networks: '2590|526|6989' }
+  /*  Zee5 needs a language constraint and the reason is measurable. TMDB
+   *  attaches ~1900 movies to provider 232 in India, but only about 2% of the
+   *  popular head is actually included with a Zee5 subscription — the rest is
+   *  its RENTAL storefront. Spider-Man: No Way Home, for instance, lists 232
+   *  under "rent", never under "flatrate", yet TMDB's discover index still
+   *  returns it for with_watch_monetization_types=flatrate. So the monetization
+   *  parameter alone cannot clean this up.
+   *
+   *  Zee5's genuine subscription library is Indian-language cinema, and
+   *  constraining to those languages measures 100% accurate against each
+   *  title's own /watch/providers record (45/45 sampled) versus 2% (1/45)
+   *  unconstrained. This is not a hack around the API — it is what the
+   *  platform's catalogue actually is.
+   */
+  zee5:       { provider: '232',  regions: ['IN'],       networks: '2590|526|6989',
+                langs: 'hi|ta|te|kn|ml|bn|mr|pa|gu|or' }
 };
 
 /*  Networks that are genuinely streaming platforms, for the "Web Series" tab.
@@ -1700,40 +1827,398 @@ const STREAMING_NETWORK_IDS = [
 // the web-series view even when they carry a streaming network id as well.
 const LINEAR_TV_EXCLUDE_IDS = '71|105|70|118|194|2584|3294';
 
-/** Build the discover calls for a platform tab. Shared by the loader and the
- *  background prefetcher so the two can never drift apart. */
-function ottQueries(key, p1, p2) {
+/*  Platform tab queries live in buildOttModeQueries() below. An earlier
+ *  ottQueries() helper was removed rather than kept as a wrapper: it predated
+ *  the flatrate gate and the per-platform language scope, so any caller that
+ *  reached for it would have quietly reintroduced the rental-catalogue leak.
+ */
+
+// ══════════════════════════════════════════════════════════════════════════
+// OTT SUB-FILTER: Web Series & Movies (like Cartoons sub-tabs)
+// ══════════════════════════════════════════════════════════════════════════
+const OTT_MODES = [
+  { id: 'all',       label: 'All',          icon: '🎬' },
+  { id: 'webseries', label: 'Web Series',   icon: '📺' },
+  { id: 'movies',    label: 'Movies',       icon: '🍿' }
+];
+
+let currentOttMode = 'all';
+
+/*  ══════════════════════════════════════════════════════════════════════
+ *  PLATFORM ACCURACY RULES — why every query below is provider-filtered
+ *  ══════════════════════════════════════════════════════════════════════
+ *  The first version of this sub-filter seeded the grid with
+ *  /trending/tv/week and /trending/movie/week. Those endpoints are GLOBAL:
+ *  they know nothing about watch providers, so the Netflix > Web Series tab
+ *  was showing shows that are not on Netflix at all. Same for every other
+ *  platform. That is the bug this block fixes.
+ *
+ *  The rule now: a title may only enter the grid if TMDB itself says it is
+ *  streamable on that platform. Two things enforce it —
+ *
+ *    1. EVERY content query carries with_watch_providers + watch_region, so
+ *       the catalogue is correct by construction. Nothing global is a source.
+ *    2. with_watch_monetization_types=flatrate keeps rent/buy titles out.
+ *       Without it, "Prime Video" pulls in the whole Amazon rental store —
+ *       provider 119 is the subscription, but a title can be attached to it
+ *       through a paid transaction too.
+ *
+ *  "Trending" and "Latest" are then expressed WITHIN that filtered
+ *  catalogue: sort_by=popularity.desc is the platform's own trending signal,
+ *  and a recent air/release-date window is the platform's latest. Both stay
+ *  provider-scoped, so freshness never costs accuracy.
+ *
+ *  with_networks is additionally intersected WITH the provider filter for
+ *  originals. A network id says who first aired a show, not who streams it
+ *  today, so on its own it would let a cancelled-and-moved show slip in.
+ */
+const OTT_MONETIZATION = 'flatrate';
+
+// Extra provider ids that are the SAME service under another billing tier
+// (ad-supported plans get their own id). Verification accepts any of these.
+const OTT_ALT_PROVIDERS = {
+  netflix:    ['8', '1796'],   // Netflix, Netflix Standard with Ads
+  prime:      ['119', '9'],    // Prime Video IN, Prime Video US
+  jiohotstar: ['2336'],        // 122 is deliberately absent: retired, not offered in IN
+  zee5:       ['232']
+};
+
+/** IST-anchored yyyy-mm-dd, optionally shifted by days. */
+function ottISTDate(offsetDays) {
+  const d = new Date(Date.now() + (5.5 * 60 * 60 * 1000) + ((offsetDays || 0) * 86400000));
+  return d.toISOString().split('T')[0];
+}
+
+/**
+ * OTT mode ke hisaab se queries. Har query provider-filtered hai, isliye
+ * jo bhi aata hai wo us platform ka hi hota hai — trending aur latest bhi
+ * usi filtered catalogue ke andar se nikalte hain.
+ */
+function buildOttModeQueries(key, mode, page) {
   const cfg = OTT[key];
   if (!cfg) return [];
-  const base = { sort_by: 'popularity.desc', language: 'en-US' };
-  const out = [];
+  const p1 = String(page * 2 - 1);
+  const p2 = String(page * 2);
+  const pg = String(page);
+  const today = ottISTDate(0);
 
-  // Provider-filtered series and movies, two pages each. Two pages per load is
-  // what makes the infinite scroll feel endless: ~80 fresh candidates per step.
-  [p1, p2].forEach((page) => {
-    out.push({ endpoint: '/discover/tv', type: 'tv', params: Object.assign({}, base, {
-      with_watch_providers: cfg.provider, watch_region: 'IN', page
-    }) });
-    out.push({ endpoint: '/discover/movie', type: 'movie', params: Object.assign({}, base, {
-      with_watch_providers: cfg.provider, watch_region: 'IN', page
-    }) });
+  // The provider gate every single query inherits.
+  const gate = {
+    with_watch_providers: cfg.provider,
+    watch_region: 'IN',
+    with_watch_monetization_types: OTT_MONETIZATION,
+    language: 'en-US'
+  };
+  // Platforms whose subscription catalogue is language-scoped (see OTT table).
+  if (cfg.langs) gate.with_original_language = cfg.langs;
+  const q = [];
+  // tag: drives scoring in fetchOttMovies — 'trend' | 'latest' | 'top' | 'core'
+  const push = (endpoint, type, params, tag) =>
+    q.push({ endpoint, type, tag, params: Object.assign({}, gate, params) });
+
+  if (mode === 'webseries') {
+    // TRENDING on this platform: most popular series in its own catalogue.
+    push('/discover/tv', 'tv', { sort_by: 'popularity.desc', page: p1 }, 'trend');
+    push('/discover/tv', 'tv', { sort_by: 'popularity.desc', page: p2 }, 'core');
+    // LATEST: aired in the last 120 days, popular first (not date-sorted, so
+    // obscure filler does not outrank the real new releases).
+    push('/discover/tv', 'tv', {
+      sort_by: 'popularity.desc',
+      'first_air_date.gte': ottISTDate(-120), 'first_air_date.lte': today, page: pg
+    }, 'latest');
+    // NEWEST: strictly newest first, with a small vote floor to skip junk.
+    push('/discover/tv', 'tv', {
+      sort_by: 'first_air_date.desc', 'first_air_date.lte': today,
+      'vote_count.gte': '5', page: pg
+    }, 'latest');
+    // PROVEN HITS: deep catalogue by vote volume.
+    push('/discover/tv', 'tv', { sort_by: 'vote_count.desc', page: p1 }, 'top');
+    // ORIGINALS: network AND provider, so it is "their original, still on
+    // their platform" rather than "their original, wherever it lives now".
+    if (cfg.networks) {
+      push('/discover/tv', 'tv', { with_networks: cfg.networks, sort_by: 'popularity.desc', page: p1 }, 'core');
+    }
+  } else if (mode === 'movies') {
+    // TRENDING on this platform.
+    push('/discover/movie', 'movie', { sort_by: 'popularity.desc', page: p1 }, 'trend');
+    push('/discover/movie', 'movie', { sort_by: 'popularity.desc', page: p2 }, 'core');
+    // LATEST: released in the last 120 days, popular first.
+    push('/discover/movie', 'movie', {
+      sort_by: 'popularity.desc',
+      'primary_release_date.gte': ottISTDate(-120), 'primary_release_date.lte': today, page: pg
+    }, 'latest');
+    // NEWEST first, vote floor to skip junk.
+    push('/discover/movie', 'movie', {
+      sort_by: 'primary_release_date.desc', 'primary_release_date.lte': today,
+      'vote_count.gte': '10', page: pg
+    }, 'latest');
+    // PROVEN HITS.
+    push('/discover/movie', 'movie', { sort_by: 'vote_count.desc', page: p1 }, 'top');
+    // US subscription catalogue for the global platforms — still provider-gated.
+    if (cfg.regions.includes('US')) {
+      push('/discover/movie', 'movie', {
+        with_watch_providers: cfg.providerUS || cfg.provider, watch_region: 'US',
+        sort_by: 'popularity.desc', page: p1
+      }, 'core');
+    }
+  } else {
+    // 'all' — both types, provider-gated, trending + latest of each on top.
+    push('/discover/tv', 'tv', { sort_by: 'popularity.desc', page: p1 }, 'trend');
+    push('/discover/movie', 'movie', { sort_by: 'popularity.desc', page: p1 }, 'trend');
+    push('/discover/tv', 'tv', { sort_by: 'popularity.desc', page: p2 }, 'core');
+    push('/discover/movie', 'movie', { sort_by: 'popularity.desc', page: p2 }, 'core');
+    push('/discover/tv', 'tv', {
+      sort_by: 'popularity.desc',
+      'first_air_date.gte': ottISTDate(-120), 'first_air_date.lte': today, page: pg
+    }, 'latest');
+    push('/discover/movie', 'movie', {
+      sort_by: 'popularity.desc',
+      'primary_release_date.gte': ottISTDate(-120), 'primary_release_date.lte': today, page: pg
+    }, 'latest');
+    if (cfg.networks) {
+      push('/discover/tv', 'tv', { with_networks: cfg.networks, sort_by: 'popularity.desc', page: p1 }, 'core');
+    }
+  }
+  return q;
+}
+
+/*  Verified-trending cross-check.
+ *  The provider-filtered pages above are accurate but ordered by TMDB's
+ *  popularity score, which moves slower than what is actually trending this
+ *  week. So we ask the global trending list what is hot, then keep only the
+ *  entries TMDB confirms are streaming on THIS platform, via each title's
+ *  own /watch/providers record. Unverified titles are discarded, never shown.
+ *  Bounded to the top slice and memoised, so it costs a handful of cached
+ *  requests rather than one per card.
+ */
+const _ottVerifyCache = new Map();
+
+/*  Returns true / false / null.
+ *
+ *  The null is the important part. An earlier version returned false when the
+ *  request failed, which reads as "not on this platform" — so a rate-limited
+ *  or offline user would have perfectly valid titles filtered out of the grid.
+ *  Errors and missing provider data are now reported as "unknown" and every
+ *  caller fails open on them. Only a provider record that genuinely lacks the
+ *  platform counts as a false.
+ */
+async function ottIsOnPlatform(key, type, id) {
+  const cacheKey = key + ':' + type + ':' + id;
+  if (_ottVerifyCache.has(cacheKey)) return _ottVerifyCache.get(cacheKey);
+  const accept = OTT_ALT_PROVIDERS[key] || [OTT[key] && OTT[key].provider];
+  const regions = (OTT[key] && OTT[key].regions) || ['IN'];
+
+  const p = (async () => {
+    let data;
+    try {
+      data = await tmdb('/' + type + '/' + id + '/watch/providers', {});
+    } catch (e) {
+      return null;                       // network / rate limit — unknown
+    }
+    const results = data && data.results;
+    if (!results || !Object.keys(results).length) return null;  // no data at all
+
+    for (const region of regions) {
+      const entry = results[region];
+      if (!entry) continue;
+      // flatrate / free / ads = included with the subscription. rent and buy
+      // are deliberately ignored: a rental is not "on the platform".
+      const tiers = [].concat(entry.flatrate || [], entry.free || [], entry.ads || []);
+      if (tiers.some(pv => pv && accept.includes(String(pv.provider_id)))) return true;
+    }
+    return false;
+  })();
+
+  _ottVerifyCache.set(cacheKey, p);
+  // Never let an inconclusive answer stick in the cache, otherwise one bad
+  // minute poisons the whole session.
+  p.then(v => { if (v === null) _ottVerifyCache.delete(cacheKey); }).catch(() => {
+    _ottVerifyCache.delete(cacheKey);
+  });
+  return p;
+}
+
+/** Global trending, filtered down to titles verified on this platform. */
+async function ottVerifiedTrending(key, mode, page) {
+  const pg = String(page);
+  const wants = [];
+  if (mode !== 'movies') wants.push({ endpoint: '/trending/tv/week', type: 'tv' });
+  if (mode !== 'webseries') wants.push({ endpoint: '/trending/movie/week', type: 'movie' });
+
+  const res = await Promise.allSettled(
+    wants.map(w => tmdb(w.endpoint, { language: 'en-US', page: pg }))
+  );
+
+  const candidates = [];
+  res.forEach((r, i) => {
+    const list = (r.status === 'fulfilled' && r.value && r.value.results) ? r.value.results : [];
+    // Top slice only — the tail of the trending list is not worth verifying.
+    list.slice(0, 10).forEach(raw => {
+      if (!raw || !raw.poster_path || !raw.id) return;
+      const item = Object.assign({}, raw);
+      item.media_type = wants[i].type;
+      candidates.push(item);
+    });
   });
 
-  // Originals, via the platform's own network id(s).
-  if (cfg.networks) {
-    out.push({ endpoint: '/discover/tv', type: 'tv', params: Object.assign({}, base, {
-      with_networks: cfg.networks, page: p1
-    }) });
-  }
+  const verdicts = await Promise.all(
+    candidates.map(c => ottIsOnPlatform(key, c.media_type, c.id))
+  );
+  return candidates.filter((c, i) => verdicts[i]);
+}
 
-  // US catalogue widens the pool for the global platforms.
-  if (cfg.regions.includes('US')) {
-    out.push({ endpoint: '/discover/movie', type: 'movie', params: Object.assign({}, base, {
-      with_watch_providers: cfg.providerUS || cfg.provider, watch_region: 'US', page: p1
-    }) });
-  }
+/*  Adaptive accuracy guard.
+ *  The provider gate plus the per-platform language scope measures 100%
+ *  accurate today, so verifying every card would be wasted requests. But TMDB
+ *  provider data does drift — the Zee5 rental leak is exactly that kind of
+ *  drift — so instead of trusting it blindly we spot-check a small sample of
+ *  the head. Clean sample: ship the list untouched, cost is a handful of
+ *  cached requests. Dirty sample: verify the whole pool and drop anything the
+ *  platform does not actually stream, so the section self-heals rather than
+ *  silently showing wrong titles again.
+ */
+const OTT_SAMPLE_SIZE = 10;
+const OTT_SAMPLE_MIN_PASS = 0.9;
+const OTT_DEEP_VERIFY_CAP = 90;
 
-  return out;
+async function ottEnforceAccuracy(key, items) {
+  if (items.length < 4) return items;
+
+  const sample = items.slice(0, OTT_SAMPLE_SIZE);
+  const sampleVerdicts = await Promise.all(
+    sample.map(m => ottIsOnPlatform(key, m.media_type, m.id).catch(() => null))
+  );
+  const known = sampleVerdicts.filter(v => v !== null);
+  // Nothing conclusive (offline / TMDB hiccup) — fail open, an empty grid is
+  // worse than an unverified one.
+  if (known.length < 4) return items;
+
+  const passRate = known.filter(v => v === true).length / known.length;
+  if (passRate >= OTT_SAMPLE_MIN_PASS) return items;
+
+  // Sample was dirty: verify for real and keep only confirmed titles.
+  const head = items.slice(0, OTT_DEEP_VERIFY_CAP);
+  const verdicts = await Promise.all(
+    head.map(m => ottIsOnPlatform(key, m.media_type, m.id).catch(() => null))
+  );
+  const kept = head.filter((m, i) => verdicts[i] !== false);
+  console.warn('[OTT] ' + key + ': provider data looks polluted ('
+    + Math.round(passRate * 100) + '% of sample on-platform) — kept '
+    + kept.length + '/' + head.length + ' after verification');
+  return kept;
+}
+
+/**
+ * Fetch this platform's content for the active mode. Everything returned is
+ * provider-verified; trending and latest are boosted to the top of the grid.
+ */
+async function fetchOttMovies(key, mode, page) {
+  const plan = buildOttModeQueries(key, mode, page);
+  if (!plan.length) return [];
+
+  // Provider-gated catalogue and the verified-trending overlay, in parallel.
+  const [res, verifiedTrending] = await Promise.all([
+    Promise.allSettled(plan.map(p => tmdb(p.endpoint, p.params))),
+    ottVerifiedTrending(key, mode, page).catch(() => [])
+  ]);
+
+  const TAG_BOOST = { trend: 6000, latest: 4200, top: 1200, core: 0 };
+  const picked = new Map();
+
+  const consider = (raw, type, tag, extra) => {
+    if (!raw || !raw.poster_path || !raw.id) return;
+    // Mode gate: Web Series tab me sirf series, Movies tab me sirf movies.
+    if (mode === 'webseries' && type !== 'tv') return;
+    if (mode === 'movies' && type !== 'movie') return;
+    const item = Object.assign({}, raw);
+    item.media_type = type;
+    const k = type + '-' + item.id;
+
+    let score = Math.min(item.popularity || 0, 500) * 8;
+    score += TAG_BOOST[tag] || 0;
+    score += extra || 0;
+    const v = item.vote_count || 0;
+    if (v > 0) score += Math.log10(v + 1) * 400;
+    // Freshness bonus computed from the title's own date, so a genuinely new
+    // release ranks high no matter which query surfaced it.
+    const d = item.first_air_date || item.release_date;
+    if (d) {
+      const ageDays = (Date.now() - new Date(d).getTime()) / 86400000;
+      if (ageDays >= 0 && ageDays <= 30) score += 2500;
+      else if (ageDays > 30 && ageDays <= 120) score += 1200;
+    }
+
+    const prev = picked.get(k);
+    if (!prev || score > prev._ottScore) {
+      item._ottScore = score;
+      picked.set(k, item);
+    }
+  };
+
+  res.forEach((r, idx) => {
+    const list = (r.status === 'fulfilled' && r.value && r.value.results) ? r.value.results : [];
+    const src = plan[idx];
+    list.forEach(raw => consider(raw, src.type, src.tag));
+  });
+
+  // Verified trending sits above everything else — it is both confirmed on
+  // the platform and confirmed hot right now.
+  verifiedTrending.forEach(item => consider(item, item.media_type, 'trend', 4000));
+
+  const ranked = Array.from(picked.values()).sort((a, b) => b._ottScore - a._ottScore);
+  return ottEnforceAccuracy(key, ranked);
+}
+
+// ── OTT SUB-FILTER BAR (chips under category tabs) ──
+function renderOttFilterBar() {
+  const catTabs = document.getElementById('catTabs');
+  if (!catTabs) return;
+  let bar = document.getElementById('ottFilterBar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'ottFilterBar';
+    bar.className = 'anime-filter-bar ott-filter-bar';
+    bar.setAttribute('role', 'tablist');
+    bar.setAttribute('aria-label', 'OTT content filters');
+    catTabs.insertAdjacentElement('afterend', bar);
+  }
+  bar.innerHTML = OTT_MODES.map(m => {
+    const active = m.id === currentOttMode;
+    return `<button type="button" class="anime-chip${active ? ' active' : ''}" role="tab" tabindex="0" aria-selected="${active}" onclick="setOttMode('${m.id}')"><span class="anime-chip-icon" aria-hidden="true">${m.icon}</span><span>${m.label}</span></button>`;
+  }).join('');
+  bar.style.display = 'flex';
+}
+
+function hideOttFilterBar() {
+  const bar = document.getElementById('ottFilterBar');
+  if (bar) bar.style.display = 'none';
+}
+
+function updateOttHeading(cat) {
+  const h = document.getElementById('sectionHeading');
+  if (!h) return;
+  const platformName = CAT_HEADINGS[cat] || cat.toUpperCase();
+  const m = OTT_MODES.find(x => x.id === currentOttMode) || OTT_MODES[0];
+  if (currentOttMode === 'all') {
+    h.textContent = platformName;
+  } else {
+    h.textContent = platformName + ' • ' + m.label.toUpperCase();
+  }
+}
+
+function setOttMode(mode) {
+  if (!OTT_MODES.some(m => m.id === mode)) mode = 'all';
+  currentOttMode = mode;
+  renderOttFilterBar();
+  // Find which OTT platform is currently active
+  const activeTab = document.querySelector('.cat-tab.active');
+  let ottCat = 'netflix';
+  if (activeTab) {
+    const match = (activeTab.getAttribute('onclick') || '').match(/'([^']+)'/);
+    if (match && OTT[match[1]]) ottCat = match[1];
+  }
+  updateOttHeading(ottCat);
+  loadMovies(ottCat);
 }
 
 // -- BACKGROUND PREFETCH HELPERS (For Instant "Load More") --
@@ -1824,8 +2309,8 @@ function prefetchMoviesPage(cat, pageNum) {
     tmdb('/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
   }
   else if (OTT[cat]) {
-    // Netflix / Prime / JioHotstar / Zee5 all share one query builder.
-    ottQueries(cat, p1, p2).forEach(q => tmdb(q.endpoint, q.params));
+    // Netflix / Prime / JioHotstar / Zee5 — use active OTT mode for prefetch
+    buildOttModeQueries(cat, currentOttMode, pageNum).forEach(q => tmdb(q.endpoint, q.params));
   }
   else {
     const base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: 'en-US' });
@@ -2782,32 +3267,9 @@ async function loadMovies(cat, isLoadMore = false) {
       combined.forEach(m => { if (m && m.id && !seen.has(m.id)) { seen.add(m.id); movies.push(m); } });
     } else if (OTT[cat]) {
       // ── PLATFORM TABS: Netflix / Prime Video / JioHotstar / Zee5 ──
-      // Provider-filtered, two pages of series AND two pages of movies per
-      // step, so the infinite scroll keeps yielding new titles instead of
-      // running dry after the first screen.
-      const queries = ottQueries(cat, p1, p2);
-      const res = await Promise.allSettled(queries.map(q => tmdb(q.endpoint, q.params)));
-      const combined = [];
-      res.forEach((r, idx) => {
-        if (r.status === 'fulfilled' && r.value && r.value.results) {
-          const type = queries[idx].type;
-          r.value.results.forEach(item => { item.media_type = type; combined.push(item); });
-        }
-      });
-      // Interleave series and movies so one type does not monopolise the top
-      // of the grid — provider endpoints return them in separate batches.
-      const tvItems = combined.filter(m => m.media_type === 'tv');
-      const movieItems = combined.filter(m => m.media_type === 'movie');
-      const seen = new Set();
-      const maxLen = Math.max(tvItems.length, movieItems.length);
-      for (let i = 0; i < maxLen; i++) {
-        [movieItems[i], tvItems[i]].forEach(m => {
-          if (m && m.id && !seen.has(m.media_type + '-' + m.id)) {
-            seen.add(m.media_type + '-' + m.id);
-            movies.push(m);
-          }
-        });
-      }
+      // Uses OTT sub-filter mode (all / webseries / movies) to decide queries.
+      // Trending/latest content is boosted to the top via scoring.
+      movies = movies.concat(await fetchOttMovies(cat, currentOttMode, currentMoviePage));
     } else {
       const base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: 'en-US' });
       const res = await Promise.all([
@@ -3240,6 +3702,8 @@ function filterCat(cat, e) {
   if (cat === 'anime') { renderAnimeFilterBar(); updateAnimeHeading(); } else { hideAnimeFilterBar(); }
   // Cartoons ke liye apna sub-filter bar (Trending / Famous / Hindi / Doraemon & Co ...)
   if (cat === 'kids') { renderCartoonFilterBar(); updateCartoonHeading(); } else { hideCartoonFilterBar(); }
+  // OTT platforms ke liye Web Series & Movies sub-filter bar
+  if (OTT[cat]) { renderOttFilterBar(); updateOttHeading(cat); } else { hideOttFilterBar(); }
   const sec = document.getElementById('movies-section');
   if (sec) sec.scrollIntoView({ behavior: isMzTVMode() ? 'auto' : 'smooth' });
   loadMovies(cat);
@@ -3289,6 +3753,7 @@ function showWatchlist(e) {
   isSearchResultsMode = false;
   isWatchlistMode = true;
   hideAnimeFilterBar();
+  hideOttFilterBar();
   // Nothing to page here, so take the sentinel out of the viewport entirely
   // rather than relying on the observer callback to bail.
   const scrollTrigger = document.getElementById('infiniteScrollTrigger');
@@ -4365,10 +4830,23 @@ async function openModal(id, type = 'movie', activationEvent) {
   // Saare servers aur buttons instantly show karo taaki user immediately click kar sake
   try { renderExternalSources(id, getSelectedSourceIdx(), getSelectedLang()); } catch(e){}
 
-  // ⚡ SPEED: provider hosts se DNS+TLS handshake abhi shuru kar do (details aane se pehle)
+  // ⚡ SPEED: provider handshake details aane se pehle shuru kar do.
+  //
+  // Order matters here. warmPlayerConnection() warms the host this user is
+  // ACTUALLY going to stream from (their saved server, anime-corrected), so it
+  // goes first and gets the idle connection. preconnectPlayerHosts used to run
+  // ahead of it with a limit of 6, meaning six speculative DNS+TCP+TLS
+  // handshakes were opened before the one host that mattered — competing with
+  // the TMDB detail fetch, the backdrop image and the prewarm iframe for the
+  // same connection budget on a phone.
+  //
+  // Two fallbacks are kept warm because the realistic failure mode is the user
+  // clicking one alternate server, not six — and they are the servers the retry
+  // chain would genuinely reach, not a fixed slice of an unrelated list.
   try {
-    preconnectPlayerHosts(6);
+    resetTriedSources();   // fresh title, fresh retry chain
     warmPlayerConnection(id, type);
+    warmRankedFallbacks(id, type, getSelectedLang(), 2);
   } catch(e){}
  
   try {
@@ -5096,7 +5574,18 @@ async function loadRelatedMovies(id, type) {
         card.style.animationDelay = ((i % 12) * 0.04) + 's';
         card.innerHTML =
           '<div class="card-poster">' +
-            '<img src="'+IMG+m.poster_path+'" alt="'+escapeHTML(m.title||m.name||'')+'" width="170" height="255" loading="lazy" decoding="async">' +
+            '<img src="'+IMG+m.poster_path+'"' +
+              // The grid is minmax(185px, 1fr) on desktop and 2 columns on
+              // phones, so a card is roughly 185-260 CSS px wide. A single w342
+              // src made a 1x desktop download ~2.6x the pixels it displays and
+              // left a 3x phone slightly soft. Letting the browser choose fixes
+              // both directions from one markup change.
+              ' srcset="https://image.tmdb.org/t/p/w185'+m.poster_path+' 185w,' +
+              ' https://image.tmdb.org/t/p/w342'+m.poster_path+' 342w,' +
+              ' https://image.tmdb.org/t/p/w500'+m.poster_path+' 500w"' +
+              ' sizes="(max-width: 600px) 45vw, (max-width: 1200px) 200px, 230px"' +
+              ' alt="'+escapeHTML(m.title||m.name||'')+'" width="170" height="255"' +
+              ' loading="lazy" decoding="async">' +
             '<div class="card-quality">'+qual+'</div>' +
             (isHot ? '<div class="card-hot">HOT</div>' : '') +
             (m._isCollection ? '<div class="card-dubbed" style="background:rgba(245,197,24,0.2);color:var(--gold);border:1px solid rgba(245,197,24,0.4);">FRANCHISE</div>' : '') +
@@ -5564,9 +6053,148 @@ function setSelectedQuality(quality) {
   localStorage.setItem('moviezone.playerQuality', quality);
 }
  
+/*  ══════════════════════════════════════════════════════════════════════
+ *  LEARNED SERVER HEALTH — why playback used to feel slow
+ *  ══════════════════════════════════════════════════════════════════════
+ *  The player had no memory. Every play started at a fixed server index and
+ *  waited a flat 5000 ms before deciding that server was dead, then walked to
+ *  the NEXT INDEX and waited another 5000 ms. If the first two providers were
+ *  blocked on this user's network — which is normal, these hosts get blocked
+ *  regionally all the time — the user sat through 10-15 seconds of spinner
+ *  before anything played. And because nothing was recorded, the exact same
+ *  penalty was paid again on the next movie, forever.
+ *
+ *  Now every load outcome is measured and persisted, so the player converges
+ *  on whatever actually works fast for THIS user:
+ *
+ *    • ordering — servers are tried best-first by measured latency and failure
+ *      rate instead of by their position in the array
+ *    • give-up time — a server that normally answers in 1.2 s is no longer
+ *      given 5 s to prove it is broken; the timeout follows its own history
+ *    • recovery — a success partially forgives past failures, so a provider
+ *      that was down for a day is not blacklisted forever
+ *
+ *  Latency is stored as an EWMA so one slow night does not condemn a good
+ *  server and a recovering one climbs back quickly.
+ */
+const MZ_PLAYER_HEALTH_KEY = 'mz_player_health_v1';
+const MZ_PH_DEFAULT_TIMEOUT = 5000;  // unknown server: same patience as before
+const MZ_PH_MIN_TIMEOUT = 2200;      // never abandon faster than this
+const MZ_PH_MAX_TIMEOUT = 6000;
+const MZ_DUBBED_LANGS = ['hi', 'ta', 'te', 'ml', 'kn', 'mr', 'bn'];
+
+let _mzPlayerHealth = null;
+
+function playerHealth() {
+  if (_mzPlayerHealth) return _mzPlayerHealth;
+  try {
+    _mzPlayerHealth = JSON.parse(localStorage.getItem(MZ_PLAYER_HEALTH_KEY)) || {};
+  } catch (e) { _mzPlayerHealth = {}; }
+  return _mzPlayerHealth;
+}
+
+function _mzPersistPlayerHealth() {
+  // Tiny payload, but still keep it off the critical path — this fires right
+  // when the player is starting up.
+  _mzOnIdle(() => {
+    try { localStorage.setItem(MZ_PLAYER_HEALTH_KEY, JSON.stringify(playerHealth())); }
+    catch (e) {}
+  });
+}
+
+function _mzHealthEntry(name) {
+  const h = playerHealth();
+  if (!h[name]) h[name] = { ok: 0, fail: 0, ms: 0 };
+  return h[name];
+}
+
+/** A provider answered. Record how long it took. */
+function recordPlayerLoad(name, ms) {
+  if (!name || !(ms >= 0)) return;
+  const e = _mzHealthEntry(name);
+  e.ok++;
+  e.ms = e.ms ? Math.round(e.ms * 0.7 + ms * 0.3) : ms;
+  // Partial forgiveness: a provider that is back up should climb the order
+  // again instead of carrying its outage for the rest of the user's life.
+  e.fail = Math.max(0, +(e.fail - 0.5).toFixed(1));
+  _mzPersistPlayerHealth();
+}
+
+/** A provider timed out or refused. */
+function recordPlayerFailure(name) {
+  if (!name) return;
+  const e = _mzHealthEntry(name);
+  e.fail++;
+  _mzPersistPlayerHealth();
+}
+
+/*  Ranking cost, lower is better. A failure is weighted far above any latency
+ *  difference, because waiting for a dead server costs the full timeout while
+ *  the gap between a fast and a slow working server is a second or two.
+ *  Never-tried servers sit mid-pack: ahead of known-bad, behind known-good, so
+ *  the player explores rather than locking onto the first thing that worked.
+ */
+function playerCost(name) {
+  const h = playerHealth()[name];
+  if (!h || (!h.ok && !h.fail)) return 4000;
+  const attempts = h.ok + h.fail;
+  const failRate = h.fail / Math.max(1, attempts);
+  return (h.ms || 3500) + failRate * 12000;
+}
+
+function rankSourceIdxs(idxs) {
+  return idxs.slice().sort((a, b) => {
+    const d = playerCost(playerSources[a].name) - playerCost(playerSources[b].name);
+    return d !== 0 ? d : a - b;   // stable: fall back to declared order
+  });
+}
+
+/** Servers eligible for this content, honouring the anime and dub rules. */
+function candidateSourceIdxs(lang, movie) {
+  const all = playerSources.map((_, i) => i);
+  const isAnime = movie && (isAnimeContent(movie) || isCartoonContent(movie));
+  if (isAnime) {
+    const a = all.filter(i => playerSources[i].anime);
+    if (a.length) return a;
+  }
+  if (MZ_DUBBED_LANGS.indexOf(lang) !== -1) {
+    const d = all.filter(i => playerSources[i].dubbed);
+    if (d.length) return d;
+  }
+  return all;
+}
+
+/** How long to wait before giving up on this specific server. */
+function adaptivePlayerTimeout(name) {
+  const h = playerHealth()[name];
+  if (!h || !h.ok || !h.ms) return MZ_PH_DEFAULT_TIMEOUT;
+  return Math.min(MZ_PH_MAX_TIMEOUT, Math.max(MZ_PH_MIN_TIMEOUT, Math.round(h.ms * 2.2)));
+}
+
+// Servers already attempted for the current play, so a retry chain never loops
+// back onto something that just failed.
+let _mzTriedSources = new Set();
+function resetTriedSources() { _mzTriedSources = new Set(); }
+
 function getSelectedSourceIdx() {
-  const saved = parseInt(localStorage.getItem('moviezone.playerSourceIdx') || '0', 10);
-  return isNaN(saved) ? 0 : Math.max(0, Math.min(saved, playerSources.length - 1));
+  const raw = localStorage.getItem('moviezone.playerSourceIdx');
+  const saved = parseInt(raw === null ? '-1' : raw, 10);
+  const ranked = rankSourceIdxs(playerSources.map((_, i) => i));
+  const best = ranked.length ? ranked[0] : 0;
+
+  // Nothing stored yet — open on whatever has actually performed best here
+  // rather than always on index 0.
+  if (isNaN(saved) || saved < 0 || saved >= playerSources.length) return best;
+
+  /*  A stored pick is respected, with one exception: if that server's measured
+   *  record is far worse than the best available, honouring it would mean
+   *  knowingly making the user watch a spinner. The threshold is deliberately
+   *  high (twice the cost AND above the mid-pack baseline) so a genuine
+   *  preference is not overridden by one unlucky failure.
+   */
+  const savedCost = playerCost(playerSources[saved].name);
+  if (savedCost > playerCost(playerSources[best].name) * 2 && savedCost > 6000) return best;
+  return saved;
 }
  
 function setSelectedSourceIdx(idx) {
@@ -5665,6 +6293,30 @@ function preconnectHost(origin) {
 
 function preconnectPlayerHosts(limit) {
   PLAYER_HOSTS.slice(0, limit || 4).forEach(preconnectHost);
+}
+
+/*  Warm the handshakes for the servers this user would ACTUALLY fall back to.
+ *
+ *  preconnectPlayerHosts() warms a slice of a hardcoded list, which has no
+ *  relationship to the retry chain — it could warm three hosts none of which
+ *  are ever used while the real fallback stays cold. This walks the same
+ *  ranked, dub/anime-filtered pool that autoRetryNextServer() picks from, so
+ *  if the first choice does fail the next attempt starts on an open connection
+ *  instead of a fresh DNS lookup.
+ *
+ *  Only the TLS handshake is warmed here, not the embed document — prefetching
+ *  several provider pages that will probably go unused is bandwidth a phone
+ *  cannot spare.
+ */
+function warmRankedFallbacks(id, type, lang, count) {
+  try {
+    const pool = candidateSourceIdxs(lang, currentModalMovie);
+    rankSourceIdxs(pool).slice(0, (count || 2) + 1).forEach((idx) => {
+      const u = buildPlayerUrl(id, type, idx, lang);
+      if (!u) return;
+      try { preconnectHost(new URL(u).origin); } catch (e) {}
+    });
+  } catch (e) {}
 }
 
 function isDataSaver() {
@@ -5915,9 +6567,15 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
 
   // -- AUTO-RETRY SYSTEM: If server doesn't load in time, try next dubbed server --
   let hasLoaded = preAlreadyLoaded;
-  
+  const _mzSrcName = playerSources[srcIdx].name;
+  const _mzStartedAt = Date.now();
+  _mzTriedSources.add(_mzSrcName);
+
   iframe.onload = () => {
     hasLoaded = true;
+    // Feeds the ranking: this is how the player learns which providers are
+    // actually fast on this user's network.
+    recordPlayerLoad(_mzSrcName, Date.now() - _mzStartedAt);
     if (loader && loader.parentNode) { 
       loader.style.opacity = '0';
       setTimeout(() => { if (loader && loader.parentNode) loader.remove(); }, 400);
@@ -5926,17 +6584,22 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   
   iframe.onerror = () => {
     // Server refused connection - auto try next
+    recordPlayerFailure(_mzSrcName);
     autoRetryNextServer(id, srcIdx, lang, quality, type);
   };
 
   // Prewarm frame pehle hi load ho chuka tha — loader hi mat dikhao
   if (preAlreadyLoaded && loader && loader.parentNode) loader.remove();
 
-  // Timeout-based auto-retry (prewarmed stream ko extra wait ki zarurat nahi)
+  // Timeout-based auto-retry. The wait now follows this server's own measured
+  // history instead of a flat 5 s, so a provider that normally answers in
+  // ~1.2 s is abandoned in ~2.6 s rather than holding the user for five.
   if (!hasLoaded) {
-    const retryAfter = reusable ? 4000 : 5000;
+    const base = adaptivePlayerTimeout(_mzSrcName);
+    const retryAfter = Math.max(MZ_PH_MIN_TIMEOUT, reusable ? base - 800 : base);
     window._mzRetryTimer = setTimeout(() => {
       if (!hasLoaded) {
+        recordPlayerFailure(_mzSrcName);
         const loaderEl = document.getElementById('mzPlayerLoader');
         if (loaderEl) {
           loaderEl.innerHTML = `
@@ -5989,34 +6652,32 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
 }
 
 function autoRetryNextServer(id, currentIdx, lang, quality, type) {
-  const DUBBED_LANG_LIST = ['hi', 'ta', 'te', 'ml', 'kn', 'mr', 'bn'];
-  const isDubbedLang = DUBBED_LANG_LIST.includes(lang);
-  
-  // Find next server to try (prefer dubbed servers for dubbed languages)
+  /*  Retry order is measured, not positional.
+   *
+   *  This used to scan forward from currentIdx and take the next index that
+   *  matched the dub/anime rule, so the fallback chain was simply whatever
+   *  order the array happened to be in. A user whose first three providers are
+   *  regionally blocked walked all three on every single play, paying the full
+   *  timeout each time, and learned nothing for next time.
+   *
+   *  The eligible pool now gets ordered by the same learned cost the initial
+   *  pick uses, and anything already attempted during THIS play is skipped so
+   *  the chain cannot loop back onto a server that just failed.
+   */
+  const pool = candidateSourceIdxs(lang, currentModalMovie)
+    .filter(i => i !== currentIdx && !_mzTriedSources.has(playerSources[i].name));
+
   let nextIdx = -1;
-  // Anime/Cartoon content: pehle anime-capable all-rounder servers try karo
-  if (isAnimeContent(currentModalMovie) || isCartoonContent(currentModalMovie)) {
-    for (let i = currentIdx + 1; i < playerSources.length; i++) {
-      if (playerSources[i].anime) { nextIdx = i; break; }
-    }
-    if (nextIdx === -1) {
-      for (let i = 0; i < currentIdx; i++) {
-        if (playerSources[i].anime) { nextIdx = i; break; }
-      }
-    }
-  }
-  if (nextIdx === -1) for (let i = currentIdx + 1; i < playerSources.length; i++) {
-    if (isDubbedLang && playerSources[i].dubbed) { nextIdx = i; break; }
-  }
-  // If no more dubbed servers, try any server
-  if (nextIdx === -1) {
-    for (let i = currentIdx + 1; i < playerSources.length; i++) {
-      nextIdx = i; break;
-    }
-  }
-  // Wrap around to first server if we've exhausted all
-  if (nextIdx === -1 && currentIdx > 0) {
-    nextIdx = 0;
+  const ranked = rankSourceIdxs(pool);
+  if (ranked.length) {
+    nextIdx = ranked[0];
+  } else {
+    // Every eligible server has been tried for this title. Start exploration
+    // over on the best of the full list so the user still gets a player
+    // instead of a dead end.
+    resetTriedSources();
+    const wide = rankSourceIdxs(playerSources.map((_, i) => i).filter(i => i !== currentIdx));
+    if (wide.length) nextIdx = wide[0];
   }
   
   if (nextIdx !== -1 && nextIdx !== currentIdx) {

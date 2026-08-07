@@ -1,19 +1,20 @@
-// v48: TV keeps the same collapsed category dropdowns as the laptop (popup +
-// D-pad support in tv-mode.js) and the hero carousel autoplays again on a 6s
-// timer that only pauses over the controls / hidden tab / off-screen hero.
+// v58: the shell now precaches the MINIFIED bundles, matching index.html. The
+// tags in index.html used to request the unminified sources even though the
+// build produced .min files, so both the network and this cache were carrying
+// the dev-sized assets (739 KB raw vs 422 KB).
 // Keep these query strings in step with index.html on every asset bump — an
 // offline client is served exactly these URLs, so a stale entry here means a
 // phone keeps running old code with no way to tell.
-const CACHE_NAME = 'moviezone-v57';
+const CACHE_NAME = 'moviezone-v58';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/tv-mode.css?v=1.1',
-  '/moviezone.css?v=5.3',
-  '/tv-mode.js?v=1.2',
-  '/search-engine.js?v=2.0',
-  '/moviezone.js?v=7.1',
-  '/pwa-install.js?v=1.6',
+  '/tv-mode.min.css?v=1.2',
+  '/moviezone.min.css?v=5.4',
+  '/tv-mode.min.js?v=1.3',
+  '/search-engine.min.js?v=2.1',
+  '/moviezone.min.js?v=7.2',
+  '/pwa-install.min.js?v=1.7',
   '/manifest.json',
   '/moviezone-logo.png?v=2',
   '/icon-192.png?v=2',

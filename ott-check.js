@@ -12,25 +12,47 @@ const http = require('http');
 const assert = require('assert');
 const app = require('./server');
 
-// Mirrors the OTT table and ottQueries() in moviezone.js.
-const OTT = {
-  netflix:    { provider: '8',    regions: ['IN', 'US'], networks: '213' },
-  prime:      { provider: '119',  regions: ['IN'],       networks: '1024', providerUS: '9' },
-  jiohotstar: { provider: '2336', regions: ['IN'],       networks: '3919' },
-  zee5:       { provider: '232',  regions: ['IN'],       networks: '2590|526|6989' }
-};
+// The OTT table and the query builder are extracted from moviezone.js rather
+// than copied, because the copy that used to live here drifted: it had no
+// flatrate gate and no per-platform language scope, so this suite was passing
+// against a query plan the app no longer ships.
+const vm = require('vm');
+const _src = require('fs').readFileSync('moviezone.js', 'utf8');
 
-function ottQueries(key, p1, p2) {
-  const cfg = OTT[key];
-  const base = { sort_by: 'popularity.desc', language: 'en-US' };
-  const out = [];
-  [p1, p2].forEach((page) => {
-    out.push({ endpoint: '/discover/tv', type: 'tv', params: Object.assign({}, base, { with_watch_providers: cfg.provider, watch_region: 'IN', page }) });
-    out.push({ endpoint: '/discover/movie', type: 'movie', params: Object.assign({}, base, { with_watch_providers: cfg.provider, watch_region: 'IN', page }) });
-  });
-  if (cfg.networks) out.push({ endpoint: '/discover/tv', type: 'tv', params: Object.assign({}, base, { with_networks: cfg.networks, page: p1 }) });
-  if (cfg.regions.includes('US')) out.push({ endpoint: '/discover/movie', type: 'movie', params: Object.assign({}, base, { with_watch_providers: cfg.providerUS || cfg.provider, watch_region: 'US', page: p1 }) });
-  return out;
+function _block(marker) {
+  const at = _src.indexOf(marker);
+  if (at === -1) throw new Error('not found in moviezone.js: ' + marker);
+  const open = _src.indexOf('{', at);
+  let depth = 0;
+  for (let i = open; i < _src.length; i++) {
+    if (_src[i] === '{') depth++;
+    else if (_src[i] === '}') { depth--; if (depth === 0) return _src.slice(at, i + 1); }
+  }
+  throw new Error('unbalanced braces after: ' + marker);
+}
+function _line(marker) {
+  const at = _src.indexOf(marker);
+  if (at === -1) throw new Error('not found in moviezone.js: ' + marker);
+  return _src.slice(at, _src.indexOf('\n', at));
+}
+
+const _sandbox = { console, Date, Math, Object, Array, String, Number };
+_sandbox.globalThis = _sandbox;
+vm.createContext(_sandbox);
+vm.runInContext([
+  _block('const OTT = {') + ';',
+  _line('const OTT_MONETIZATION ='),
+  _block('function ottISTDate('),
+  _block('function buildOttModeQueries('),
+  'globalThis.__x = { OTT, buildOttModeQueries };'
+].join('\n\n'), _sandbox);
+
+const { OTT, buildOttModeQueries } = _sandbox.__x;
+
+// 'all' is the mode a platform tab opens on, so that is what the depth and
+// infinite-scroll assertions below simulate.
+function ottQueries(key, pageNum) {
+  return buildOttModeQueries(key, 'all', pageNum);
 }
 
 function api(server, endpoint, params) {
@@ -81,9 +103,7 @@ function check(label, fn) {
     const seen = new Set();
     const perStep = [];
     for (let pageNum = 1; pageNum <= 3; pageNum++) {
-      const p1 = String(pageNum * 2 - 1);
-      const p2 = String(pageNum * 2);
-      const queries = ottQueries(key, p1, p2);
+      const queries = ottQueries(key, pageNum);
       const results = await Promise.all(queries.map((q) => api(server, q.endpoint, q.params).catch(() => ({ results: [] }))));
 
       let fresh = 0;

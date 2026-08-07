@@ -15,7 +15,7 @@
       "use": "@vercel/static"
     },
     {
-      "src": "{search-engine,moviezone,moviezone.min,pwa-install,sw,tv-mode,tv-mode.min}.js",
+      "src": "{search-engine,search-engine.min,moviezone,moviezone.min,pwa-install,pwa-install.min,sw,tv-mode,tv-mode.min}.js",
       "use": "@vercel/static"
     },
     {

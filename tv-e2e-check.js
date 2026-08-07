@@ -239,7 +239,12 @@ async function probe(cdp, userAgent, url) {
   const say = (ok, msg) => { console.log((ok ? 'PASS  ' : 'FAIL  ') + msg); if (!ok) bad++; };
 
   console.log('--- assets served by server.js ---');
-  for (const asset of ['/index.html', '/tv-mode.css?v=1.1', '/tv-mode.js?v=1.1', '/moviezone.js?v=5.5', '/sw.js', '/manifest.json']) {
+  // These mirror the tags in index.html. They had drifted (v1.1 / v5.5) and so
+  // were checking URLs the page no longer requests, which meant a broken asset
+  // reference could not have been caught here.
+  for (const asset of ['/index.html', '/tv-mode.min.css?v=1.2', '/tv-mode.min.js?v=1.3',
+    '/moviezone.min.css?v=5.4', '/moviezone.min.js?v=7.2', '/search-engine.min.js?v=2.1',
+    '/pwa-install.min.js?v=1.7', '/sw.js', '/manifest.json']) {
     const r = await httpGet(port, asset);
     say(r.status === 200, asset + ' -> ' + r.status + ' ' + r.type + ' ' + r.len + 'B');
   }
