@@ -5270,6 +5270,14 @@ async function openModal(id, type = 'movie', activationEvent) {
  
               eInput.onchange = () => { 
                 updatePreview();
+                /*  Naya episode = naya retry chain.
+                 *  _mzTriedSources sirf naye title par reset hota tha, episode
+                 *  badalne par nahi. Binge karte waqt set har episode ka failure
+                 *  jodta rehta tha, to 3-4 episode baad eligible pool khali ho
+                 *  jaata aur fallback "wide" branch par gir jaata — jo dub/anime
+                 *  eligibility ignore karke server uthata hai. Har episode ko
+                 *  poora fallback chain milna chahiye. */
+                resetTriedSources();
                 if(embedEl.querySelector('iframe')) playMovie(); 
               };
               updatePreview();
@@ -5278,7 +5286,7 @@ async function openModal(id, type = 'movie', activationEvent) {
             } catch(err) { eInput.innerHTML = '<option value="1">Episode 1</option>'; }
           };
           
-          sInput.onchange = (e) => fetchEpisodes(e.target.value, 1); // Season change   Episode 1
+          sInput.onchange = (e) => { resetTriedSources(); fetchEpisodes(e.target.value, 1); }; // Season change   Episode 1
           
           fetchEpisodes(lastS, lastE); // Load last saved or first episode
         }
@@ -6769,222 +6777,20 @@ function togglePlayerLang() {
  
 async function downloadMovie() {
   if (!currentModalMovie) return;
-  const title = currentModalMovie.title || currentModalMovie.name || '';
-  const year = (currentModalMovie.release_date || currentModalMovie.first_air_date || '').slice(0, 4);
+  const id = currentModalMovie.id;
   const isSeries = currentModalMovie.media_type === 'tv';
-  const lang = currentModalMovie.original_language || 'en';
-  
-  // Get download button reference
-  const dlBtn = document.querySelector('.btn-download');
-  let originalBtnHtml = '';
-  if (dlBtn) {
-    originalBtnHtml = dlBtn.innerHTML;
-    dlBtn.innerHTML = '<div class="player-spinner" style="width:18px; height:18px; border-width:2px; border-color:rgba(16,185,129,0.2); border-left-color:#10b981;"></div><span style="color:#10b981;">Searching...</span>';
-    dlBtn.style.pointerEvents = 'none';
-    dlBtn.style.borderColor = '#10b981';
-  }
- 
-  // Remove existing modal if any
-  const existingModal = document.getElementById('dlModal');
-  if (existingModal) existingModal.remove();
 
-  // ── BUILD DOWNLOAD LINKS ──
-  
-  // 1. DIRECT DOWNLOAD SITES (Multiple options for Movies, TV, Anime)
-  const encodedTitle = encodeURIComponent(title);
-  const encodedTitleYear = encodeURIComponent(`${title} ${year}`);
-  
-  let directLinksHtml = '';
-  
+  // VidVault (VidRock ka official download server) — instant, koi API wait nahi
+  let downloadUrl;
   if (isSeries) {
-    // TV SHOWS / WEB SERIES download links
-    directLinksHtml = `
-      <a href="https://www.google.com/search?q=${encodedTitleYear}+download+hindi+dubbed+web+series" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid #10b981; margin-bottom:8px;">
-        <span style="display:flex; align-items:center; gap:10px;">
-          <strong style="color:#fff; font-size:0.95rem;">Google - Hindi Dubbed</strong>
-        </span>
-        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">Search</span>
-      </a>
-      <a href="https://1337x.to/search/${encodedTitle}+${year}/1/" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid #e63946; margin-bottom:8px;">
-        <span style="display:flex; align-items:center; gap:10px;">
-          <strong style="color:#fff; font-size:0.95rem;">1337x Torrents</strong>
-        </span>
-        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">All Seasons</span>
-      </a>
-      <a href="https://www.google.com/search?q=${encodedTitleYear}+index+of+mkv+480p+720p+1080p" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid var(--accent); margin-bottom:8px;">
-        <span style="display:flex; align-items:center; gap:10px;">
-          <strong style="color:#fff; font-size:0.95rem;">Index of (Direct Files)</strong>
-        </span>
-        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">MKV/MP4</span>
-      </a>
-      <a href="https://www.google.com/search?q=${encodedTitle}+vegamovies+OR+moviesflix+OR+filmyzilla+download" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid var(--gold); margin-bottom:8px;">
-        <span style="display:flex; align-items:center; gap:10px;">
-          <strong style="color:#fff; font-size:0.95rem;">Hindi Dubbed Sites</strong>
-        </span>
-        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">480p-4K</span>
-      </a>
-    `;
+    const sel = currentEpisodeSelection();
+    downloadUrl = `https://vidvault.ru/tv/${id}/${sel.s}/${sel.e}`;
   } else {
-    // MOVIES download links
-    directLinksHtml = `
-      <a href="https://www.google.com/search?q=${encodedTitleYear}+download+hindi+dubbed+480p+720p+1080p+4k" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid #10b981; margin-bottom:8px;">
-        <span style="display:flex; align-items:center; gap:10px;">
-          <strong style="color:#fff; font-size:0.95rem;">Google - Hindi Dubbed</strong>
-        </span>
-        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">All Quality</span>
-      </a>
-      <a href="https://1337x.to/search/${encodedTitle}+${year}/1/" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid #e63946; margin-bottom:8px;">
-        <span style="display:flex; align-items:center; gap:10px;">
-          <strong style="color:#fff; font-size:0.95rem;">1337x Torrents</strong>
-        </span>
-        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">HD/4K</span>
-      </a>
-      <a href="https://www.google.com/search?q=${encodedTitleYear}+index+of+mkv+1080p+OR+2160p+OR+4k" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid var(--accent); margin-bottom:8px;">
-        <span style="display:flex; align-items:center; gap:10px;">
-          <strong style="color:#fff; font-size:0.95rem;">Index of (Direct Files)</strong>
-        </span>
-        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">MKV/MP4</span>
-      </a>
-      <a href="https://www.google.com/search?q=${encodedTitle}+${year}+vegamovies+OR+moviesflix+OR+filmyzilla+OR+mp4moviez+download+hindi" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid var(--gold); margin-bottom:8px;">
-        <span style="display:flex; align-items:center; gap:10px;">
-          <strong style="color:#fff; font-size:0.95rem;">Hindi Dubbed Sites</strong>
-        </span>
-        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">Dual Audio</span>
-      </a>
-    `;
+    downloadUrl = `https://vidvault.ru/movie/${id}`;
   }
 
-  // 2. TORRENT SECTION (YTS for movies, 1337x for all)
-  let torrentsHtml = '';
-  try {
-    if (!isSeries) {
-      const query = currentModalMovie.imdb_id || title;
-      let ytsData = null;
-      let fetchSuccess = false;
-      
-      const mirrors = ['https://yts.mx', 'https://yts.rs', 'https://yts.do', 'https://yify.is'];
-      
-      for (const mirror of mirrors) {
-        try {
-          const ytsRes = await fetch(mirror + '/api/v2/list_movies.json?query_term=' + encodeURIComponent(query));
-          if (ytsRes.ok) {
-            ytsData = await ytsRes.json();
-            fetchSuccess = true;
-            break;
-          }
-        } catch(e) {}
-      }
-      
-      if (fetchSuccess && ytsData && ytsData.data && ytsData.data.movies && ytsData.data.movies.length > 0) {
-        const movie = ytsData.data.movies[0];
-        if (movie.torrents && movie.torrents.length > 0) {
-          torrentsHtml = movie.torrents.map(t => {
-            const magnet = `magnet:?xt=urn:btih:${t.hash}&dn=${encodeURIComponent(movie.title)}&tr=udp://open.demonii.com:1337/announce&tr=udp://tracker.openbittorrent.com:80&tr=udp://tracker.opentrackr.org:1337/announce`;
-            return `
-              <a href="${magnet}" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid var(--gold); margin-bottom:8px;">
-                <span style="display:flex; align-items:center; gap:10px;">
-                  <strong style="color:#fff; font-size:0.95rem;">${t.quality} ${t.type.toUpperCase()}</strong>
-                </span>
-                <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">${t.size}</span>
-              </a>
-            `;
-          }).join('');
-        }
-      }
-    }
-    
-    // Fallback for TV shows and if YTS fails
-    if (!torrentsHtml) {
-      torrentsHtml = `
-        <a href="https://1337x.to/search/${encodedTitle}+${year}/1/" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid var(--gold); margin-bottom:8px;">
-          <span style="display:flex; align-items:center; gap:10px;">
-            <strong style="color:#fff; font-size:0.95rem;">Search on 1337x</strong>
-          </span>
-          <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">Torrent</span>
-        </a>
-        <a href="https://torrentgalaxy.to/torrents.php?search=${encodedTitle}+${year}" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid var(--accent); margin-bottom:8px;">
-          <span style="display:flex; align-items:center; gap:10px;">
-            <strong style="color:#fff; font-size:0.95rem;">TorrentGalaxy</strong>
-          </span>
-          <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">All Quality</span>
-        </a>
-      `;
-    }
-  } catch(err) {
-    torrentsHtml = `
-      <a href="https://1337x.to/search/${encodedTitle}+${year}/1/" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid var(--gold); margin-bottom:8px;">
-        <span style="display:flex; align-items:center; gap:10px;">
-          <strong style="color:#fff; font-size:0.95rem;">Search on 1337x</strong>
-        </span>
-        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">Manual Search</span>
-      </a>
-    `;
-  }
-
-  // 3. ANIME DOWNLOAD (if anime/cartoon detected)
-  let animeHtml = '';
-  const isAnime = (currentModalMovie.genre_ids || []).includes(16) || lang === 'ja';
-  if (isAnime || isSeries) {
-    animeHtml = `
-      <h4 style="font-size:0.7rem; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:var(--text2); margin-top:1.2rem; margin-bottom:0.8rem; padding-bottom:0.4rem; border-bottom: 1px solid rgba(255,255,255,0.1);">ANIME / CARTOON DOWNLOAD</h4>
-      <a href="https://www.google.com/search?q=${encodedTitle}+hindi+dubbed+anime+download+480p+720p+1080p" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid #06b6d4; margin-bottom:8px;">
-        <span style="display:flex; align-items:center; gap:10px;">
-          <strong style="color:#fff; font-size:0.95rem;">Anime Hindi Dubbed</strong>
-        </span>
-        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">Google</span>
-      </a>
-      <a href="https://nyaa.si/?f=0&c=0_0&q=${encodedTitle}" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid #7c3aed; margin-bottom:8px;">
-        <span style="display:flex; align-items:center; gap:10px;">
-          <strong style="color:#fff; font-size:0.95rem;">Nyaa.si (Anime Torrents)</strong>
-        </span>
-        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">Sub/Dub</span>
-      </a>
-      <a href="https://www.google.com/search?q=${encodedTitle}+animedubhindi+OR+toonsplus+OR+toonworld4all+download" target="_blank" class="premium-play-btn" style="text-decoration:none; justify-content:space-between; background:linear-gradient(135deg, rgba(30,30,42,0.8), rgba(15,15,20,0.9)); border:1px solid rgba(255,255,255,0.1); border-left:4px solid #f59e0b; margin-bottom:8px;">
-        <span style="display:flex; align-items:center; gap:10px;">
-          <strong style="color:#fff; font-size:0.95rem;">Cartoon/Anime Hindi Sites</strong>
-        </span>
-        <span style="font-size:0.8rem; color:var(--text2); background:rgba(0,0,0,0.5); padding:3px 8px; border-radius:6px;">Multi Quality</span>
-      </a>
-    `;
-  }
- 
-  // Restore button state
-  if (dlBtn) {
-    dlBtn.innerHTML = originalBtnHtml;
-    dlBtn.style.pointerEvents = 'auto';
-    dlBtn.style.borderColor = '';
-  }
- 
-  // 3. Update Modal UI with fetched Links
-  const dlModalHtml = `
-    <div id="dlModal" style="position:fixed; inset:0; z-index:999999; background:rgba(5,5,8,0.85); backdrop-filter:blur(12px); display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity 0.3s ease;">
-      <div style="background:var(--card); padding:2.5rem; border-radius:20px; border:1px solid rgba(255,255,255,0.1); width:90%; max-width:420px; text-align:center; box-shadow:0 25px 50px rgba(0,0,0,0.6); transform:scale(0.95); transition:transform 0.3s ease;" id="dlModalBox">
-        <h3 style="margin-bottom:0.5rem; font-family:'Bebas Neue', sans-serif; font-size:2.2rem; color:#fff; letter-spacing:1px;">Download Options</h3>
-        <p style="font-size:0.85rem; color:var(--text2); margin-bottom:1.5rem; line-height:1.5;">Apna pasandeeda download method chunein.</p>
-        <div style="display:flex; flex-direction:column; max-height:350px; overflow-y:auto; padding-right:5px; text-align:left;">
-          
-          <h4 style="font-size:0.7rem; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:var(--text2); margin-bottom:0.8rem; padding-bottom:0.4rem; border-bottom: 1px solid rgba(255,255,255,0.1);">DIRECT DOWNLOAD</h4>
-          ${directLinksHtml}
-
-          <h4 style="font-size:0.7rem; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:var(--text2); margin-top:1.2rem; margin-bottom:0.8rem; padding-bottom:0.4rem; border-bottom: 1px solid rgba(255,255,255,0.1);">TORRENT DOWNLOAD</h4>
-          ${torrentsHtml}
-          ${animeHtml}
-        </div>
-        <button onclick="const m=document.getElementById('dlModal'); m.style.opacity='0'; setTimeout(()=>m.remove(),300);" style="margin-top:1.5rem; width:100%; background:transparent; border:1px solid rgba(255,255,255,0.2); color:var(--text); padding:0.8rem; border-radius:12px; cursor:pointer; font-weight:600; transition:all 0.2s;">Close</button>
-      </div>
-    </div>
-  `;
-  
-  document.body.insertAdjacentHTML('beforeend', dlModalHtml);
-  
-  setTimeout(() => {
-    const dlModal = document.getElementById('dlModal');
-    const dlModalBox = document.getElementById('dlModalBox');
-    if (dlModal && dlModalBox) {
-      dlModal.style.opacity = '1';
-      dlModalBox.style.transform = 'scale(1)';
-    }
-  }, 10);
+  // Naya tab turant kholo (user click ke andar, popup blocker se bachne ke liye)
+  window.open(downloadUrl, '_blank', 'noopener');
 }
  
 function togglePlayerFS() {
