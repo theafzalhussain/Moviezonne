@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MovieZone — Core Web Vitals harness</title>
+</head>
+<body>
+<h1>Core Web Vitals harness</h1>
+<p>Opens the real index.html in a same-origin iframe and measures what the
+   browser actually did: which element became the LCP candidate, how much the
+   layout shifted, which fonts were used, and which requests were issued. The
+   iframe is deliberately sized like a phone so the mobile code paths run.</p>
+<iframe id="app" src="/index.html" style="width:412px;height:915px;border:1px solid #333"></iframe>
+
+<script>
+(function () {
+  // The runner passes ?collector=PORT. Results go to that standalone collector
+  // rather than to the page's own origin, so the harness works unchanged whether
+  // the page is served by this run or by a dev server that was already up.
+  var COLLECTOR = (function () {
+    var m = /[?&]collector=(\d+)/.exec(location.search);
+    return m ? 'http://127.0.0.1:' + m[1] + '/' : null;
+  })();
+
+  var checks = [];
+  function ok(name, pass, detail) {
+    checks.push({ name: name, pass: !!pass, detail: detail == null ? '' : String(detail) });
+  }
+  var reported = false;
+  function report() {
+    if (reported) return;
+    reported = true;
+    document.title = 'CWV: ' + checks.filter(function (c) { return c.pass; }).length + '/' + checks.length;
+    try {
+      fetch(COLLECTOR || '/__results', {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(checks)
+      });
+    } catch (e) { /* the runner will time out and fail loudly */ }
+  }
+
+  var frame = document.getElementById('app');
+
+  // Observers have to be installed from inside the iframe, before the page
+  // paints, so they are attached on the first available frame-window tick.
+  function instrument(win) {
+    win.__mzCls = 0;
+    win.__mzShifts = [];
+    win.__mzLcp = null;
+    win.__mzConsoleErrors = [];
+    try {
+      var origError = win.console.error;
+      win.console.error = function () {
+        try { win.__mzConsoleErrors.push([].slice.call(arguments).join(' ').slice(0, 200)); } catch (e) {}
+        return origError.apply(win.console, arguments);
+      };
+    } catch (e) {}
+
+    try {
+      new win.PerformanceObserver(function (list) {
+        list.getEntries().forEach(function (e) {
+          if (e.hadRecentInput) return;
+          win.__mzCls += e.value;
+          if (e.value > 0.001) {
+            win.__mzShifts.push({
+              value: +e.value.toFixed(4),
+              at: Math.round(e.startTime),
+              sources: (e.sources || []).map(function (s) {
+                var n = s.node;
+                var label = '(detached)';
+                if (n) {
+                  var proto = '';
+                  try { proto = Object.getPrototypeOf(n).constructor.name; } catch (e3) {}
+                  var host = n.parentElement || n.parentNode || null;
+                  var hostLabel = '';
+                  if (host && host.nodeType === 1) {
+                    hostLabel = '<' + host.tagName.toLowerCase() +
+                      (host.id ? '#' + host.id : '') +
+                      (host.className && host.className.split ? '.' + host.className.split(/\s+/).join('.') : '') + '>';
+                  }
+                  label = (n.tagName || n.nodeName || '?') +
+                    ' [' + proto + ']' +
+                    (n.id ? ' id=' + n.id : '') +
+                    (n.className && n.className.split ? ' class=' + n.className : '') +
+                    (hostLabel ? ' parent=' + hostLabel : '') +
+                    (n.outerHTML ? ' html=' + n.outerHTML.replace(/\s+/g, ' ').slice(0, 120) : '');
+                }
+                var pr = s.previousRect || {}, cr = s.currentRect || {};
+                var probe = '';
+                try {
+                  var pts = [[cr.x + cr.width / 2, cr.y + 4], [cr.x + cr.width / 2, cr.y + cr.height / 2]];
+                  probe = ' probe=' + pts.map(function (p) {
+                    var el = win.document.elementFromPoint(Math.round(p[0]), Math.round(p[1]));
+                    return el ? '<' + el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') +
+                      (el.className && el.className.split ? '.' + el.className.split(/\s+/).join('.') : '') + '>' : 'null';
+                  }).join('+');
+                } catch (e2) {}
+                return label +
+                  ' from[' + [pr.x, pr.y, pr.width, pr.height].map(Math.round).join(',') + ']' +
+                  ' to[' + [cr.x, cr.y, cr.width, cr.height].map(Math.round).join(',') + ']' +
+                  probe + ' ready=' + win.document.readyState;
+              })
+            });
+          }
+        });
+      }).observe({ type: 'layout-shift', buffered: true });
+    } catch (e) { win.__mzClsUnsupported = e.message; }
+
+    try {
+      new win.PerformanceObserver(function (list) {
+        var es = list.getEntries();
+        var last = es[es.length - 1];
+        if (!last) return;
+        win.__mzLcp = {
+          time: Math.round(last.startTime),
+          size: last.size,
+          url: last.url || '',
+          tag: last.element ? last.element.tagName.toLowerCase() : '',
+          cls: last.element ? String(last.element.className || '') : '',
+          fp: last.element ? (last.element.getAttribute('fetchpriority') || '') : ''
+        };
+      }).observe({ type: 'largest-contentful-paint', buffered: true });
+    } catch (e) { win.__mzLcpUnsupported = e.message; }
+  }
+
+  // Poll for the frame window as early as possible.
+  var armed = false;
+  var arm = setInterval(function () {
+    try {
+      var w = frame.contentWindow;
+      if (w && w.PerformanceObserver && !armed) { instrument(w); armed = true; clearInterval(arm); }
+    } catch (e) {}
+  }, 5);
+
+  frame.addEventListener('load', function () {
+    try {
+      frame.contentWindow.addEventListener('error', function (ev) {
+        frame.contentWindow.__mzHarnessError = String(ev.message || ev.error || 'unknown');
+      });
+    } catch (e) {}
+    // The carousel needs a real TMDB round trip before slide 0 exists, and the
+    // ALL feed fans out to a dozen discover queries before it renders.
+    setTimeout(runChecks, 18000);
+  });
+
+  function runChecks() {
+    var doc, win;
+    try { doc = frame.contentDocument; win = frame.contentWindow; }
+    catch (e) { ok('same-origin access to the app frame', false, e.message); return report(); }
+    if (!doc || !win) { ok('app frame loaded', false, 'no document'); return report(); }
+
+    // ── document structure ───────────────────────────────────────────────
+    ok('the parsed document has exactly one head', doc.querySelectorAll('head').length === 1,
+      doc.querySelectorAll('head').length + ' head elements');
+    ok('no cross-origin script blocks the parser',
+      [].slice.call(doc.scripts).every(function (s) {
+        return !s.src || s.src.indexOf(win.location.origin) === 0 || s.async || s.defer;
+      }));
+
+    // ── LCP ──────────────────────────────────────────────────────────────
+    var lcp = win.__mzLcp;
+    ok('an LCP candidate was reported', !!lcp, win.__mzLcpUnsupported || 'none');
+    if (lcp) {
+      ok('the LCP element is the hero backdrop <img>',
+        lcp.tag === 'img' && lcp.cls.indexOf('slide-bg-img') !== -1,
+        lcp.tag + '.' + lcp.cls + ' at ' + lcp.time + 'ms');
+      ok('the LCP image declares fetchpriority="high"', lcp.fp === 'high', 'fetchpriority=' + lcp.fp);
+      ok('the LCP image is a sized TMDB backdrop, never "original"',
+        /image\.tmdb\.org\/t\/p\/w(500|780|1280)\//.test(lcp.url), lcp.url);
+    }
+
+    // ── the hero image itself ────────────────────────────────────────────
+    var hero = doc.querySelector('.carousel-slide .slide-bg-img');
+    ok('slide 0 rendered a real <img>, not a background', !!hero);
+    if (hero) {
+      ok('the hero image actually decoded', hero.complete && hero.naturalWidth > 0,
+        'complete=' + hero.complete + ' naturalWidth=' + hero.naturalWidth);
+      var box = hero.getBoundingClientRect();
+      ok('the hero image fills the slide', box.width > 300 && box.height > 300,
+        Math.round(box.width) + 'x' + Math.round(box.height));
+      ok('the Ken-Burns parent still drives the transform',
+        win.getComputedStyle(hero.parentElement).transform !== 'none',
+        win.getComputedStyle(hero.parentElement).transform);
+    }
+    ok('slide 0 no longer carries an inline background-image',
+      (function () {
+        var bg = doc.querySelector('.carousel-slide .slide-bg');
+        return bg ? !bg.style.backgroundImage : false;
+      })());
+    ok('the hero URL was stored for the next visit',
+      (function () { try { return !!JSON.parse(win.localStorage.getItem('mz_hero_lcp')).u; } catch (e) { return false; } })());
+
+    // ── CLS ──────────────────────────────────────────────────────────────
+    var cls = win.__mzCls;
+    ok('layout-shift was observable', typeof cls === 'number', win.__mzClsUnsupported || '');
+    ok('CLS is in the "good" band (< 0.1)', cls < 0.1,
+      'CLS=' + (typeof cls === 'number' ? cls.toFixed(4) : '?') +
+      (win.__mzShifts && win.__mzShifts.length
+        ? ' | biggest sources: ' + JSON.stringify(win.__mzShifts.slice(-4)) : ''));
+
+    // ── fonts ────────────────────────────────────────────────────────────
+    var res = (win.performance.getEntriesByType('resource') || []).map(function (e) { return e.name; });
+    ok('nothing is requested from Google Fonts',
+      !res.some(function (n) { return /fonts\.(googleapis|gstatic)\.com/.test(n); }),
+      res.filter(function (n) { return /fonts\./.test(n); }).join(', '));
+    var fontReqs = res.filter(function (n) { return /\/fonts\/.*\.woff2/.test(n); });
+    ok('the self-hosted woff2 files were fetched same-origin', fontReqs.length >= 1,
+      fontReqs.length + ' font requests');
+    ok('the critical faces are loaded and ready',
+      win.document.fonts.check('1em Outfit') && win.document.fonts.check('1em "Bebas Neue"'),
+      'Outfit=' + win.document.fonts.check('1em Outfit') +
+      ' Bebas=' + win.document.fonts.check('1em "Bebas Neue"'));
+    ok('the hero title is rendered in Bebas Neue, not a fallback',
+      (function () {
+        var t = doc.querySelector('.slide-title');
+        return t ? /Bebas Neue/.test(win.getComputedStyle(t).fontFamily) : false;
+      })());
+
+    // ── images ───────────────────────────────────────────────────────────
+    var imgs = [].slice.call(doc.querySelectorAll('img'));
+    var undimensioned = imgs.filter(function (i) {
+      if (i.classList.contains('slide-bg-img')) return false;   // sized by its parent
+      return !(i.getAttribute('width') && i.getAttribute('height'));
+    }).map(function (i) { return (i.className || i.id || i.src || '?').toString().slice(0, 40); });
+    ok('every rendered <img> declares width and height', undimensioned.length === 0,
+      undimensioned.join(' | '));
+
+    var gridImgs = imgs.filter(function (i) { return i.closest && i.closest('.card-poster'); });
+    ok('grid posters ship a srcset', gridImgs.length > 0 && gridImgs.every(function (i) { return !!i.srcset; }),
+      gridImgs.length + ' poster images');
+    ok('grid posters stay out of the hero priority lane',
+      gridImgs.every(function (i) { return i.getAttribute('fetchpriority') === 'low'; }));
+
+    // ── loader ───────────────────────────────────────────────────────────
+    var loader = doc.getElementById('mz-loader');
+    ok('the loader overlay was dismissed', !!loader && loader.classList.contains('loader-hidden'));
+
+    // ── CLS reservation for Continue Watching ────────────────────────────
+    // Asserted against the SERVED markup, not the live DOM: when the visitor has
+    // no watch history renderContinueWatching() legitimately sets
+    // element.style.display = 'none', so the live node is expected to carry an
+    // inline style. What must never come back is display:none baked into the
+    // HTML, because that outranks the stylesheet and forces the reveal to happen
+    // after first paint.
+    fetch('/index.html').then(function (r) { return r.text(); }).then(function (src) {
+      ok('Continue Watching is not hidden by an inline style in the served HTML',
+        !/id="continue-watching"[^>]*style="display:none/.test(src));
+      ok('the served HTML reserves the Continue Watching row before paint',
+        /html\.mz-has-cw #continue-watching\{display:block\}/.test(src) &&
+        /localStorage\.getItem\('mz_continue_watching'\)/.test(src));
+      finishUp(doc, win);
+    }).catch(function (e) {
+      ok('could read the served HTML back', false, e.message);
+      finishUp(doc, win);
+    });
+  }
+
+  function finishUp(doc, win) {
+    // ── long tasks / INP proxy ───────────────────────────────────────────
+    ok('the idle cursor loop parks itself instead of running every frame',
+      !/requestAnimationFrame\(animateCursorRing\);\s*\}\s*animateCursorRing\(\)/.test(
+        String(win.animateCursorRing || '')), 'source check');
+
+    ok('no uncaught error surfaced in the app frame', !win.__mzHarnessError, win.__mzHarnessError || '');
+
+    // Always-on diagnostics: when the feed is empty every content assertion
+    // above fails for the same upstream reason, and this is what tells them apart.
+    var api = (win.performance.getEntriesByType('resource') || [])
+      .filter(function (e) { return e.name.indexOf('/api/tmdb') !== -1; });
+    ok('the feed received data from /api/tmdb',
+      doc.querySelectorAll('.movie-card').length > 0 || doc.querySelectorAll('.carousel-slide').length > 0,
+      'api requests=' + api.length +
+      ' slides=' + doc.querySelectorAll('.carousel-slide').length +
+      ' cards=' + doc.querySelectorAll('.movie-card').length +
+      ' carouselMovies=' + ((win.carouselMovies && win.carouselMovies.length) || 'n/a') +
+      ' lastApi=' + (api.length ? api[api.length - 1].name.slice(-90) : 'none') +
+      ' consoleErrors=' + JSON.stringify((win.__mzConsoleErrors || []).slice(0, 3)));
+
+    report();
+  }
+})();
+</script>
+</body>
+</html>

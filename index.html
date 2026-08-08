@@ -1,27 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <head>
-    <!-- ✅ Yeh 2 lines add karo sabse pehle, line 3 ke baad -->
-    <script src="https://www.datadoghq-browser-agent.com/us1/v5/datadog-rum.js" type="text/javascript"></script>
-    <script>
-      window.DD_RUM && window.DD_RUM.init({
-        applicationId: '2d98ba56-1b76-4b3e-9591-e6964fe2733c',
-        clientToken: 'pub4dbf2c26e71ae61cfd49507556566886',
-        site: 'us5.datadoghq.com',
-        service: 'moviezone',
-        env: 'production',
-        version: '1.0.0',
-        sessionSampleRate: 100,
-        sessionReplaySampleRate: 20,
-        trackResources: true,
-        trackUserInteractions: true,
-        trackLongTasks: true,
-      });
-    </script>
-
-    <meta charset="UTF-8">
-    <!-- ... baaki sab waisa hi rahega -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
@@ -29,19 +8,26 @@
 <link rel="preconnect" href="https://image.tmdb.org" crossorigin>
 <link rel="dns-prefetch" href="https://image.tmdb.org">
 
-<link rel="stylesheet" href="moviezone.min.css?v=5.4">
+<link rel="stylesheet" href="moviezone.min.css?v=5.5">
 <link rel="stylesheet" href="tv-mode.min.css?v=1.2">
 
 <link rel="preload" href="/moviezone-logo.webp" as="image" type="image/webp" fetchpriority="high">
+<link rel="preload" href="/fonts/outfit-latin-var.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/bebas-neue-latin-400.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="search-engine.min.js?v=2.1" as="script">
-<link rel="preload" href="moviezone.min.js?v=7.5" as="script">
+<link rel="preload" href="moviezone.min.js?v=7.6" as="script">
 <link rel="preload" href="tv-mode.min.js?v=1.3" as="script">
 
-<!-- Fonts stay non-blocking (media=print swap) so they never delay LCP -->
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700;900&family=Playfair+Display:ital,wght@0,700;1,400&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
-<noscript><link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700;900&family=Playfair+Display:ital,wght@0,700;1,400&display=swap" rel="stylesheet"></noscript>
+<style id="mz-fonts">
+@font-face{font-family:'Outfit';font-style:normal;font-weight:300 900;font-display:swap;src:url(/fonts/outfit-latin-var.woff2) format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:'Outfit';font-style:normal;font-weight:300 900;font-display:swap;src:url(/fonts/outfit-latin-ext-var.woff2) format('woff2');unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
+@font-face{font-family:'Bebas Neue';font-style:normal;font-weight:400;font-display:swap;src:url(/fonts/bebas-neue-latin-400.woff2) format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:'Bebas Neue';font-style:normal;font-weight:400;font-display:swap;src:url(/fonts/bebas-neue-latin-ext-400.woff2) format('woff2');unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
+@font-face{font-family:'Playfair Display';font-style:normal;font-weight:700;font-display:swap;src:url(/fonts/playfair-display-latin-700.woff2) format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:'Playfair Display';font-style:normal;font-weight:700;font-display:swap;src:url(/fonts/playfair-display-latin-ext-700.woff2) format('woff2');unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
+@font-face{font-family:'Playfair Display';font-style:italic;font-weight:400;font-display:swap;src:url(/fonts/playfair-display-latin-italic-400.woff2) format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:'Playfair Display';font-style:italic;font-weight:400;font-display:swap;src:url(/fonts/playfair-display-latin-ext-italic-400.woff2) format('woff2');unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
+</style>
 
 <!-- ════════════════════════════════════════════════════════════════════
      SEO CORE  (v2.0)
@@ -438,6 +424,167 @@
 .site-footer{contain-intrinsic-size:auto 620px;content-visibility:auto}
 @media (max-width:560px){.mz-seo{padding:2rem 1rem 2.4rem;font-size:.9rem}}
 </style>
+
+<!-- ════════════════════════════════════════════════════════════════════
+     CORE WEB VITALS — LAYOUT RESERVATIONS (CLS)
+     Loaded last in <head> so it wins the cascade over moviezone.min.css.
+
+     Every rule here reserves space for something that JS injects after first
+     paint. Without them the injected content pushes the page down and Chrome
+     books the movement as Cumulative Layout Shift.
+     ════════════════════════════════════════════════════════════════════ -->
+<style id="mz-cwv-critical">
+/* Paint the brand background before moviezone.min.css arrives, so a slow
+   stylesheet shows dark chrome instead of a white flash. */
+html{background:#03030a;color-scheme:dark}
+
+/* CONTINUE WATCHING was `style="display:none"` in the markup and un-hidden by
+   renderContinueWatching() on DOMContentLoaded. That reveal happens after the
+   first paint, so the whole page below it jumped down by ~380px — the single
+   largest shift on a returning visit. The inline style is gone; visibility is
+   now decided by a class that the head script below sets synchronously from
+   localStorage, i.e. before anything is painted. min-height holds the row open
+   while the poster requests are still in flight. */
+#continue-watching{display:none}
+html.mz-has-cw #continue-watching{display:block}
+html.mz-has-cw #continueWatchingGrid{min-height:236px}
+
+/* HERO LCP IMAGE
+   Slide 0's backdrop is now a real <img fetchpriority="high"> instead of a CSS
+   background-image (see buildCarousel). Rule lives in moviezone.css next to
+   .slide-bg; it is not needed at first paint because the element only exists
+   once the bundle has run. */
+
+/* Hero placeholder: #hero is height:95vh, so the section itself never shifts,
+   but an empty track flashes pure black until the carousel data lands. A cheap
+   gradient keeps the first paint looking intentional and gives the LCP image a
+   box that is already the right size. */
+#carouselTrack:empty{background:linear-gradient(115deg,#07070f 0%,#101024 45%,#07070f 100%)}
+
+/* ── MEASURED SHIFT #1: <body> jumped 95px, worth 0.104 CLS ──────────────────
+   #hero carries margin-top:75px (95px under 768px wide). <main> has no padding,
+   border or BFC, so that margin collapsed straight through it and landed on
+   <body>. The first paint happens while the parser is still inside <head>/<nav>,
+   before <main> exists, so <body> painted at y=0 and then dropped to y=95 the
+   moment #hero was parsed — every pixel already on screen moved with it.
+
+   display:flow-root gives <main> its own block formatting context, so the margin
+   stays inside it. #hero keeps exactly the same 75/95px gap and the rendered
+   result is unchanged; it just stops being a shift. Old browsers that do not
+   know flow-root fall back to today's behaviour, so this cannot regress them. */
+#main-content{display:flow-root}
+
+/* ── MEASURED SHIFT #2: .main-content::before grew, worth 0.209 CLS ──────────
+   #movies-section is position:relative and paints a decorative panel through
+   ::before with inset:1rem 2% 0 — so the pseudo-element is sized by its parent.
+   With #movieGrid empty the parent is only as tall as its header, and when the
+   first 24 cards render the parent (and therefore the panel) expands by hundreds
+   of pixels. Chrome books that expansion as a layout shift.
+
+   Reserving a plausible grid height while it is empty removes it. The value is
+   height-based rather than a card count on purpose: it only has to be close
+   enough that the panel does not visibly resize, and it disappears the instant
+   the first card lands because :empty stops matching. */
+#movieGrid:empty{min-height:70vh}
+@media (max-width:600px){#movieGrid:empty{min-height:120vh}}
+
+/* Aspect-ratio safety net for the TMDB images that ship without width/height
+   because their size is purely CSS-driven. Declaring the ratio lets the browser
+   size the box before the bytes arrive, which is what actually removes the
+   shift — the attributes alone do nothing once CSS sets width:100%. */
+.ud-cast-card img,.modal-cast-chip img{aspect-ratio:2/3;height:auto}
+.modal-cast-chip img{aspect-ratio:1/1}
+.ch-mosaic-tile img{aspect-ratio:2/3;width:100%;height:100%;object-fit:cover}
+.modal-prod-chip img{aspect-ratio:3/2;height:auto;object-fit:contain}
+.ud-backdrop-img{aspect-ratio:16/9}
+
+/* Below-fold rail: skip layout + paint until it scrolls close. `auto 700px` means
+   "use 700px until you have measured me once, then reuse the real size" — a plain
+   fixed placeholder is wrong in both directions and shifts the page when the skip
+   is released. This declaration replaces the one that moviezone.js used to inject;
+   that sheet is appended at runtime and would otherwise win on cascade order.
+   #movies-section is deliberately NOT here: it sits directly under the hero, so it
+   is never actually off-screen, and skipping it cost 0.209 CLS. */
+#upcoming{contain-intrinsic-size:auto 700px;content-visibility:auto}
+</style>
+
+<!-- ════════════════════════════════════════════════════════════════════
+     PRE-PAINT HINTS — runs before the first paint on purpose.
+     Two synchronous localStorage reads (~0.1 ms). Both have to happen before
+     anything is painted to be worth doing at all, so they cannot be deferred.
+     ════════════════════════════════════════════════════════════════════ -->
+<script>
+(function () {
+  var d = document.documentElement;
+
+  // 1) CLS: reserve the Continue Watching row before first paint if this visitor
+  //    has one. Key must stay in step with CW_KEY in moviezone.js.
+  try {
+    var cw = localStorage.getItem('mz_continue_watching');
+    if (cw && cw !== '[]' && JSON.parse(cw).length) d.classList.add('mz-has-cw');
+  } catch (e) {}
+
+  // 2) LCP: the hero backdrop URL is only knowable after the bundle parses AND
+  //    the TMDB response lands, so on a cold load the browser cannot start that
+  //    image until very late. buildCarousel() remembers the URL it used; if the
+  //    visitor was here recently, start the same request now — at the top of
+  //    <head>, before the bundles. TMDB's trending list turns over roughly daily,
+  //    so a 6 h TTL keeps the hit rate high; a miss costs one unused image
+  //    request, and the service worker usually serves it from cache anyway.
+  //    Skipped entirely on metered/slow links where a wrong guess costs the most.
+  try {
+    var c = navigator.connection || {};
+    if (c.saveData || /^[23]g/.test(c.effectiveType || '')) return;
+    var h = JSON.parse(localStorage.getItem('mz_hero_lcp') || 'null');
+    if (h && h.u && Date.now() - h.t < 216e5 && /^https:\/\/image\.tmdb\.org\//.test(h.u)) {
+      var l = document.createElement('link');
+      l.rel = 'preload'; l.as = 'image'; l.href = h.u; l.fetchPriority = 'high';
+      document.head.appendChild(l);
+    }
+  } catch (e) {}
+})();
+</script>
+
+<!-- ════════════════════════════════════════════════════════════════════
+     DATADOG RUM — async loader.
+     This used to be a plain <script src> at the very top of a duplicated
+     <head>, which meant a third-party, cross-origin, PARSER-BLOCKING request
+     sat in front of the stylesheet, the fonts and the bundles. Nothing on the
+     page could be discovered until Datadog's CDN answered, and the RUM agent's
+     own initialisation ran on the main thread before first paint — it was
+     measuring an LCP/INP that it was itself inflating.
+
+     The official async snippet queues init() until the agent loads, so the
+     document never waits on it. It is placed at the end of <head> so the
+     request is issued after the resources that actually render the page.
+
+     sessionReplaySampleRate dropped 20 -> 10: replay instruments DOM mutations,
+     and this page mutates heavily while rendering rails, so it is the most
+     expensive RUM feature on INP. 10% is still plenty of sessions to debug from.
+     ════════════════════════════════════════════════════════════════════ -->
+<script>
+(function (h, o, u, n, d) {
+  h = h[d] = h[d] || { q: [], onReady: function (c) { h.q.push(c); } };
+  d = o.createElement(u); d.async = 1; d.src = n;
+  n = o.getElementsByTagName(u)[0]; n.parentNode.insertBefore(d, n);
+})(window, document, 'script', 'https://www.datadoghq-browser-agent.com/us1/v5/datadog-rum.js', 'DD_RUM');
+window.DD_RUM.onReady(function () {
+  window.DD_RUM.init({
+    applicationId: '2d98ba56-1b76-4b3e-9591-e6964fe2733c',
+    clientToken: 'pub4dbf2c26e71ae61cfd49507556566886',
+    site: 'us5.datadoghq.com',
+    service: 'moviezone',
+    env: 'production',
+    version: '1.0.0',
+    sessionSampleRate: 100,
+    sessionReplaySampleRate: 10,
+    defaultPrivacyLevel: 'mask-user-input',
+    trackResources: true,
+    trackUserInteractions: true,
+    trackLongTasks: true
+  });
+});
+</script>
 </head>
 <body>
 
@@ -532,8 +679,14 @@
 </section>
 
 
-<!-- CONTINUE WATCHING -->
-<section id="continue-watching" class="continue-watching-section" style="display:none;">
+<!-- CONTINUE WATCHING
+     No inline style="display:none" here any more: it beat every stylesheet rule,
+     so the section could only be revealed from JS on DOMContentLoaded — after
+     first paint — and that reveal shifted the entire page down. Hiding is now
+     done in mz-cwv-critical, and the pre-paint head script un-hides it for
+     visitors who have a list. renderContinueWatching() still has the final say
+     via element.style, which now correctly overrides the stylesheet. -->
+<section id="continue-watching" class="continue-watching-section">
   <div class="section-header">
     <div class="section-title">
       <div class="title-line"></div>
@@ -709,7 +862,7 @@
     
     <!-- Backdrop Hero -->
     <div class="ud-hero">
-      <img id="udBackdrop" src="" alt="Movie backdrop" class="ud-backdrop-img" loading="lazy" decoding="async">
+      <img id="udBackdrop" src="" alt="Movie backdrop" class="ud-backdrop-img" width="1280" height="720" loading="lazy" decoding="async">
       <div class="ud-hero-gradient"></div>
       <div class="ud-countdown-box" id="udCountdown"></div>
     </div>
@@ -717,7 +870,7 @@
     <!-- Main Content -->
     <div class="ud-content">
       <div class="ud-top-row">
-        <img id="udPoster" src="" alt="Movie poster" class="ud-poster" loading="lazy" decoding="async">
+        <img id="udPoster" src="" alt="Movie poster" class="ud-poster" width="342" height="513" loading="lazy" decoding="async">
         <div class="ud-info">
           <h2 class="ud-title" id="udTitle"></h2>
           <div class="ud-tagline" id="udTagline"></div>
@@ -1086,30 +1239,36 @@
 
 <script src="tv-mode.min.js?v=1.3" defer></script>
 <script src="search-engine.min.js?v=2.1" defer></script>
-<script src="moviezone.min.js?v=7.5" defer></script>
+<script src="moviezone.min.js?v=7.6" defer></script>
 <script src="pwa-install.min.js?v=1.7" defer></script>
 <script>
-// INSTANT PERFORMANCE: Remove loader faster + mark page interactive
+// ── Loader dismissal ─────────────────────────────────────────────────────────
+// Deferred scripts run before DOMContentLoaded, so by the time this fires the
+// app shell is fully wired and the hero has its reserved 95vh box. There is
+// nothing left for the overlay to hide.
+//
+// The old version only did this `if (isFastNet)`. That was backwards: on a fast
+// link the loader barely mattered, while 2g/3g/save-data visitors — the ones
+// whose Core Web Vitals are actually poor — were held behind an opaque overlay
+// until the TMDB response landed *plus* another 400 ms timer in moviezone.js.
+// The gate is gone; every visitor now sees the shell as soon as it exists.
 document.addEventListener('DOMContentLoaded', () => {
-  // Reduce loader time for fast connections
-  const conn = navigator.connection || {};
-  const isFastNet = !conn.saveData && conn.effectiveType !== '2g' && conn.effectiveType !== '3g';
-  if (isFastNet) {
-    const loader = document.getElementById('mz-loader');
-    if (loader) setTimeout(() => loader.classList.add('loader-hidden'), 200);
-  }
-  // Mark page as loaded for CSS transitions
+  const loader = document.getElementById('mz-loader');
+  // One frame of delay lets the browser commit the shell paint first, so the
+  // fade-out reveals rendered chrome rather than an empty document.
+  if (loader) requestAnimationFrame(() => loader.classList.add('loader-hidden'));
   document.documentElement.style.setProperty('--page-loaded', '1');
 });
-// PRIORITY: Preload first visible images for instant LCP
-if ('requestIdleCallback' in window) {
-  requestIdleCallback(() => {
-    document.querySelectorAll('img[loading="lazy"]').forEach((img, i) => {
-      if (i < 4) img.loading = 'eager'; // First 4 images load immediately
-    });
-  });
-}
 
+// NOTE: a requestIdleCallback block used to walk img[loading="lazy"] and flip the
+// first four to loading="eager". It was removed, not replaced:
+//   * requestIdleCallback fires *after* the page is idle, by which point those
+//     four images have already been requested or are already on screen — the
+//     flip changed nothing except forcing extra attribute mutations and a style
+//     recalculation on the main thread.
+//   * The images that genuinely need priority are handled where they are built:
+//     the hero backdrop ships fetchpriority="high" and the first six grid
+//     posters are rendered with loading="eager" in moviezone.js.
 </script>
 
 <!-- Service worker registration is intentionally performed in the <head> PWA

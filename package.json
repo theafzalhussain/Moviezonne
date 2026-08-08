@@ -8,6 +8,7 @@
     "test": "node tv-mode.test.js && node tv-mode.browser.test.js && node pwa-assets.test.js && node asset-perf-check.js && node player-health.test.js && node seo-ssr.test.js && node carousel-fit-check.js && node cat-tabs.browser.test.js && node cat-tabs.mobile.browser.test.js && node all-feed-ranking.browser.test.js && node tmdb-e2e.js && node tmdb-stale.js && node ott-check.js && node ott-sections-check.js",
     "test:offline": "node tv-mode.test.js && node tv-mode.browser.test.js && node pwa-assets.test.js && node asset-perf-check.js && node player-health.test.js && node seo-ssr.test.js && node carousel-fit-check.js && node vercelignore-check.js",
     "test:perf": "node asset-perf-check.js && node player-health.test.js",
+    "test:cwv": "node cwv-check.js",
     "test:tv": "node tv-mode.test.js && node tv-mode.browser.test.js",
     "test:tabs": "node cat-tabs.browser.test.js && node cat-tabs.mobile.browser.test.js",
     "test:tabs:mobile": "node cat-tabs.mobile.browser.test.js",
@@ -34,6 +35,7 @@
   "homepage": "https://github.com/theafzalhussain/Moviezonne#readme",
   "dependencies": {
     "@datadog/browser-rum": "^7.8.0",
+    "@sentry/node": "^10.69.0",
     "axios": "1.9.0",
     "axios-retry": "4.5.0",
     "clean-css-cli": "^4.0.12",

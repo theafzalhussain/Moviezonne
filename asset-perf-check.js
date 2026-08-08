@@ -30,6 +30,15 @@ const sw = fs.readFileSync('sw.js', 'utf8');
 const js = fs.readFileSync('moviezone.js', 'utf8');
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 
+/*  Several checks below scan for markup patterns. Both files document their own
+ *  markup in prose, so a naive scan matches the explanation instead of the code.
+ *  These stripped copies exist purely so the guards look at what ships.
+ */
+const htmlCode = html.replace(/<!--[\s\S]*?-->/g, '');
+const jsCode = js
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/^[ \t]*\/\/.*$/gm, '');
+
 let pass = 0;
 let fail = 0;
 const failures = [];
@@ -192,8 +201,29 @@ check('sw.js precaches no unminified bundle', () => {
 check('cache version was bumped past the pre-minification build', () => {
   const m = sw.match(/const CACHE_NAME = 'moviezone-v(\d+)'/);
   assert.ok(m, 'CACHE_NAME not found');
-  assert.ok(Number(m[1]) >= 58,
-    'CACHE_NAME is v' + m[1] + '; the .min switch needs a bump above v57 or clients keep the old shell');
+  assert.ok(Number(m[1]) >= 59,
+    'CACHE_NAME is v' + m[1] + '; the caching-strategy rewrite needs a bump above v58 or clients keep the old shell');
+});
+
+check('TMDB images are cached instead of re-downloaded every visit', () => {
+  assert.ok(/image\.tmdb\.org/.test(sw),
+    'sw.js has no TMDB image branch. The generic path only stores response.type === "basic", and a TMDB image is cross-origin, so every repeat visit re-downloaded the hero backdrop - the LCP element.');
+  assert.ok(/IMAGE_CACHE/.test(sw), 'no dedicated image cache');
+  assert.ok(/IMAGE_CACHE_MAX_ENTRIES/.test(sw), 'the image cache is unbounded');
+  assert.ok(/key !== IMAGE_CACHE/.test(sw),
+    'activate() deletes the image cache on every shell bump, which defeats the point of having it');
+});
+
+check('versioned bundles are served cache-first', () => {
+  assert.ok(/isVersionedAsset/.test(sw),
+    'scripts and styles are network-first again: that is a full round trip in front of two render-blocking resources on every repeat visit, even though ?v= makes each URL immutable');
+});
+
+check('self-hosted fonts are precached', () => {
+  ['/fonts/outfit-latin-var.woff2', '/fonts/bebas-neue-latin-400.woff2'].forEach((f) => {
+    assert.ok(sw.includes("'" + f + "'"),
+      f + ' is on the critical render path but not precached - an offline visit would reflow to a system face');
+  });
 });
 
 console.log('\n-- image weight ' + '-'.repeat(45));
@@ -207,9 +237,82 @@ check('backdrops never request TMDB "original"', () => {
   assert.ok(/w1280/.test(fn), 'w1280 ceiling missing');
 });
 
-check('hero LCP preload declares high fetch priority', () => {
-  assert.ok(/preload\.fetchPriority\s*=\s*'high'/.test(js),
-    'the hero preload competes at default priority with grid posters');
+check('the hero backdrop is a real high-priority <img>, not a background', () => {
+  /*  This used to assert `preload.fetchPriority = 'high'` on a <link> that
+   *  buildCarousel injected. That mechanism is gone, and deliberately so: the
+   *  link was appended from JS — after the bundle parsed and after the TMDB
+   *  response resolved — so it raced nothing. The property it guarded (the LCP
+   *  element wins the priority race) is now achieved by rendering slide 0's
+   *  backdrop as an <img fetchpriority="high">, which the browser requests at
+   *  Highest priority the moment it is inserted.
+   */
+  const start = jsCode.indexOf('function buildCarousel');
+  assert.ok(start !== -1, 'buildCarousel not found');
+  const fn = jsCode.slice(start, jsCode.indexOf('\nfunction ensureSlideBg', start));
+
+  assert.ok(/class="slide-bg-img"[\s\S]{0,200}?fetchpriority="high"/.test(fn),
+    'slide 0 is not rendered as an <img fetchpriority="high"> - the LCP element is back to being a low-priority CSS background');
+  assert.ok(!/style="background-image:url/.test(fn),
+    'slide 0 is setting background-image again; a background is not discoverable by the preload scanner');
+  assert.ok(/localStorage\.setItem\('mz_hero_lcp'/.test(fn),
+    'the hero URL is no longer remembered, so the pre-paint LCP hint in index.html can never fire');
+});
+
+check('the pre-paint hint in index.html reads the hero URL back', () => {
+  assert.ok(/localStorage\.getItem\('mz_hero_lcp'\)/.test(html),
+    'index.html does not consume mz_hero_lcp - returning visitors lose the early LCP request');
+  assert.ok(/l\.fetchPriority = 'high'/.test(html),
+    'the hero hint is injected without high fetch priority');
+});
+
+check('grid posters do not outbid the hero for bandwidth', () => {
+  assert.ok(/fetchpriority="low"/.test(js),
+    'grid posters are back at default priority; #hero is 95vh so none of them are above the fold, yet six eager ones competed with the LCP image');
+});
+
+check('no third-party script blocks the parser', () => {
+  const blocking = [...html.matchAll(/<script\s+src="(https?:\/\/[^"]+)"(?![^>]*\b(?:async|defer)\b)/g)]
+    .map((m) => m[1]);
+  assert.strictEqual(blocking.length, 0,
+    'parser-blocking cross-origin script(s): ' + blocking.join(', '));
+});
+
+check('there is exactly one <head>', () => {
+  // Anchored to the line start: prose inside inline <script> comments also says
+  // "<head>", and stripping HTML comments alone does not remove those.
+  const n = (htmlCode.match(/^<head>\s*$/gm) || []).length;
+  assert.strictEqual(n, 1, 'found ' + n + ' <head> tags - the nested one made every tag inside it invalid');
+});
+
+check('fonts are self-hosted, not fetched from Google', () => {
+  assert.ok(!/fonts\.googleapis\.com/.test(html),
+    'the Google Fonts stylesheet is back: that is DNS+TLS -> CSS -> DNS+TLS -> woff2 before a glyph can paint');
+  assert.ok(/<link rel="preload" href="\/fonts\/[\w.-]+\.woff2" as="font" type="font\/woff2" crossorigin>/.test(html),
+    'no woff2 preload - the face will not be ready for the first paint and the swap will shift .slide-title');
+  ['outfit-latin-var.woff2', 'bebas-neue-latin-400.woff2'].forEach((f) => {
+    assert.ok(fs.existsSync(path.join(__dirname, 'fonts', f)), 'fonts/' + f + ' is missing on disk');
+  });
+});
+
+check('Continue Watching reserves its space before first paint', () => {
+  assert.ok(!/id="continue-watching"[^>]*style="display:none/.test(html),
+    'the inline display:none is back; it outranks every stylesheet, so the section can only be revealed after first paint - a ~380px shift');
+  assert.ok(/html\.mz-has-cw #continue-watching\{display:block\}/.test(html),
+    'no class-driven reveal rule');
+  assert.ok(/localStorage\.getItem\('mz_continue_watching'\)/.test(html),
+    'nothing sets mz-has-cw before paint, so the reservation never applies');
+});
+
+check('every TMDB image ships intrinsic dimensions', () => {
+  const offenders = [];
+  for (const tag of jsCode.match(/<img[^>]*?(?:>|decoding=)/g) || []) {
+    // slide-bg-img is sized entirely by its absolutely-positioned parent, so
+    // width/height attributes would describe nothing.
+    if (/width=/.test(tag) || /slide-bg-img/.test(tag)) continue;
+    offenders.push(tag.replace(/\s+/g, ' ').slice(0, 70));
+  }
+  assert.strictEqual(offenders.length, 0,
+    'images without width/height reserve no space: ' + offenders.join(' | '));
 });
 
 check('grid posters ship a srcset so the browser can pick a size', () => {

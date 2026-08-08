@@ -115,7 +115,25 @@ perfStyle.textContent = `
   .movie-card, .upcoming-card { content-visibility: auto; contain-intrinsic-size: 180px 320px; contain: layout style paint; }
   .carousel-slide { will-change: transform, opacity; }
   img { content-visibility: auto; }
-  #movies-section, #upcoming { content-visibility: auto; contain-intrinsic-size: 1000px; }
+  /*  #movies-section was in this rule and it was the single largest CLS source on
+   *  the page: 0.209, measured (cwv-check.js).
+   *
+   *  content-visibility:auto tells the browser to skip the subtree's layout while
+   *  it is off-screen and to pretend it is contain-intrinsic-size tall instead.
+   *  #movies-section is #hero's immediate neighbour, so it enters the viewport on
+   *  the first flick every single time - the skip buys nothing. What it does buy
+   *  is a guaranteed shift: the subtree (including .main-content::before, the
+   *  decorative panel that is sized by its parent) gets no box at all until the
+   *  section is un-skipped, and Chrome books that first layout as a 644px move.
+   *  The flat 1000px placeholder made it worse by being wrong in both directions.
+   *
+   *  #upcoming keeps the optimisation - it really is far down the page - but its
+   *  declaration now lives in the mz-cwv-critical block in index.html, using
+   *  "contain-intrinsic-size: auto 700px" so the browser remembers the size it
+   *  last measured instead of re-guessing. Declaring it here as well would win on
+   *  cascade order (this sheet is injected after the document's own styles) and
+   *  silently undo that.
+   */
   
   /* === MOBILE / SMALL SCREEN OPTIMIZATION (< 768px) === */
   @media (max-width: 768px) {
@@ -264,42 +282,67 @@ if (!isMzTV() && !isTouchOnly && !isMobile) {
   
   let cursorIdleTimer;
   let isCursorMoving = true;
+  let cursorRafId = 0;
 
+  /*  INP — the mousemove handler used to write cursorGlow.style.transform and
+   *  cursorDot.style.transform directly. Every pointer move (and a mouse emits
+   *  them far faster than 60 Hz) therefore dirtied style inside the input task,
+   *  so any interaction that landed in the same frame queued behind that work.
+   *
+   *  The handler now only records coordinates - the writes happen once per frame
+   *  in animateCursorRing, which already existed and already ran on rAF. Same
+   *  pixels, one style write per frame instead of one per event.
+   */
   window.addEventListener('mousemove', (e) => {
     mouseX = e.clientX;
     mouseY = e.clientY;
     isCursorMoving = true;
     clearTimeout(cursorIdleTimer);
-    cursorIdleTimer = setTimeout(() => isCursorMoving = false, 150);
-    
-    if (cursorGlow) {
-      cursorGlow.style.transform = `translate3d(${mouseX}px, ${mouseY}px, 0) translate(-50%, -50%)`;
-    }
-    if (cursorDot) {
-      cursorDot.style.transform = `translate3d(${mouseX}px, ${mouseY}px, 0) translate(-50%, -50%)`;
-    }
-  });
+    cursorIdleTimer = setTimeout(() => { isCursorMoving = false; }, 150);
+    startCursorLoop();
+  }, { passive: true });
 
   // Smooth 3D Trailing Animation for the Ring
+  /*  This loop used to call requestAnimationFrame unconditionally, forever: on
+   *  every desktop visit the browser ran a main-thread task every frame for the
+   *  whole session, even with the mouse parked. It now parks itself once the ring
+   *  has caught up with the pointer, and mousemove restarts it. Idle desktop
+   *  sessions go from 60 tasks/second to zero, which is main-thread budget that
+   *  interactions get to use instead.
+   */
   function animateCursorRing() {
-    if (isCursorMoving || Math.abs(mouseX - ringX) > 0.1 || Math.abs(mouseY - ringY) > 0.1) {
+    const settled = !isCursorMoving &&
+      Math.abs(mouseX - ringX) <= 0.1 && Math.abs(mouseY - ringY) <= 0.1;
+
+    if (!settled) {
       // Super Fast Cursor Speed (0.45 is 2.5x faster than 0.18)
-      ringX += (mouseX - ringX) * 0.45; 
+      ringX += (mouseX - ringX) * 0.45;
       ringY += (mouseY - ringY) * 0.45;
-      
+
       if (cursorRing) {
         const velX = mouseX - ringX;
         const velY = mouseY - ringY;
-        const rotateX = -velY * 0.8; 
+        const rotateX = -velY * 0.8;
         const rotateY = velX * 0.8;
-        
+
         // Use pure hardware-accelerated transform instead of top/left
         cursorRing.style.transform = `translate3d(${ringX}px, ${ringY}px, 0) translate(-50%, -50%) perspective(500px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateZ(5px)`;
       }
     }
-    requestAnimationFrame(animateCursorRing);
+
+    // Batched pointer-follow writes, moved here out of the mousemove handler.
+    const follow = `translate3d(${mouseX}px, ${mouseY}px, 0) translate(-50%, -50%)`;
+    if (cursorGlow) cursorGlow.style.transform = follow;
+    if (cursorDot) cursorDot.style.transform = follow;
+
+    if (settled) { cursorRafId = 0; return; }
+    cursorRafId = requestAnimationFrame(animateCursorRing);
   }
-  animateCursorRing();
+
+  function startCursorLoop() {
+    if (!cursorRafId) cursorRafId = requestAnimationFrame(animateCursorRing);
+  }
+  startCursorLoop();
 
   // Interactive Hover Glow Effects
   const interactiveElements = 'a, button, .movie-card, .upcoming-card, .thumb, .cat-tab, input, select, .player-chip, .nav-logo';
@@ -791,11 +834,13 @@ async function init() {
       else loadUpcoming();
     }, 800);
 
-    // 4. Hide Cinematic Loader as soon as the basic structure is ready
-    setTimeout(() => {
-      const loader = document.getElementById('mz-loader');
-      if (loader) loader.classList.add('loader-hidden');
-    }, 400);
+    // 4. Safety net only. index.html already drops the loader on DOMContentLoaded,
+    //    which happens before this await settles, so on a normal load this is a
+    //    no-op. It stays for the case where the shell script was skipped (older
+    //    TV browsers) - but the 400 ms setTimeout that used to wrap it is gone:
+    //    it delayed the reveal by 400 ms plus the 0.8 s fade for no benefit.
+    const loader = document.getElementById('mz-loader');
+    if (loader) loader.classList.add('loader-hidden');
 
   } catch (err) {
     console.error("Init Error:", err);
@@ -1544,25 +1589,45 @@ function buildCarousel() {
     const slide = document.createElement('div');
     slide.className = 'carousel-slide' + (i === 0 ? ' active' : '');
     const bgUrl = m.backdrop_path ? getResponsiveBackdrop(m.backdrop_path) : `https://image.tmdb.org/t/p/w780${m.poster_path}`;
-    
-    // Preload the very first Large Image for blazing fast Initial Render (LCP Optimization)
+
+    /*  LCP — slide 0's backdrop IS this page's Largest Contentful Paint element.
+     *
+     *  It used to be a CSS background-image on .slide-bg, helped along by a
+     *  <link rel="preload"> that this loop injected. Both parts were weak:
+     *
+     *    - A background-image is invisible to the preload scanner. The browser
+     *      only learns the URL after it has resolved style for the injected
+     *      markup, and it then fetches it at Low priority, behind every poster
+     *      the grid is requesting in the same tick.
+     *    - The preload link was appended from JS, i.e. after the bundle parsed
+     *      AND after the TMDB response resolved. By then the same element was
+     *      about to request the image anyway, so the "preload" won no time at
+     *      all - it only added a duplicate-priority entry.
+     *
+     *  A real <img fetchpriority="high"> is requested at Highest priority the
+     *  moment the node is inserted, and is a first-class LCP candidate rather
+     *  than a background decoration. It is nested INSIDE .slide-bg so it
+     *  inherits the existing inset/scale/filter - the Ken-Burns zoom and the
+     *  brightness grade are unchanged (see .slide-bg-img in index.html).
+     *
+     *  Slides 1..n keep data-bg and stay lazy via ensureSlideBg(); only slide 0
+     *  is on the critical path.
+     */
+    const heroImg = i === 0
+      ? '<img class="slide-bg-img" src="' + bgUrl + '" alt="" fetchpriority="high" decoding="async" draggable="false">'
+      : '';
+
     if (i === 0) {
-      const preload = document.createElement('link');
-      preload.rel = 'preload';
-      preload.as = 'image';
-      preload.href = bgUrl;
-      // Without this the preload competes at default priority with the poster
-      // images the grid is requesting at the same moment. This IS the LCP
-      // element, so it should win that race.
-      preload.fetchPriority = 'high';
-      document.head.appendChild(preload);
+      // Remember the URL so the NEXT visit can start this exact request from the
+      // pre-paint hint in <head>, before this bundle has even been parsed.
+      // Read back by the mz_hero_lcp block in index.html (6 h TTL enforced there).
+      try {
+        localStorage.setItem('mz_hero_lcp', JSON.stringify({ u: bgUrl, t: Date.now() }));
+      } catch (e) { /* quota / private mode - the hint is optional */ }
     }
 
-    // Performance: only load the FIRST slide's background eagerly.
-    // Remaining slides are lazy-loaded just-in-time (current + next) via ensureSlideBg()
-    // so the page doesn't have to download 6 large images on first paint.
     slide.innerHTML =
-      '<div class="slide-bg" data-bg="'+bgUrl+'"'+(i === 0 ? ' style="background-image:url(\''+bgUrl+'\')"' : '')+'></div>' +
+      '<div class="slide-bg"' + (i === 0 ? '' : ' data-bg="' + bgUrl + '"') + '>' + heroImg + '</div>' +
       '<div class="slide-gradient"></div>' +
       '<div class="slide-content">' +
         '<div class="slide-badge">'+(m._badge || '🔥 TRENDING NOW')+'</div>' +
@@ -1610,8 +1675,25 @@ function buildCarousel() {
   dots.appendChild(dotsFrag);
   thumbs.appendChild(thumbsFrag);
  
-  // Preload the next slide's background while the user is still looking at slide 0
-  if (carouselMovies.length > 1) ensureSlideBg(1 % carouselMovies.length);
+  // Slide 1's backdrop used to be requested right here, in the same tick as the
+  // hero. Two full-width backdrops racing each other means the one the user can
+  // actually see - the LCP element - gets half the bandwidth for nothing, since
+  // the next slide is not needed until the auto-slide timer fires seconds later.
+  // Wait for the hero to finish, then warm slide 1 while the main thread is idle.
+  if (carouselMovies.length > 1) {
+    const warmNext = () => {
+      const run = () => ensureSlideBg(1 % carouselMovies.length);
+      if ('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 2000 });
+      else setTimeout(run, 600);
+    };
+    const heroImg = track.querySelector('.slide-bg-img');
+    if (heroImg && !heroImg.complete) {
+      heroImg.addEventListener('load', warmNext, { once: true });
+      heroImg.addEventListener('error', warmNext, { once: true });
+    } else {
+      warmNext();
+    }
+  }
  
   startAutoSlide();
 }
@@ -3393,7 +3475,22 @@ function renderMovies(movies, append = false) {  const grid = document.getElemen
         // `i` har batch me 0 se restart hota hai, isliye `!append` bhi check karna
         // zaroori hai — warna har "load more" batch 6 aur eager images add kar deta.
         // Sirf PEHLE render ke pehle 6 cards eager (LCP), baaki sab lazy.
-        `<img src="${IMG}${m.poster_path}" alt="${escapeHTML(m.title||'')}" width="171" height="256" loading="${(!append && i < 6) ? 'eager' : 'lazy'}" decoding="async">` +
+        // A single w342 src made every device download the same bytes: ~2.6x the
+        // pixels a 1x desktop card displays, and slightly soft on a 3x phone.
+        // The sibling renderer further down already shipped a srcset; this one
+        // did not, so the busiest grid on the page was the one paying for it.
+        `<img src="${IMG}${m.poster_path}"` +
+          ` srcset="https://image.tmdb.org/t/p/w185${m.poster_path} 185w,` +
+          ` https://image.tmdb.org/t/p/w342${m.poster_path} 342w,` +
+          ` https://image.tmdb.org/t/p/w500${m.poster_path} 500w"` +
+          ` sizes="(max-width: 600px) 45vw, (max-width: 1200px) 200px, 230px"` +
+          ` alt="${escapeHTML(m.title||'')}" width="171" height="256"` +
+          // The first six stay eager (unchanged), but they are explicitly LOW
+          // priority: #hero is 95vh tall, so no grid poster is above the fold on
+          // any viewport, and at default priority six of them were competing with
+          // the hero backdrop - the actual LCP element - for the same connection.
+          ` loading="${(!append && i < 6) ? 'eager' : 'lazy'}"` +
+          ` fetchpriority="low" decoding="async">` +
         '<div class="card-quality '+(qualClass||'')+'">'+qual+'</div>' +
         (isHot ? '<div class="card-hot">HOT</div>' : '') +
         freshBadge +
@@ -4066,7 +4163,7 @@ async function openUpcomingDetail(id, type, activationEvent) {
           ? 'https://image.tmdb.org/t/p/w185' + person.profile_path 
           : 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2280%22 height=%22120%22><rect width=%2280%22 height=%22120%22 fill=%22%23222%22/><text x=%2240%22 y=%2265%22 fill=%22%23555%22 text-anchor=%22middle%22 font-size=%2224%22>👤</text></svg>';
         return '<div class="ud-cast-card">' +
-          '<img src="' + imgSrc + '" alt="' + escapeHTML(person.name) + '" loading="lazy" decoding="async">' +
+          '<img src="' + imgSrc + '" alt="' + escapeHTML(person.name) + '" width="80" height="120" loading="lazy" decoding="async">' +
           '<div class="ud-cast-name">' + escapeHTML(person.name) + '</div>' +
           '<div class="ud-cast-char">' + escapeHTML(person.character || '') + '</div>' +
         '</div>';
@@ -5129,7 +5226,7 @@ async function openModal(id, type = 'movie', activationEvent) {
             ? 'https://image.tmdb.org/t/p/w185'+person.profile_path 
             : 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2248%22 height=%2248%22><rect width=%2248%22 height=%2248%22 rx=%2224%22 fill=%22%23222%22/><text x=%2224%22 y=%2230%22 fill=%22%23555%22 text-anchor=%22middle%22 font-size=%2216%22>👤</text></svg>';
           metaHTML += '<div class="modal-cast-chip" title="'+escapeHTML(person.name)+' as '+escapeHTML(person.character||'')+'">' +
-            '<img src="'+imgSrc+'" alt="'+escapeHTML(person.name)+'" loading="lazy" decoding="async">' +
+            '<img src="'+imgSrc+'" alt="'+escapeHTML(person.name)+'" width="48" height="48" loading="lazy" decoding="async">' +
             '<div class="modal-cast-info"><span class="modal-cast-name">'+escapeHTML(person.name)+'</span><span class="modal-cast-char">'+escapeHTML(person.character||'')+'</span></div>' +
           '</div>';
         });
@@ -5141,7 +5238,7 @@ async function openModal(id, type = 'movie', activationEvent) {
         metaHTML += '<div class="modal-production-row">';
         details.production_companies.slice(0, 4).forEach(company => {
           if (company.logo_path) {
-            metaHTML += '<div class="modal-prod-chip"><img src="https://image.tmdb.org/t/p/w92'+company.logo_path+'" alt="'+escapeHTML(company.name)+'" title="'+escapeHTML(company.name)+'"></div>';
+            metaHTML += '<div class="modal-prod-chip"><img src="https://image.tmdb.org/t/p/w92'+company.logo_path+'" alt="'+escapeHTML(company.name)+'" title="'+escapeHTML(company.name)+'" width="92" height="61" loading="lazy" decoding="async"></div>';
           } else {
             metaHTML += '<div class="modal-prod-chip modal-prod-text">'+escapeHTML(company.name)+'</div>';
           }
@@ -5259,7 +5356,7 @@ async function openModal(id, type = 'movie', activationEvent) {
                   previewDiv.style.display = 'flex';
                   const imgSrc = ep.still_path ? IMG + ep.still_path : (details.backdrop_path ? IMG + details.backdrop_path : '');
                   previewDiv.innerHTML = `
-                  <img src="${imgSrc}" style="width:160px; height:90px; object-fit:cover; flex-shrink:0; border-right:1px solid rgba(255,255,255,0.1);" alt="Ep Thumbnail" loading="lazy">
+                  <img src="${imgSrc}" style="width:160px; height:90px; object-fit:cover; flex-shrink:0; border-right:1px solid rgba(255,255,255,0.1);" alt="Ep Thumbnail" width="160" height="90" loading="lazy" decoding="async">
                   <div style="padding:10px 14px; display:flex; flex-direction:column; justify-content:center;">
                     <strong style="font-size:0.95rem; color:var(--gold); display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; text-shadow: 0 2px 4px rgba(0,0,0,0.5);">Ep ${ep.episode_number}: ${escapeHTML(ep.name)}</strong>
                     <span style="font-size:0.8rem; color:rgba(255,255,255,0.7); margin-top:4px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; line-height:1.4;">${escapeHTML(ep.overview || 'No description available.')}</span>
@@ -7352,7 +7449,7 @@ init();
       const timeAgo = getTimeAgo(item.timestamp);
       return `
         <div class="cw-card" onclick="openCWMovie(${item.id}, '${item.media_type}', event)" tabindex="0">
-          <img class="cw-card-img" src="${img}" alt="${item.title}" loading="lazy">
+          <img class="cw-card-img" src="${img}" alt="${escapeHTML(item.title || '')}" width="280" height="158" loading="lazy" decoding="async">
           <div class="cw-play-icon">
             <svg viewBox="0 0 24 24" width="22" height="22" fill="#000"><path d="M8 5v14l11-7z"/></svg>
           </div>
@@ -7947,7 +8044,7 @@ window.handleNotifyMe = async function(btn) {
       // stride keeps neighbouring tiles from being the same franchise
       const path = pool[(i * 7) % pool.length];
       html += '<div class="ch-mosaic-tile"><img src="https://image.tmdb.org/t/p/w185' + path +
-              '" alt="" loading="lazy" decoding="async" data-ch-reveal></div>';
+              '" alt="" width="185" height="278" loading="lazy" decoding="async" data-ch-reveal></div>';
     }
     grid.innerHTML = html;
     attachImageReveal(grid);
@@ -7988,11 +8085,11 @@ window.handleNotifyMe = async function(btn) {
             postersEl.innerHTML =
               '<img src="https://image.tmdb.org/t/p/w780' + heroItem.backdrop_path + '"' +
               ' srcset="https://image.tmdb.org/t/p/w500' + heroItem.backdrop_path + ' 500w, https://image.tmdb.org/t/p/w780' + heroItem.backdrop_path + ' 780w"' +
-              ' sizes="(max-width: 768px) 90vw, 420px" alt="" loading="lazy" decoding="async"' +
+              ' sizes="(max-width: 768px) 90vw, 420px" alt="" width="780" height="439" loading="lazy" decoding="async"' +
               ' class="ch-card-backdrop" data-ch-reveal>';
           } else if (allItems.length > 0) {
             postersEl.innerHTML = allItems.slice(0, 3).map(m =>
-              '<img src="' + IMG + m.poster_path + '" alt="" loading="lazy" decoding="async" data-ch-reveal>'
+              '<img src="' + IMG + m.poster_path + '" alt="" width="342" height="513" loading="lazy" decoding="async" data-ch-reveal>'
             ).join('');
           } else {
             postersEl.innerHTML = '<div class="ch-card-empty">Coming soon</div>';
@@ -8079,7 +8176,7 @@ window.handleNotifyMe = async function(btn) {
           '<div class="ch-movie-card ch-accent-' + universe.accent + '" data-id="' + item.id + '" data-type="' + item._type + '"' +
             ' role="button" tabindex="0" aria-label="' + escapeHTML(title) + ' (' + year + ')" style="--delay:' + delay + 'ms;animation-delay:' + delay + 'ms">' +
             '<div class="ch-movie-card-inner">' +
-              '<img src="' + IMG + item.poster_path + '" alt="' + escapeHTML(title) + ' poster" loading="lazy" decoding="async" data-ch-reveal>' +
+              '<img src="' + IMG + item.poster_path + '" alt="' + escapeHTML(title) + ' poster" width="342" height="513" loading="lazy" decoding="async" data-ch-reveal>' +
               '<span class="ch-movie-order">' + (idx + 1) + '</span>' +
               (isTVItem ? '<span class="ch-movie-type-badge ch-type-tv">TV</span>' : '<span class="ch-movie-type-badge ch-type-movie">MOVIE</span>') +
               (voteRaw > 0 ? '<div class="ch-movie-rating">★ ' + rating + '</div>' : '') +
@@ -8107,7 +8204,7 @@ window.handleNotifyMe = async function(btn) {
       '<div class="ch-detail-hero ch-accent-' + universe.accent + '">' +
         (heroItem.backdrop_path ? '<img src="https://image.tmdb.org/t/p/w1280' + heroItem.backdrop_path + '"' +
           ' srcset="https://image.tmdb.org/t/p/w780' + heroItem.backdrop_path + ' 780w, https://image.tmdb.org/t/p/w1280' + heroItem.backdrop_path + ' 1280w"' +
-          ' sizes="100vw" alt="" fetchpriority="high" decoding="async" class="ch-detail-hero-img">' : '') +
+          ' sizes="100vw" alt="" width="1280" height="720" fetchpriority="high" decoding="async" class="ch-detail-hero-img">' : '') +
         '<div class="ch-detail-hero-gradient"></div>' +
         '<div class="ch-detail-hero-particles"></div>' +
         '<div class="ch-detail-hero-content">' +

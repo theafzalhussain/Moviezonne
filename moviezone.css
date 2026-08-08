@@ -346,7 +346,11 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: opacity 0.8s var(--ease-smooth), visibility 0.8s;
+  /* 0.8s -> 0.35s. The overlay is dropped on DOMContentLoaded now, so this
+     transition is the last thing standing between the visitor and a page that is
+     already fully rendered underneath. Half a second of decorative fade there is
+     half a second of perceived load time. */
+  transition: opacity 0.35s var(--ease-smooth), visibility 0.35s;
 }
 
 #mz-loader.loader-hidden {
@@ -1709,6 +1713,33 @@ body.cursor-hover #cursor-dot {
   transition: transform 12s cubic-bezier(0.25, 0.46, 0.45, 0.94), filter 1s ease;
   filter: brightness(0.48) saturate(1.1);
   will-change: transform;
+}
+
+/*  LCP element.
+ *  Slide 0's backdrop is an <img fetchpriority="high"> nested inside .slide-bg
+ *  instead of a background-image on it. Reason: a background-image is invisible
+ *  to the preload scanner and is fetched at Low priority, and it is only a
+ *  "background" LCP candidate. An <img> is requested at Highest priority the
+ *  instant it is inserted.
+ *
+ *  Nesting rather than replacing is deliberate: the img inherits .slide-bg's
+ *  inset:-5%, scale() and brightness filter, so the Ken-Burns zoom and the
+ *  colour grade are byte-for-byte the same effect as before. These two
+ *  properties just reproduce what background-size:cover +
+ *  background-position:center top were doing.
+ *
+ *  Slides 1..n still use the background-image path via ensureSlideBg().
+ */
+.slide-bg-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+  border: 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .carousel-slide.active .slide-bg {

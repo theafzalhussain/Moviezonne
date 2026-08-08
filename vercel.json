@@ -15,6 +15,10 @@
       "use": "@vercel/static"
     },
     {
+      "src": "fonts/*.woff2",
+      "use": "@vercel/static"
+    },
+    {
       "src": "{search-engine,search-engine.min,moviezone,moviezone.min,pwa-install,pwa-install.min,sw,tv-mode,tv-mode.min}.js",
       "use": "@vercel/static"
     },
@@ -66,6 +70,19 @@
     }
   ],
   "headers": [
+    {
+      "source": "/fonts/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" },
+        { "key": "Access-Control-Allow-Origin", "value": "*" }
+      ]
+    },
+    {
+      "source": "/(.*).min.(js|css)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
     {
       "source": "/manifest.json",
       "headers": [

@@ -12,3 +12,41 @@
   to = "https://image.tmdb.org/:splat"
   status = 200
   force = true
+
+# Self-hosted fonts replaced the Google Fonts stylesheet. Google served these
+# with a one-year immutable policy; matching that here is what makes the swap a
+# net win on repeat visits instead of a new same-origin request every time.
+# The filenames are content-stable (a new font version gets a new name), so
+# immutable is accurate.
+[[headers]]
+  for = "/fonts/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+    Access-Control-Allow-Origin = "*"
+
+# The bundles are requested with ?v= and that version is bumped on every change,
+# so the URL is immutable. Without this they were revalidated on every visit,
+# which put a round trip in front of two render-blocking resources.
+[[headers]]
+  for = "/*.min.css"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/*.min.js"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# The service worker must never be cached, or clients cannot learn about a new
+# shell. index.html likewise has to stay fresh: it is the file that tells the
+# browser which ?v= of the immutable assets above to ask for.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+    Service-Worker-Allowed = "/"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
