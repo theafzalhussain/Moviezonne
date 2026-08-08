@@ -1,6 +1,27 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <head>
+    <!-- ✅ Yeh 2 lines add karo sabse pehle, line 3 ke baad -->
+    <script src="https://www.datadoghq-browser-agent.com/us1/v5/datadog-rum.js" type="text/javascript"></script>
+    <script>
+      window.DD_RUM && window.DD_RUM.init({
+        applicationId: '2d98ba56-1b76-4b3e-9591-e6964fe2733c',
+        clientToken: 'pub4dbf2c26e71ae61cfd49507556566886',
+        site: 'us5.datadoghq.com',
+        service: 'moviezone',
+        env: 'production',
+        version: '1.0.0',
+        sessionSampleRate: 100,
+        sessionReplaySampleRate: 20,
+        trackResources: true,
+        trackUserInteractions: true,
+        trackLongTasks: true,
+      });
+    </script>
+
+    <meta charset="UTF-8">
+    <!-- ... baaki sab waisa hi rahega -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
