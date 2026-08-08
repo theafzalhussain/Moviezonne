@@ -33,6 +33,7 @@
   },
   "homepage": "https://github.com/theafzalhussain/Moviezonne#readme",
   "dependencies": {
+    "@datadog/browser-rum": "^7.8.0",
     "axios": "1.9.0",
     "axios-retry": "4.5.0",
     "clean-css-cli": "^4.0.12",
@@ -45,8 +46,8 @@
     "mongodb": "^7.5.0",
     "node-cache": "^5.1.2",
     "pm2": "^7.0.3",
-    "undici": "^6.21.1",
     "terser": "5.49.0",
+    "undici": "^6.21.1",
     "web-push": "3.6.7"
   },
   "devDependencies": {

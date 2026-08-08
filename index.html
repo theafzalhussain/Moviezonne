@@ -5,25 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="color-scheme" content="dark">
-
-<!-- ════════════════════════════════════════════════════════════════════
-     CRITICAL RESOURCE DISCOVERY — deliberately the first thing in <head>
-     ════════════════════════════════════════════════════════════════════
-     The preload scanner reads <head> top to bottom, so nothing below this
-     point can start downloading until everything above it has been parsed.
-     These tags used to sit after the SEO meta and the ~9 KB JSON-LD graph,
-     which meant the browser chewed through 20.8 KB of markup before it even
-     knew the stylesheet existed — a completely idle network for that whole
-     stretch on a cold visit.
-
-     Only first-paint origins get a real preconnect (full DNS + TCP + TLS).
-     Playback providers are needed after a click, so they keep the cheap
-     dns-prefetch further down; moviezone.js upgrades them at idle and
-     openModal() warms the specific one the user will stream from.
-
-     `charset` and `viewport` stay above this block: charset must land inside
-     the first 1024 bytes, and viewport wants to be known before any layout.
-     -->
 <link rel="preconnect" href="https://image.tmdb.org" crossorigin>
 <link rel="dns-prefetch" href="https://image.tmdb.org">
 
