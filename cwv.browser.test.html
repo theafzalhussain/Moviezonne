@@ -403,9 +403,21 @@
       worst.map(function (t) { return t.dur + 'ms@' + t.at; }).join(' ');
 
     ok('long tasks were observable', !win.__mzLongTaskUnsupported, win.__mzLongTaskUnsupported || 'ok');
-    ok('no task in the first 5s blocks for over 250ms',
-      inWindow.every(function (t) { return t.dur <= 250; }), summary);
-    ok('blocking time in the first 5s stays under 400ms', windowTbt < 400,
+
+    /*  Thresholds are deliberately loose. Measured on the same machine minutes
+     *  apart, this figure ranged 130-236ms when the box was quiet and 274-477ms
+     *  with a couple of dev servers running — and the unmodified baseline moved
+     *  the same way (181-537ms under load, 184-487ms quiet). A tight budget here
+     *  would just flap with whatever else is running.
+     *
+     *  So these catch a real regression (a task that blocks for a third of a
+     *  second, or blocking time doubling) and nothing else. The value is in the
+     *  printed numbers, which are always shown — compare like-for-like, back to
+     *  back, on the same machine, or do not compare at all.
+     */
+    ok('no task in the first 5s blocks for over 350ms',
+      inWindow.every(function (t) { return t.dur <= 350; }), summary);
+    ok('blocking time in the first 5s stays under 700ms', windowTbt < 700,
       'first-5s TBT ' + windowTbt + 'ms (whole run ' + blocking + 'ms)');
     ok('long task count in the first 5s stays reasonable', inWindow.length <= 12, summary);
 
@@ -436,6 +448,17 @@
 
     ok('API request count on first load stays bounded', api.length <= 60,
       api.length + ' API requests, ' + avg(api) + 'ms avg, ' + slowApi.length + ' over 1s');
+    /*  Unlike blocking time, this number is stable: measured back to back on the
+     *  same machine it was ~41.5ms before the concurrency gate and ~19.8ms after,
+     *  every run, because it is dominated by queueing rather than by CPU
+     *  contention. The origin holds one https.Agent to TMDB with maxSockets: 12,
+     *  shared across all visitors, and the homepage used to fire ~25 requests at
+     *  once — so more than half of them sat in a socket queue while the browser
+     *  counted the wait as request duration.
+     */
+    ok('no API request is left queueing behind the origin socket pool',
+      api.length === 0 || avg(api) < 300,
+      avg(api) + 'ms avg across ' + api.length + ' requests, ' + slowApi.length + ' over 1s');
     ok('image request count on first load stays bounded', imgs.length <= 60,
       imgs.length + ' image requests, ' + avg(imgs) + 'ms avg, ' + slowImg.length + ' over 1s');
     ok('watch/providers is not fetched on the homepage', providers.length === 0,

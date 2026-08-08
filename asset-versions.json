@@ -1,0 +1,26 @@
+{
+  "moviezone.min.js": {
+    "version": "7.7",
+    "sha256": "7b70e25e470e1966"
+  },
+  "moviezone.min.css": {
+    "version": "5.6",
+    "sha256": "873afe79dfef1682"
+  },
+  "tv-mode.min.js": {
+    "version": "1.3",
+    "sha256": "680b17412899009c"
+  },
+  "tv-mode.min.css": {
+    "version": "1.2",
+    "sha256": "fdcaf332e96cdf38"
+  },
+  "search-engine.min.js": {
+    "version": "2.1",
+    "sha256": "9a5bf3774cab5ac4"
+  },
+  "pwa-install.min.js": {
+    "version": "1.8",
+    "sha256": "006fedc14adeee87"
+  }
+}
