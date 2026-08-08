@@ -461,6 +461,27 @@
       avg(api) + 'ms avg across ' + api.length + ' requests, ' + slowApi.length + ' over 1s');
     ok('image request count on first load stays bounded', imgs.length <= 60,
       imgs.length + ' image requests, ' + avg(imgs) + 'ms avg, ' + slowImg.length + ' over 1s');
+
+    /*  The number the report was actually about: how many poster requests are in
+     *  flight while the page is coming up. TMDB's measured first-byte is ~3.2s, so
+     *  every image started in this window is competing with the hero backdrop for
+     *  the same connections — and the hero is the LCP element.
+     *
+     *  Counted by request start time, not by total, because the deferred tail is
+     *  supposed to appear later. A total would hide the whole point of deferring.
+     */
+    var earlyImgs = imgs.filter(function (e) { return e.startTime < 3000; });
+    var earlyTmdb = earlyImgs.filter(function (e) { return /\/t\/p\/w\d+\//.test(e.name); });
+    ok('few poster requests compete with the hero during load',
+      earlyTmdb.length <= 20,
+      earlyTmdb.length + ' TMDB poster requests started in the first 3s (' +
+      imgs.length + ' images total over the whole run, ' +
+      doc.querySelectorAll('#movieGrid .movie-card').length + ' cards rendered)');
+
+    // The QR code must not reach a third party; the encoder is bundled.
+    var qrReq = res.filter(function (e) { return e.name.indexOf('qrserver.com') !== -1; });
+    ok('no QR code is fetched from a third-party API', qrReq.length === 0,
+      qrReq.length + ' requests to api.qrserver.com');
     ok('watch/providers is not fetched on the homepage', providers.length === 0,
       providers.length + ' watch/providers requests');
 

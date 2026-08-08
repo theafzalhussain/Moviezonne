@@ -3843,7 +3843,39 @@ async function loadMovies(cat, isLoadMore = false) {
   const newMovies = movies.filter(m => { const k = keyOf(m); if (existingIds.has(k)) return false; existingIds.add(k); return true; });
   allMovies = allMovies.concat(newMovies);
  
-  renderMovies(isLoadMore ? newMovies : (isFullViewMovies ? allMovies : allMovies.slice(0, 24)), isLoadMore);
+  /*  FIRST PAINT SHOWS 8 CARDS, NOT 24.
+   *
+   *  Reported symptom: "saari images ek saath load ho rahi hain", 117 images over
+   *  500ms, ~3.1s each. The posters were already lazy (all but the first six), but
+   *  lazy is not a promise of "later" — Chrome starts a lazy image once it is
+   *  within roughly 1250px of the viewport, and 24 cards sitting directly under a
+   *  95vh hero are all inside that margin. So effectively the whole first batch
+   *  was requested at once, competing with the hero backdrop, which IS the LCP
+   *  element.
+   *
+   *  Rendering fewer cards is not the same as fetching fewer titles: the data is
+   *  already in allMovies either way. What changes is how many <img> elements
+   *  exist while the page is coming up. The remaining cards are appended once the
+   *  main thread goes idle, so they are still in the DOM well before a user can
+   *  scroll to them — infinite scroll, the load-more paging and the ranking order
+   *  all see the same list they did before.
+   */
+  const FIRST_PAINT_CARDS = 8;
+
+  if (isLoadMore) {
+    renderMovies(newMovies, true);
+  } else if (isFullViewMovies) {
+    renderMovies(allMovies, false);
+  } else {
+    const head = allMovies.slice(0, FIRST_PAINT_CARDS);
+    const tail = allMovies.slice(FIRST_PAINT_CARDS, 24);
+    renderMovies(head, false);
+    if (tail.length) {
+      const paintTail = () => renderMovies(tail, true);
+      if ('requestIdleCallback' in window) requestIdleCallback(paintTail, { timeout: 1500 });
+      else setTimeout(paintTail, 300);
+    }
+  }
   
   const loadMoreBtn = document.getElementById('loadMoreMoviesBtn');
   if (loadMoreBtn) loadMoreBtn.style.display = 'none'; // Always hide button for infinite scroll
@@ -4001,24 +4033,28 @@ function renderMovies(movies, append = false) {
       '<div class="movie-card" tabindex="0" data-id="' + m.id + '" data-type="' + type + '"' +
         ' style="will-change:auto;animation-delay:' + ((i % 24) * 0.04) + 's">' +
         '<div class="card-poster">' +
-          // Only the first six of the FIRST render are eager; every later batch is
-          // lazy. `i` restarts at 0 per batch, which is why `!append` is checked
-          // too — otherwise every "load more" would add six more eager images.
-          //
           // A single w342 src made every device download the same bytes: ~2.6x the
           // pixels a 1x desktop card displays, and slightly soft on a 3x phone.
+          // The srcset lets the browser pick; sizes tells it the real slot width.
           `<img src="${IMG}${m.poster_path}"` +
             ` srcset="https://image.tmdb.org/t/p/w185${m.poster_path} 185w,` +
             ` https://image.tmdb.org/t/p/w342${m.poster_path} 342w,` +
             ` https://image.tmdb.org/t/p/w500${m.poster_path} 500w"` +
             ` sizes="(max-width: 600px) 45vw, (max-width: 1200px) 200px, 230px"` +
             ` alt="${escapeHTML(m.title||'')}" width="171" height="256"` +
-            // The first six stay eager, but explicitly LOW priority: #hero is 95vh
-            // tall, so no grid poster is above the fold on any viewport, and at
-            // default priority six of them competed with the hero backdrop — the
-            // actual LCP element — for the same connection.
-            ` loading="${(!append && i < 6) ? 'eager' : 'lazy'}"` +
-            ` fetchpriority="low" decoding="async">` +
+            /*  Every grid poster is lazy now, including the first row.
+             *
+             *  They used to be eager for the first six, justified as
+             *  "above-the-fold / LCP". That premise does not hold on this page:
+             *  #hero is 95vh tall, so no grid poster is above the fold on any
+             *  viewport. Those six were simply six immediate requests to
+             *  image.tmdb.org — measured first-byte ~3.2s — racing the hero
+             *  backdrop, which is the element LCP is actually scored on.
+             *
+             *  fetchpriority stays low for the same reason: even once Chrome
+             *  decides to start a lazy poster, it must not outbid the hero.
+             */
+            ` loading="lazy" fetchpriority="low" decoding="async">` +
           '<div class="card-quality '+(qualClass||'')+'">'+qual+'</div>' +
           (isHot ? '<div class="card-hot">HOT</div>' : '') +
           freshBadge +

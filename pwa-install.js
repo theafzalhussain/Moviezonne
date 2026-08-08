@@ -628,7 +628,23 @@
     if (remember) markDismissed(TV_STORAGE_KEY);
   }
 
-  /* QR CODE */
+  /* QR CODE
+   *
+   *  This used to hit api.qrserver.com first and only fall back to the bundled
+   *  generator in img.onerror. That was backwards, and measurably expensive:
+   *  6 calls at ~739ms each on the install/TV surfaces, to a third-party host
+   *  that needs its own DNS + TLS handshake, for data this file can already
+   *  produce locally — MiniQR is bundled right above and is a good chunk of why
+   *  this script is 30 KB.
+   *
+   *  Now MiniQR renders straight to a canvas: zero network, zero third party, no
+   *  cold-connection latency, and it still works with no connection at all —
+   *  which matters, because the TV overlay exists to be scanned by a phone when
+   *  the TV itself cannot install the app.
+   *
+   *  The remote API is kept only for the case where MiniQR somehow is not on the
+   *  page, so the surface degrades instead of showing an empty box.
+   */
   var QR_API = 'https://api.qrserver.com/v1/create-qr-code/';
 
   function qrApiUrl(text, size) {
@@ -640,8 +656,8 @@
     return window.location.href;
   }
 
-  function renderQRFallback(el, text, opts) {
-    if (!el || !window.MiniQR) return;
+  function renderQRLocal(el, text, opts) {
+    if (!el || !window.MiniQR) return false;
     var canvas = document.createElement('canvas');
     try {
       window.MiniQR.renderTo(canvas, text, {
@@ -654,30 +670,40 @@
       canvas.setAttribute('aria-label', 'QR code for ' + text);
       el.innerHTML = '';
       el.appendChild(canvas);
+      return true;
     } catch (e) {
-      el.innerHTML = '';
+      return false;
     }
+  }
+
+  // Kept under the old name too: other call sites and tests may reference it.
+  function renderQRFallback(el, text, opts) {
+    renderQRLocal(el, text, opts);
+  }
+
+  function renderQRRemote(el, text, opts) {
+    var size = (opts && opts.size) || 200;
+    var img = document.createElement('img');
+    img.width = size;
+    img.height = size;
+    img.alt = 'QR code that opens ' + text;
+    img.decoding = 'async';
+    img.loading = 'lazy';
+    img.referrerPolicy = 'no-referrer';
+    img.style.cssText = 'display:block;width:100%;height:100%;max-width:100%;border-radius:6px;background:#fff;object-fit:contain;';
+    img.src = qrApiUrl(text, size);
+    el.innerHTML = '';
+    el.appendChild(img);
   }
 
   function renderQRInto(el, opts) {
     if (!el) return;
     opts = opts || {};
-    var size = opts.size || 200;
     var url = currentUrl();
 
-    var img = document.createElement('img');
-    img.width = size;
-    img.height = size;
-    img.alt = 'QR code that opens ' + url;
-    img.decoding = 'async';
-    img.loading = 'eager';
-    img.referrerPolicy = 'no-referrer';
-    img.style.cssText = 'display:block;width:100%;height:100%;max-width:100%;border-radius:6px;background:#fff;object-fit:contain;';
-    img.onerror = function () { renderQRFallback(el, url, opts); };
-    img.src = qrApiUrl(url, size);
-
-    el.innerHTML = '';
-    el.appendChild(img);
+    // Local first. Only reach the network if the bundled encoder is unavailable.
+    if (renderQRLocal(el, url, opts)) return;
+    renderQRRemote(el, url, opts);
   }
 
   // Keep the QR in sync with SPA-style URL changes so it never points at a stale page.

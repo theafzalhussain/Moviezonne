@@ -2873,14 +2873,40 @@ html[data-mz-tv="true"] .cat-group-menu {
   aspect-ratio: 2/3;
   overflow: hidden;
   border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+  /*  Zero-request placeholder.
+   *
+   *  Every poster is lazy and TMDB's measured first-byte is ~3.2s, so a card can
+   *  sit with an empty poster slot for seconds. This fills it with brand-coloured
+   *  chrome so the grid looks composed rather than broken while images arrive.
+   *
+   *  Deliberately CSS, not an LQIP thumbnail. Fetching a w92 blur preview per
+   *  card would ADD one request each — 24 more requests to the very host that is
+   *  already the bottleneck — to hide the latency caused by too many requests to
+   *  that host. A gradient costs nothing and cannot make the queue worse.
+   */
+  background:
+    linear-gradient(150deg, rgba(255, 255, 255, 0.055) 0%, rgba(255, 255, 255, 0.015) 45%, rgba(0, 0, 0, 0.12) 100%),
+    var(--card2, #13131f);
 }
 
+/*  The same placeholder sits on the image itself, not just the wrapper. An <img>
+ *  with no decoded content paints its own background, and the photo paints over
+ *  it the moment it decodes — so there is no flicker, no JS, and no per-card load
+ *  listener (renderMovies deliberately attaches none). If a poster 404s or fails,
+ *  the placeholder simply stays instead of showing a broken-image glyph.
+ *
+ *  An opacity fade was tried here and removed: it needs a `load` event to know
+ *  when to reveal, and [src] matches from parse time, so a CSS-only version can
+ *  never fire at the right moment. */
 .card-poster img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   transition: transform 0.75s ease, filter 0.55s ease;
   filter: saturate(1.02) contrast(1.04) brightness(0.97);
+  background:
+    linear-gradient(150deg, rgba(255, 255, 255, 0.055) 0%, rgba(255, 255, 255, 0.015) 45%, rgba(0, 0, 0, 0.12) 100%),
+    var(--card2, #13131f);
 }
 
 .movie-card:hover .card-poster img,
