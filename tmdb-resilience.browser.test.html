@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MovieZone — TMDB fetch resilience harness</title>
+</head>
+<body>
+<h1>TMDB fetch resilience harness</h1>
+<p>Loads the real index.html, lets it settle, then breaks <code>fetch()</code> for
+   <code>/api/tmdb</code> only and drives a category load. Measures how many
+   requests the app makes before it gives up, what it shows the user, whether the
+   failure is reported through Datadog rather than console.error, and whether a
+   manual retry recovers once the network is restored.</p>
+<iframe id="app" src="/index.html" style="width:412px;height:915px;border:1px solid #333"></iframe>
+
+<script>
+(function () {
+  var COLLECTOR = (function () {
+    var m = /[?&]collector=(\d+)/.exec(location.search);
+    return m ? 'http://127.0.0.1:' + m[1] + '/' : null;
+  })();
+
+  var checks = [];
+  function ok(name, pass, detail) {
+    checks.push({ name: name, pass: !!pass, detail: detail == null ? '' : String(detail) });
+  }
+  var reported = false;
+  function report() {
+    if (reported) return;
+    reported = true;
+    try {
+      fetch(COLLECTOR || '/__results', {
+        method: 'POST', mode: 'cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(checks)
+      });
+    } catch (e) {}
+  }
+
+  var frame = document.getElementById('app');
+  var win = null, doc = null;
+
+  // State captured while the network is broken.
+  var apiAttempts = [];        // timestamps of /api/tmdb fetch attempts
+  var consoleErrors = [];      // console.error calls made while broken
+  var rumErrors = [];          // DD_RUM.addError calls
+  var realFetch = null;
+  var breakNetwork = false;
+
+  frame.addEventListener('load', function () {
+    win = frame.contentWindow;
+    doc = frame.contentDocument;
+    // Let the real page finish its normal first load before interfering.
+    setTimeout(phaseBreak, 9000);
+  });
+
+  function isApiUrl(u) {
+    return String(u).indexOf('/api/tmdb') !== -1;
+  }
+
+  function phaseBreak() {
+    if (!win) { ok('app frame reachable', false, 'no contentWindow'); return report(); }
+
+    // Baseline: the page must have loaded normally first, otherwise a "bounded
+    // retry" result would be meaningless.
+    var baselineCards = doc.querySelectorAll('.movie-card').length;
+    ok('baseline: the feed loaded normally before the fault was injected',
+      baselineCards > 0, baselineCards + ' cards');
+
+    // ── inject the fault ──────────────────────────────────────────────────
+    realFetch = win.fetch;
+    win.fetch = function (input) {
+      var url = (input && input.url) ? input.url : input;
+      if (breakNetwork && isApiUrl(url)) {
+        apiAttempts.push(Date.now());
+        // Exactly what a dropped connection produces, and exactly the error
+        // Datadog was reporting 91 times a day.
+        return Promise.reject(new TypeError('Failed to fetch'));
+      }
+      return realFetch.apply(win, arguments);
+    };
+
+    var realConsoleError = win.console.error;
+    win.console.error = function () {
+      consoleErrors.push([].slice.call(arguments).join(' ').slice(0, 160));
+      return realConsoleError.apply(win.console, arguments);
+    };
+
+    // Stub Datadog so we can see whether failures are reported with context.
+    win.DD_RUM = win.DD_RUM || {};
+    win.DD_RUM.addError = function (err, meta) {
+      rumErrors.push({ msg: err && err.message, meta: meta || {} });
+    };
+
+    breakNetwork = true;
+    apiAttempts = [];
+    consoleErrors = [];
+    rumErrors = [];
+
+    /*  Wipe every cache layer first. Without this the test proves nothing about
+     *  the failure path: tmdb() prefers stale cache over an error, and the
+     *  background prefetcher warms enough URLs during the baseline load that a
+     *  "fresh" category still resolves from localStorage. That preference is
+     *  correct and is asserted separately in phaseStaleCache below — but here we
+     *  need the genuinely-uncached case.
+     *
+     *  eval runs inside the frame's realm, which is the only way to reach
+     *  tmdbCache: top-level const in a classic script is a global lexical
+     *  binding, not a property of window.
+     */
+    try {
+      win.eval('tmdbCache.clear(); inFlightRequests.clear();');
+      Object.keys(win.localStorage)
+        .filter(function (k) { return k.indexOf('mz_cache_') === 0; })
+        .forEach(function (k) { win.localStorage.removeItem(k); });
+    } catch (e) {
+      ok('could clear the cache layers to reach the failure path', false, e.message);
+      return report();
+    }
+
+    // 'kdrama' has not been rendered yet and its cache is now gone, so the
+    // request path is genuinely exercised with nothing to fall back on.
+    try { win.loadMovies('kdrama'); }
+    catch (e) { ok('loadMovies is callable', false, e.message); return report(); }
+
+    // Old code retried every 3s forever. New code must stop:
+    //   per-request  1 try + 2 retries  (0.5s, 1s backoff)
+    //   per-feed     1 pass + 3 retries (1.5s, 3s, 6s backoff)
+    // Worst case is under ~20s, so 32s is a generous window to prove it settled.
+    setTimeout(phaseAssert, 32000);
+  }
+
+  function phaseAssert() {
+    var total = apiAttempts.length;
+    var last = apiAttempts.length ? apiAttempts[apiAttempts.length - 1] : 0;
+    var quietFor = Date.now() - last;
+
+    ok('the app actually tried to reach the API', total > 0, total + ' attempts');
+
+    // THE REGRESSION GUARD. Before the fix this never went quiet: loadMovies
+    // rescheduled itself every 3s for the lifetime of the tab.
+    ok('retries STOP instead of looping forever',
+      total > 0 && quietFor > 8000,
+      total + ' attempts, last one ' + Math.round(quietFor / 1000) + 's ago');
+
+    // A ceiling as well as a floor: bounded must mean bounded.
+    ok('total attempts stay within the retry budget', total > 0 && total < 220,
+      total + ' attempts while the network was down');
+
+    // ── what the user is shown ────────────────────────────────────────────
+    var grid = doc.getElementById('movieGrid');
+    var text = grid ? (grid.textContent || '') : '';
+    var btn = doc.getElementById('mzFeedRetryBtn');
+
+    ok('a terminal error state is shown, with an action', !!btn, 'grid text: ' + text.slice(0, 90));
+    ok('the UI no longer claims to be loading forever',
+      text.indexOf('Loading movies') === -1,
+      'grid text: ' + text.slice(0, 90));
+
+    // ── how the failure was reported ──────────────────────────────────────
+    ok('failures are reported to Datadog with endpoint context',
+      rumErrors.length > 0 && rumErrors.some(function (e) { return e.meta && e.meta.endpoint; }),
+      rumErrors.length + ' addError calls, first meta: ' + JSON.stringify(rumErrors[0] && rumErrors[0].meta));
+
+    ok('tmdb() no longer spams console.error',
+      !consoleErrors.some(function (m) { return m.indexOf('Network/Fetch Error') !== -1; }),
+      consoleErrors.length + ' console.error calls');
+
+    // ── recovery ──────────────────────────────────────────────────────────
+    breakNetwork = false;
+    if (!btn) { report(); return; }
+    btn.click();
+    setTimeout(function () {
+      var cards = doc.querySelectorAll('.movie-card').length;
+      ok('the manual retry recovers once the network is back', cards > 0, cards + ' cards after retry');
+      phaseStaleCache(cards);
+    }, 14000);
+  }
+
+  /*  The other half of the contract: when a refresh fails but usable stale data
+   *  exists, the user should keep seeing content rather than an error screen.
+   *  'kdrama' was just fetched successfully, so its cache is warm — breaking the
+   *  network again and reloading it must not blank the rail.
+   */
+  function phaseStaleCache(cardsBefore) {
+    apiAttempts = [];
+    breakNetwork = true;
+    try { win.eval('tmdbCache.clear();'); } catch (e) {}   // force the localStorage path
+    win.loadMovies('kdrama');
+
+    setTimeout(function () {
+      var cards = doc.querySelectorAll('.movie-card').length;
+      var btn = doc.getElementById('mzFeedRetryBtn');
+      ok('a failed refresh falls back to stale cache instead of an error screen',
+        cards > 0 && !btn,
+        cards + ' cards still shown (was ' + cardsBefore + '), retry button present: ' + !!btn);
+      ok('no uncaught error surfaced in the app frame', !win.__mzResilienceError,
+        win.__mzResilienceError || '');
+      breakNetwork = false;
+      report();
+    }, 9000);
+  }
+
+  window.addEventListener('load', function () {
+    try {
+      frame.contentWindow.addEventListener('error', function (ev) {
+        frame.contentWindow.__mzResilienceError = String(ev.message || 'unknown');
+      });
+    } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>

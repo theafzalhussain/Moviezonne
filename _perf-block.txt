@@ -1,0 +1,160 @@
+// -- PERFORMANCE BOOST STYLES --
+const perfStyle = document.createElement('style');
+perfStyle.textContent = `
+  /* === UNIVERSAL DEVICE PERFORMANCE === */
+  
+  /* GPU-accelerated cards for all devices */
+  .movie-card, .upcoming-card { content-visibility: auto; contain-intrinsic-size: 180px 320px; contain: layout style paint; }
+  .carousel-slide { will-change: transform, opacity; }
+  img { content-visibility: auto; }
+  /*  #movies-section was in this rule and it was the single largest CLS source on
+   *  the page: 0.209, measured (cwv-check.js).
+   *
+   *  content-visibility:auto tells the browser to skip the subtree's layout while
+   *  it is off-screen and to pretend it is contain-intrinsic-size tall instead.
+   *  #movies-section is #hero's immediate neighbour, so it enters the viewport on
+   *  the first flick every single time - the skip buys nothing. What it does buy
+   *  is a guaranteed shift: the subtree (including .main-content::before, the
+   *  decorative panel that is sized by its parent) gets no box at all until the
+   *  section is un-skipped, and Chrome books that first layout as a 644px move.
+   *  The flat 1000px placeholder made it worse by being wrong in both directions.
+   *
+   *  #upcoming keeps the optimisation - it really is far down the page - but its
+   *  declaration now lives in the mz-cwv-critical block in index.html, using
+   *  "contain-intrinsic-size: auto 700px" so the browser remembers the size it
+   *  last measured instead of re-guessing. Declaring it here as well would win on
+   *  cascade order (this sheet is injected after the document's own styles) and
+   *  silently undo that.
+   */
+  
+  /* === MOBILE / SMALL SCREEN OPTIMIZATION (< 768px) === */
+  @media (max-width: 768px) {
+    /* Kill ALL animations on mobile — biggest performance gain */
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.2s !important;
+    }
+    /* Exceptions: only allow essential transitions */
+    #mzMobilePanel, .mobile-nav-overlay, .hamburger-btn span {
+      transition-duration: 0.3s !important;
+    }
+    #mzMobilePanel .mz-mp-link {
+      transition-duration: 0.25s !important;
+    }
+    /* Menu buttons stay instant. The dropdown panel is already on screen by the
+       time the pill would ease, so any duration here reads as lag. moviezone.css
+       sets "transition: none !important" on these, but this sheet is injected
+       AFTER it — so without an explicit exception the wildcard above wins and
+       silently puts the transition back. */
+    .cat-group-trigger, .cat-group-chevron {
+      transition-duration: 0s !important;
+    }
+    
+    /* Remove ALL hover effects on mobile */
+    .movie-card:hover, .upcoming-card:hover { transform: none !important; box-shadow: none !important; }
+    
+    /* Kill GPU-heavy effects entirely */
+    .ambient-particles { display: none !important; }
+    #hero::before, #hero::after { display: none !important; }
+    .click-spark { display: none !important; }
+    
+    /* Remove ALL backdrop-filters on mobile (main lag cause) */
+    * { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+    /* Only re-enable on mobile panel */
+    #mzMobilePanel { backdrop-filter: blur(20px) !important; -webkit-backdrop-filter: blur(20px) !important; }
+    
+    /* Simplify box-shadows (major GPU cost) */
+    .movie-card, .upcoming-card, .player-chip, .player-chip--source, .cat-tab { 
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
+    }
+    #navbar {
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5) !important;
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+      background: rgba(5,5,12,0.95) !important;
+    }
+    
+    /* Disable 3D tilt on touch */
+    .movie-card { perspective: none !important; transform-style: flat !important; }
+    
+    /* Reduce grid reflow */
+    .movie-grid { gap: 10px !important; }
+    
+    /* Remove pseudo-element decorations */
+    .movie-card::before, .movie-card::after, .upcoming-card::before, .upcoming-card::after,
+    .nav-search::before, #navbar::before { display: none !important; }
+    
+    /* Reduce paint complexity */
+    .slide-gradient { background: linear-gradient(to top, rgba(3,3,10,0.95) 0%, transparent 60%) !important; }
+  }
+  
+  /* === TABLET (768px - 1024px) === */
+  @media (min-width: 769px) and (max-width: 1024px) {
+    .movie-card:hover { transform: translateY(-4px) !important; }
+    .ambient-particles .particle:nth-child(n+12) { display: none !important; }
+    .movie-card::before, .upcoming-card::before { display: none !important; }
+    #navbar { backdrop-filter: blur(20px) !important; -webkit-backdrop-filter: blur(20px) !important; }
+  }
+  
+  /* === TV / LARGE SCREEN OPTIMIZATION === */
+  @media (min-width: 1920px), (hover: none) and (min-width: 960px) {
+    .movie-grid { contain: layout style paint; }
+    .ambient-particles .particle:nth-child(n+15) { display: none !important; }
+    .movie-card, .upcoming-card, .cat-tab, button { min-height: 48px; }
+    /* Reduce repaints on large screens */
+    .movie-card, .upcoming-card { will-change: auto; transform: translateZ(0); }
+    .carousel-slide { will-change: transform; }
+    /* Smoother scrolling */
+    html { scroll-behavior: smooth; }
+    * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  }
+  
+  /* === LOW-END / MOBILE MODE: Strip effects but KEEP short transitions for smooth UI === */
+  .low-end-mode *, .low-end-mode *::before, .low-end-mode *::after {
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    text-shadow: none !important;
+    filter: none !important;
+    animation: none !important;
+    transition-duration: 0.2s !important;
+    transition-timing-function: ease !important;
+  }
+  /* Allow mobile panel to animate smoothly */
+  .low-end-mode #mzMobilePanel,
+  .low-end-mode .mobile-nav-overlay,
+  .low-end-mode .hamburger-btn span,
+  .low-end-mode #mzMobilePanel .mz-mp-link {
+    transition-duration: 0.3s !important;
+  }
+  /* Same exception as the mobile block above: low-end-mode is switched on for
+     every phone (and by the startup FPS probe on a loaded desktop), so without
+     this the menu buttons pick up a 0.2s ease that moviezone.css explicitly
+     turns off. */
+  .low-end-mode .cat-group-trigger,
+  .low-end-mode .cat-group-chevron {
+    transition-duration: 0s !important;
+  }
+  .low-end-mode .ambient-particles { display: none !important; }
+  .low-end-mode #hero::before, .low-end-mode #hero::after { display: none !important; }
+  .low-end-mode .click-spark { display: none !important; }
+  .low-end-mode .movie-card::before, .low-end-mode .movie-card::after { display: none !important; }
+  .low-end-mode #navbar { 
+    background: rgba(5,5,12,0.97) !important; 
+    border: 1px solid rgba(255,255,255,0.05) !important;
+  }
+  .low-end-mode .slide-gradient { 
+    background: linear-gradient(to top, rgba(3,3,10,0.98) 0%, transparent 50%) !important; 
+  }
+  
+  /* === REDUCED MOTION (accessibility + performance) === */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation: none !important;
+      transition-duration: 0.01ms !important;
+    }
+    .ambient-particles { display: none !important; }
+  }
+`;
+document.head.appendChild(perfStyle);

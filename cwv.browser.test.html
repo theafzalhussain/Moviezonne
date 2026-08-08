@@ -123,6 +123,53 @@
         };
       }).observe({ type: 'largest-contentful-paint', buffered: true });
     } catch (e) { win.__mzLcpUnsupported = e.message; }
+
+    /*  LONG TASKS — the INP story. Anything over 50ms on the main thread makes
+     *  the page unresponsive for that long, because nothing else can run. The
+     *  attribution container tells us whether it came from the top-level document
+     *  or an iframe; it does not name the function, so the useful signal is the
+     *  distribution plus WHEN each task landed relative to page start.
+     */
+    win.__mzLongTasks = [];
+    try {
+      new win.PerformanceObserver(function (list) {
+        list.getEntries().forEach(function (e) {
+          win.__mzLongTasks.push({
+            at: Math.round(e.startTime),
+            dur: Math.round(e.duration),
+            name: e.name,
+            src: (e.attribution || []).map(function (a) {
+              return a.name + '/' + a.containerType + (a.containerId ? '#' + a.containerId : '');
+            }).join(',')
+          });
+        });
+      }).observe({ type: 'longtask', buffered: true });
+    } catch (e) { win.__mzLongTaskUnsupported = e.message; }
+
+    /*  LoAF gives what `longtask` cannot: the actual function that blocked, with
+     *  a source position, plus how much of the frame went to forced style/layout.
+     *  terser is run with default mangle settings (toplevel:false), so top-level
+     *  function names survive minification and these attributions are readable.
+     */
+    win.__mzLoaf = [];
+    try {
+      new win.PerformanceObserver(function (list) {
+        list.getEntries().forEach(function (e) {
+          if (e.duration < 60) return;
+          win.__mzLoaf.push({
+            at: Math.round(e.startTime),
+            dur: Math.round(e.duration),
+            blocking: Math.round(e.blockingDuration || 0),
+            styleLayout: Math.round(e.styleAndLayoutStart ? (e.startTime + e.duration - e.styleAndLayoutStart) : 0),
+            scripts: (e.scripts || []).map(function (s) {
+              return (s.invoker || '?') + ' ' + (s.sourceFunctionName || '') +
+                ' ' + Math.round(s.duration) + 'ms' +
+                (s.forcedStyleAndLayoutDuration ? ' (+' + Math.round(s.forcedStyleAndLayoutDuration) + 'ms reflow)' : '');
+            })
+          });
+        });
+      }).observe({ type: 'long-animation-frame', buffered: true });
+    } catch (e) { win.__mzLoafUnsupported = e.message; }
   }
 
   // Poll for the frame window as early as possible.
@@ -233,6 +280,69 @@
     ok('grid posters stay out of the hero priority lane',
       gridImgs.every(function (i) { return i.getAttribute('fetchpriority') === 'low'; }));
 
+    /*  ── DELEGATION STILL WIRES THE CARDS ────────────────────────────────
+     *  renderMovies() no longer attaches six listeners per card; there is one set
+     *  on the grid container reading data-* attributes. That is a behavioural
+     *  refactor, so it needs a behavioural test: a card must still carry its
+     *  identity, a click must still open the modal, and hover must still trigger
+     *  the detail prefetch.
+     */
+    var firstCard = doc.querySelector('#movieGrid .movie-card');
+    ok('cards carry the identity the delegated handler reads',
+      !!firstCard && !!firstCard.dataset.id && !!firstCard.dataset.type,
+      firstCard ? 'data-id=' + firstCard.dataset.id + ' data-type=' + firstCard.dataset.type : 'no card');
+    ok('cards stay keyboard reachable', !!firstCard && firstCard.tabIndex === 0,
+      firstCard ? 'tabIndex=' + firstCard.tabIndex : 'no card');
+
+    if (firstCard) {
+      // Hover prefetch: delegated via mouseover, deduped by data-mzprefetched.
+      firstCard.dispatchEvent(new win.MouseEvent('mouseover', { bubbles: true }));
+      ok('hover prefetch fires through delegation',
+        firstCard.hasAttribute('data-mzprefetched'),
+        'data-mzprefetched=' + firstCard.getAttribute('data-mzprefetched'));
+
+      /*  The click assertion targets the delegated handler, not the modal.
+       *  openModal() opens with `if (!claimExplicitDetailActivation(event)) return`
+       *  — a deliberate guard that rejects untrusted events so a stray script or
+       *  mis-fire cannot open a player. A synthetic .click() is untrusted by
+       *  definition, so it can never open the modal from a test, and asserting
+       *  that it does would be asserting the guard is broken.
+       *
+       *  What the refactor changed is the wiring: the per-card click listener
+       *  became one delegated listener reading data-id/data-type. So that is what
+       *  is verified — openModal is reached, with the right arguments, carrying
+       *  the original event through.
+       */
+      var modalCalls = [];
+      var realOpenModal = win.openModal;
+      win.openModal = function (id, type, event) {
+        modalCalls.push({ id: id, type: type, hasEvent: !!event, trusted: !!(event && event.isTrusted) });
+        return undefined;   // do not actually open during measurement
+      };
+      firstCard.click();
+      win.openModal = realOpenModal;
+
+      ok('a card click reaches openModal through delegation',
+        modalCalls.length === 1 &&
+        String(modalCalls[0].id) === firstCard.dataset.id &&
+        modalCalls[0].type === firstCard.dataset.type &&
+        modalCalls[0].hasEvent,
+        JSON.stringify(modalCalls));
+
+      // A click on the play button inside the card must resolve to the card too,
+      // since the button is what the pointer actually lands on.
+      var playBtn = firstCard.querySelector('.card-play-btn');
+      if (playBtn) {
+        modalCalls = [];
+        win.openModal = function (id, type) { modalCalls.push({ id: id, type: type }); };
+        playBtn.click();
+        win.openModal = realOpenModal;
+        ok('a click on the card play button resolves to its card',
+          modalCalls.length === 1 && String(modalCalls[0].id) === firstCard.dataset.id,
+          JSON.stringify(modalCalls));
+      }
+    }
+
     // ── loader ───────────────────────────────────────────────────────────
     var loader = doc.getElementById('mz-loader');
     ok('the loader overlay was dismissed', !!loader && loader.classList.contains('loader-hidden'));
@@ -258,7 +368,79 @@
   }
 
   function finishUp(doc, win) {
-    // ── long tasks / INP proxy ───────────────────────────────────────────
+    /*  ── MAIN THREAD (INP) ───────────────────────────────────────────────
+     *  Datadog reported 256 long tasks, avg 107ms, max 749ms. A long task is
+     *  any uninterrupted >50ms block: while one runs, a tap cannot be handled,
+     *  which is precisely what INP measures. Reported with the distribution and
+     *  the worst offenders' timing so a regression names itself.
+     */
+    var lt = win.__mzLongTasks || [];
+
+    /*  Fixed 5-second window, deliberately not the load event.
+     *
+     *  The first version of this split at loadEventEnd, which turned out to be
+     *  useless for comparison: loadEventEnd itself moves when you change what
+     *  loads, so a variant that defers a script gets a shorter window and looks
+     *  better for the wrong reason. A fixed wall-clock window measures the same
+     *  span in every variant.
+     *
+     *  Five seconds covers page-up plus the immediate post-load background work,
+     *  which is the span a user is actually trying to interact during.
+     */
+    var WINDOW_MS = 5000;
+    var inWindow = lt.filter(function (t) { return t.at < WINDOW_MS; });
+    var afterWindow = lt.filter(function (t) { return t.at >= WINDOW_MS; });
+    var tbtOf = function (a) { return a.reduce(function (s, t) { return s + Math.max(0, t.dur - 50); }, 0); };
+    var windowTbt = tbtOf(inWindow);
+    var blocking = tbtOf(lt);
+
+    var total = lt.reduce(function (s, t) { return s + t.dur; }, 0);
+    var worst = lt.slice().sort(function (a, b) { return b.dur - a.dur; }).slice(0, 6);
+    var summary = 'first ' + (WINDOW_MS / 1000) + 's: ' + inWindow.length +
+      ' tasks, TBT ' + windowTbt + 'ms | later: ' + afterWindow.length + ' tasks, TBT ' +
+      tbtOf(afterWindow) + 'ms | all: ' + lt.length + ' tasks, ' + total + 'ms, max ' +
+      (lt.length ? worst[0].dur : 0) + 'ms | worst: ' +
+      worst.map(function (t) { return t.dur + 'ms@' + t.at; }).join(' ');
+
+    ok('long tasks were observable', !win.__mzLongTaskUnsupported, win.__mzLongTaskUnsupported || 'ok');
+    ok('no task in the first 5s blocks for over 250ms',
+      inWindow.every(function (t) { return t.dur <= 250; }), summary);
+    ok('blocking time in the first 5s stays under 400ms', windowTbt < 400,
+      'first-5s TBT ' + windowTbt + 'ms (whole run ' + blocking + 'ms)');
+    ok('long task count in the first 5s stays reasonable', inWindow.length <= 12, summary);
+
+    // Names the blocking scripts. Reported as a check so the detail is always
+    // printed, pass or fail — the attribution is the whole point.
+    var loaf = (win.__mzLoaf || []).slice().sort(function (a, b) { return b.dur - a.dur; }).slice(0, 5);
+    ok('slow frames are attributable to named functions',
+      !win.__mzLoafUnsupported,
+      win.__mzLoafUnsupported ? win.__mzLoafUnsupported :
+        (loaf.length ? loaf.map(function (f) {
+          return f.dur + 'ms@' + f.at + ' (block ' + f.blocking + 'ms) <- ' + (f.scripts.join(' | ') || 'no script attribution');
+        }).join('\n          ') : 'no frame over 60ms'));
+
+    /*  ── REQUEST VOLUME ──────────────────────────────────────────────────
+     *  Datadog flagged 179 slow TMDB image requests plus 44 slow discover calls.
+     *  Volume is the lever: the homepage used to fan out 25 API calls in one tick
+     *  (15 for the ALL feed, 10 for the carousel), which queues at the origin and
+     *  makes every one of them look slow.
+     */
+    var res = win.performance.getEntriesByType('resource') || [];
+    var api = res.filter(function (e) { return e.name.indexOf('/api/tmdb') !== -1; });
+    var imgs = res.filter(function (e) { return e.name.indexOf('image.tmdb.org') !== -1; });
+    var slowApi = api.filter(function (e) { return e.duration > 1000; });
+    var slowImg = imgs.filter(function (e) { return e.duration > 1000; });
+    var providers = api.filter(function (e) { return e.name.indexOf('/watch/providers') !== -1; });
+
+    var avg = function (a) { return a.length ? Math.round(a.reduce(function (s, e) { return s + e.duration; }, 0) / a.length) : 0; };
+
+    ok('API request count on first load stays bounded', api.length <= 60,
+      api.length + ' API requests, ' + avg(api) + 'ms avg, ' + slowApi.length + ' over 1s');
+    ok('image request count on first load stays bounded', imgs.length <= 60,
+      imgs.length + ' image requests, ' + avg(imgs) + 'ms avg, ' + slowImg.length + ' over 1s');
+    ok('watch/providers is not fetched on the homepage', providers.length === 0,
+      providers.length + ' watch/providers requests');
+
     ok('the idle cursor loop parks itself instead of running every frame',
       !/requestAnimationFrame\(animateCursorRing\);\s*\}\s*animateCursorRing\(\)/.test(
         String(win.animateCursorRing || '')), 'source check');
@@ -267,18 +449,52 @@
 
     // Always-on diagnostics: when the feed is empty every content assertion
     // above fails for the same upstream reason, and this is what tells them apart.
-    var api = (win.performance.getEntriesByType('resource') || [])
+    var apiRes = (win.performance.getEntriesByType('resource') || [])
       .filter(function (e) { return e.name.indexOf('/api/tmdb') !== -1; });
     ok('the feed received data from /api/tmdb',
       doc.querySelectorAll('.movie-card').length > 0 || doc.querySelectorAll('.carousel-slide').length > 0,
-      'api requests=' + api.length +
+      'api requests=' + apiRes.length +
       ' slides=' + doc.querySelectorAll('.carousel-slide').length +
       ' cards=' + doc.querySelectorAll('.movie-card').length +
-      ' carouselMovies=' + ((win.carouselMovies && win.carouselMovies.length) || 'n/a') +
-      ' lastApi=' + (api.length ? api[api.length - 1].name.slice(-90) : 'none') +
       ' consoleErrors=' + JSON.stringify((win.__mzConsoleErrors || []).slice(0, 3)));
 
-    report();
+    /*  ── WHERE THE TIME GOES ─────────────────────────────────────────────
+     *  longtask gives durations but no names; LoAF only fires for frames that
+     *  delayed rendering, so load-time script blocks often escape it. This wraps
+     *  the app's top-level functions (terser keeps top-level names, and a
+     *  function declaration IS the window property, so reassigning it also
+     *  redirects internal calls) and re-runs the same work against a warm cache.
+     *
+     *  Absolute numbers differ from a cold load — no network, no parse of the
+     *  bundle — so this is a ranking of synchronous cost, not a repro of the
+     *  load. It is what tells us which function to attack.
+     */
+    var timings = {};
+    ['renderMovies', 'buildCarousel', 'loadMovies', 'loadCarousel', 'loadUpcoming',
+     'renderUpcoming', 'prefetchMoviesPage', 'titleQualityState'].forEach(function (name) {      var orig = win[name];
+      if (typeof orig !== 'function') return;
+      timings[name] = { calls: 0, self: 0 };
+      win[name] = function () {
+        var t0 = win.performance.now();
+        try { return orig.apply(this, arguments); }
+        finally {
+          timings[name].calls++;
+          timings[name].self += win.performance.now() - t0;
+        }
+      };
+    });
+
+    win.loadMovies('all');
+    setTimeout(function () {
+      var ranked = Object.keys(timings)
+        .map(function (k) { return { n: k, c: timings[k].calls, ms: Math.round(timings[k].self) }; })
+        .filter(function (t) { return t.c > 0; })
+        .sort(function (a, b) { return b.ms - a.ms; });
+      ok('synchronous cost per renderer is recorded',
+        ranked.length > 0,
+        ranked.map(function (t) { return t.n + ' ' + t.ms + 'ms/' + t.c + ' calls'; }).join(', '));
+      report();
+    }, 6000);
   }
 })();
 </script>

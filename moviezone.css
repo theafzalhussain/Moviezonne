@@ -2842,6 +2842,28 @@ html[data-mz-tv="true"] .cat-group-menu {
   box-shadow: 0 45px 100px rgba(0, 0, 0, 0.7), 0 0 40px rgba(245, 197, 24, 0.1);
 }
 
+/*  PREMIUM HOVER LIFT — was two JS listeners and four inline style writes on
+ *  every card (mouseenter set transition + transform + boxShadow, mouseleave
+ *  cleared them). At 24 cards that is 48 listeners; infinite scroll took it past
+ *  400. All of it to express one state change that the compositor can do alone.
+ *
+ *  Gated on (hover: hover) and (pointer: fine) so it only applies to real mouse
+ *  pointers — the same set the old `!isMobile` check was approximating — and
+ *  excluded on TV, which navigates by focus and runs on a weak GPU.
+ *
+ *  An earlier version tilted the card in 3D via rotateX/rotateY from the mouse
+ *  position. That swings the corners outward unevenly and, combined with the
+ *  scale, spilled into whichever neighbouring card sat in that direction. A flat
+ *  lift cannot: the card's footprint never changes shape, so it cannot reach
+ *  past its own grid cell.
+ */
+@media (hover: hover) and (pointer: fine) {
+  html:not([data-mz-tv="true"]) .movie-card:hover {
+    transform: perspective(1000px) translateY(-10px);
+    box-shadow: 0 30px 70px rgba(0, 0, 0, 0.6), 0 0 20px rgba(245, 197, 24, 0.1);
+  }
+}
+
 .movie-card:hover::before {
   opacity: 1;
 }
@@ -5993,6 +6015,37 @@ html[data-mz-tv="true"] .cat-group-menu {
   margin-bottom: 0.55rem;
   font-family: 'Bebas Neue', sans-serif;
   letter-spacing: 2px;
+}
+
+/*  Shown when a feed has exhausted its retry budget. Before this, a failed feed
+ *  sat on "Loading movies..." forever while retrying every 3s in the background,
+ *  so the user had no way to tell a slow load from a dead one and no way to act.
+ *  This is the action. */
+.mz-feed-retry-btn {
+  margin-top: 1.25rem;
+  padding: 0.7rem 1.6rem;
+  border: 1px solid rgba(245, 197, 24, 0.45);
+  border-radius: 999px;
+  background: rgba(245, 197, 24, 0.1);
+  color: var(--gold);
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.mz-feed-retry-btn:hover,
+.mz-feed-retry-btn:focus-visible {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: #120e00;
+}
+
+.mz-feed-retry-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -11279,3 +11332,215 @@ html[data-mz-tv="true"] .cat-group-menu {
     min-width: 0;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MOVED OUT OF JAVASCRIPT
+   ═══════════════════════════════════════════════════════════════════════════
+   Everything below this line used to be a template literal inside
+   moviezone.js, appended to <head> as a <style> element at runtime:
+
+     • perfStyle          — appended during top-level script execution
+     • mz-search-v2-css   — appended by an IIFE during the same execution
+     • mz-multilang-css   — appended inside init(), i.e. on DOMContentLoaded
+
+   Three problems, all of them measurable:
+
+     1. Every <style> insertion invalidates computed style for the whole
+        document and forces a full recalculation. Three of them landed inside
+        the load window, one of them at DOMContentLoaded — the exact moment the
+        browser should be painting. Datadog's long-task report (256 tasks, avg
+        107ms) was dominated by script execution, and this was part of it.
+     2. The CSS shipped unminified. terser cannot minify the inside of a string,
+        so ~7.5 KB of formatted CSS with comments went out as-is, inside the JS
+        bundle, where it also had to be parsed as a JS string literal first.
+        Here, cleancss compresses it like any other rule.
+     3. It was invisible to anyone reading the stylesheet. Rules that override
+        moviezone.css lived in a different file, in a different language.
+
+   CASCADE: these blocks are last in the file, in their original relative order,
+   so every override they previously won by being injected late still wins. They
+   now sit before tv-mode.min.css instead of after it — which changes nothing,
+   because every tv-mode rule is html[data-mz-tv="true"] scoped and !important,
+   so it beats these on specificity and importance regardless of order.
+
+   Still injected from JS, deliberately: mz-tv-perf-css. It only applies to TVs
+   and depends on --mz-card-h, which is measured at runtime.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* === UNIVERSAL DEVICE PERFORMANCE === */
+
+/* GPU-accelerated cards for all devices */
+.movie-card, .upcoming-card { content-visibility: auto; contain-intrinsic-size: 180px 320px; contain: layout style paint; }
+.carousel-slide { will-change: transform, opacity; }
+img { content-visibility: auto; }
+
+/*  #movies-section deliberately does NOT get content-visibility here. It was the
+ *  single largest CLS source on the page — 0.209, measured by cwv-check.js.
+ *
+ *  content-visibility:auto tells the browser to skip a subtree's layout while it
+ *  is off-screen and pretend it is contain-intrinsic-size tall. #movies-section
+ *  is #hero's immediate neighbour, so it enters the viewport on the first flick
+ *  every single time and the skip buys nothing. What it does buy is a guaranteed
+ *  shift: the subtree — including .main-content::before, the decorative panel
+ *  that is sized by its parent — gets no box at all until the section is
+ *  un-skipped, and Chrome books that first layout as a 644px move. The flat
+ *  1000px placeholder it used made things worse by being wrong in both
+ *  directions.
+ *
+ *  #upcoming keeps the optimisation, since it really is far down the page. Its
+ *  declaration lives in the mz-cwv-critical block in index.html using
+ *  contain-intrinsic-size: auto 700px, so the browser reuses the size it last
+ *  measured instead of re-guessing.
+ */
+
+/* === MOBILE / SMALL SCREEN OPTIMIZATION (< 768px) === */
+@media (max-width: 768px) {
+  /* Kill ALL animations on mobile — biggest performance gain */
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.2s !important;
+  }
+  /* Exceptions: only allow essential transitions */
+  #mzMobilePanel, .mobile-nav-overlay, .hamburger-btn span {
+    transition-duration: 0.3s !important;
+  }
+  #mzMobilePanel .mz-mp-link {
+    transition-duration: 0.25s !important;
+  }
+  /* Menu buttons stay instant. The dropdown panel is already on screen by the
+     time the pill would ease, so any duration here reads as lag. The rule
+     earlier in this file sets "transition: none !important" on these, but the
+     wildcard above comes later and would silently put the transition back
+     without this explicit exception. */
+  .cat-group-trigger, .cat-group-chevron {
+    transition-duration: 0s !important;
+  }
+
+  /* Remove ALL hover effects on mobile */
+  .movie-card:hover, .upcoming-card:hover { transform: none !important; box-shadow: none !important; }
+
+  /* Kill GPU-heavy effects entirely */
+  .ambient-particles { display: none !important; }
+  #hero::before, #hero::after { display: none !important; }
+  .click-spark { display: none !important; }
+
+  /* Remove ALL backdrop-filters on mobile (main lag cause) */
+  * { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+  /* Only re-enable on mobile panel */
+  #mzMobilePanel { backdrop-filter: blur(20px) !important; -webkit-backdrop-filter: blur(20px) !important; }
+
+  /* Simplify box-shadows (major GPU cost) */
+  .movie-card, .upcoming-card, .player-chip, .player-chip--source, .cat-tab {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
+  }
+  #navbar {
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: rgba(5,5,12,0.95) !important;
+  }
+
+  /* Disable 3D tilt on touch */
+  .movie-card { perspective: none !important; transform-style: flat !important; }
+
+  /* Reduce grid reflow */
+  .movie-grid { gap: 10px !important; }
+
+  /* Remove pseudo-element decorations */
+  .movie-card::before, .movie-card::after, .upcoming-card::before, .upcoming-card::after,
+  .nav-search::before, #navbar::before { display: none !important; }
+
+  /* Reduce paint complexity */
+  .slide-gradient { background: linear-gradient(to top, rgba(3,3,10,0.95) 0%, transparent 60%) !important; }
+}
+
+/* === TABLET (768px - 1024px) === */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .movie-card:hover { transform: translateY(-4px) !important; }
+  .ambient-particles .particle:nth-child(n+12) { display: none !important; }
+  .movie-card::before, .upcoming-card::before { display: none !important; }
+  #navbar { backdrop-filter: blur(20px) !important; -webkit-backdrop-filter: blur(20px) !important; }
+}
+
+/* === TV / LARGE SCREEN OPTIMIZATION === */
+@media (min-width: 1920px), (hover: none) and (min-width: 960px) {
+  .movie-grid { contain: layout style paint; }
+  .ambient-particles .particle:nth-child(n+15) { display: none !important; }
+  .movie-card, .upcoming-card, .cat-tab, button { min-height: 48px; }
+  /* Reduce repaints on large screens */
+  .movie-card, .upcoming-card { will-change: auto; transform: translateZ(0); }
+  .carousel-slide { will-change: transform; }
+  /* Smoother scrolling */
+  html { scroll-behavior: smooth; }
+  * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+}
+
+/* === LOW-END / MOBILE MODE: Strip effects but KEEP short transitions for smooth UI === */
+.low-end-mode *, .low-end-mode *::before, .low-end-mode *::after {
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  text-shadow: none !important;
+  filter: none !important;
+  animation: none !important;
+  transition-duration: 0.2s !important;
+  transition-timing-function: ease !important;
+}
+/* Allow mobile panel to animate smoothly */
+.low-end-mode #mzMobilePanel,
+.low-end-mode .mobile-nav-overlay,
+.low-end-mode .hamburger-btn span,
+.low-end-mode #mzMobilePanel .mz-mp-link {
+  transition-duration: 0.3s !important;
+}
+/* Same exception as the mobile block above: low-end-mode is switched on for
+   every phone (and by the startup FPS probe on a loaded desktop), so without
+   this the menu buttons pick up a 0.2s ease that this file explicitly turns
+   off further up. */
+.low-end-mode .cat-group-trigger,
+.low-end-mode .cat-group-chevron {
+  transition-duration: 0s !important;
+}
+.low-end-mode .ambient-particles { display: none !important; }
+.low-end-mode #hero::before, .low-end-mode #hero::after { display: none !important; }
+.low-end-mode .click-spark { display: none !important; }
+.low-end-mode .movie-card::before, .low-end-mode .movie-card::after { display: none !important; }
+.low-end-mode #navbar {
+  background: rgba(5,5,12,0.97) !important;
+  border: 1px solid rgba(255,255,255,0.05) !important;
+}
+.low-end-mode .slide-gradient {
+  background: linear-gradient(to top, rgba(3,3,10,0.98) 0%, transparent 50%) !important;
+}
+
+/* === REDUCED MOTION (accessibility + performance) === */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+  .ambient-particles { display: none !important; }
+}
+
+/* ── Search dropdown v2: match highlight, clear button, suggestion skeleton ── */
+.nav-search{position:relative}
+.mz-search-hl{background:rgba(245,197,24,.22);color:#f5c518;border-radius:3px;padding:0 1px;font-weight:800}
+.mz-search-clear{position:absolute;right:10px;top:50%;transform:translateY(-50%);display:none;align-items:center;justify-content:center;width:22px;height:22px;border:0;border-radius:50%;background:rgba(255,255,255,.09);color:rgba(255,255,255,.7);cursor:pointer;font-size:15px;line-height:1;padding:0;z-index:3;transition:background .18s ease,color .18s ease}
+.mz-search-clear:hover{background:rgba(245,197,24,.2);color:#f5c518}
+.mz-search-clear.visible{display:flex}
+.search-results-dropdown .mz-sugg-skeleton{display:flex;gap:10px;padding:9px 12px;align-items:center}
+.search-results-dropdown .mz-sugg-skeleton i{display:block;border-radius:6px;background:linear-gradient(90deg,rgba(255,255,255,.05),rgba(255,255,255,.12),rgba(255,255,255,.05));background-size:200% 100%;animation:mzSuggShimmer 1.1s linear infinite}
+.search-results-dropdown .mz-sugg-skeleton i.p{width:42px;height:60px;flex:0 0 42px}
+.search-results-dropdown .mz-sugg-skeleton i.l{height:11px;flex:1}
+@keyframes mzSuggShimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.search-results-dropdown .mz-sugg-skeleton i{animation:none}}
+
+/* ── Multi-language audio picker (modal + detail page) ── */
+.mz-lang-btn{display:inline-flex!important;align-items:center;gap:5px;background:rgba(255,255,255,0.05)!important;border:1px solid rgba(255,255,255,0.1)!important;color:rgba(255,255,255,0.65)!important;font-size:0.78rem!important;font-weight:600!important;padding:7px 13px!important;border-radius:999px!important;cursor:pointer!important;transition:all .2s ease!important;letter-spacing:.2px!important;position:relative!important}
+.mz-lang-btn:hover{background:rgba(245,197,24,.12)!important;border-color:rgba(245,197,24,.35)!important;color:#fff!important;transform:translateY(-1px)!important}
+.mz-lang-btn.active{background:linear-gradient(135deg,#f5c518,#e6a817)!important;border-color:#f5c518!important;color:#000!important;font-weight:800!important;box-shadow:0 4px 18px rgba(245,197,24,.35)!important;transform:translateY(-1px)!important}
+.mz-lang-btn.mz-lang-avail{border-color:rgba(16,185,129,.3)!important}
+.mz-lang-btn.mz-lang-avail.active{border-color:#f5c518!important}
+.mz-avail-dot{display:inline-block;width:6px;height:6px;background:#10b981;border-radius:50%;margin-left:3px;flex-shrink:0;box-shadow:0 0 5px rgba(16,185,129,.5)}
+.mz-lang-btn.active .mz-avail-dot{background:rgba(0,0,0,.4);box-shadow:none}

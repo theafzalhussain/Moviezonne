@@ -54,7 +54,11 @@ const kb = (n) => (n / 1024).toFixed(1) + ' KB';
 const gzipOf = (p) => zlib.gzipSync(fs.readFileSync(p), { level: 9 }).length;
 
 const CORE = ['moviezone', 'tv-mode'];
-const SCRIPTS = ['moviezone', 'tv-mode', 'search-engine', 'pwa-install'];
+// Scripts that ship as a <script defer> tag in the document.
+const SCRIPTS = ['moviezone', 'tv-mode', 'search-engine'];
+// Built and deployed, but injected at runtime instead of tagged in the document.
+const LAZY_SCRIPTS = ['pwa-install'];
+const ALL_SCRIPTS = SCRIPTS.concat(LAZY_SCRIPTS);
 const STYLES = ['moviezone', 'tv-mode'];
 
 console.log('\n-- shipped asset weight ' + '-'.repeat(38));
@@ -86,6 +90,25 @@ for (const name of SCRIPTS) {
     assert.ok(tag.test(html), name + '.min.js is not the <script> src');
     const bare = new RegExp('<script src="' + name + '\\.js\\?');
     assert.ok(!bare.test(html), 'unminified ' + name + '.js is still requested');
+  });
+}
+
+for (const name of LAZY_SCRIPTS) {
+  check(name + '.min.js stays OFF the critical path', () => {
+    /*  pwa-install.min.js is 30 KB of install popup plus a bundled QR code
+     *  generator. As a fourth `defer` tag its parse and execution landed inside
+     *  the load window alongside the three scripts that actually render the page.
+     *  It is now injected on idle / on demand — see the loader at the end of
+     *  index.html. The one thing that could not wait, capturing the one-shot
+     *  beforeinstallprompt event, is done by the bootstrap in <head>.
+     */
+    const tag = new RegExp('<script src="' + name + '\\.min\\.js\\?v=[\\d.]+" defer>');
+    assert.ok(!tag.test(html), name + '.min.js is back as a blocking <script defer> tag');
+    assert.ok(new RegExp("s\\.src = '" + name + "\\.min\\.js\\?v=[\\d.]+'").test(html),
+      'no runtime loader for ' + name + '.min.js — it would never load at all');
+    assert.ok(/__mzLoadPwaInstall/.test(js),
+      'installPWA() cannot pull the controller in on demand, so an early click is dropped');
+    assert.ok(fs.existsSync(path.join(__dirname, name + '.min.js')), name + '.min.js missing on disk');
   });
 }
 
@@ -157,7 +180,7 @@ check('charset stays in the first 1024 bytes', () => {
 console.log('\n-- build produces everything index.html asks for ' + '-'.repeat(13));
 
 check('npm run build minifies every shipped script', () => {
-  SCRIPTS.forEach((name) => {
+  ALL_SCRIPTS.forEach((name) => {
     assert.ok(pkg.scripts.build.includes(name + '.min.js'),
       name + '.min.js is referenced by index.html but never built');
   });
@@ -169,7 +192,7 @@ check('npm run build minifies every shipped stylesheet', () => {
   });
 });
 check('minified output is actually smaller than its source', () => {
-  [...SCRIPTS.map((n) => [n + '.js', n + '.min.js']),
+  [...ALL_SCRIPTS.map((n) => [n + '.js', n + '.min.js']),
    ...STYLES.map((n) => [n + '.css', n + '.min.css'])].forEach(([src, min]) => {
     assert.ok(fs.existsSync(min), min + ' has not been built - run npm run build');
     assert.ok(fs.statSync(min).size < fs.statSync(src).size,
@@ -184,7 +207,9 @@ check('sw.js precaches exactly the URLs index.html requests', () => {
     ...[...html.matchAll(/<script src="([^"]+\.js\?[^"]*)" defer>/g)].map((m) => m[1]),
     ...[...html.matchAll(/<link rel="stylesheet" href="([^"]+\.css\?[^"]*)">/g)].map((m) => m[1])
   ];
-  assert.ok(pageAssets.length >= 6, 'expected at least 6 versioned assets, found ' + pageAssets.length);
+  // 3 scripts + 2 stylesheets. pwa-install used to be a fourth script tag here;
+  // it is injected at runtime now and is asserted separately.
+  assert.ok(pageAssets.length >= 5, 'expected at least 5 versioned assets, found ' + pageAssets.length);
   pageAssets.forEach((a) => {
     assert.ok(sw.includes("'/" + a + "'"),
       a + ' is loaded by index.html but not precached by sw.js - offline clients would run stale code');
@@ -192,7 +217,7 @@ check('sw.js precaches exactly the URLs index.html requests', () => {
 });
 
 check('sw.js precaches no unminified bundle', () => {
-  [...SCRIPTS.map((n) => n + '.js'), ...STYLES.map((n) => n + '.css')].forEach((f) => {
+  [...ALL_SCRIPTS.map((n) => n + '.js'), ...STYLES.map((n) => n + '.css')].forEach((f) => {
     assert.ok(!new RegExp("'/" + f.replace('.', '\\.') + "\\?").test(sw),
       'sw.js still precaches the unminified ' + f);
   });
@@ -201,8 +226,16 @@ check('sw.js precaches no unminified bundle', () => {
 check('cache version was bumped past the pre-minification build', () => {
   const m = sw.match(/const CACHE_NAME = 'moviezone-v(\d+)'/);
   assert.ok(m, 'CACHE_NAME not found');
-  assert.ok(Number(m[1]) >= 59,
-    'CACHE_NAME is v' + m[1] + '; the caching-strategy rewrite needs a bump above v58 or clients keep the old shell');
+  assert.ok(Number(m[1]) >= 60,
+    'CACHE_NAME is v' + m[1] + '; moving pwa-install off the critical path needs a bump above v59 or clients keep the old shell');
+});
+
+check('the lazily-loaded bundle is still available offline', () => {
+  assert.ok(/'\/pwa-install\.min\.js\?v=[\d.]+'/.test(sw),
+    'pwa-install.min.js is not precached at all, so the install UI would be unavailable offline');
+  const optional = sw.slice(sw.indexOf('OPTIONAL_ASSETS'), sw.indexOf('self.addEventListener'));
+  assert.ok(/pwa-install\.min\.js/.test(optional),
+    'pwa-install.min.js is a core-shell entry; it is no longer on the load path, so a 404 there must not be able to fail the whole SW install');
 });
 
 check('TMDB images are cached instead of re-downloaded every visit', () => {

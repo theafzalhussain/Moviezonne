@@ -9,6 +9,7 @@
     "test:offline": "node tv-mode.test.js && node tv-mode.browser.test.js && node pwa-assets.test.js && node asset-perf-check.js && node player-health.test.js && node seo-ssr.test.js && node carousel-fit-check.js && node vercelignore-check.js",
     "test:perf": "node asset-perf-check.js && node player-health.test.js",
     "test:cwv": "node cwv-check.js",
+    "test:resilience": "node tmdb-resilience-check.js",
     "test:tv": "node tv-mode.test.js && node tv-mode.browser.test.js",
     "test:tabs": "node cat-tabs.browser.test.js && node cat-tabs.mobile.browser.test.js",
     "test:tabs:mobile": "node cat-tabs.mobile.browser.test.js",

@@ -1240,7 +1240,70 @@ window.DD_RUM.onReady(function () {
 <script src="tv-mode.min.js?v=1.3" defer></script>
 <script src="search-engine.min.js?v=2.1" defer></script>
 <script src="moviezone.min.js?v=7.6" defer></script>
-<script src="pwa-install.min.js?v=1.7" defer></script>
+<script>
+/*  ── pwa-install.min.js is NOT loaded with the others ─────────────────────────
+ *  It was a fourth `defer` script, so its 30 KB was parsed and executed inside
+ *  the load window, back-to-back with the other three. Nothing in it is needed
+ *  to render the page: it is the install popup UI plus a bundled QR code
+ *  generator (the QR image is for Smart TV users to scan on a phone).
+ *
+ *  The one time-critical part — capturing `beforeinstallprompt`, which fires once
+ *  and cannot be re-requested — is already handled by the bootstrap in <head>,
+ *  and pwa-install.js detects that via __mzPromptCaptureReady and skips its own
+ *  capture. So the module can arrive whenever.
+ *
+ *  It is pulled in on whichever comes first:
+ *    • beforeinstallprompt  — the browser is actively offering an install, so the
+ *      UI should be ready before the user goes looking for it
+ *    • window load + idle   — after the load window, so a passive visitor still
+ *      ends up with a correct install-button state
+ *    • installPWA()         — the user clicked Install before either of the above
+ */
+window.__mzLoadPwaInstall = function () {
+  if (window.__mzPwaInstallLoading) return window.__mzPwaInstallLoading;
+  window.__mzPwaInstallLoading = new Promise(function (resolve) {
+    var s = document.createElement('script');
+    s.src = 'pwa-install.min.js?v=1.8';
+    s.async = true;
+    // Resolve on error too: installPWA() has a fallback path and must not hang.
+    s.onload = function () {
+      window.dispatchEvent(new CustomEvent('mz:pwainstallready'));
+      resolve(true);
+    };
+    s.onerror = function () { resolve(false); };
+    document.head.appendChild(s);
+  });
+  return window.__mzPwaInstallLoading;
+};
+
+window.addEventListener('beforeinstallprompt', function () { window.__mzLoadPwaInstall(); });
+
+/*  Scheduling matters as much as deferring. The first attempt at this used
+ *  load + requestIdleCallback, which put it in the same idle window that
+ *  moviezone.js already uses for loadUpcoming() and the next-page prefetch —
+ *  three pieces of background work landing on one idle callback is just a long
+ *  task at a later timestamp.
+ *
+ *  So: first real interaction wins (an engaged visitor gets it immediately, and
+ *  their own tap already interrupted the render), otherwise a 6s timer, by which
+ *  point the app's own background work has finished.
+ */
+(function () {
+  var fired = false;
+  function pull() {
+    if (fired) return;
+    fired = true;
+    ['pointerdown', 'keydown', 'touchstart'].forEach(function (t) {
+      window.removeEventListener(t, pull, true);
+    });
+    window.__mzLoadPwaInstall();
+  }
+  ['pointerdown', 'keydown', 'touchstart'].forEach(function (t) {
+    window.addEventListener(t, pull, { capture: true, passive: true, once: true });
+  });
+  window.addEventListener('load', function () { setTimeout(pull, 6000); });
+})();
+</script>
 <script>
 // ── Loader dismissal ─────────────────────────────────────────────────────────
 // Deferred scripts run before DOMContentLoaded, so by the time this fires the

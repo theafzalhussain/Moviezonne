@@ -106,166 +106,16 @@ function getResponsiveBackdrop(path) {
   if (window.innerWidth >= 1920) document.documentElement.classList.add('large-screen-mode');
 })();
  
-// -- PERFORMANCE BOOST STYLES --
-const perfStyle = document.createElement('style');
-perfStyle.textContent = `
-  /* === UNIVERSAL DEVICE PERFORMANCE === */
-  
-  /* GPU-accelerated cards for all devices */
-  .movie-card, .upcoming-card { content-visibility: auto; contain-intrinsic-size: 180px 320px; contain: layout style paint; }
-  .carousel-slide { will-change: transform, opacity; }
-  img { content-visibility: auto; }
-  /*  #movies-section was in this rule and it was the single largest CLS source on
-   *  the page: 0.209, measured (cwv-check.js).
-   *
-   *  content-visibility:auto tells the browser to skip the subtree's layout while
-   *  it is off-screen and to pretend it is contain-intrinsic-size tall instead.
-   *  #movies-section is #hero's immediate neighbour, so it enters the viewport on
-   *  the first flick every single time - the skip buys nothing. What it does buy
-   *  is a guaranteed shift: the subtree (including .main-content::before, the
-   *  decorative panel that is sized by its parent) gets no box at all until the
-   *  section is un-skipped, and Chrome books that first layout as a 644px move.
-   *  The flat 1000px placeholder made it worse by being wrong in both directions.
-   *
-   *  #upcoming keeps the optimisation - it really is far down the page - but its
-   *  declaration now lives in the mz-cwv-critical block in index.html, using
-   *  "contain-intrinsic-size: auto 700px" so the browser remembers the size it
-   *  last measured instead of re-guessing. Declaring it here as well would win on
-   *  cascade order (this sheet is injected after the document's own styles) and
-   *  silently undo that.
-   */
-  
-  /* === MOBILE / SMALL SCREEN OPTIMIZATION (< 768px) === */
-  @media (max-width: 768px) {
-    /* Kill ALL animations on mobile — biggest performance gain */
-    *, *::before, *::after {
-      animation-duration: 0.01ms !important;
-      animation-iteration-count: 1 !important;
-      transition-duration: 0.2s !important;
-    }
-    /* Exceptions: only allow essential transitions */
-    #mzMobilePanel, .mobile-nav-overlay, .hamburger-btn span {
-      transition-duration: 0.3s !important;
-    }
-    #mzMobilePanel .mz-mp-link {
-      transition-duration: 0.25s !important;
-    }
-    /* Menu buttons stay instant. The dropdown panel is already on screen by the
-       time the pill would ease, so any duration here reads as lag. moviezone.css
-       sets "transition: none !important" on these, but this sheet is injected
-       AFTER it — so without an explicit exception the wildcard above wins and
-       silently puts the transition back. */
-    .cat-group-trigger, .cat-group-chevron {
-      transition-duration: 0s !important;
-    }
-    
-    /* Remove ALL hover effects on mobile */
-    .movie-card:hover, .upcoming-card:hover { transform: none !important; box-shadow: none !important; }
-    
-    /* Kill GPU-heavy effects entirely */
-    .ambient-particles { display: none !important; }
-    #hero::before, #hero::after { display: none !important; }
-    .click-spark { display: none !important; }
-    
-    /* Remove ALL backdrop-filters on mobile (main lag cause) */
-    * { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
-    /* Only re-enable on mobile panel */
-    #mzMobilePanel { backdrop-filter: blur(20px) !important; -webkit-backdrop-filter: blur(20px) !important; }
-    
-    /* Simplify box-shadows (major GPU cost) */
-    .movie-card, .upcoming-card, .player-chip, .player-chip--source, .cat-tab { 
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
-    }
-    #navbar {
-      box-shadow: 0 4px 20px rgba(0,0,0,0.5) !important;
-      backdrop-filter: none !important;
-      -webkit-backdrop-filter: none !important;
-      background: rgba(5,5,12,0.95) !important;
-    }
-    
-    /* Disable 3D tilt on touch */
-    .movie-card { perspective: none !important; transform-style: flat !important; }
-    
-    /* Reduce grid reflow */
-    .movie-grid { gap: 10px !important; }
-    
-    /* Remove pseudo-element decorations */
-    .movie-card::before, .movie-card::after, .upcoming-card::before, .upcoming-card::after,
-    .nav-search::before, #navbar::before { display: none !important; }
-    
-    /* Reduce paint complexity */
-    .slide-gradient { background: linear-gradient(to top, rgba(3,3,10,0.95) 0%, transparent 60%) !important; }
-  }
-  
-  /* === TABLET (768px - 1024px) === */
-  @media (min-width: 769px) and (max-width: 1024px) {
-    .movie-card:hover { transform: translateY(-4px) !important; }
-    .ambient-particles .particle:nth-child(n+12) { display: none !important; }
-    .movie-card::before, .upcoming-card::before { display: none !important; }
-    #navbar { backdrop-filter: blur(20px) !important; -webkit-backdrop-filter: blur(20px) !important; }
-  }
-  
-  /* === TV / LARGE SCREEN OPTIMIZATION === */
-  @media (min-width: 1920px), (hover: none) and (min-width: 960px) {
-    .movie-grid { contain: layout style paint; }
-    .ambient-particles .particle:nth-child(n+15) { display: none !important; }
-    .movie-card, .upcoming-card, .cat-tab, button { min-height: 48px; }
-    /* Reduce repaints on large screens */
-    .movie-card, .upcoming-card { will-change: auto; transform: translateZ(0); }
-    .carousel-slide { will-change: transform; }
-    /* Smoother scrolling */
-    html { scroll-behavior: smooth; }
-    * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
-  }
-  
-  /* === LOW-END / MOBILE MODE: Strip effects but KEEP short transitions for smooth UI === */
-  .low-end-mode *, .low-end-mode *::before, .low-end-mode *::after {
-    box-shadow: none !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-    text-shadow: none !important;
-    filter: none !important;
-    animation: none !important;
-    transition-duration: 0.2s !important;
-    transition-timing-function: ease !important;
-  }
-  /* Allow mobile panel to animate smoothly */
-  .low-end-mode #mzMobilePanel,
-  .low-end-mode .mobile-nav-overlay,
-  .low-end-mode .hamburger-btn span,
-  .low-end-mode #mzMobilePanel .mz-mp-link {
-    transition-duration: 0.3s !important;
-  }
-  /* Same exception as the mobile block above: low-end-mode is switched on for
-     every phone (and by the startup FPS probe on a loaded desktop), so without
-     this the menu buttons pick up a 0.2s ease that moviezone.css explicitly
-     turns off. */
-  .low-end-mode .cat-group-trigger,
-  .low-end-mode .cat-group-chevron {
-    transition-duration: 0s !important;
-  }
-  .low-end-mode .ambient-particles { display: none !important; }
-  .low-end-mode #hero::before, .low-end-mode #hero::after { display: none !important; }
-  .low-end-mode .click-spark { display: none !important; }
-  .low-end-mode .movie-card::before, .low-end-mode .movie-card::after { display: none !important; }
-  .low-end-mode #navbar { 
-    background: rgba(5,5,12,0.97) !important; 
-    border: 1px solid rgba(255,255,255,0.05) !important;
-  }
-  .low-end-mode .slide-gradient { 
-    background: linear-gradient(to top, rgba(3,3,10,0.98) 0%, transparent 50%) !important; 
-  }
-  
-  /* === REDUCED MOTION (accessibility + performance) === */
-  @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after {
-      animation: none !important;
-      transition-duration: 0.01ms !important;
-    }
-    .ambient-particles { display: none !important; }
-  }
-`;
-document.head.appendChild(perfStyle);
+/*  -- PERFORMANCE BOOST STYLES --
+ *  Moved to the end of moviezone.css. It was ~5 KB of static CSS held in a
+ *  template literal and appended to <head> during top-level execution, which
+ *  invalidated computed style for the whole document and forced a full recalc
+ *  inside the load window. terser also could not minify it, so it shipped
+ *  formatted, comments and all, inside the JS bundle.
+ *
+ *  It is last in the stylesheet, so every override it used to win by being
+ *  injected late still wins. See the MOVED OUT OF JAVASCRIPT banner there.
+ */
 
 // Weak device detect karke class lagana
 // -- PREMIUM CURSOR GLOW & CLICK SPARKS --
@@ -738,6 +588,250 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') _mzFlushCacheWrites();
 });
 
+/*  ══════════════════════════════════════════════════════════════════════
+ *  NETWORK RESILIENCE
+ *  ══════════════════════════════════════════════════════════════════════
+ *  Datadog RUM was reporting ~91 "TypeError: Failed to fetch" per day, all
+ *  from tmdb() <- loadMovies(). Hardly any of them were a broken API. Three
+ *  real causes, biggest first:
+ *
+ *  1. RETRY STORM. loadMovies() re-ran itself every 3 s, FOREVER, whenever it
+ *     finished with an empty list. Each run fans out to 15 parallel tmdb()
+ *     calls, so one user on a dead connection generated ~300 failed requests
+ *     a minute, every one of them logging console.error — which is exactly
+ *     what RUM collects. A handful of such sessions explains the whole daily
+ *     count. That loop is now bounded (see loadMovies).
+ *  2. NO REQUEST-LEVEL RETRY. A single dropped packet on a mobile network
+ *     handover turned straight into an empty section, because the catch below
+ *     returned { results: [] } on the first failure. Transient failures now
+ *     get up to two retries with exponential backoff and jitter.
+ *  3. UNLOAD NOISE. Requests still in flight when the user navigates away
+ *     reject with precisely this TypeError. That is browser housekeeping, not
+ *     a fault, and it is no longer reported as an error.
+ *
+ *  Also new: a hard per-attempt timeout. Before this, a connection that
+ *  opened and then stalled (captive portals and carrier-grade NAT do this)
+ *  left the request pending indefinitely, so the section it fed never
+ *  resolved and never errored either — it just stayed on the skeleton.
+ *
+ *  None of this changes the API contract. Same BASE, same endpoints, same
+ *  params, same response handling. Only how long the client waits, how often
+ *  it retries, and what it calls an error.
+ */
+const MZ_FETCH_TIMEOUT_MS = 9000;   // per attempt
+const MZ_FETCH_MAX_RETRIES = 2;     // 3 attempts total, worst case
+const MZ_FETCH_BACKOFF_MS = 500;    // doubled per attempt, plus jitter
+
+// Set once the page is going away, so rejections caused by teardown can be
+// told apart from real failures. pagehide covers bfcache and normal unload.
+let _mzPageHiding = false;
+window.addEventListener('pagehide', () => { _mzPageHiding = true; });
+window.addEventListener('beforeunload', () => { _mzPageHiding = true; });
+
+// Monotonic count of requests that failed for network reasons. loadMovies reads
+// it before and after gathering, which is how it distinguishes "the network
+// broke" from "TMDB genuinely has nothing for this category" — the two used to
+// be indistinguishable, and treating the second as the first is what armed the
+// infinite retry.
+let _mzFetchFailureCount = 0;
+
+const _mzSleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+/*  ══════════════════════════════════════════════════════════════════════
+ *  REQUEST CONCURRENCY GATE
+ *  ══════════════════════════════════════════════════════════════════════
+ *  Datadog flagged 30 slow /api/tmdb/discover/movie and 14 slow
+ *  /api/tmdb/discover/tv requests — "slow" meaning over a second. They were not
+ *  slow because TMDB is slow. They were slow because they were queueing.
+ *
+ *  A cold homepage fires ~25 API calls in two ticks: loadCarousel() sends 10 and
+ *  loadMovies('all') sends 15, all inside Promise.allSettled. Meanwhile the
+ *  origin holds ONE https.Agent to TMDB with maxSockets: 12 — and that pool is
+ *  global, shared across every concurrent visitor. So a single visitor already
+ *  overflows it by half, and three visitors loading at once put 75 requests
+ *  behind 12 sockets.
+ *
+ *  Firing all 25 at once buys nothing, because the server cannot forward more
+ *  than 12 anyway. All it does is convert server-side queue time into
+ *  client-visible request duration: the request is "in flight" from the browser's
+ *  point of view — and from Datadog's — while it actually sits in a socket queue.
+ *
+ *  Six is chosen so one client never occupies more than half the origin's
+ *  upstream pool, leaving room for other visitors. It is also what the browser
+ *  itself would have enforced over HTTP/1.1.
+ *
+ *  This does not change WHICH requests are made, only how many are in flight at
+ *  once. Order is preserved, so the carousel — which feeds the LCP element and
+ *  calls first — still gets the first slots.
+ *
+ *  NOTE for the server side (deliberately not changed here): raising maxSockets,
+ *  or giving discover responses a short s-maxage so the CDN absorbs the burst,
+ *  would remove the queue at its source. That is a server decision.
+ */
+const MZ_MAX_CONCURRENT_FETCHES = 6;
+let _mzActiveFetches = 0;
+const _mzFetchQueue = [];
+
+function _mzAcquireSlot() {
+  // A runaway queue must never be able to wedge the app. If it ever grows past
+  // anything plausible, stop gating rather than blocking.
+  if (_mzActiveFetches < MZ_MAX_CONCURRENT_FETCHES || _mzFetchQueue.length > 80) {
+    _mzActiveFetches++;
+    return Promise.resolve();
+  }
+  return new Promise(resolve => _mzFetchQueue.push(resolve));
+}
+
+function _mzReleaseSlot() {
+  const next = _mzFetchQueue.shift();
+  // Hand the slot straight to the next waiter instead of decrementing and
+  // re-incrementing, which would let a late arrival jump the queue.
+  if (next) next();
+  else _mzActiveFetches = Math.max(0, _mzActiveFetches - 1);
+}
+
+// Queued promises would otherwise never settle once the page stops running.
+window.addEventListener('pagehide', () => {
+  while (_mzFetchQueue.length) _mzFetchQueue.shift()();
+});
+
+/*  Shared by every loader that retries (loadMovies, loadCarousel). Declared here
+ *  rather than next to loadMovies because loadCarousel sits ~1600 lines earlier
+ *  and reads them too — keeping them at the point of first use avoids relying on
+ *  const hoisting order.
+ *
+ *  1.5s, 3s, 6s. Deliberately not the old flat 3s: a flat interval retried a
+ *  broken connection at a constant rate forever, which is how a single bad
+ *  session produced hundreds of requests. Doubling means a genuinely dead link
+ *  is abandoned in under 11 seconds.
+ */
+const MZ_FEED_MAX_RETRIES = 3;
+const MZ_FEED_RETRY_BASE_MS = 1500;
+
+// Waits for the connection to come back instead of polling a dead link. Fires at
+// most once, and only while this page is still the one the user is looking at.
+function _mzWhenOnline(fn) {
+  if (navigator.onLine !== false) { fn(); return; }
+  const run = () => { window.removeEventListener('online', run); if (!_mzPageHiding) fn(); };
+  window.addEventListener('online', run, { once: true });
+}
+
+// 0 means "no response at all" (network-level). Retrying a 4xx is pointless:
+// a bad request stays bad. 408/425/429 and 5xx are the ones that heal.
+function _mzIsTransientStatus(status) {
+  return status === 0 || status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+/*  A failure is "benign" when it was caused by something other than the network
+ *  being broken, and reporting it would be noise:
+ *    • the page is unloading  — the browser cancels in-flight requests
+ *    • the device is offline  — already surfaced to the user by the OS
+ *    • the request was aborted — either by our own stale-request logic or by
+ *      the timeout, both of which are deliberate
+ */
+function _mzIsBenignFailure(err) {
+  if (_mzPageHiding) return true;
+  if (navigator.onLine === false) return true;
+  return !!err && (err.name === 'AbortError' || err.name === 'TimeoutError');
+}
+
+function _mzReportFetchError(err, meta) {
+  // Structured, queryable context beats a stringified console line. RUM's error
+  // tracking also picks up console.error, so this uses console.warn to avoid
+  // reporting the same failure twice.
+  try {
+    if (window.DD_RUM && typeof window.DD_RUM.addError === 'function') {
+      window.DD_RUM.addError(err, Object.assign({ source: 'tmdb' }, meta));
+    }
+  } catch (e) { /* never let telemetry break a fetch */ }
+  console.warn('[MovieZone] TMDB request failed', meta, err && err.message);
+}
+
+/*  One attempt, with a hard timeout, cancellable from the caller's controller.
+ *  A fresh controller per attempt is required because an AbortController is
+ *  single-use — reusing the outer one would make attempt 2 abort instantly.
+ */
+async function _mzFetchAttempt(urlStr, outerSignal) {
+  // Gate is acquired per attempt, so a retry queues behind current traffic
+  // instead of jumping it.
+  await _mzAcquireSlot();
+
+  const attemptController = new AbortController();
+  let timedOut = false;
+
+  const timer = setTimeout(() => { timedOut = true; attemptController.abort(); }, MZ_FETCH_TIMEOUT_MS);
+  const relayAbort = () => attemptController.abort();
+  if (outerSignal.aborted) relayAbort();
+  else outerSignal.addEventListener('abort', relayAbort, { once: true });
+
+  try {
+    const r = await fetch(urlStr, { signal: attemptController.signal });
+    return r;
+  } catch (err) {
+    if (timedOut) {
+      const e = new Error('TMDB request timed out after ' + MZ_FETCH_TIMEOUT_MS + 'ms');
+      e.name = 'TimeoutError';
+      throw e;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    outerSignal.removeEventListener('abort', relayAbort);
+    _mzReleaseSlot();
+  }
+}
+
+/*  Retries transient failures only, and gives up immediately if the caller
+ *  cancelled or the page is going away. Returns the parsed JSON, or throws the
+ *  last error for tmdb()'s catch to turn into a cache/empty fallback.
+ */
+async function _mzFetchWithRetry(urlStr, outerSignal, meta) {
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= MZ_FETCH_MAX_RETRIES; attempt++) {
+    if (outerSignal.aborted || _mzPageHiding) break;
+
+    // Retrying while the OS says there is no link just burns battery. Wait for
+    // the connection to come back, but not longer than one backoff window —
+    // the caller has its own retry, so blocking here indefinitely would hang it.
+    if (navigator.onLine === false && attempt > 0) break;
+
+    try {
+      const r = await _mzFetchAttempt(urlStr, outerSignal);
+      if (r.ok) return await r.json();
+
+      if (!_mzIsTransientStatus(r.status) || attempt === MZ_FETCH_MAX_RETRIES) {
+        const e = new Error('TMDB responded ' + r.status);
+        e.name = 'HttpError';
+        e.status = r.status;
+        throw e;
+      }
+
+      // 429 tells us how long to wait; honour it rather than guessing.
+      const retryAfter = Number(r.headers.get('Retry-After'));
+      const wait = Number.isFinite(retryAfter) && retryAfter > 0
+        ? Math.min(retryAfter * 1000, 5000)
+        : MZ_FETCH_BACKOFF_MS * Math.pow(2, attempt) + Math.random() * 250;
+      lastError = new Error('TMDB responded ' + r.status);
+      lastError.status = r.status;
+      await _mzSleep(wait);
+      continue;
+    } catch (err) {
+      lastError = err;
+      // Deliberate cancellation and teardown are final — never retry them.
+      if (err.name === 'AbortError' || _mzPageHiding) throw err;
+      if (err.name === 'HttpError' && !_mzIsTransientStatus(err.status)) throw err;
+      if (attempt === MZ_FETCH_MAX_RETRIES) throw err;
+
+      // Jitter matters here: a cold homepage fires 15 of these at once, and
+      // without it all 15 would retry in the same millisecond and collide again.
+      await _mzSleep(MZ_FETCH_BACKOFF_MS * Math.pow(2, attempt) + Math.random() * 250);
+    }
+  }
+
+  throw lastError || new Error('TMDB request abandoned');
+}
+
 async function tmdb(endpoint, params) {
   params = params || {};
  
@@ -786,19 +880,43 @@ async function tmdb(endpoint, params) {
  
   const fetchPromise = (async () => {
     try {
-      const r = await fetch(urlStr, { signal: controller.signal }); 
-      if (!r.ok) return cachedData || {};
-      const data = await r.json();
+      const data = await _mzFetchWithRetry(urlStr, controller.signal, { endpoint: endpoint, url: urlStr });
       tmdbCache.set(urlStr, data);
 
       // Queued, not written inline — see DEFERRED CACHE WRITES above.
       _mzQueueCacheWrite(cacheKey, data);
 
       return data;
-    } catch (e) { 
-      if (e.name === 'AbortError') return cachedData || { results: [] }; // Return safe fallback on cancellation
-      console.error('Network/Fetch Error:', e);
-      return cachedData || { results: [] }; // Fallback to stale cache or empty array
+    } catch (e) {
+      /*  Every exit below returns data rather than rethrowing, exactly as before —
+       *  callers spread `r.results || []` across ~40 sites and none of them expect
+       *  a rejection. What changed is the bookkeeping:
+       *
+       *    • stale cache is preferred over an empty list, so a failed refresh
+       *      shows yesterday's posters instead of an empty rail;
+       *    • the failure is COUNTED, so loadMovies can tell a network fault from
+       *      a genuinely empty category and stop retrying the latter forever;
+       *    • the returned object is MARKED, so a direct caller can check;
+       *    • only non-benign failures are reported, and via DD_RUM.addError with
+       *      the endpoint attached instead of a bare console.error.
+       */
+      const benign = _mzIsBenignFailure(e);
+      if (!benign) {
+        _mzFetchFailureCount++;
+        _mzReportFetchError(e, {
+          endpoint: endpoint,
+          status: e.status || 0,
+          offline: navigator.onLine === false,
+          hadStaleCache: !!cachedData
+        });
+      }
+
+      if (cachedData) return cachedData;
+      // Non-enumerable so it never leaks into JSON.stringify or the cache write,
+      // and so `for (const k in res)` loops elsewhere stay unaffected.
+      const fallback = { results: [] };
+      Object.defineProperty(fallback, '_mzFailed', { value: true, enumerable: false });
+      return fallback;
     } finally {
         if (abortControllers.get(urlStr) === controller) abortControllers.delete(urlStr);
     }
@@ -814,13 +932,13 @@ async function tmdb(endpoint, params) {
  
 // -- INIT -- Priority-based staggered loading for ultra-fast startup
 async function init() {
-  // Inject Multi-Language UI styles
-  if (!document.getElementById('mz-multilang-css')) {
-    const _s = document.createElement('style');
-    _s.id = 'mz-multilang-css';
-    _s.textContent = `.mz-lang-btn{display:inline-flex!important;align-items:center;gap:5px;background:rgba(255,255,255,0.05)!important;border:1px solid rgba(255,255,255,0.1)!important;color:rgba(255,255,255,0.65)!important;font-size:0.78rem!important;font-weight:600!important;padding:7px 13px!important;border-radius:999px!important;cursor:pointer!important;transition:all .2s ease!important;letter-spacing:.2px!important;position:relative!important}.mz-lang-btn:hover{background:rgba(245,197,24,.12)!important;border-color:rgba(245,197,24,.35)!important;color:#fff!important;transform:translateY(-1px)!important}.mz-lang-btn.active{background:linear-gradient(135deg,#f5c518,#e6a817)!important;border-color:#f5c518!important;color:#000!important;font-weight:800!important;box-shadow:0 4px 18px rgba(245,197,24,.35)!important;transform:translateY(-1px)!important}.mz-lang-btn.mz-lang-avail{border-color:rgba(16,185,129,.3)!important}.mz-lang-btn.mz-lang-avail.active{border-color:#f5c518!important}.mz-avail-dot{display:inline-block;width:6px;height:6px;background:#10b981;border-radius:50%;margin-left:3px;flex-shrink:0;box-shadow:0 0 5px rgba(16,185,129,.5)}.mz-lang-btn.active .mz-avail-dot{background:rgba(0,0,0,.4);box-shadow:none}`;
-    document.head.appendChild(_s);
-  }
+  /*  The multi-language button styles used to be injected here, as a <style>
+   *  element appended on DOMContentLoaded. That is the worst possible moment for
+   *  it: appending a stylesheet invalidates computed style document-wide and
+   *  forces a full recalculation, and this one landed exactly when the browser
+   *  was trying to produce the first paint. The rules are static and now live at
+   *  the end of moviezone.css.
+   */
   try {
     // Load carousel and movies in parallel (Promise.allSettled ensures one failure doesn't block other)
     await Promise.allSettled([
@@ -1400,7 +1518,11 @@ function calculateMovieScore(movie) {
   return ratingScore + popularityScore + recencyBoost + trendingVelocity + voteConfidence + nowPlayingBonus + qualityUpgradeBoost;
 }
 
+let _mzCarouselAttempts = 0;
+const MZ_CAROUSEL_MAX_RETRIES = 2;
+
 async function loadCarousel() {
+  const _mzCarouselFailureMark = _mzFetchFailureCount;
   // FETCH FROM ALL MAJOR CATEGORIES IN PARALLEL (Professional-grade discovery)
   const results = await Promise.allSettled([
     tmdb('/trending/movie/week', { language: 'en-US', page: '1' }),
@@ -1425,8 +1547,33 @@ async function loadCarousel() {
     }
   });
 
-  // If no data came at all, fallback silently
-  if (masterPool.length === 0) { buildCarousel(); return; }
+  /*  Empty pool. This used to just call buildCarousel() and give up silently, so
+   *  a network blip on load left #hero as a bare gradient for the rest of the
+   *  session — and #hero holds the LCP element, so that is the most visible part
+   *  of the page staying broken.
+   *
+   *  Bounded retry, and only when the failure counter says the network actually
+   *  failed. An honest empty pool (TMDB up, nothing passed the date filters) is
+   *  still terminal, because retrying it would return the same nothing.
+   */
+  if (masterPool.length === 0) {
+    const networkFailed = _mzFetchFailureCount > _mzCarouselFailureMark ||
+      navigator.onLine === false;
+
+    if (networkFailed && _mzCarouselAttempts < MZ_CAROUSEL_MAX_RETRIES) {
+      _mzCarouselAttempts++;
+      if (navigator.onLine === false) {
+        _mzCarouselAttempts--;             // do not spend attempts on a dead link
+        _mzWhenOnline(() => loadCarousel());
+      } else {
+        setTimeout(loadCarousel, MZ_FEED_RETRY_BASE_MS * Math.pow(2, _mzCarouselAttempts - 1));
+      }
+      return;
+    }
+    buildCarousel();
+    return;
+  }
+  _mzCarouselAttempts = 0;
 
   // Deduplicate: Keep best version (highest popularity) of each movie
   const movieMap = new Map();
@@ -1666,7 +1813,14 @@ function buildCarousel() {
     const thumb = document.createElement('div');
     thumb.className = 'thumb' + (i === 0 ? ' active' : '');
     thumb.tabIndex = 0;
-    thumb.innerHTML = '<img src="'+IMG+m.poster_path+'" alt="" width="60" height="84" loading="lazy" decoding="async">';
+    /*  w185, not IMG (w342).
+     *  .thumb renders at min(58px, 5.02vh) wide — so w342 was roughly 6x the
+     *  pixels it displays on a 1x screen and still 2x on a 3x phone. Ten of these
+     *  load with the carousel, which put ~250 KB of thumbnail on the critical
+     *  path to show ~35 KB worth of image. w185 covers a 3x device exactly.
+     */
+    thumb.innerHTML = '<img src="https://image.tmdb.org/t/p/w185' + m.poster_path +
+      '" alt="" width="60" height="84" loading="lazy" decoding="async">';
     thumb.addEventListener('click', () => { goToSlide(i); resetAutoSlide(); });
     thumbsFrag.appendChild(thumb);
   });
@@ -3018,6 +3172,80 @@ function setCartoonMode(mode) {
   loadMovies('kids');
 }
 
+/*  ══════════════════════════════════════════════════════════════════════
+ *  FEED RETRY BUDGET + FAILURE UI
+ *  ══════════════════════════════════════════════════════════════════════
+ *  Replaces the unbounded `setTimeout(() => loadMovies(cat), 3000)` that used
+ *  to run for the lifetime of the tab whenever a feed came back empty. See the
+ *  comment at the retry site inside loadMovies for the full story.
+ *
+ *  Budget is per category, because failing "anime" says nothing about whether
+ *  "trending" is reachable, and a user switching tabs should get a fresh set of
+ *  attempts for the tab they actually chose. MZ_FEED_MAX_RETRIES and
+ *  MZ_FEED_RETRY_BASE_MS live in the NETWORK RESILIENCE block above, since
+ *  loadCarousel shares them.
+ */
+const _mzFeedRetries = new Map();
+
+function _mzFeedRetryState(cat) {
+  const key = cat || 'all';
+  if (!_mzFeedRetries.has(key)) _mzFeedRetries.set(key, { attempts: 0, timer: 0 });
+  return _mzFeedRetries.get(key);
+}
+
+function _mzFeedSlot() {
+  return document.getElementById('movieGrid');
+}
+
+// TMDB answered, there is simply nothing matching this category. Terminal state:
+// retrying cannot change a correct answer.
+function renderFeedEmpty(cat) {
+  const grid = _mzFeedSlot();
+  if (!grid) return;
+  grid.innerHTML =
+    '<div class="no-results">' +
+      '<h3>Nothing here right now</h3>' +
+      '<p>No titles matched this category. Try another tab or search for a title.</p>' +
+    '</div>';
+}
+
+// Transient network failure, retry already scheduled. Says what is happening and
+// when, rather than the old permanent "Loading movies...".
+function renderFeedRetrying(cat, attempt, delayMs) {
+  const grid = _mzFeedSlot();
+  if (!grid) return;
+  const offline = navigator.onLine === false;
+  grid.innerHTML =
+    '<div class="no-results">' +
+      '<h3>' + (offline ? 'You are offline' : 'Connection hiccup') + '</h3>' +
+      '<p>' + (offline
+        ? 'Waiting for your connection to come back — this will retry itself.'
+        : 'Retrying in ' + Math.round(delayMs / 1000) + 's (attempt ' + attempt + ' of ' + MZ_FEED_MAX_RETRIES + ').') +
+      '</p>' +
+    '</div>';
+}
+
+// Retry budget spent. The user gets an explicit action instead of an eternal
+// spinner, and we stop generating requests until they ask for one.
+function renderFeedError(cat) {
+  const grid = _mzFeedSlot();
+  if (!grid) return;
+  grid.innerHTML =
+    '<div class="no-results">' +
+      '<h3>Could not load titles</h3>' +
+      '<p>The catalogue did not respond. Your connection may be blocking it.</p>' +
+      '<button type="button" class="mz-feed-retry-btn" id="mzFeedRetryBtn">Try again</button>' +
+    '</div>';
+  const btn = document.getElementById('mzFeedRetryBtn');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    _mzFeedRetryState(cat).attempts = 0;   // manual click buys a fresh budget
+    btn.disabled = true;
+    btn.textContent = 'Retrying…';
+    loadMovies(cat);
+  }, { once: true });
+}
+
 async function loadMovies(cat, isLoadMore = false) {
   const grid = document.getElementById('movieGrid');
   if (!grid) return;
@@ -3040,7 +3268,22 @@ async function loadMovies(cat, isLoadMore = false) {
   const pageStr = String(currentMoviePage);
   const p1 = String(currentMoviePage * 2 - 1);
   const p2 = String(currentMoviePage * 2);
-  
+
+  /*  tmdb() deliberately never rejects — 40-odd call sites read `r.results || []`
+   *  and would all need try/catch otherwise. The cost is that a fetch failure and
+   *  an honestly empty response look identical from here, which is what let the
+   *  old code retry an empty category forever. Comparing the global failure
+   *  counter before and after the gather recovers that distinction without
+   *  touching a single call site.
+   *
+   *  The counter is global, so a background prefetch failing in the same window
+   *  can flip this to "network failed" when the feed itself was fine. That only
+   *  matters on the empty-result branch, and erring that way is the safe
+   *  direction: something on the wire really did fail, and the retry it triggers
+   *  is bounded to three attempts.
+   */
+  const _mzFeedFailureMark = _mzFetchFailureCount;
+
   try {
     if (cat === 'all') {
       // NETFLIX-STYLE DISCOVERY: Fetch diverse sources for maximum content freshness
@@ -3376,13 +3619,62 @@ async function loadMovies(cat, isLoadMore = false) {
   });
 
   if (!movies.length && !isLoadMore) {
-    const grid = document.getElementById('movieGrid');
-    if (grid) grid.innerHTML = '<div class="no-results"><h3>Loading movies...</h3><p>Retrying in a moment...</p></div>';
-    // Auto-retry after 3 seconds
-    setTimeout(() => loadMovies(cat), 3000);
+    /*  THE RETRY STORM, FIXED.
+     *
+     *  This used to be:
+     *      grid.innerHTML = '<h3>Loading movies...</h3><p>Retrying in a moment</p>'
+     *      setTimeout(() => loadMovies(cat), 3000);
+     *
+     *  with no attempt counter and no exit condition. Two problems compounded:
+     *
+     *    • It could not tell "the network is down" from "this category is
+     *      genuinely empty", so BOTH retried forever, every 3 seconds, for as
+     *      long as the tab stayed open. Each pass fans out to up to 15 parallel
+     *      tmdb() calls — roughly 300 requests a minute, each logging an error.
+     *      That is the source of the "91 TypeError: Failed to fetch in 24h" in
+     *      Datadog; a couple of sessions on bad connections produce all of it.
+     *    • It lied. The message said "Loading..." forever, so a user on a broken
+     *      connection saw an eternal spinner with no way to act.
+     *
+     *  Now: only network failures retry, at most MZ_FEED_MAX_RETRIES times with
+     *  exponential backoff; a genuinely empty category says so and stops; and
+     *  when retries are exhausted the user gets an explicit, actionable state.
+     */
+    const networkFailed = _mzFetchFailureCount > _mzFeedFailureMark ||
+      navigator.onLine === false;
+    const state = _mzFeedRetryState(cat);
+
+    if (!networkFailed) {
+      // TMDB answered fine, it just has nothing matching this category's filters.
+      // Retrying an honest empty result can only ever produce the same result.
+      state.attempts = 0;
+      renderFeedEmpty(cat);
+      return;
+    }
+
+    if (state.attempts >= MZ_FEED_MAX_RETRIES) {
+      renderFeedError(cat);
+      return;
+    }
+
+    state.attempts++;
+    const delay = MZ_FEED_RETRY_BASE_MS * Math.pow(2, state.attempts - 1);
+    renderFeedRetrying(cat, state.attempts, delay);
+
+    clearTimeout(state.timer);
+    if (navigator.onLine === false) {
+      // Do not burn attempts against a link the OS already says is down. Come
+      // back the instant it returns; that is faster than any timer would be.
+      state.attempts--;
+      _mzWhenOnline(() => loadMovies(cat));
+    } else {
+      state.timer = setTimeout(() => loadMovies(cat), delay);
+    }
     return;
   }
-  
+
+  // Reached content, so the category is healthy again.
+  _mzFeedRetryState(cat).attempts = 0;
   const keyOf = (m) => (m.media_type || (m.name && !m.title ? 'tv' : 'movie')) + '-' + m.id;
   const existingIds = new Set(allMovies.map(keyOf));
   const newMovies = movies.filter(m => { const k = keyOf(m); if (existingIds.has(k)) return false; existingIds.add(k); return true; });
@@ -3408,7 +3700,77 @@ async function loadMovies(cat, isLoadMore = false) {
 // Hover-prefetch budget: ek session me itne se zyada card details prefetch na ho
 let _mzHoverPrefetchCount = 0;
 
-function renderMovies(movies, append = false) {  const grid = document.getElementById('movieGrid');
+/*  ══════════════════════════════════════════════════════════════════════
+ *  GRID EVENT DELEGATION — attached once, not per card
+ *  ══════════════════════════════════════════════════════════════════════
+ *  renderMovies() used to wire six listeners onto every single card: click,
+ *  mouseenter (prefetch), touchstart (prefetch), focus (prefetch), mouseenter
+ *  (hover lift) and mouseleave (hover lift). It also allocated three closures
+ *  per card to capture `m` and `type`.
+ *
+ *  A first render is 24 cards — 144 listeners. Infinite scroll accumulates, and
+ *  the file's own comment already noted the shape of the problem ("200 cards =
+ *  400 useless listeners"). At 200 cards that is 1200 listeners and 600 live
+ *  closures, all of it built inside one synchronous loop, which is exactly the
+ *  kind of block Datadog was reporting as long tasks.
+ *
+ *  Everything below is now three listeners on the container, forever, reading
+ *  the card's data-* attributes. Behaviour is identical: click still bubbles (so
+ *  tv-mode.js's synthesised el.click() on Enter keeps working), and prefetch
+ *  still fires on hover, touch and keyboard focus.
+ *
+ *  The hover LIFT moved to CSS entirely — see the @media (hover: hover) rule on
+ *  .movie-card in moviezone.css. It was two listeners and four inline style
+ *  writes per hover to do what one CSS rule does on the compositor.
+ */
+let _mzGridDelegated = false;
+
+function _mzCardPrefetch(card) {
+  if (!card || card.hasAttribute('data-mzprefetched')) return;
+  if (_mzHoverPrefetchCount >= 24) return;
+  if (typeof isDataSaver === 'function' && isDataSaver()) return;
+  card.setAttribute('data-mzprefetched', '1');
+  _mzHoverPrefetchCount++;
+  const id = card.dataset.id;
+  const type = card.dataset.type;
+  if (!id || !type) return;
+  try { tmdb('/' + type + '/' + id, { language: 'en-US', append_to_response: 'videos,credits' }); } catch (err) {}
+  try { preconnectPlayerHosts(3); } catch (err) {}
+}
+
+function ensureGridDelegation(grid) {
+  if (_mzGridDelegated || !grid) return;
+  _mzGridDelegated = true;
+
+  grid.addEventListener('click', (event) => {
+    const card = event.target.closest('.movie-card[data-id]');
+    if (!card || !grid.contains(card)) return;
+    openModal(parseInt(card.dataset.id, 10), card.dataset.type, event);
+  });
+
+  // mouseenter does not bubble, so delegation uses mouseover; the
+  // data-mzprefetched guard makes the repeat fires from pointer movement free.
+  if (!isMzTV()) {
+    grid.addEventListener('mouseover', (event) => {
+      const card = event.target.closest('.movie-card[data-id]');
+      if (card) _mzCardPrefetch(card);
+    }, { passive: true });
+    grid.addEventListener('touchstart', (event) => {
+      const card = event.target.closest('.movie-card[data-id]');
+      if (card) _mzCardPrefetch(card);
+    }, { passive: true });
+  }
+
+  // focusin is the bubbling counterpart of focus. This is how D-pad navigation
+  // triggers prefetch, so it stays enabled on every device.
+  grid.addEventListener('focusin', (event) => {
+    const card = event.target.closest('.movie-card[data-id]');
+    if (card) _mzCardPrefetch(card);
+  });
+}
+
+function renderMovies(movies, append = false) {
+  const grid = document.getElementById('movieGrid');
   if (!grid) return;
   if (!append) {
     if (!movies.length) {
@@ -3417,19 +3779,29 @@ function renderMovies(movies, append = false) {  const grid = document.getElemen
     }
     grid.innerHTML = '';
   }
-  
-  const fragment = document.createDocumentFragment();
-  const startIndex = append ? (allMovies.length - movies.length) : 0;
-  
+
+  ensureGridDelegation(grid);
+
+  /*  One HTML string for the whole batch, parsed once.
+   *
+   *  Before: 24 separate `card.innerHTML = ...` assignments, each one its own
+   *  HTML parse plus two element.style writes. The parser was re-entered 24
+   *  times per render and 200+ times over a scrolling session.
+   *
+   *  insertAdjacentHTML on the container is a single parse for the batch, and it
+   *  appends without touching the nodes already in the grid — so infinite scroll
+   *  does not re-parse what is already rendered.
+   */
+  const html = [];
+
   movies.forEach((m, i) => {
     const type   = m.media_type || (m.name && !m.title ? 'tv' : 'movie');
     const rating = m.vote_average ? m.vote_average.toFixed(1) : 'N/A';
     const year   = (m.release_date || m.first_air_date || '').slice(0, 4);
-    const votes  = m.vote_count > 999 ? (m.vote_count/1000).toFixed(1)+'K' : (m.vote_count||0);
     const genres = (m.genre_ids||[]).slice(0,2).map(id => GENRE_MAP[id]).filter(Boolean);
     const rDateStr = m.release_date || m.first_air_date;
-    const isHot  = m.popularity > 100 && ((m.vote_count || 0) > 50 || (new Date() - new Date(rDateStr || '2000-01-01')) / (1000*60*60*24) < 60);
-    
+    const isHot  = m.popularity > 100 && ((m.vote_count || 0) > 50 || (Date.now() - new Date(rDateStr || '2000-01-01')) / (1000*60*60*24) < 60);
+
     // -- PRINT QUALITY BADGE --
     // Derived from the release→quality timeline the ALL feed also ranks by
     // (MOVIE_QUALITY_TIMELINE for films, TV_QUALITY_TIMELINE for series and
@@ -3437,10 +3809,10 @@ function renderMovies(movies, append = false) {  const grid = document.getElemen
     const qualityState = titleQualityState(m, Date.now());
     let qual = qualityState.qual;
     let qualClass = qualityState.cls;
-    
+
     // -- 4K ULTRA HD CATEGORY: force 4K badge on these cards --
     if (m._force4K) { qual = '4K'; qualClass = 'qual-4k'; }
-    
+
     // -- SMART RELEASE FRESHNESS BADGE --
     // Two things earn the corner ribbon: a recent release, and a recent print
     // upgrade. The second one is why a months-old film that just got its HD
@@ -3458,104 +3830,62 @@ function renderMovies(movies, append = false) {  const grid = document.getElemen
     // -- HINDI DUBBED BADGE: Show on Hollywood/Japanese/Korean movies (likely dubbed)
     const dubbedLangs = ['en', 'ja', 'ko', 'fr', 'es', 'de']; // Languages that are commonly dubbed to Hindi
     const isDubbedLikely = dubbedLangs.includes(m.original_language) && m.popularity > 50;
-    
-    const card   = document.createElement('div');
-    card.className = 'movie-card';
-    card.tabIndex = 0;
-    // Optimized will-change usage
-    card.style.willChange = 'auto'; 
-    card.style.animationDelay = ((i % 24) * 0.04) + 's';
-    card.innerHTML =
-      '<div class="card-poster">' +
-        // PERF FIX: pehle TV pe `eager` tha, jo ulta nuksan karta tha — 200+ cards
-        // ka matlab 200+ image download + decode EK SAATH, jo weak TV GPU ko hang
-        // kar deta hai (aur tv-mode.js ka parkOffscreenPosters() unhe beech me
-        // abort karta hai = wasted bandwidth). Ab sirf pehle 6 cards eager
-        // (above-the-fold / LCP), baaki lazy — har device pe.
-        // `i` har batch me 0 se restart hota hai, isliye `!append` bhi check karna
-        // zaroori hai — warna har "load more" batch 6 aur eager images add kar deta.
-        // Sirf PEHLE render ke pehle 6 cards eager (LCP), baaki sab lazy.
-        // A single w342 src made every device download the same bytes: ~2.6x the
-        // pixels a 1x desktop card displays, and slightly soft on a 3x phone.
-        // The sibling renderer further down already shipped a srcset; this one
-        // did not, so the busiest grid on the page was the one paying for it.
-        `<img src="${IMG}${m.poster_path}"` +
-          ` srcset="https://image.tmdb.org/t/p/w185${m.poster_path} 185w,` +
-          ` https://image.tmdb.org/t/p/w342${m.poster_path} 342w,` +
-          ` https://image.tmdb.org/t/p/w500${m.poster_path} 500w"` +
-          ` sizes="(max-width: 600px) 45vw, (max-width: 1200px) 200px, 230px"` +
-          ` alt="${escapeHTML(m.title||'')}" width="171" height="256"` +
-          // The first six stay eager (unchanged), but they are explicitly LOW
-          // priority: #hero is 95vh tall, so no grid poster is above the fold on
-          // any viewport, and at default priority six of them were competing with
-          // the hero backdrop - the actual LCP element - for the same connection.
-          ` loading="${(!append && i < 6) ? 'eager' : 'lazy'}"` +
-          ` fetchpriority="low" decoding="async">` +
-        '<div class="card-quality '+(qualClass||'')+'">'+qual+'</div>' +
-        (isHot ? '<div class="card-hot">HOT</div>' : '') +
-        freshBadge +
-        (isDubbedLikely ? '<div class="card-dubbed"> HINDI</div>' : '') +
-        '<div class="card-overlay"><button class="card-play-btn">&#9654;</button></div>' +
-      '</div>' +
-      '<div class="card-info">' +
-        '<div class="card-title">'+escapeHTML(m.title||m.name||'')+'</div>' +
-        '<div class="card-meta">' +
-          '<div class="card-rating">RATING '+rating+'</div>' +
-          '<div class="card-year">YEAR '+year+'</div>' +
+
+    html.push(
+      // data-id / data-type replace the per-card closures the delegated handlers
+      // used to need. willChange and animationDelay ride along in the same parse
+      // instead of costing two element.style writes each.
+      '<div class="movie-card" tabindex="0" data-id="' + m.id + '" data-type="' + type + '"' +
+        ' style="will-change:auto;animation-delay:' + ((i % 24) * 0.04) + 's">' +
+        '<div class="card-poster">' +
+          // Only the first six of the FIRST render are eager; every later batch is
+          // lazy. `i` restarts at 0 per batch, which is why `!append` is checked
+          // too — otherwise every "load more" would add six more eager images.
+          //
+          // A single w342 src made every device download the same bytes: ~2.6x the
+          // pixels a 1x desktop card displays, and slightly soft on a 3x phone.
+          `<img src="${IMG}${m.poster_path}"` +
+            ` srcset="https://image.tmdb.org/t/p/w185${m.poster_path} 185w,` +
+            ` https://image.tmdb.org/t/p/w342${m.poster_path} 342w,` +
+            ` https://image.tmdb.org/t/p/w500${m.poster_path} 500w"` +
+            ` sizes="(max-width: 600px) 45vw, (max-width: 1200px) 200px, 230px"` +
+            ` alt="${escapeHTML(m.title||'')}" width="171" height="256"` +
+            // The first six stay eager, but explicitly LOW priority: #hero is 95vh
+            // tall, so no grid poster is above the fold on any viewport, and at
+            // default priority six of them competed with the hero backdrop — the
+            // actual LCP element — for the same connection.
+            ` loading="${(!append && i < 6) ? 'eager' : 'lazy'}"` +
+            ` fetchpriority="low" decoding="async">` +
+          '<div class="card-quality '+(qualClass||'')+'">'+qual+'</div>' +
+          (isHot ? '<div class="card-hot">HOT</div>' : '') +
+          freshBadge +
+          (isDubbedLikely ? '<div class="card-dubbed"> HINDI</div>' : '') +
+          '<div class="card-overlay"><button class="card-play-btn" tabindex="-1" aria-hidden="true">&#9654;</button></div>' +
         '</div>' +
-        '<div class="card-meta"><div class="card-runtime">LANG '+(m.original_language||'EN').toUpperCase()+'</div></div>' +
-        '<div class="card-genres">'+genres.map(g => '<span class="card-genre">'+escapeHTML(g)+'</span>').join('')+'</div>' +
-      '</div>';
-    card.addEventListener('click', (event) => { openModal(m.id, type, event); });
-
-    // ⚡ SPEED: hover/touch par hi details prefetch + provider hosts warm,
-    // taaki modal khulte hi play ready ho (max 24 prefetch per session)
-    let _cardPrefetched = false;
-    const cardPrefetch = () => {
-      if (_cardPrefetched || _mzHoverPrefetchCount >= 24) return;
-      if (typeof isDataSaver === 'function' && isDataSaver()) return;
-      _cardPrefetched = true;
-      _mzHoverPrefetchCount++;
-      try { tmdb('/' + type + '/' + m.id, { language: 'en-US', append_to_response: 'videos,credits' }); } catch (err) {}
-      try { preconnectPlayerHosts(3); } catch (err) {}
-    };
-    // PERF FIX (TV): mouse aur touch TV pe exist hi nahi karte. Pehle har card pe
-    // ye 2 dead listeners lagte the — 200 cards = 400 bekaar listeners.
-    if (!isMzTV()) {
-      card.addEventListener('mouseenter', cardPrefetch, { passive: true });
-      card.addEventListener('touchstart', cardPrefetch, { passive: true });
-    }
-    // D-pad focus TV pe yahi prefetch trigger karta hai — isliye ye har device pe rehta hai.
-    card.addEventListener('focus', cardPrefetch, { passive: true });
-    fragment.appendChild(card);
-    // PERF FIX (TV): scroll-reveal animation ke liye har card ka apna
-    // IntersectionObserver entry banta tha (200 cards = 200 entries), aur uska
-    // opacity/transform transition weak TV GPU pe frame drop karta hai.
-    // TV pe cards seedhe visible dikhte hain — CSS me .in-view state force hai.
-    if (!isMzTV()) scrollObserver.observe(card);
-
-    // Premium hover lift (Desktop only - causes lag on mobile/TV)
-    // A prior version tilted the card in 3D via rotateX/rotateY based on
-    // mouse position. That tilt swings the card's corners outward unevenly
-    // (top-left one moment, top-right the next) and, combined with the
-    // scale, was spilling into whichever neighboring card sat in that
-    // direction. A flat lift cannot do that: the card's footprint never
-    // changes shape, so it can't reach past its own grid cell.
-    if (!isMzTV() && !isMobile) {
-      card.addEventListener('mouseenter', () => {
-        card.style.transition = 'transform 0.25s ease-out, box-shadow 0.25s ease-out';
-        card.style.transform = 'perspective(1000px) translateY(-10px)';
-        card.style.boxShadow = '0 30px 70px rgba(0,0,0,0.6), 0 0 20px rgba(245,197,24,0.1)';
-      });
-      card.addEventListener('mouseleave', () => {
-        card.style.transition = 'transform 0.3s ease, box-shadow 0.3s ease';
-        card.style.transform = '';
-        card.style.boxShadow = '';
-      });
-    }
- 
+        '<div class="card-info">' +
+          '<div class="card-title">'+escapeHTML(m.title||m.name||'')+'</div>' +
+          '<div class="card-meta">' +
+            '<div class="card-rating">RATING '+rating+'</div>' +
+            '<div class="card-year">YEAR '+year+'</div>' +
+          '</div>' +
+          '<div class="card-meta"><div class="card-runtime">LANG '+(m.original_language||'EN').toUpperCase()+'</div></div>' +
+          '<div class="card-genres">'+genres.map(g => '<span class="card-genre">'+escapeHTML(g)+'</span>').join('')+'</div>' +
+        '</div>' +
+      '</div>'
+    );
   });
-  grid.appendChild(fragment);
+
+  const firstNew = grid.children.length;
+  grid.insertAdjacentHTML('beforeend', html.join(''));
+
+  /*  Scroll-reveal registration, in one pass over just the new nodes.
+   *  Skipped on TV: a per-card IntersectionObserver entry (200 cards = 200
+   *  entries) plus an opacity/transform transition drops frames on a weak TV
+   *  GPU, and CSS forces .in-view there instead.
+   */
+  if (!isMzTV()) {
+    for (let n = firstNew; n < grid.children.length; n++) scrollObserver.observe(grid.children[n]);
+  }
 }
  
 // CATEGORY FILTER
@@ -4316,25 +4646,11 @@ const debouncedSuggest = makeDebounced(query => {
   searchDropdownFill(query);
 }, SEARCH_DEBOUNCE_MS);
 
-/* -- Supplementary styles for the v2 dropbits (highlight + clear button) -- */
-(function injectSearchStyles() {
-  if (document.getElementById('mz-search-v2-css')) return;
-  const style = document.createElement('style');
-  style.id = 'mz-search-v2-css';
-  style.textContent = `
-.nav-search{position:relative}
-.mz-search-hl{background:rgba(245,197,24,.22);color:#f5c518;border-radius:3px;padding:0 1px;font-weight:800}
-.mz-search-clear{position:absolute;right:10px;top:50%;transform:translateY(-50%);display:none;align-items:center;justify-content:center;width:22px;height:22px;border:0;border-radius:50%;background:rgba(255,255,255,.09);color:rgba(255,255,255,.7);cursor:pointer;font-size:15px;line-height:1;padding:0;z-index:3;transition:background .18s ease,color .18s ease}
-.mz-search-clear:hover{background:rgba(245,197,24,.2);color:#f5c518}
-.mz-search-clear.visible{display:flex}
-.search-results-dropdown .mz-sugg-skeleton{display:flex;gap:10px;padding:9px 12px;align-items:center}
-.search-results-dropdown .mz-sugg-skeleton i{display:block;border-radius:6px;background:linear-gradient(90deg,rgba(255,255,255,.05),rgba(255,255,255,.12),rgba(255,255,255,.05));background-size:200% 100%;animation:mzSuggShimmer 1.1s linear infinite}
-.search-results-dropdown .mz-sugg-skeleton i.p{width:42px;height:60px;flex:0 0 42px}
-.search-results-dropdown .mz-sugg-skeleton i.l{height:11px;flex:1}
-@keyframes mzSuggShimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
-@media (prefers-reduced-motion:reduce){.search-results-dropdown .mz-sugg-skeleton i{animation:none}}`;
-  document.head.appendChild(style);
-})();
+/*  -- Supplementary styles for the v2 search dropbits --
+ *  Moved to the end of moviezone.css. This was a third runtime <style> append
+ *  during top-level execution; each one costs a document-wide style
+ *  invalidation and a full recalc. The rules are static.
+ */
 
 /* -- One-tap clear button (part of the "clean UI" requirement) -- */
 const searchClearBtn = (function buildClearButton() {
@@ -4790,7 +5106,13 @@ function renderSearchDropdown(query, search) {
       resultItem.setAttribute('aria-selected', 'false');
       resultItem.setAttribute('aria-label', title + ' (' + (type === 'tv' ? 'series' : 'movie') + ')');
 
-      const poster = item.poster_path ? IMG + item.poster_path : SEARCH_POSTER_FALLBACK;
+      /*  w154, not IMG (w342). The dropdown renders these at 42x60 CSS px, so
+       *  w342 was ~8x the pixels on a 1x screen and still ~2x on a 3x phone.
+       *  Search fires on every few keystrokes and renders up to a dozen rows, so
+       *  this was one of the heavier image paths on the site for one of the
+       *  smallest things it draws. w154 covers 42px at 3x with room to spare.
+       */
+      const poster = item.poster_path ? 'https://image.tmdb.org/t/p/w154' + item.poster_path : SEARCH_POSTER_FALLBACK;
       const quality = item._matchQuality || 'Related';
 
       resultItem.innerHTML =
@@ -7514,21 +7836,27 @@ init();
     applyPwaInstallState(!!(event.detail && event.detail.installed));
   });
 
-  // pwa-install.js is loaded immediately after this file. Defer one task so its
-  // monitor exists, then ask it for the authoritative state.
-  setTimeout(function syncPwaInstallState() {
+  /*  pwa-install.min.js is now loaded lazily (see the loader in index.html), so
+   *  its monitor may not exist yet. This resolves the state from what is
+   *  available now, and re-resolves it authoritatively when the controller
+   *  arrives — the mz:pwainstallready event the loader fires on script load.
+   */
+  function syncPwaInstallState() {
     const monitor = window.__mzPwaInstallMonitor;
     if (monitor && typeof monitor.check === 'function') {
       monitor.check().then(applyPwaInstallState).catch(function() { applyPwaInstallState(false); });
       return;
     }
-    // Defensive fallback only if the dedicated controller failed to load.
+    // Cheap local signals, good enough to decide whether to show the button
+    // before the controller lands.
     const installedFallback = window.matchMedia('(display-mode: standalone)').matches ||
       window.matchMedia('(display-mode: fullscreen)').matches ||
       window.navigator.standalone === true ||
       localStorage.getItem('mz_app_installed') === '1';
     applyPwaInstallState(installedFallback);
-  }, 0);
+  }
+  setTimeout(syncPwaInstallState, 0);
+  window.addEventListener('mz:pwainstallready', syncPwaInstallState);
 
   // Global install function - called from navbar button and banner.
   window.installPWA = function() {
@@ -7542,6 +7870,20 @@ init();
     if (typeof window.__mzTriggerInstall === 'function') {
       if (!window.deferredPrompt && window.__mzOpenInstallPopup) window.__mzOpenInstallPopup();
       return window.__mzTriggerInstall();
+    }
+
+    /*  The user got here before the lazy controller did — the common case being
+     *  a click within the first second or two. Pull it in and re-enter once, so
+     *  the click is honoured instead of being dropped on a "still loading" toast.
+     */
+    if (typeof window.__mzLoadPwaInstall === 'function' && !window.__mzInstallRetried) {
+      window.__mzInstallRetried = true;
+      if (typeof showToast === 'function') showToast('Preparing install…');
+      window.__mzLoadPwaInstall().then(function () {
+        window.__mzInstallRetried = false;
+        window.installPWA();
+      });
+      return;
     }
 
     if (window.__mzOpenInstallPopup) {

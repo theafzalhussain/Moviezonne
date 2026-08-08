@@ -12,7 +12,7 @@
 //     Now 7.6 on both sides.
 //   * Versioned same-origin assets became CACHE-FIRST (see below).
 //   * TMDB images get their own stale-while-revalidate cache.
-const CACHE_NAME = 'moviezone-v59';
+const CACHE_NAME = 'moviezone-v60';
 
 // Separate cache for TMDB posters/backdrops. Kept apart from the shell so the
 // activate handler can wipe an old shell without throwing away hundreds of
@@ -30,7 +30,6 @@ const STATIC_ASSETS = [
   '/tv-mode.min.js?v=1.3',
   '/search-engine.min.js?v=2.1',
   '/moviezone.min.js?v=7.6',
-  '/pwa-install.min.js?v=1.7',
   '/manifest.json',
   '/moviezone-logo.png?v=2',
   '/icon-192.png?v=2',
@@ -48,6 +47,11 @@ const STATIC_ASSETS = [
 // installing. It is cached opportunistically and fetched from the network if absent.
 const OPTIONAL_ASSETS = [
   '/collections-catalog.json?v=2',
+  // pwa-install.min.js moved off the critical path: index.html no longer ships a
+  // <script> tag for it, it is injected on idle / on demand. Still worth having
+  // offline so the install popup works, but it must not be able to fail a
+  // service-worker install the way a core-shell entry can.
+  '/pwa-install.min.js?v=1.8',
   '/fonts/outfit-latin-ext-var.woff2',
   '/fonts/bebas-neue-latin-ext-400.woff2',
   '/fonts/playfair-display-latin-700.woff2',
