@@ -722,6 +722,124 @@ function _mzIsTransientStatus(status) {
   return status === 0 || status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
+/*  ── MISSING RESOURCES ARE NOT FAULTS ────────────────────────────────────────
+ *  Probed against the live proxy: every one of these returns a clean 404 with
+ *  {"error":"TMDB API error","detail":"Not Found"} —
+ *    /movie/999999999   a title TMDB does not have (or has since removed)
+ *    /tv/{id}/watch/providers  for a title with no provider record
+ *    /tv/1399/season/99 a season that does not exist
+ *    /movie/undefined, /movie/NaN, /movie/, /movie/0, /movie/-5
+ *
+ *  None of those are broken code or a broken network. They happen normally:
+ *  a Continue Watching or Watchlist entry persisted in localStorage months ago
+ *  can outlive the TMDB record it points at, and plenty of titles simply have no
+ *  watch-provider data.
+ *
+ *  Before this, a 404 went down the same path as a dropped connection: counted in
+ *  _mzFetchFailureCount (which can arm the feed retry budget) and reported to
+ *  Datadog via addError. So a user with one stale watchlist entry generated a
+ *  steady trickle of "errors" that no one could act on.
+ *
+ *  Now they are silent: empty result, nothing reported, nothing counted.
+ *
+ *  401/403 stay loud on purpose — those mean the TMDB read token is missing,
+ *  wrong or expired, which is a real outage and must be visible immediately.
+ */
+function _mzIsMissingStatus(status) {
+  return status === 404 || status === 410;
+}
+
+/*  Negative cache for confirmed-missing URLs, so hovering the same dead card ten
+ *  times does not send ten requests. Short TTL on purpose: it is keyed on a 404,
+ *  and while TMDB is reliable about 404 meaning "not here", a title genuinely can
+ *  be added later, and a 10-minute window is not worth arguing about.
+ */
+const _mzMissingUrls = new Map();
+const MZ_MISSING_TTL_MS = 10 * 60 * 1000;
+
+function _mzRememberMissing(urlStr) {
+  _mzMissingUrls.set(urlStr, Date.now());
+  // Bound the map; these keys are long and a browsing session can touch many.
+  if (_mzMissingUrls.size > 300) {
+    const cutoff = Date.now() - MZ_MISSING_TTL_MS;
+    for (const [k, t] of _mzMissingUrls) if (t < cutoff) _mzMissingUrls.delete(k);
+  }
+}
+
+function _mzIsKnownMissing(urlStr) {
+  const at = _mzMissingUrls.get(urlStr);
+  if (at === undefined) return false;
+  if (Date.now() - at < MZ_MISSING_TTL_MS) return true;
+  _mzMissingUrls.delete(urlStr);
+  return false;
+}
+
+/*  A title confirmed gone from TMDB should stop haunting the user.
+ *
+ *  Continue Watching and the Watchlist are localStorage lists of ids, so they
+ *  outlive the TMDB records they point at. Without pruning, a title that TMDB
+ *  removed sits in the rail forever: it renders (the poster path is cached in the
+ *  list entry), the user taps it, it 404s, nothing opens — every single session.
+ *  Dropping the entry the first time a 404 is confirmed makes the problem
+ *  self-healing instead of permanent.
+ */
+function _mzForgetDeadTitle(id, type) {
+  const numId = Number(id);
+  if (!Number.isFinite(numId)) return;
+  try {
+    const cw = JSON.parse(localStorage.getItem('mz_continue_watching') || '[]');
+    const keptCw = cw.filter(e => Number(e && e.id) !== numId);
+    if (keptCw.length !== cw.length) {
+      localStorage.setItem('mz_continue_watching', JSON.stringify(keptCw));
+      if (typeof renderContinueWatching === 'function') renderContinueWatching();
+    }
+  } catch (e) { /* corrupt list - leave it to the normal parse guards */ }
+
+  try {
+    if (Array.isArray(watchlist)) {
+      const kept = watchlist.filter(e => Number(e && e.id) !== numId);
+      if (kept.length !== watchlist.length) {
+        watchlist = kept;
+        localStorage.setItem('mz_watchlist', JSON.stringify(watchlist));
+      }
+    }
+  } catch (e) { /* same */ }
+  console.debug('[MovieZone] pruned dead title', type + '/' + id, 'from saved lists');
+}
+
+/*  ── REJECT IMPOSSIBLE IDs BEFORE THEY BECOME REQUESTS ───────────────────────
+ *  /movie/undefined and /movie/NaN are what you get when an id arrives as
+ *  undefined or fails parseInt — a card rendered from a TMDB item with no id, or
+ *  a corrupt localStorage entry. They cannot succeed, so sending them only burns
+ *  a request and produces a 404 to explain away.
+ *
+ *  The test is deliberately narrow: reject the literal broken forms and any
+ *  non-positive number, and let everything else through. A whitelist of valid
+ *  named endpoints (/movie/popular, /tv/airing_today, /movie/latest …) would have
+ *  to be kept in step with TMDB forever and would eventually reject something
+ *  legitimate. TMDB is the authority on whether an id exists; this only catches
+ *  the cases that are wrong on their face.
+ *
+ *  Note /tv/{id}/season/0 is valid — season 0 is the specials season — so the
+ *  check only applies to the id segment straight after a resource name.
+ */
+const MZ_ID_RESOURCES = { movie: 1, tv: 1, collection: 1, person: 1, company: 1, network: 1, keyword: 1 };
+
+function _mzInvalidIdSegment(endpoint) {
+  const parts = String(endpoint).split('?')[0].split('/');
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (!MZ_ID_RESOURCES[parts[i]]) continue;
+    const seg = parts[i + 1];
+    if (seg === '' || seg === 'undefined' || seg === 'null' || seg === 'NaN') {
+      return parts[i] + '/' + (seg === '' ? '(empty)' : seg);
+    }
+    // Numeric-looking but impossible. Non-numeric strings are named endpoints
+    // and are left for TMDB to judge.
+    if (/^-?\d+$/.test(seg) && Number(seg) <= 0) return parts[i] + '/' + seg;
+  }
+  return null;
+}
+
 /*  A failure is "benign" when it was caused by something other than the network
  *  being broken, and reporting it would be noise:
  *    • the page is unloading  — the browser cancels in-flight requests
@@ -733,6 +851,22 @@ function _mzIsBenignFailure(err) {
   if (_mzPageHiding) return true;
   if (navigator.onLine === false) return true;
   return !!err && (err.name === 'AbortError' || err.name === 'TimeoutError');
+}
+
+/*  The value returned for anything that does not exist: an invalid id, a
+ *  confirmed 404, a title with no provider record. Shaped like an empty TMDB
+ *  response so every existing caller keeps working — `r.results || []` yields [],
+ *  and the watch/providers consumer's `Object.keys(results).length` yields 0,
+ *  which it already treats as "no data".
+ *
+ *  The markers are non-enumerable so they never reach JSON.stringify, the
+ *  localStorage cache, or a `for...in` over the response.
+ */
+function _mzMissingResult() {
+  const out = { results: [] };
+  Object.defineProperty(out, '_mzMissing', { value: true, enumerable: false });
+  Object.defineProperty(out, '_mzFailed', { value: true, enumerable: false });
+  return out;
 }
 
 function _mzReportFetchError(err, meta) {
@@ -834,7 +968,17 @@ async function _mzFetchWithRetry(urlStr, outerSignal, meta) {
 
 async function tmdb(endpoint, params) {
   params = params || {};
- 
+
+  /*  Fail fast on ids that cannot exist. Returns the same empty shape a 404
+   *  would, so the ~40 call sites that read `r.results || []` are unaffected, but
+   *  no request leaves the browser and nothing is reported.
+   */
+  const badId = _mzInvalidIdSegment(endpoint);
+  if (badId) {
+    console.debug('[MovieZone] skipped TMDB request with an impossible id:', badId);
+    return _mzMissingResult();
+  }
+
   let qs = '';
   if (Object.keys(params).length) {
     qs = '?' + Object.entries(params).map(([k,v]) => encodeURIComponent(k)+'='+encodeURIComponent(v)).join('&');
@@ -843,6 +987,10 @@ async function tmdb(endpoint, params) {
 
   
   if (tmdbCache.has(urlStr)) return tmdbCache.get(urlStr); // Memory cache (instant)
+
+  // Already confirmed missing this session — do not ask again. Hovering the same
+  // dead card repeatedly used to fire a request every time.
+  if (_mzIsKnownMissing(urlStr)) return _mzMissingResult();
   
   // ZERO-LATENCY SWR (Stale-While-Revalidate) CACHING
   const cacheKey = 'mz_cache_' + urlStr;
@@ -901,6 +1049,21 @@ async function tmdb(endpoint, params) {
        *      the endpoint attached instead of a bare console.error.
        */
       const benign = _mzIsBenignFailure(e);
+      const missing = e && e.name === 'HttpError' && _mzIsMissingStatus(e.status);
+
+      if (missing) {
+        /*  Silent by design. This is "TMDB does not have this", not a fault:
+         *  a stale watchlist id, a removed title, a season that never existed, or
+         *  simply no watch-provider record. Not counted as a network failure (so
+         *  it cannot arm the feed retry budget) and not reported to Datadog (so it
+         *  cannot drown the errors that do matter). Remembered for 10 minutes so
+         *  the same dead URL is not asked for again.
+         */
+        _mzRememberMissing(urlStr);
+        console.debug('[MovieZone] TMDB has no record for', endpoint, '- skipping silently');
+        return cachedData || _mzMissingResult();
+      }
+
       if (!benign) {
         _mzFetchFailureCount++;
         _mzReportFetchError(e, {
@@ -4369,6 +4532,16 @@ async function openUpcomingDetail(id, type, activationEvent) {
     // If another request was started while this one was loading, discard this result
     if (_udAbortController && _udAbortController.signal.aborted) return;
     
+    // TMDB has no record for this id. Closing silently reads as a dead tap, so
+    // say one sentence and prune the entry that pointed at it. _mzMissing covers
+    // the confirmed-404 case; the !details.id test still catches anything else
+    // that comes back without a usable body.
+    if (details && details._mzMissing) {
+      closeUpcomingDetail();
+      _mzForgetDeadTitle(id, mediaType);
+      if (typeof showToast === 'function') showToast('This title is no longer available.');
+      return;
+    }
     if (!details || !details.id) { closeUpcomingDetail(); return; }
     
     currentUpcomingMovie = details;
@@ -5270,6 +5443,23 @@ async function openModal(id, type = 'movie', activationEvent) {
  
   try {
     const details = await tmdb('/'+type+'/'+id, { language: 'en-US', append_to_response: 'videos,credits' });
+
+    /*  TMDB has no record for this id — confirmed 404, already logged silently by
+     *  tmdb(). Every field below would be undefined, which left the modal sitting
+     *  on "Loading..." and a spinner forever: the user gets no content and no
+     *  explanation, and the only way out is the close button.
+     *
+     *  "Silently skip" cannot mean nothing here, because the user deliberately
+     *  tapped this card. So: close the modal, say one calm sentence, and drop the
+     *  dead entry from Continue Watching / Watchlist so it stops coming back.
+     */
+    if (details && details._mzMissing) {
+      try { closeModal(); } catch (e) {}
+      _mzForgetDeadTitle(id, type);
+      if (typeof showToast === 'function') showToast('This title is no longer available.');
+      return;
+    }
+
     details.media_type = type;
     currentModalMovie = details;
     const bgEl = document.getElementById('modalBg');

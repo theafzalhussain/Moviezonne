@@ -71,11 +71,15 @@
     realFetch = win.fetch;
     win.fetch = function (input) {
       var url = (input && input.url) ? input.url : input;
-      if (breakNetwork && isApiUrl(url)) {
+      if (isApiUrl(url)) {
+        // Counted whether or not the fault is active. Counting only while broken
+        // made the 404 phase below assert against a counter that never moved.
         apiAttempts.push(Date.now());
-        // Exactly what a dropped connection produces, and exactly the error
-        // Datadog was reporting 91 times a day.
-        return Promise.reject(new TypeError('Failed to fetch'));
+        if (breakNetwork) {
+          // Exactly what a dropped connection produces, and exactly the error
+          // Datadog was reporting 91 times a day.
+          return Promise.reject(new TypeError('Failed to fetch'));
+        }
       }
       return realFetch.apply(win, arguments);
     };
@@ -194,11 +198,81 @@
       ok('a failed refresh falls back to stale cache instead of an error screen',
         cards > 0 && !btn,
         cards + ' cards still shown (was ' + cardsBefore + '), retry button present: ' + !!btn);
+      breakNetwork = false;
+      phaseMissing();
+    }, 9000);
+  }
+
+  /*  ── 404 / MISSING RESOURCES ─────────────────────────────────────────────
+   *  A 404 is not a fault. It happens normally: a Continue Watching entry from
+   *  months ago outliving its TMDB record, a title with no watch-provider data, a
+   *  season that does not exist. Those must be silent — no Datadog error, no
+   *  console.error, and not counted as a network failure (which would arm the
+   *  feed retry budget).
+   *
+   *  Network is restored for this phase, so these are REAL responses from the
+   *  real proxy, not injected ones.
+   */
+  function phaseMissing() {
+    apiAttempts = [];
+    rumErrors = [];
+    consoleErrors = [];
+    var realConsoleErr = win.console.error;
+
+    // 1. Impossible ids must never reach the network at all.
+    var beforeCount = 0;
+    var probes = [];
+    ['/movie/undefined', '/movie/NaN', '/movie/', '/movie/0', '/movie/-5', '/tv/undefined/watch/providers']
+      .forEach(function (ep) { probes.push(win.tmdb(ep, { language: 'en-US' })); });
+
+    Promise.all(probes).then(function (results) {
+      var allMissing = results.every(function (r) { return r && r._mzMissing === true && Array.isArray(r.results); });
+      ok('impossible ids resolve to an empty result, not a request',
+        allMissing && apiAttempts.length === 0,
+        'all marked missing: ' + allMissing + ', network attempts made: ' + apiAttempts.length);
+
+      // 2. A real 404 from the live proxy must be silent.
+      apiAttempts = [];
+      return win.tmdb('/movie/999999999', { language: 'en-US' });
+    }).then(function (r) {
+      ok('a genuine 404 returns an empty result',
+        r && r._mzMissing === true, JSON.stringify({ missing: !!(r && r._mzMissing), keys: Object.keys(r || {}) }));
+      ok('a 404 is not reported to Datadog',
+        rumErrors.length === 0, rumErrors.length + ' addError calls: ' + JSON.stringify(rumErrors.slice(0, 2)));
+      ok('a 404 does not log console.error',
+        consoleErrors.length === 0, consoleErrors.length + ' console.error calls');
+
+      var attemptsFirst = apiAttempts.length;
+      ok('a 404 is fetched once, not retried', attemptsFirst === 1, attemptsFirst + ' attempts for one 404');
+
+      // 3. Second ask for the same dead URL must be served from the negative cache.
+      apiAttempts = [];
+      return win.tmdb('/movie/999999999', { language: 'en-US' });
+    }).then(function (r) {
+      ok('a known-missing URL is not requested again',
+        r && r._mzMissing === true && apiAttempts.length === 0,
+        'attempts on the repeat call: ' + apiAttempts.length);
+
+      // 4. A dead id must be pruned from the persisted lists.
+      try {
+        win.localStorage.setItem('mz_continue_watching',
+          JSON.stringify([{ id: 999999999, title: 'Gone', media_type: 'movie', timestamp: Date.now(), progress: 10 }]));
+        win._mzForgetDeadTitle(999999999, 'movie');
+        var left = JSON.parse(win.localStorage.getItem('mz_continue_watching') || '[]');
+        ok('a confirmed-dead title is pruned from Continue Watching',
+          left.length === 0, 'entries left: ' + left.length);
+      } catch (e) {
+        ok('a confirmed-dead title is pruned from Continue Watching', false, e.message);
+      }
+
+      win.console.error = realConsoleErr;
       ok('no uncaught error surfaced in the app frame', !win.__mzResilienceError,
         win.__mzResilienceError || '');
-      breakNetwork = false;
       report();
-    }, 9000);
+    }).catch(function (e) {
+      ok('the 404 phase completed', false, e && e.message);
+      report();
+    });
   }
 
   window.addEventListener('load', function () {

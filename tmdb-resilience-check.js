@@ -160,6 +160,87 @@ check('offline waits for the connection instead of burning attempts', () => {
     'the online handler is not one-shot');
 });
 
+console.log('\n-- 404s and impossible ids are not faults ' + '-'.repeat(20));
+
+check('404/410 are classified as missing, not as failures', () => {
+  assert.ok(/_mzIsMissingStatus/.test(jsCode), 'no missing-resource classification');
+  const fn = jsCode.slice(jsCode.indexOf('function _mzIsMissingStatus'), jsCode.indexOf('const _mzMissingUrls'));
+  assert.ok(/status === 404/.test(fn) && /status === 410/.test(fn), '404/410 not covered');
+});
+
+check('a 404 is neither counted nor reported', () => {
+  const idx = jsCode.indexOf('const missing = e && e.name');
+  assert.ok(idx !== -1, 'tmdb() catch has no missing-resource branch');
+  const branch = jsCode.slice(idx, idx + 700);
+  assert.ok(/if \(missing\)/.test(branch), 'the missing branch is never taken');
+  assert.ok(/_mzRememberMissing\(urlStr\)/.test(branch), 'a confirmed 404 is not remembered');
+  // The missing branch has to return BEFORE the reporting branch, or a 404 still
+  // increments the failure counter and still reaches Datadog.
+  assert.ok(branch.indexOf('return cachedData || _mzMissingResult()') <
+            branch.indexOf('_mzFetchFailureCount++'),
+    'the missing branch does not return before the failure-reporting branch');
+});
+
+check('401/403 stay loud — an expired token must be visible', () => {
+  const fn = jsCode.slice(jsCode.indexOf('function _mzIsMissingStatus'), jsCode.indexOf('const _mzMissingUrls'));
+  assert.ok(!/401|403/.test(fn),
+    'auth failures are being swallowed as "missing"; a dead TMDB token would look like an empty catalogue');
+});
+
+check('impossible ids are rejected before a request is built', () => {
+  assert.ok(/_mzInvalidIdSegment/.test(jsCode), 'no id validation');
+  const fn = jsCode.slice(jsCode.indexOf('function _mzInvalidIdSegment'), jsCode.indexOf('async function tmdb'));
+  ["'undefined'", "'null'", "'NaN'"].forEach((lit) => {
+    assert.ok(fn.includes(lit), 'id validation does not catch ' + lit);
+  });
+  assert.ok(/Number\(seg\) <= 0/.test(fn), 'non-positive numeric ids are not rejected');
+  assert.ok(/season/.test(jsCode), 'sanity: season endpoints exist');
+  // The check must run before the URL is assembled, otherwise a request still goes out.
+  const t = jsCode.indexOf('async function tmdb');
+  const body = jsCode.slice(t, t + 900);
+  assert.ok(body.indexOf('_mzInvalidIdSegment(endpoint)') < body.indexOf('const urlStr = BASE'),
+    'id validation runs after the URL is built');
+});
+
+check('a known-missing URL is not requested twice', () => {
+  assert.ok(/_mzIsKnownMissing\(urlStr\)/.test(jsCode), 'no negative cache lookup');
+  assert.ok(/MZ_MISSING_TTL_MS/.test(jsCode), 'the negative cache never expires');
+});
+
+check('a dead title is pruned from the persisted lists', () => {
+  assert.ok(/function _mzForgetDeadTitle/.test(jsCode), 'no pruning helper');
+  const fn = jsCode.slice(jsCode.indexOf('function _mzForgetDeadTitle'), jsCode.indexOf('function _mzInvalidIdSegment'));
+  assert.ok(/mz_continue_watching/.test(fn), 'Continue Watching is not pruned');
+  assert.ok(/mz_watchlist/.test(fn), 'the watchlist is not pruned');
+});
+
+check('an opened title that no longer exists closes cleanly', () => {
+  assert.ok(/details && details\._mzMissing/.test(jsCode),
+    'openModal does not detect a missing title, so it would sit on "Loading..." forever');
+  assert.ok(/This title is no longer available/.test(jsCode),
+    'the user gets no explanation for a dead tap');
+});
+
+console.log('\n-- API shape and version ' + '-'.repeat(37));
+
+check('the client targets TMDB v3 paths through the same-origin proxy', () => {
+  assert.ok(/const LIVE_BACKEND_URL = '\/api\/tmdb'/.test(jsCode),
+    'the API base is not the same-origin proxy');
+  assert.ok(!/api_key=/.test(jsCode),
+    'an api_key is being put in a query string; auth belongs in the Authorization header');
+  assert.ok(!/api\.themoviedb\.org/.test(jsCode),
+    'the client is calling TMDB directly, which would expose the token');
+});
+
+check('the server proxies to v3 with a v4 bearer token', () => {
+  const server = fs.readFileSync('server.js', 'utf8');
+  assert.ok(/const buildBaseUrl = \(host\) => `https:\/\/\$\{host\}\/3`/.test(server),
+    'the upstream base URL is not TMDB v3');
+  assert.ok(/Authorization.*Bearer \$\{TMDB_TOKEN\}/.test(server),
+    'no v4 bearer token; v3 paths with a v4 read token is the supported combination');
+  assert.ok(!/api_key=\$\{/.test(server), 'the legacy api_key query param is back');
+});
+
 // ── browser run ────────────────────────────────────────────────────────────
 const BROWSER_CANDIDATES = [
   path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Google\\Chrome\\Application\\chrome.exe'),
