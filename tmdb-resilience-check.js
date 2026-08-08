@@ -48,6 +48,7 @@ function check(label, fn) {
 
 // ── static guards ──────────────────────────────────────────────────────────
 const js = fs.readFileSync('moviezone.js', 'utf8');
+const sw = fs.readFileSync('sw.js', 'utf8');
 const jsCode = js.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
 
 console.log('\n-- the infinite retry loop stays gone ' + '-'.repeat(24));
@@ -305,6 +306,66 @@ check('software renderers are no longer reported as bots', () => {
   assert.ok(/mz:software-renderer/.test(jsCode), 'the renderer hint is gone entirely');
   assert.ok(/!isLocalhost && softwareRenderers/.test(jsCode),
     'the check still runs on localhost, so the repo\'s own headless suites keep tripping it');
+});
+
+console.log('\n-- the caching stack, layer by layer ' + '-'.repeat(25));
+
+/*  Five independent layers keep TMDB off the critical path. Each one is invisible
+ *  when it works, so each gets a guard — losing any of them silently would show up
+ *  only as a slow site under load, which is the hardest kind of regression to
+ *  attribute.
+ */
+check('L1 client memory cache dedupes within a page view', () => {
+  assert.ok(/tmdbCache\.has\(urlStr\)/.test(jsCode), 'no in-memory cache lookup');
+  assert.ok(/inFlightRequests\.has\(urlStr\)/.test(jsCode),
+    'no in-flight coalescing: two callers asking for the same URL in the same tick would each send a request');
+});
+
+check('L2 client SWR cache survives reloads', () => {
+  assert.ok(/mz_cache_/.test(jsCode), 'no localStorage cache');
+  assert.ok(/12 \* 60 \* 60 \* 1000/.test(jsCode), 'the 12h freshness window is gone');
+  assert.ok(/_mzQueueCacheWrite/.test(jsCode), 'cache writes are no longer deferred off the render path');
+});
+
+check('L3 service worker caches the shell and TMDB images', () => {
+  assert.ok(/IMAGE_CACHE/.test(sw), 'no TMDB image cache');
+  assert.ok(/isVersionedAsset/.test(sw), 'versioned assets are not cache-first');
+  assert.ok(/key !== IMAGE_CACHE/.test(sw), 'the image cache is wiped on every shell bump');
+});
+
+check('L4 origin caches TMDB responses and coalesces upstream calls', () => {
+  const server = fs.readFileSync('server.js', 'utf8');
+  assert.ok(/new NodeCache\(\{ stdTTL: \d+ \}\)/.test(server), 'no server-side response cache');
+  assert.ok(/function fetchTmdbOnce/.test(server),
+    'no upstream coalescing: N concurrent users asking for the same URL would each hit TMDB');
+  assert.ok(/staleCache/.test(server), 'no stale copy to serve when TMDB is down');
+});
+
+check('L5 the CDN caches API responses for everyone', () => {
+  const server = fs.readFileSync('server.js', 'utf8');
+  assert.ok(/s-maxage=86400/.test(server),
+    'no s-maxage on API responses. This is the layer that actually helps at 100 concurrent users: without it every serverless instance re-fetches, because in-memory cache is per-instance.');
+  assert.ok(/stale-while-revalidate=86400/.test(server), 'no stale-while-revalidate for the CDN');
+});
+
+check('immutable headers cover every versioned asset type', () => {
+  const netlify = fs.readFileSync('netlify.toml', 'utf8');
+  const vercel = fs.readFileSync('vercel.json', 'utf8');
+  ['/*.min.js', '/*.min.css', '/fonts/*', '/*.webp', '/*.png'].forEach((t) => {
+    assert.ok(netlify.includes('for = "' + t + '"'), 'netlify.toml does not cache ' + t);
+  });
+  assert.ok(/webp\|png\|svg/.test(vercel), 'vercel.json does not cache versioned images');
+  // The two files that must NEVER be immutable, or a deploy can never reach anyone.
+  assert.ok(/for = "\/sw\.js"[\s\S]{0,200}no-cache/.test(netlify), 'sw.js is not no-cache');
+  assert.ok(/for = "\/index\.html"[\s\S]{0,200}max-age=0/.test(netlify), 'index.html is not revalidated');
+});
+
+check('the first paint renders a small batch, not the whole page', () => {
+  assert.ok(/FIRST_PAINT_CARDS/.test(jsCode), 'the first render is not capped');
+  const n = Number((/const FIRST_PAINT_CARDS = (\d+);/.exec(jsCode) || [])[1]);
+  assert.ok(n > 0 && n <= 10, 'first paint renders ' + n + ' cards');
+  assert.ok(/requestIdleCallback\(paintTail/.test(jsCode),
+    'the remaining cards are not deferred to idle, so the whole batch still lands during load');
 });
 
 // ── browser run ────────────────────────────────────────────────────────────

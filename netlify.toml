@@ -37,6 +37,28 @@
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
 
+# Icons and logos. These were the one gap left in the caching setup: they are
+# already requested with ?v= from index.html and manifest.json, so the URL is
+# immutable by the same rule as the bundles, but without a header they fell back
+# to Netlify's default and were revalidated on every visit.
+#
+# Not applied to /*.jpg deliberately — nothing versioned ships as .jpg, and TMDB
+# posters are cross-origin so these headers could never reach them anyway.
+[[headers]]
+  for = "/*.webp"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/*.png"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/*.svg"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
 # The service worker must never be cached, or clients cannot learn about a new
 # shell. index.html likewise has to stay fresh: it is the file that tells the
 # browser which ?v= of the immutable assets above to ask for.
