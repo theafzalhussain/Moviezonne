@@ -12,7 +12,7 @@
 //     Now 7.6 on both sides.
 //   * Versioned same-origin assets became CACHE-FIRST (see below).
 //   * TMDB images get their own stale-while-revalidate cache.
-const CACHE_NAME = 'moviezone-v63';
+const CACHE_NAME = 'moviezone-v64';
 
 // Separate cache for TMDB posters/backdrops. Kept apart from the shell so the
 // activate handler can wipe an old shell without throwing away hundreds of
@@ -29,7 +29,7 @@ const STATIC_ASSETS = [
   '/moviezone.min.css?v=5.7',
   '/tv-mode.min.js?v=1.3',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=7.9',
+  '/moviezone.min.js?v=8.0',
   '/manifest.json',
   '/moviezone-logo.png?v=2',
   '/icon-192.png?v=2',

@@ -241,6 +241,72 @@ check('the server proxies to v3 with a v4 bearer token', () => {
   assert.ok(!/api_key=\$\{/.test(server), 'the legacy api_key query param is back');
 });
 
+console.log('\n-- cut connections (499) and rate limiting ' + '-'.repeat(19));
+
+check('499 is treated as a cut connection, not a plain 4xx', () => {
+  const fn = jsCode.slice(jsCode.indexOf('function _mzIsTransientStatus'),
+                          jsCode.indexOf('function _mzIsSelfInflictedStatus'));
+  assert.ok(/status === 499/.test(fn),
+    '499 is not retryable again. It means the connection was cut, which heals on retry; as a plain 4xx it failed instantly and was reported as an error 511 times in five minutes.');
+});
+
+check('a connection we cut ourselves is not reported as an error', () => {
+  assert.ok(/_mzIsSelfInflictedStatus/.test(jsCode), 'no self-inflicted classification');
+  const fn = jsCode.slice(jsCode.indexOf('function _mzIsSelfInflictedStatus'),
+                          jsCode.indexOf('const _mzMissingUrls'));
+  assert.ok(/status === 499/.test(fn), '499 is still reported');
+  const benign = jsCode.slice(jsCode.indexOf('function _mzIsBenignFailure'),
+                              jsCode.indexOf('function _mzMissingResult'));
+  assert.ok(/_mzIsSelfInflictedStatus\(err\.status\)/.test(benign),
+    'the benign check does not consult the self-inflicted list');
+});
+
+check('the client timeout is not shorter than the origin budget', () => {
+  const m = /const MZ_FETCH_TIMEOUT_MS = (\d+);/.exec(jsCode);
+  assert.ok(m, 'MZ_FETCH_TIMEOUT_MS not found');
+  const server = fs.readFileSync('server.js', 'utf8');
+  const st = /timeout: (\d+),/.exec(server.slice(server.indexOf('const tmdbClient = axios.create')));
+  const clientMs = Number(m[1]);
+  const serverMs = st ? Number(st[1]) : 15000;
+  assert.ok(clientMs >= serverMs,
+    'client aborts at ' + clientMs + 'ms while the origin allows itself ' + serverMs +
+    'ms per upstream attempt (plus axiosRetry with shouldResetTimeout). A shorter client budget guarantees we cut the connection mid-flight, and that is exactly what produces a 499.');
+});
+
+check("TMDB's rate limit is respected, not just concurrency", () => {
+  assert.ok(/MZ_RATE_LIMIT/.test(jsCode), 'no rate limiter — concurrency caps in-flight requests, not requests over time');
+  const lim = Number((/const MZ_RATE_LIMIT = (\d+);/.exec(jsCode) || [])[1]);
+  const win = Number((/const MZ_RATE_WINDOW_MS = (\d+);/.exec(jsCode) || [])[1]);
+  assert.ok(lim > 0 && win > 0, 'rate limiter constants missing');
+  // TMDB allows ~40 per 10s per key; stay under it and leave room for the server.
+  assert.ok(lim / (win / 10000) <= 40,
+    'client budget is ' + lim + ' per ' + (win / 1000) + 's, which exceeds TMDB\'s ~40/10s');
+  assert.ok(/_mzRateDelayMs\(\)/.test(jsCode), 'the rate budget is never actually waited on');
+});
+
+check('concurrency stays at or below 4 lanes', () => {
+  const n = Number((/const MZ_MAX_CONCURRENT_FETCHES = (\d+);/.exec(jsCode) || [])[1]);
+  assert.ok(n > 0 && n <= 4, 'concurrency is ' + n + '; the origin holds only 12 upstream sockets, shared across all visitors');
+});
+
+check('the rate wait happens before a concurrency lane is taken', () => {
+  const fn = jsCode.slice(jsCode.indexOf('async function _mzAcquireSlot'),
+                          jsCode.indexOf('function _mzReleaseSlot'));
+  assert.ok(fn.indexOf('_mzRateDelayMs()') < fn.indexOf('_mzActiveFetches++'),
+    'a lane is taken and then slept in, which throttles the other lanes for no reason');
+});
+
+console.log('\n-- renderer detection is a hint, not an accusation ' + '-'.repeat(11));
+
+check('software renderers are no longer reported as bots', () => {
+  assert.ok(!/Potential Bot\/Headless Browser Detected/.test(jsCode),
+    'the console.error is back. It blocked nothing (no listener existed), Datadog collects console.error, and swiftshader/mesa/llvmpipe are software renderers used by real people on VMs, remote desktops and GPU-blocklisted drivers.');
+  assert.ok(!/'bot-detected'/.test(jsCode), 'the bot-detected event name is back');
+  assert.ok(/mz:software-renderer/.test(jsCode), 'the renderer hint is gone entirely');
+  assert.ok(/!isLocalhost && softwareRenderers/.test(jsCode),
+    'the check still runs on localhost, so the repo\'s own headless suites keep tripping it');
+});
+
 // ── browser run ────────────────────────────────────────────────────────────
 const BROWSER_CANDIDATES = [
   path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Google\\Chrome\\Application\\chrome.exe'),

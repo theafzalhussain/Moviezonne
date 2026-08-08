@@ -181,6 +181,22 @@
     } catch (e) {}
   }, 5);
 
+  /*  Time to first rendered card. LCP tracks the hero, which is fetched
+   *  independently, so it can look healthy while the grid arrives much later.
+   *  This is the metric that catches a change to API concurrency or scheduling
+   *  making content appear later — the hero would not move at all.
+   */
+  var firstCardAt = null;
+  var cardWatch = setInterval(function () {
+    try {
+      var d = frame.contentDocument;
+      if (d && d.querySelector('#movieGrid .movie-card')) {
+        firstCardAt = Math.round(frame.contentWindow.performance.now());
+        clearInterval(cardWatch);
+      }
+    } catch (e) {}
+  }, 25);
+
   frame.addEventListener('load', function () {
     try {
       frame.contentWindow.addEventListener('error', function (ev) {
@@ -477,6 +493,11 @@
       earlyTmdb.length + ' TMDB poster requests started in the first 3s (' +
       imgs.length + ' images total over the whole run, ' +
       doc.querySelectorAll('#movieGrid .movie-card').length + ' cards rendered)');
+
+    // Content must not arrive later as a side effect of throttling requests.
+    ok('the first card renders within 4s',
+      firstCardAt !== null && firstCardAt < 4000,
+      'first card at ' + (firstCardAt === null ? 'never' : firstCardAt + 'ms'));
 
     // The QR code must not reach a third party; the encoder is bundled.
     var qrReq = res.filter(function (e) { return e.name.indexOf('qrserver.com') !== -1; });

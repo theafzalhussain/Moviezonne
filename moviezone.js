@@ -618,7 +618,26 @@ document.addEventListener('visibilitychange', () => {
  *  params, same response handling. Only how long the client waits, how often
  *  it retries, and what it calls an error.
  */
-const MZ_FETCH_TIMEOUT_MS = 9000;   // per attempt
+/*  Per-attempt timeout.
+ *
+ *  This was 9000ms, and that number was the direct cause of "TMDB responded 499"
+ *  appearing 511 times in five minutes.
+ *
+ *  499 is not something TMDB sends. It is what the hosting platform records and
+ *  returns when the CLIENT closes the connection before the function replies. We
+ *  were the client closing it: server.js gives its TMDB axios client a 15s
+ *  timeout AND axiosRetry(retries: 6, shouldResetTimeout: true), so one
+ *  /api/tmdb request can legitimately stay open for far longer than 9s while the
+ *  origin is still working through host failover. Aborting at 9s guaranteed we
+ *  cut it off mid-flight, and then reported the resulting 499 as an error.
+ *
+ *  So the client budget must not be shorter than the origin's own first-attempt
+ *  budget. 15s matches it. Waiting longer than that is pointless for a user, and
+ *  it does not cost them a blank screen: the SWR layer has already returned stale
+ *  data for anything seen before, and the origin serves its own stale copy on
+ *  failure.
+ */
+const MZ_FETCH_TIMEOUT_MS = 15000;  // per attempt; keep >= server.js tmdbClient timeout
 const MZ_FETCH_MAX_RETRIES = 2;     // 3 attempts total, worst case
 const MZ_FETCH_BACKOFF_MS = 500;    // doubled per attempt, plus jitter
 
@@ -668,16 +687,57 @@ const _mzSleep = (ms) => new Promise(r => setTimeout(r, ms));
  *  or giving discover responses a short s-maxage so the CDN absorbs the burst,
  *  would remove the queue at its source. That is a server decision.
  */
-const MZ_MAX_CONCURRENT_FETCHES = 6;
+const MZ_MAX_CONCURRENT_FETCHES = 4;
+
+/*  ── RATE LIMIT ──────────────────────────────────────────────────────────────
+ *  TMDB allows roughly 40 requests per 10 seconds per key. The concurrency gate
+ *  above caps how many are in flight, but not how many are sent over time — and
+ *  those are different things. Four lanes at 200ms each is 200 requests in 10
+ *  seconds, five times over the limit. Infinite scroll plus the hover prefetcher
+ *  plus the OTT provider verification can genuinely reach that.
+ *
+ *  30 per 10s, not 40: the key is shared with server-side work (SSR pages,
+ *  sitemap generation, the provider checks in the verification suites), so a
+ *  client that spends the entire budget would starve those and trip the limit for
+ *  everyone. This leaves headroom.
+ *
+ *  A cold homepage sends ~25 requests, which is under the cap, so the normal load
+ *  path is not slowed at all. The limiter only engages during sustained activity,
+ *  which is exactly when the 429s and cut connections were appearing.
+ */
+const MZ_RATE_LIMIT = 30;
+const MZ_RATE_WINDOW_MS = 10000;
+const _mzRateStamps = [];
+
+// How long to wait before another request may start, 0 if there is budget now.
+function _mzRateDelayMs() {
+  const now = Date.now();
+  while (_mzRateStamps.length && now - _mzRateStamps[0] > MZ_RATE_WINDOW_MS) _mzRateStamps.shift();
+  if (_mzRateStamps.length < MZ_RATE_LIMIT) return 0;
+  return Math.max(0, MZ_RATE_WINDOW_MS - (now - _mzRateStamps[0])) + 10;
+}
+
 let _mzActiveFetches = 0;
 const _mzFetchQueue = [];
 
-function _mzAcquireSlot() {
+async function _mzAcquireSlot() {
+  /*  Rate budget is waited for BEFORE taking a concurrency lane. Doing it the
+   *  other way round would park a lane for seconds while it slept, which would
+   *  throttle the other three for no reason.
+   */
+  for (let guard = 0; guard < 20; guard++) {
+    const wait = _mzRateDelayMs();
+    if (!wait) break;
+    if (_mzPageHiding) break;
+    await _mzSleep(wait);
+  }
+  _mzRateStamps.push(Date.now());
+
   // A runaway queue must never be able to wedge the app. If it ever grows past
   // anything plausible, stop gating rather than blocking.
   if (_mzActiveFetches < MZ_MAX_CONCURRENT_FETCHES || _mzFetchQueue.length > 80) {
     _mzActiveFetches++;
-    return Promise.resolve();
+    return;
   }
   return new Promise(resolve => _mzFetchQueue.push(resolve));
 }
@@ -716,10 +776,28 @@ function _mzWhenOnline(fn) {
   window.addEventListener('online', run, { once: true });
 }
 
-// 0 means "no response at all" (network-level). Retrying a 4xx is pointless:
-// a bad request stays bad. 408/425/429 and 5xx are the ones that heal.
+/*  0 means "no response at all" (network-level). Retrying a 4xx is pointless: a
+ *  bad request stays bad. 408/425/429 and 5xx are the ones that heal.
+ *
+ *  499 is the odd one and it belongs here. It is not a TMDB status — it is what the
+ *  hosting platform returns when the client closed the connection before the
+ *  function answered, i.e. a cut connection, which is exactly the retryable class.
+ *  It was previously treated as a plain 4xx, so it failed instantly with no retry
+ *  and was reported as an error 511 times in five minutes.
+ */
 function _mzIsTransientStatus(status) {
-  return status === 0 || status === 408 || status === 425 || status === 429 || status >= 500;
+  return status === 0 || status === 408 || status === 425 ||
+         status === 429 || status === 499 || status >= 500;
+}
+
+/*  Statuses that mean "this request was cut short", as opposed to "the server is
+ *  broken". We cause most of these ourselves — the per-attempt timeout aborting,
+ *  the stale-request abort, or the user navigating away mid-flight — so they are
+ *  retried but never reported. Reporting a failure you deliberately caused just
+ *  buries the ones you did not.
+ */
+function _mzIsSelfInflictedStatus(status) {
+  return status === 499 || status === 408;
 }
 
 /*  ── MISSING RESOURCES ARE NOT FAULTS ────────────────────────────────────────
@@ -850,6 +928,8 @@ function _mzInvalidIdSegment(endpoint) {
 function _mzIsBenignFailure(err) {
   if (_mzPageHiding) return true;
   if (navigator.onLine === false) return true;
+  // A cut connection we caused ourselves. Retried above, never reported.
+  if (err && err.name === 'HttpError' && _mzIsSelfInflictedStatus(err.status)) return true;
   return !!err && (err.name === 'AbortError' || err.name === 'TimeoutError');
 }
 
@@ -7847,10 +7927,34 @@ setTimeout(extractTopKeywords, 3000);
         const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
         const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL).toLowerCase();
 
-        const botIndicators = ['swiftshader', 'mesa', 'llvmpipe', 'headless'];
-        if (botIndicators.some(indicator => renderer.includes(indicator))) {
-          console.error('Potential Bot/Headless Browser Detected!', { vendor, renderer });
-          window.dispatchEvent(new CustomEvent('bot-detected', { detail: { vendor, renderer } }));
+        /*  This used to call console.error('Potential Bot/Headless Browser
+         *  Detected!'), and that was the whole of its effect. Two things were
+         *  wrong with it:
+         *
+         *  1. It blocked nothing. Nothing in the codebase listens for the
+         *     'bot-detected' event, so the "detection" had no consequence beyond
+         *     the log line. It was not gating access, and never has been.
+         *  2. swiftshader / mesa / llvmpipe are SOFTWARE RENDERERS, and plenty of
+         *     real people browse with one: virtual machines, remote desktop
+         *     sessions, Linux without accelerated drivers, and any machine where
+         *     Chrome has blocklisted the GPU driver. Calling those visitors bots
+         *     was wrong on its own terms.
+         *
+         *  Since Datadog RUM collects console.error, the only thing this block
+         *  actually did was file a steady stream of unactionable "errors" against
+         *  real users — and against every headless run of this repo's own test
+         *  suite.
+         *
+         *  It is now a debug log. The signal is still emitted for anyone who wants
+         *  to build on it, renamed to describe what it really detected: a software
+         *  renderer, which is a rendering-performance hint, not an identity claim.
+         *  Skipped entirely on localhost so the test suites stay quiet.
+         */
+        const softwareRenderers = ['swiftshader', 'mesa', 'llvmpipe', 'headless'];
+        if (!isLocalhost && softwareRenderers.some(indicator => renderer.includes(indicator))) {
+          console.debug('[MovieZone] software WebGL renderer detected; GPU effects may be slow.',
+            { vendor, renderer });
+          window.dispatchEvent(new CustomEvent('mz:software-renderer', { detail: { vendor, renderer } }));
         }
       }
     } catch (e) { /* Silently fail if canvas/webgl is blocked or fails */ }

@@ -127,11 +127,17 @@
     try { win.loadMovies('kdrama'); }
     catch (e) { ok('loadMovies is callable', false, e.message); return report(); }
 
-    // Old code retried every 3s forever. New code must stop:
-    //   per-request  1 try + 2 retries  (0.5s, 1s backoff)
-    //   per-feed     1 pass + 3 retries (1.5s, 3s, 6s backoff)
-    // Worst case is under ~20s, so 32s is a generous window to prove it settled.
-    setTimeout(phaseAssert, 32000);
+    /*  Old code retried every 3s forever. New code must stop:
+     *    per-request  1 try + 2 retries  (0.5s, 1s backoff)
+     *    per-feed     1 pass + 3 retries (1.5s, 3s, 6s backoff)
+     *
+     *  The window is 55s, not the 32s it started at. The client-side rate limiter
+     *  (30 requests / 10s, to stay under TMDB's ~40/10s) deliberately spreads the
+     *  same bounded set of attempts over more wall-clock time, so a window sized
+     *  for the un-throttled version cut off mid-sequence and read as "still
+     *  looping". Bounded is about the total, not the elapsed time.
+     */
+    setTimeout(phaseAssert, 55000);
   }
 
   function phaseAssert() {
