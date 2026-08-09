@@ -300,6 +300,8 @@ let carouselMovies = [];
 let autoSlideTimer = null;
 let isLoadingMore = false;
 let isSearchResultsMode = false;
+let renderMoviesRunId = 0;
+let renderMoviesTimer = null;
 /*  The watchlist is a finite, local list, so infinite scroll must not run while
  *  it is on screen. This used to be inferred by checking whether the active
  *  .cat-tab's onclick contained "showWatchlist" — that broke the moment the
@@ -1323,6 +1325,10 @@ async function init() {
    *  was trying to produce the first paint. The rules are static and now live at
    *  the end of moviezone.css.
    */
+  function initNonCritical() {
+    loadUpcoming();
+  }
+
   try {
     // Load carousel and movies in parallel (Promise.allSettled ensures one failure doesn't block other)
     await Promise.allSettled([
@@ -1330,10 +1336,10 @@ async function init() {
       loadMovies('all')
     ]);
 
-    // 3. Delay upcoming fetching until browser is idle
+    // 3. Delay upcoming fetching until the page has settled.
     setTimeout(() => {
-      if ('requestIdleCallback' in window) requestIdleCallback(() => loadUpcoming());
-      else loadUpcoming();
+      if ('requestIdleCallback' in window) requestIdleCallback(initNonCritical, { timeout: 5000 });
+      else initNonCritical();
     }, 800);
 
     // 4. Safety net only. index.html already drops the loader on DOMContentLoaded,
@@ -4188,6 +4194,14 @@ function ensureGridDelegation(grid) {
 function renderMovies(movies, append = false) {
   const grid = document.getElementById('movieGrid');
   if (!grid) return;
+
+  renderMoviesRunId += 1;
+  const runId = renderMoviesRunId;
+  if (renderMoviesTimer) {
+    clearTimeout(renderMoviesTimer);
+    renderMoviesTimer = null;
+  }
+
   if (!append) {
     if (!movies.length) {
       grid.innerHTML = '<div class="no-results"><h3>No movies found</h3><p>Try a different search or category.</p></div>';
@@ -4198,19 +4212,7 @@ function renderMovies(movies, append = false) {
 
   ensureGridDelegation(grid);
 
-  /*  One HTML string for the whole batch, parsed once.
-   *
-   *  Before: 24 separate `card.innerHTML = ...` assignments, each one its own
-   *  HTML parse plus two element.style writes. The parser was re-entered 24
-   *  times per render and 200+ times over a scrolling session.
-   *
-   *  insertAdjacentHTML on the container is a single parse for the batch, and it
-   *  appends without touching the nodes already in the grid — so infinite scroll
-   *  does not re-parse what is already rendered.
-   */
-  const html = [];
-
-  movies.forEach((m, i) => {
+  function createMovieCardHTML(m, i) {
     const type   = m.media_type || (m.name && !m.title ? 'tv' : 'movie');
     const rating = m.vote_average ? m.vote_average.toFixed(1) : 'N/A';
     const year   = (m.release_date || m.first_air_date || '').slice(0, 4);
@@ -4292,20 +4294,46 @@ function renderMovies(movies, append = false) {
           '<div class="card-genres">'+genres.map(g => '<span class="card-genre">'+escapeHTML(g)+'</span>').join('')+'</div>' +
         '</div>' +
       '</div>'
-    );
-  });
-
-  const firstNew = grid.children.length;
-  grid.insertAdjacentHTML('beforeend', html.join(''));
-
-  /*  Scroll-reveal registration, in one pass over just the new nodes.
-   *  Skipped on TV: a per-card IntersectionObserver entry (200 cards = 200
-   *  entries) plus an opacity/transform transition drops frames on a weak TV
-   *  GPU, and CSS forces .in-view there instead.
-   */
-  if (!isMzTV()) {
-    for (let n = firstNew; n < grid.children.length; n++) scrollObserver.observe(grid.children[n]);
+      );
   }
+
+  function observeNewCards(startIndex) {
+    if (isMzTV()) return;
+    for (let n = startIndex; n < grid.children.length; n += 1) scrollObserver.observe(grid.children[n]);
+  }
+
+  function appendChunk(startIndex, chunk) {
+    const html = chunk.map((m, offset) => createMovieCardHTML(m, startIndex + offset)).join('');
+    const firstNew = grid.children.length;
+    grid.insertAdjacentHTML('beforeend', html);
+    observeNewCards(firstNew);
+  }
+
+  function renderChunked() {
+    const chunkSize = 6;
+    let index = 0;
+
+    const renderNextChunk = () => {
+      if (runId !== renderMoviesRunId) return;
+      const chunk = movies.slice(index, index + chunkSize);
+      appendChunk(index, chunk);
+      index += chunk.length;
+      if (index < movies.length) {
+        requestAnimationFrame(() => {
+          renderMoviesTimer = setTimeout(renderNextChunk, 0);
+        });
+      }
+    };
+
+    renderNextChunk();
+  }
+
+  if (movies.length <= 6) {
+    appendChunk(0, movies);
+    return;
+  }
+
+  renderChunked();
 }
  
 // CATEGORY FILTER
