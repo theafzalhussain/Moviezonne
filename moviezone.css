@@ -4860,6 +4860,13 @@ html[data-mz-tv="true"] .cat-group-menu {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  /* Reserve the trailing block (trailer, cast, actions): these paint
+     separately from the header when the modal opens, and without a floor
+     they could collapse into the entrance and re-flow the page overlap.
+     The overlay above already scrolls the whole modal, so no scroll/overflow
+     needed on the wrapper — a nested scroll region would fight it. */
+  min-height: 200px;
+  contain: layout style;
 }
 
 .video-embed {
