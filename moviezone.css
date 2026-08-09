@@ -3316,6 +3316,10 @@ html[data-mz-tv="true"] .cat-group-menu {
 
 #upcoming {
   padding: 2rem 4% 4.5rem;
+  /* Hold a full row of cards open while the grid is being populated, so the
+     section can never push the page below it when the first cards paint. */
+  min-height: 350px;
+  contain: layout style;
 }
 
 .upcoming-grid {
@@ -4086,6 +4090,11 @@ html[data-mz-tv="true"] .cat-group-menu {
 .modal-content-wrapper {
   display: flex;
   flex-direction: column;
+  /* The full-screen modal (min-height:100vh) slots content into a flex column,
+     so the info column that lives at the bottom could grow and re-flow while
+     the modal entrance animation runs. Layout+style containment inlines that
+     subtree: nothing in here can resize another box on entrance. */
+  contain: layout style;
 }
 
 .modal-top {
@@ -4197,6 +4206,13 @@ html[data-mz-tv="true"] .cat-group-menu {
   flex-direction: column;
   justify-content: flex-end;
   transition: opacity 0.4s ease;
+  /* Reserve the info column: overview/trailer chips arrive as the API data
+     paints, and without a held height the title block drop can re-line the
+     whole bottom edge inside the still-animating modal. Containment seals
+     the subtree from any outer layout. The backdrop image above needs no box
+     of its own — #modal-image-wrapper is absolute inset:0 and already stable. */
+  min-height: 200px;
+  contain: layout style;
 }
 
 .modal-title {

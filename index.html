@@ -439,9 +439,14 @@
      books the movement as Cumulative Layout Shift.
      ════════════════════════════════════════════════════════════════════ -->
 <style id="mz-cwv-critical">
-/* Paint the brand background before moviezone.min.css arrives, so a slow
-   stylesheet shows dark chrome instead of a white flash. */
-html{background:#03030a;color-scheme:dark}
+/* ── MEASURED SHIFT #0: scroll-lock widened the layout ──
+   Every overlay (movie modal, upcoming detail, mobile nav, install popup) sets
+   body{overflow:hidden} while open. On a classic-scrollbar OS the vertical bar
+   disappears with it and the whole page widens by its width, so every centered
+   element slides sideways in the same frame the modal appears. Reserving the
+   gutter up front means the scroll-lock can change nothing about layout.
+   Overlay-scrollbar devices and browsers without the property simply no-op. */
+html{scrollbar-gutter:stable;background:#03030a;color-scheme:dark}
 
 /* CONTINUE WATCHING was `style="display:none"` in the markup and un-hidden by
    renderContinueWatching() on DOMContentLoaded. That reveal happens after the
