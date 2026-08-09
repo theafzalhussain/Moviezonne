@@ -3,11 +3,11 @@ module.exports = {
     {
       name: 'moviezone-pro',
       script: './server.js',
-      instances: 'max',         // Server ke saare (100%) CPU cores use karega!
-      exec_mode: 'cluster',     // PM2 ka Load-Balancer Mode
+      instances: 1,             // Render-style single process keeps memory bounded
+      exec_mode: 'fork',        // One worker only; cluster mode is unnecessary here
       autorestart: true,        // Crash hone par automatic instantly restart
       watch: false,             // Production me file watching false rakhte hain
-      max_memory_restart: '1G', // Memory Leak Protection: 1GB RAM se upar jaate hi safe restart
+      max_memory_restart: '384M', // Stay below Render's 512MB cap with room for spikes
       env: {
         NODE_ENV: 'production',
         PORT: 3000

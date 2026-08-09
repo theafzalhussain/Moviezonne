@@ -21,7 +21,7 @@
     "verify:seo": "node seo-live-check.js",
     "verify:tv": "node tv-e2e-check.js",
     "perf:tv": "node tv-perf-check.js",
-    "start": "pm2-runtime start ecosystem.config.js",
+    "start": "node server.js",
     "dev": "node server.js"
   },
   "repository": {
