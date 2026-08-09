@@ -858,6 +858,29 @@ app.get('/favicon.ico', (req, res) => {
   res.sendFile(require('path').join(__dirname, 'favicon-32.png'));
 });
 
+// Log throttle for upstream 403s. Keyed on the endpoint family (ids collapsed) so
+// /movie/550/watch/providers and /movie/680/watch/providers share one line, and
+// capped so a long-running process cannot grow the map without bound.
+const forbiddenLogSeen = new Map();
+const FORBIDDEN_LOG_INTERVAL_MS = 60 * 1000;
+
+function forbiddenLogKey(endpoint) {
+  return String(endpoint).split('?')[0].split('/').filter(Boolean)
+    .map(p => (/^\d+$/.test(p) ? ':id' : p)).slice(0, 4).join('/') || '(root)';
+}
+
+function shouldLogForbidden(endpoint) {
+  const key = forbiddenLogKey(endpoint);
+  const now = Date.now();
+  const last = forbiddenLogSeen.get(key);
+  if (last && now - last < FORBIDDEN_LOG_INTERVAL_MS) return false;
+  forbiddenLogSeen.set(key, now);
+  if (forbiddenLogSeen.size > 200) {
+    for (const [k, t] of forbiddenLogSeen) if (now - t > FORBIDDEN_LOG_INTERVAL_MS) forbiddenLogSeen.delete(k);
+  }
+  return true;
+}
+
 // Proxy Endpoint: Frontend yahan request bhejega
 app.use('/api/tmdb', apiLimiter, async (req, res) => {
   const safeUrl = req.url.replace(/^\/api\/tmdb/, '');
@@ -894,7 +917,24 @@ app.use('/api/tmdb', apiLimiter, async (req, res) => {
   } catch (error) {
     const upstreamStatus = error.tmdbStatus || error.response?.status || null;
     const code = error.code || upstreamStatus || 'UNKNOWN';
-    console.error(`TMDB Proxy Error [${code}]: ${error.message || 'Unknown error'} for ${endpoint}`);
+
+    /*  403 is logged quietly and at most once a minute per endpoint family.
+     *
+     *  It is not a server fault: TMDB refuses individual endpoints the key has no
+     *  access to, and its edge answers 403 instead of 429 for a rejected burst.
+     *  At console.error level and one line per request, a handful of refused
+     *  endpoints buried every genuine 5xx in the log. The client treats these the
+     *  same way — see the FORBIDDEN section in moviezone.js.
+     *
+     *  Everything else keeps its original volume.
+     */
+    if (upstreamStatus === 403) {
+      if (shouldLogForbidden(endpoint)) {
+        console.warn(`TMDB refused [403]: ${endpoint} — endpoint not permitted for this key, or edge throttling. Serving cache/fallback.`);
+      }
+    } else {
+      console.error(`TMDB Proxy Error [${code}]: ${error.message || 'Unknown error'} for ${endpoint}`);
+    }
 
     // Serve slightly stale data rather than an error — the user never sees a dead page.
     const stale = staleCache.get(url);

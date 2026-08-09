@@ -820,11 +820,104 @@ function _mzIsSelfInflictedStatus(status) {
  *
  *  Now they are silent: empty result, nothing reported, nothing counted.
  *
- *  401/403 stay loud on purpose — those mean the TMDB read token is missing,
- *  wrong or expired, which is a real outage and must be visible immediately.
+ *  401 stays loud on purpose — it means the TMDB read token is missing, wrong or
+ *  expired, which is a real outage and must be visible immediately. 403 used to
+ *  be lumped in with it; see the FORBIDDEN section below for why it is not.
  */
 function _mzIsMissingStatus(status) {
   return status === 404 || status === 410;
+}
+
+/*  ── 403 IS NOT AUTOMATICALLY AN OUTAGE ──────────────────────────────────────
+ *  The assumption behind treating 403 like 401 was that both mean "your token is
+ *  no good". Only 401 means that. A 403 arrives with a perfectly valid, active
+ *  key for reasons that are specific to one request, not to the account:
+ *
+ *    • the endpoint needs a permission the key does not carry — some
+ *      watch/providers and certification data behaves this way per region
+ *    • TMDB's edge (Cloudflare) rejects a burst as abuse rather than answering
+ *      429, which is why the homepage's ~25-call fan-out can produce one
+ *    • a region/language combination the account is not entitled to
+ *
+ *  Symptom of getting this wrong: intermittent 403s on a handful of endpoints
+ *  were counted as network failures (arming the feed retry budget) and reported
+ *  to Datadog on every occurrence, so a working app produced a steady drip of
+ *  unactionable errors.
+ *
+ *  Handling now mirrors 404: serve stale cache or an empty result, do not count
+ *  it, do not report it, and do not ask the same URL again for a while.
+ *
+ *  What is NOT given up: a token that really has been revoked or downgraded
+ *  produces 403 on EVERYTHING, not on one endpoint. That case is still reported —
+ *  once — by _mzNoteForbidden below, which watches for 403s spreading across
+ *  unrelated endpoint families. So a genuine outage is still visible, without
+ *  paying one error per request for the benign case.
+ */
+function _mzIsForbiddenStatus(status) {
+  return status === 403;
+}
+
+/*  Shorter TTL than the 404 cache. A 404 is TMDB stating a fact about its
+ *  catalogue; a 403 is frequently a passing condition (a rejected burst clears in
+ *  seconds), so holding the negative result for ten minutes would keep a rail
+ *  empty long after it would have worked.
+ */
+const _mzForbiddenUrls = new Map();
+const MZ_FORBIDDEN_TTL_MS = 90 * 1000;
+
+function _mzRememberForbidden(urlStr) {
+  _mzForbiddenUrls.set(urlStr, Date.now());
+  if (_mzForbiddenUrls.size > 300) {
+    const cutoff = Date.now() - MZ_FORBIDDEN_TTL_MS;
+    for (const [k, t] of _mzForbiddenUrls) if (t < cutoff) _mzForbiddenUrls.delete(k);
+  }
+}
+
+function _mzIsKnownForbidden(urlStr) {
+  const at = _mzForbiddenUrls.get(urlStr);
+  if (at === undefined) return false;
+  if (Date.now() - at < MZ_FORBIDDEN_TTL_MS) return true;
+  _mzForbiddenUrls.delete(urlStr);
+  return false;
+}
+
+/*  ── TELLING A BAD ENDPOINT FROM A BAD TOKEN ─────────────────────────────────
+ *  Counting raw 403s would not work: a single dead endpoint called by six rails
+ *  produces six 403s and looks identical to an outage. So what is counted is
+ *  distinct endpoint FAMILIES — /movie/550 and /movie/680 are one family,
+ *  /discover/tv and /trending/all are two more. Ids are collapsed because the
+ *  interesting question is "how many different kinds of request are refused".
+ *
+ *  Four unrelated families inside a minute is not something a per-endpoint
+ *  permission gap or a throttled burst produces; that is the credential. Reported
+ *  once per page load, because the second report adds no information and the
+ *  point of this whole path is to stop the drip.
+ */
+const MZ_FORBIDDEN_OUTAGE_FAMILIES = 4;
+const MZ_FORBIDDEN_OUTAGE_WINDOW_MS = 60 * 1000;
+const _mzForbiddenFamilies = new Map();
+let _mzForbiddenOutageReported = false;
+
+function _mzEndpointFamily(endpoint) {
+  const parts = String(endpoint).split('?')[0].split('/').filter(Boolean);
+  // Drop id-like and locale-like segments so /movie/550/videos and
+  // /movie/680/videos collapse to the same family.
+  const shape = parts.map(p => (/^\d+$/.test(p) ? ':id' : p));
+  return shape.slice(0, 3).join('/') || '(root)';
+}
+
+function _mzNoteForbidden(endpoint) {
+  const now = Date.now();
+  const family = _mzEndpointFamily(endpoint);
+  _mzForbiddenFamilies.set(family, now);
+
+  const cutoff = now - MZ_FORBIDDEN_OUTAGE_WINDOW_MS;
+  for (const [k, t] of _mzForbiddenFamilies) if (t < cutoff) _mzForbiddenFamilies.delete(k);
+
+  if (_mzForbiddenOutageReported) return false;
+  if (_mzForbiddenFamilies.size < MZ_FORBIDDEN_OUTAGE_FAMILIES) return false;
+  _mzForbiddenOutageReported = true;
+  return true;
 }
 
 /*  Negative cache for confirmed-missing URLs, so hovering the same dead card ten
@@ -916,6 +1009,17 @@ function _mzInvalidIdSegment(endpoint) {
     if (/^-?\d+$/.test(seg) && Number(seg) <= 0) return parts[i] + '/' + seg;
   }
   return null;
+}
+
+/*  Retry policy, which is not the same question as "is this status transient".
+ *  403 gets exactly one more attempt: when it comes from a rejected burst it
+ *  clears immediately, and recovering the real data beats falling back to stale.
+ *  It does not get the full budget, because when 403 means "this endpoint is not
+ *  permitted" no number of attempts will change it.
+ */
+function _mzShouldRetryStatus(status, attempt) {
+  if (_mzIsTransientStatus(status)) return true;
+  return _mzIsForbiddenStatus(status) && attempt === 0;
 }
 
 /*  A failure is "benign" when it was caused by something other than the network
@@ -1014,7 +1118,7 @@ async function _mzFetchWithRetry(urlStr, outerSignal, meta) {
       const r = await _mzFetchAttempt(urlStr, outerSignal);
       if (r.ok) return await r.json();
 
-      if (!_mzIsTransientStatus(r.status) || attempt === MZ_FETCH_MAX_RETRIES) {
+      if (!_mzShouldRetryStatus(r.status, attempt) || attempt === MZ_FETCH_MAX_RETRIES) {
         const e = new Error('TMDB responded ' + r.status);
         e.name = 'HttpError';
         e.status = r.status;
@@ -1034,7 +1138,7 @@ async function _mzFetchWithRetry(urlStr, outerSignal, meta) {
       lastError = err;
       // Deliberate cancellation and teardown are final — never retry them.
       if (err.name === 'AbortError' || _mzPageHiding) throw err;
-      if (err.name === 'HttpError' && !_mzIsTransientStatus(err.status)) throw err;
+      if (err.name === 'HttpError' && !_mzShouldRetryStatus(err.status, attempt)) throw err;
       if (attempt === MZ_FETCH_MAX_RETRIES) throw err;
 
       // Jitter matters here: a cold homepage fires 15 of these at once, and
@@ -1095,6 +1199,14 @@ async function tmdb(endpoint, params) {
     } catch(e) {}
   }
  
+  /*  A URL TMDB refused moments ago. Checked here rather than beside the 404
+   *  guard above so the stale copy read by the block above can still be served —
+   *  yesterday's posters beat an empty rail, and unlike a 404 this data was real.
+   *  Short window, so a passing 403 does not keep the rail empty for long, but
+   *  long enough that the rails sharing a refused URL do not each pay a request.
+   */
+  if (_mzIsKnownForbidden(urlStr)) return cachedData || _mzMissingResult();
+
   if (inFlightRequests.has(urlStr)) {
     return cachedData ? cachedData : inFlightRequests.get(urlStr);
   }
@@ -1130,6 +1242,35 @@ async function tmdb(endpoint, params) {
        */
       const benign = _mzIsBenignFailure(e);
       const missing = e && e.name === 'HttpError' && _mzIsMissingStatus(e.status);
+      const forbidden = e && e.name === 'HttpError' && _mzIsForbiddenStatus(e.status);
+
+      if (forbidden) {
+        /*  Silent, like a 404, and for the same reason: the app is working, this
+         *  one request was refused. Already retried once by _mzFetchWithRetry, so
+         *  by here it is not a passing burst rejection.
+         *
+         *  Deliberately NOT counted in _mzFetchFailureCount — counting it would
+         *  let one refused endpoint arm loadMovies' feed retry budget, which is
+         *  how this turned into repeated request storms.
+         *
+         *  Reported only if 403s have spread across unrelated endpoint families,
+         *  which is the signature of a revoked or downgraded token as opposed to
+         *  one endpoint the key cannot reach.
+         */
+        _mzRememberForbidden(urlStr);
+        if (_mzNoteForbidden(endpoint)) {
+          _mzReportFetchError(e, {
+            endpoint: endpoint,
+            status: 403,
+            reason: 'tmdb_token_forbidden_across_endpoints',
+            families: Array.from(_mzForbiddenFamilies.keys()).join(','),
+            hadStaleCache: !!cachedData
+          });
+        } else {
+          console.debug('[MovieZone] TMDB refused', endpoint, '(403) - serving cache and skipping silently');
+        }
+        return cachedData || _mzMissingResult();
+      }
 
       if (missing) {
         /*  Silent by design. This is "TMDB does not have this", not a fault:

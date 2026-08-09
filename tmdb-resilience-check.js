@@ -172,7 +172,9 @@ check('404/410 are classified as missing, not as failures', () => {
 check('a 404 is neither counted nor reported', () => {
   const idx = jsCode.indexOf('const missing = e && e.name');
   assert.ok(idx !== -1, 'tmdb() catch has no missing-resource branch');
-  const branch = jsCode.slice(idx, idx + 700);
+  // Anchored on the end of the catch rather than a fixed length, so inserting
+  // another silent branch (403) does not move the target out of the window.
+  const branch = jsCode.slice(idx, jsCode.indexOf('if (cachedData) return cachedData;', idx));
   assert.ok(/if \(missing\)/.test(branch), 'the missing branch is never taken');
   assert.ok(/_mzRememberMissing\(urlStr\)/.test(branch), 'a confirmed 404 is not remembered');
   // The missing branch has to return BEFORE the reporting branch, or a 404 still
@@ -182,10 +184,31 @@ check('a 404 is neither counted nor reported', () => {
     'the missing branch does not return before the failure-reporting branch');
 });
 
-check('401/403 stay loud — an expired token must be visible', () => {
-  const fn = jsCode.slice(jsCode.indexOf('function _mzIsMissingStatus'), jsCode.indexOf('const _mzMissingUrls'));
-  assert.ok(!/401|403/.test(fn),
-    'auth failures are being swallowed as "missing"; a dead TMDB token would look like an empty catalogue');
+/*  Originally this asserted that 401 AND 403 both stayed on the loud path. 403
+ *  has since been split out deliberately — with a valid, active key TMDB still
+ *  answers 403 for endpoints the key cannot reach and for bursts its edge
+ *  rejects, so reporting every one produced a permanent drip of unactionable
+ *  errors. 403 now has its own silent path with an outage detector; the
+ *  behavioural proof lives in tmdb-403-check.js.
+ *
+ *  401 is the one that genuinely means "this credential is dead", and it must
+ *  never be swallowed.
+ */
+check('401 stays loud — an expired token must be visible', () => {
+  const missingFn = jsCode.slice(jsCode.indexOf('function _mzIsMissingStatus'),
+                                jsCode.indexOf('function _mzIsForbiddenStatus'));
+  assert.ok(!/401/.test(missingFn),
+    '401 is being swallowed as "missing"; a dead TMDB token would look like an empty catalogue');
+
+  const forbiddenFn = jsCode.slice(jsCode.indexOf('function _mzIsForbiddenStatus'),
+                                   jsCode.indexOf('const _mzForbiddenUrls'));
+  assert.ok(/status === 403/.test(forbiddenFn) && !/401/.test(forbiddenFn),
+    '401 must not be folded into the forbidden (silent) path');
+
+  // A revoked token produces 403 everywhere, and that case must still surface.
+  assert.ok(/_mzNoteForbidden/.test(jsCode),
+    'nothing distinguishes a per-endpoint 403 from a revoked token, so a real outage would be silent');
+  assert.ok(/MZ_FORBIDDEN_OUTAGE_FAMILIES/.test(jsCode), 'no threshold for declaring a credential outage');
 });
 
 check('impossible ids are rejected before a request is built', () => {
