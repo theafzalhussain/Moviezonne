@@ -1674,9 +1674,17 @@ body.cursor-hover #cursor-dot {
 
 #hero {
   position: relative;
+  width: 100%;
+  /* A hard height is the CLS reservation: the section owns its box before
+     buildCarousel() injects the slides, so the backdrop <img> and siblings can
+     never push the movie rails below down. `contain` make the box independent
+     of whatever the track paints inside it. */
   height: 95vh;
+  min-height: 520px;
   overflow: hidden;
   margin-top: 75px;
+  background: #0a0a0a;
+  contain: layout paint style;
 }
 
 /* Film grain overlay */
@@ -2585,6 +2593,10 @@ body.cursor-hover #cursor-dot {
 
 .cat-group-menu {
   display: none;
+  /* CLS: the panel is positioned OUT of document flow (absolute below its
+     trigger on desktop, fixed on phones), so revealing it under .is-open can
+     never push the movie rails below the tab strip. `contain` keeps it that
+     way even if someone later makes a group in-flow. */
   position: absolute;
   top: calc(100% + 0.55rem);
   left: 0;
@@ -2604,6 +2616,7 @@ body.cursor-hover #cursor-dot {
   -webkit-backdrop-filter: blur(20px) saturate(160%);
   box-shadow: 0 22px 54px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   scrollbar-width: thin;
+  contain: layout style;
 }
 
 .cat-group.is-open>.cat-group-menu {
@@ -6241,6 +6254,7 @@ html[data-mz-tv="true"] .cat-group-menu {
 
   #hero {
     height: 65vh;
+    min-height: 380px;
     margin-top: 105px;
   }
 
