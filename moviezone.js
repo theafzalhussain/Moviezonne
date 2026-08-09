@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿// Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
+﻿﻿﻿﻿// Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
 // TV detection is handled by tv-mode.js which sets html[data-mz-tv="true"].
 // This getter reads the data attribute set by the isolated TV module.
@@ -4249,7 +4249,7 @@ function renderMovies(movies, append = false) {
     const dubbedLangs = ['en', 'ja', 'ko', 'fr', 'es', 'de']; // Languages that are commonly dubbed to Hindi
     const isDubbedLikely = dubbedLangs.includes(m.original_language) && m.popularity > 50;
 
-    html.push(
+    return (
       // data-id / data-type replace the per-card closures the delegated handlers
       // used to need. willChange and animationDelay ride along in the same parse
       // instead of costing two element.style writes each.
