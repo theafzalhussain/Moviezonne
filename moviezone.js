@@ -2151,7 +2151,7 @@ function buildCarousel() {
      *  is on the critical path.
      */
     const heroImg = i === 0
-      ? '<img class="slide-bg-img" src="' + bgUrl + '" alt="" fetchpriority="high" decoding="async" draggable="false">'
+      ? '<img class="slide-bg-img" src="' + bgUrl + '" alt="" width="1280" height="720" style="aspect-ratio:16/9;object-fit:cover;" fetchpriority="high" decoding="async" draggable="false">'
       : '';
 
     if (i === 0) {
@@ -4737,7 +4737,7 @@ async function loadUpcoming(isLoadMore = false) {
       card.innerHTML =
         '<div class="upcoming-poster">' +
           // PERF FIX: same eager->lazy fix as the movie grid (see renderMovies).
-          '<img src="'+posterImg+'" alt="'+escapeHTML(m.title||'')+'" width="280" height="157" loading="'+((!isLoadMore && i < 6) ? 'eager' : 'lazy')+'" decoding="async">' +
+          '<img src="'+posterImg+'" alt="'+escapeHTML(m.title||'')+'" width="280" height="157" style="aspect-ratio:16/9;object-fit:cover;" loading="'+((!isLoadMore && i < 6) ? 'eager' : 'lazy')+'" decoding="async">' +
           '<div class="upcoming-poster-overlay"></div>' +
           '<div class="upcoming-release-badge"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" style="margin-right:4px;vertical-align:-1px"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10z"/></svg>'+dateStr+'</div>' +
           (countdownText ? '<div class="upcoming-countdown-badge">⏳ '+countdownText+'</div>' : '') +
