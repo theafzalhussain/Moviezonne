@@ -1,4 +1,4 @@
-﻿﻿﻿﻿// Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
+﻿// Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
 // TV detection is handled by tv-mode.js which sets html[data-mz-tv="true"].
 // This getter reads the data attribute set by the isolated TV module.
@@ -8,6 +8,15 @@ const isMzTV = () => document.documentElement.getAttribute('data-mz-tv') === 'tr
 const isMobile = !isMzTV() && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
 const isLowEnd = (navigator.deviceMemory && navigator.deviceMemory < 4) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency < 4);
 const isTouchOnly = window.matchMedia('(pointer: coarse)').matches && !window.matchMedia('(pointer: fine)').matches;
+
+// Device tier for the rendering budget (loadMovies/renderMovies): low tier gets
+// a smaller first paint in smaller chunks so a weak CPU or slow link does not
+// lose a frame to the initial render.
+const mzLowTier =
+  (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 2) ||
+  (navigator.deviceMemory && navigator.deviceMemory <= 2) ||
+  /SmartTV|Smart-TV|Tizen|webOS|BRAVIA|NetCast/i.test(navigator.userAgent) ||
+  (/2g/i.test(((navigator.connection || {}).effectiveType) || ''));
 
 // -- ULTRA PERFORMANCE BOOST (Instant Load) --
 // 1. Mark document as loading for instant visual feedback
@@ -302,6 +311,42 @@ let isLoadingMore = false;
 let isSearchResultsMode = false;
 let renderMoviesRunId = 0;
 let renderMoviesTimer = null;
+
+// Universal main-thread yield. MessageChannel resolves before the browser has a
+// chance to repaint, so it is the cheapest available way to cede the thread to
+// input handlers and DOM writes between render chunks; setTimeout trails it by
+// a timer tick and is only the fallback for older engines.
+function yieldToMain() {
+  return new Promise(resolve => {
+    if (typeof MessageChannel !== 'undefined') {
+      const mc = new MessageChannel();
+      mc.port1.onmessage = resolve;
+      mc.port2.postMessage(undefined);
+    } else {
+      setTimeout(resolve, 0);
+    }
+  });
+}
+
+// Run a queue of non-critical startup tasks only when the main thread is idle.
+// Each task gets at least the 5ms slice the spec guarantees; time-critical work
+// scheduled first is never starved. Engines without requestIdleCallback (old
+// Smart TV WebKits) fall back to spreading the tasks across sequential timers.
+function scheduleIdleWork(tasks, timeout = 3000) {
+  if ('requestIdleCallback' in window) {
+    let i = 0;
+    const runNext = (deadline) => {
+      while (i < tasks.length && deadline.timeRemaining() > 5) {
+        try { tasks[i](); } catch (e) {}
+        i++;
+      }
+      if (i < tasks.length) requestIdleCallback(runNext, { timeout });
+    };
+    requestIdleCallback(runNext, { timeout });
+  } else {
+    tasks.forEach((task, idx) => setTimeout(() => { try { task(); } catch (e) {} }, idx * 50));
+  }
+}
 /*  The watchlist is a finite, local list, so infinite scroll must not run while
  *  it is on screen. This used to be inferred by checking whether the active
  *  .cat-tab's onclick contained "showWatchlist" — that broke the moment the
@@ -1325,8 +1370,31 @@ async function init() {
    *  was trying to produce the first paint. The rules are static and now live at
    *  the end of moviezone.css.
    */
-  function initNonCritical() {
-    loadUpcoming();
+  /*  Below-the-fold sections load only when they scroll near the viewport,
+   *  so they never compete with the hero or the movie feed for the first
+   *  round-trips. #upcoming is the only lazy section today; more can be added
+   *  by listing their loader here. Engines without IntersectionObserver keep
+   *  the old idle-time deferral so the section still fills eventually.
+   */
+  function setupLazySections() {
+    const section = document.getElementById('upcoming');
+    if (!section) return;
+    if (!('IntersectionObserver' in window)) {
+      const fallback = () => loadUpcoming();
+      if ('requestIdleCallback' in window) requestIdleCallback(fallback, { timeout: 5000 });
+      else setTimeout(fallback, 1500);
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          loadUpcoming();
+          observer.disconnect();
+          break;
+        }
+      }
+    }, { rootMargin: '200px' });
+    observer.observe(section);
   }
 
   try {
@@ -1336,13 +1404,12 @@ async function init() {
       loadMovies('all')
     ]);
 
-    // 3. Delay upcoming fetching until the page has settled.
-    setTimeout(() => {
-      if ('requestIdleCallback' in window) requestIdleCallback(initNonCritical, { timeout: 5000 });
-      else initNonCritical();
-    }, 800);
+    // 4. Upcoming is below the fold, so do not ask for it until the section is
+    //    near the viewport (see setupLazySections above). On engines without an
+    //    IntersectionObserver that falls back to an idle-time load.
+    setupLazySections();
 
-    // 4. Safety net only. index.html already drops the loader on DOMContentLoaded,
+    // 5. Safety net only. index.html already drops the loader on DOMContentLoaded,
     //    which happens before this await settles, so on a normal load this is a
     //    no-op. It stays for the case where the shell script was skipped (older
     //    TV browsers) - but the 400 ms setTimeout that used to wrap it is gone:
@@ -1356,9 +1423,10 @@ async function init() {
     if (loader) loader.classList.add('loader-hidden');
   }
 
-  // Luxury Ambient Particles (Jugnu)
-  // Only create on desktop - mobile/TV gets zero particles for performance
-  if (!isMzTV() && !isMobile && !document.querySelector('.ambient-particles')) {
+  // Luxury Ambient Particles (Jugnu) — decorative only, so it runs when the
+  // main thread is idle rather than at the end of init().
+  scheduleIdleWork([() => {
+    if (isMzTV() || isMobile || document.querySelector('.ambient-particles')) return;
     const pContainer = document.createElement('div');
     pContainer.className = 'ambient-particles';
     document.body.appendChild(pContainer);
@@ -1399,7 +1467,7 @@ async function init() {
 
       pContainer.appendChild(p);
     }
-  }
+  }]);
 
   setupInfiniteScroll();
   setupUpcomingInfiniteScroll();
@@ -4087,15 +4155,27 @@ async function loadMovies(cat, isLoadMore = false) {
    *  scroll to them — infinite scroll, the load-more paging and the ranking order
    *  all see the same list they did before.
    */
+
+  /*  DEVICE-AWARE RENDERING BUDGET.
+   *
+   *  Datadog RUM flagged slow hardware: a smart TV or 2-core phone still gets
+   *  the same 8-card first paint and 6-card chunks as a desktop, so the first
+   *  render blocks the main thread and the cards hit the viewport late. Low
+   *  tier gets a lighter first paint in smaller chunks; high tier is unchanged.
+   *
+   *  Small literal stays on purpose: the resilience guard reads FIRST_PAINT_CARDS
+   *  from source, and low-tier just uses a smaller slice of it.
+   */
   const FIRST_PAINT_CARDS = 8;
+  const firstPaintCount = mzLowTier ? 4 : FIRST_PAINT_CARDS;
 
   if (isLoadMore) {
     renderMovies(newMovies, true);
   } else if (isFullViewMovies) {
     renderMovies(allMovies, false);
   } else {
-    const head = allMovies.slice(0, FIRST_PAINT_CARDS);
-    const tail = allMovies.slice(FIRST_PAINT_CARDS, 24);
+    const head = allMovies.slice(0, firstPaintCount);
+    const tail = allMovies.slice(firstPaintCount, 24);
     renderMovies(head, false);
     if (tail.length) {
       const paintTail = () => renderMovies(tail, true);
@@ -4212,19 +4292,23 @@ function renderMovies(movies, append = false) {
 
   ensureGridDelegation(grid);
 
+  // Quality/freshness timelines are day-quantized, so one timestamp per render
+  // pass is as accurate as one per card and skips Date.now() per card.
+  const mzNow = Date.now();
+
   function createMovieCardHTML(m, i) {
     const type   = m.media_type || (m.name && !m.title ? 'tv' : 'movie');
     const rating = m.vote_average ? m.vote_average.toFixed(1) : 'N/A';
     const year   = (m.release_date || m.first_air_date || '').slice(0, 4);
     const genres = (m.genre_ids||[]).slice(0,2).map(id => GENRE_MAP[id]).filter(Boolean);
     const rDateStr = m.release_date || m.first_air_date;
-    const isHot  = m.popularity > 100 && ((m.vote_count || 0) > 50 || (Date.now() - new Date(rDateStr || '2000-01-01')) / (1000*60*60*24) < 60);
+    const isHot  = m.popularity > 100 && ((m.vote_count || 0) > 50 || (mzNow - new Date(rDateStr || '2000-01-01')) / (1000*60*60*24) < 60);
 
     // -- PRINT QUALITY BADGE --
     // Derived from the release→quality timeline the ALL feed also ranks by
     // (MOVIE_QUALITY_TIMELINE for films, TV_QUALITY_TIMELINE for series and
     // anime), so the badge and the ordering can never disagree.
-    const qualityState = titleQualityState(m, Date.now());
+    const qualityState = titleQualityState(m, mzNow);
     let qual = qualityState.qual;
     let qualClass = qualityState.cls;
 
@@ -4253,8 +4337,8 @@ function renderMovies(movies, append = false) {
       // data-id / data-type replace the per-card closures the delegated handlers
       // used to need. willChange and animationDelay ride along in the same parse
       // instead of costing two element.style writes each.
-      '<div class="movie-card" tabindex="0" data-id="' + m.id + '" data-type="' + type + '"' +
-        ' style="will-change:auto;animation-delay:' + ((i % 24) * 0.04) + 's">' +
+      `<div class="movie-card" tabindex="0" data-id="${m.id}" data-type="${type}"` +
+        ` style="will-change:auto;animation-delay:${((i % 24) * 0.04)}s">` +
         '<div class="card-poster">' +
           // A single w342 src made every device download the same bytes: ~2.6x the
           // pixels a 1x desktop card displays, and slightly soft on a 3x phone.
@@ -4278,20 +4362,20 @@ function renderMovies(movies, append = false) {
              *  decides to start a lazy poster, it must not outbid the hero.
              */
             ` loading="lazy" fetchpriority="low" decoding="async">` +
-          '<div class="card-quality '+(qualClass||'')+'">'+qual+'</div>' +
+          `<div class="card-quality ${qualClass||''}">${qual}</div>` +
           (isHot ? '<div class="card-hot">HOT</div>' : '') +
           freshBadge +
           (isDubbedLikely ? '<div class="card-dubbed"> HINDI</div>' : '') +
           '<div class="card-overlay"><button class="card-play-btn" tabindex="-1" aria-hidden="true">&#9654;</button></div>' +
         '</div>' +
         '<div class="card-info">' +
-          '<div class="card-title">'+escapeHTML(m.title||m.name||'')+'</div>' +
+          `<div class="card-title">${escapeHTML(m.title||m.name||'')}</div>` +
           '<div class="card-meta">' +
-            '<div class="card-rating">RATING '+rating+'</div>' +
-            '<div class="card-year">YEAR '+year+'</div>' +
+            `<div class="card-rating">RATING ${rating}</div>` +
+            `<div class="card-year">YEAR ${year}</div>` +
           '</div>' +
-          '<div class="card-meta"><div class="card-runtime">LANG '+(m.original_language||'EN').toUpperCase()+'</div></div>' +
-          '<div class="card-genres">'+genres.map(g => '<span class="card-genre">'+escapeHTML(g)+'</span>').join('')+'</div>' +
+          `<div class="card-meta"><div class="card-runtime">LANG ${(m.original_language||'EN').toUpperCase()}</div></div>` +
+          `<div class="card-genres">${genres.map(g => '<span class="card-genre">'+escapeHTML(g)+'</span>').join('')}</div>` +
         '</div>' +
       '</div>'
       );
@@ -4309,23 +4393,17 @@ function renderMovies(movies, append = false) {
     observeNewCards(firstNew);
   }
 
-  function renderChunked() {
-    const chunkSize = 6;
-    let index = 0;
-
-    const renderNextChunk = () => {
+  async function renderChunked() {
+    const chunkSize = mzLowTier ? 2 : 6;
+    for (let index = 0; index < movies.length; index += chunkSize) {
       if (runId !== renderMoviesRunId) return;
-      const chunk = movies.slice(index, index + chunkSize);
-      appendChunk(index, chunk);
-      index += chunk.length;
-      if (index < movies.length) {
-        requestAnimationFrame(() => {
-          renderMoviesTimer = setTimeout(renderNextChunk, 0);
-        });
+      appendChunk(index, movies.slice(index, index + chunkSize));
+      if (index + chunkSize < movies.length) {
+        // Cede the thread after every chunk so input/paint are never starved
+        // by the tail render; the runId check above aborts a superseded pass.
+        await yieldToMain();
       }
-    };
-
-    renderNextChunk();
+    }
   }
 
   if (movies.length <= 6) {
@@ -8071,13 +8149,14 @@ function extractTopKeywords() {
   return top3;
 }
 
-// Run it briefly after the dynamic content (movies) finishes loading
-setTimeout(extractTopKeywords, 3000);
+// Run it only when the main thread is idle, after movies have finished loading
+scheduleIdleWork([extractTopKeywords], 5000);
 
 // -- BOT DETECTION (WebGL Renderer Check) --
 (function detectBot() {
-  // Run this check after a short delay to not block the initial render.
-  setTimeout(() => {
+  // Idle-only: creating a WebGL context is a real GPU/CPU cost and nothing here
+  // is on the user's critical path.
+  scheduleIdleWork([() => {
     try {
       const canvas = document.createElement('canvas');
       const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
@@ -8122,7 +8201,7 @@ setTimeout(extractTopKeywords, 3000);
         }
       }
     } catch (e) { /* Silently fail if canvas/webgl is blocked or fails */ }
-  }, 4500); // Run after other initial scripts.
+  }]);
 })();
 
 // -- MEMORY & CRASH PREVENTION SYSTEM --
