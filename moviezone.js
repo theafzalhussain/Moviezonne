@@ -5036,11 +5036,13 @@ window.addEventListener('popstate', () => {
  *                           A × button clears the box in one tap.
  * ════════════════════════════════════════════════════════════════════════ */
 
-const SEARCH_DEBOUNCE_MS = 350;     // sweet spot inside the 300-400ms window
+const SEARCH_DEBOUNCE_MS = 400;     // wait for typing to settle before calling TMDB
 const SEARCH_MIN_CHARS = 2;         // suggestions start at 2 characters
 const SEARCH_SUGGESTION_LIMIT = 8;  // rows shown in the dropdown
 
 let searchTimer = null;             // kept for backwards compatibility
+let _lastSearchQuery = '';
+let _searchAbortController = null;
 let searchRequestId = 0;
 let searchActiveIndex = -1;
 let searchCatalogPromise = null;
@@ -5073,8 +5075,20 @@ const makeDebounced = (fn, wait) => {
 const debouncedSuggest = makeDebounced(query => {
   const current = (searchInput?.value || '').trim();
   if (current !== query || query.length < SEARCH_MIN_CHARS) return;
-  searchDropdownFill(query);
+  _lastSearchQuery = query;
+  searchDropdownFill(query, beginSearchRequest());
 }, SEARCH_DEBOUNCE_MS);
+
+function beginSearchRequest() {
+  if (_searchAbortController) _searchAbortController.abort();
+  _searchAbortController = new AbortController();
+  return _searchAbortController.signal;
+}
+
+function clearSearchRequest() {
+  if (_searchAbortController) _searchAbortController.abort();
+  _searchAbortController = null;
+}
 
 /*  -- Supplementary styles for the v2 search dropbits --
  *  Moved to the end of moviezone.css. This was a third runtime <style> append
@@ -5135,6 +5149,8 @@ if (searchInput) {
     // Nothing typed -> cancel any pending request and close cleanly.
     if (!query) {
       debouncedSuggest.cancel();
+      clearSearchRequest();
+      _lastSearchQuery = '';
       searchRequestId += 1;
       closeDropdown();
       return;
@@ -5143,13 +5159,24 @@ if (searchInput) {
     // 1 character -> no network call at all, just a hint.
     if (query.length < SEARCH_MIN_CHARS) {
       debouncedSuggest.cancel();
+      clearSearchRequest();
       showSearchLoading('Type at least ' + SEARCH_MIN_CHARS + ' letters…', false);
       return;
     }
 
-    // 2+ characters -> show skeleton instantly, fire the request after 350ms.
+    if (query === _lastSearchQuery) return;
+
+    // 2+ characters -> show skeleton instantly, fire the request after 400ms.
     showSearchLoading('Finding the best matches…', true);
     debouncedSuggest(query);
+  });
+
+  searchInput.addEventListener('change', () => {
+    if (searchInput && !searchInput.value.trim()) {
+      debouncedSuggest.cancel();
+      clearSearchRequest();
+      _lastSearchQuery = '';
+    }
   });
 
   searchInput.addEventListener('keydown', event => {
@@ -5166,6 +5193,7 @@ if (searchInput) {
     }
     if (event.key === 'Escape') {
       debouncedSuggest.cancel();
+      clearSearchRequest();
       closeDropdown();
       return;
     }
@@ -5224,6 +5252,7 @@ document.addEventListener('pointerdown', event => {
   if (!isSearchDropdownOpen()) return;
   if (!isInsideSearchBox(event.target)) {
     debouncedSuggest.cancel();
+    clearSearchRequest();
     closeDropdown();
   }
 }, true);
@@ -5237,6 +5266,7 @@ document.addEventListener('click', event => {
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && isSearchDropdownOpen()) {
     debouncedSuggest.cancel();
+    clearSearchRequest();
     closeDropdown();
   }
 });
@@ -5369,7 +5399,7 @@ async function loadSearchCatalog() {
  *   /search/multi  (actor & mixed matches)
  * Everything is then re-ranked by the Fuse.js-compatible fuzzy engine.
  */
-async function intelligentMovieSearch(query, limit = 20) {
+async function intelligentMovieSearch(query, limit = 20, signal = null) {
   const engine = searchEngineApi();
   const cacheKey = (engine?.normalizeSearchText(query) || query.toLowerCase()) + '|' + limit;
   const cached = intelligentSearchCache.get(cacheKey);
@@ -5379,49 +5409,25 @@ async function intelligentMovieSearch(query, limit = 20) {
   const aliasQuery = engine?.applyAliases(query) || query;
   const normalizedQuery = engine?.normalizeSearchText(query) || query.toLowerCase();
 
-  // Suggestion mode (small limit) stays deliberately lean: 2-3 requests so the
-  // dropdown feels instant. The full results page asks for wider coverage.
-  const deepMode = limit > 10;
+  const searchQuery = aliasQuery && aliasQuery !== normalizedQuery ? aliasQuery : query;
+  let searchResults = [];
 
-  const jobs = [
-    // PRIMARY suggestion source (TMDb movie search).
-    { tag: 'movie', promise: tmdb('/search/movie', { ...baseParams, query }) },
-    // Covers web series, anime and actor names in a single extra call.
-    { tag: 'multi', promise: tmdb('/search/multi', { ...baseParams, query }) },
-    { tag: 'catalog', promise: loadSearchCatalog() }
-  ];
-  // Alias/typo variant only when it actually differs (saves a request).
-  if (aliasQuery && aliasQuery !== normalizedQuery) {
-    jobs.push({ tag: 'movie', promise: tmdb('/search/movie', { ...baseParams, query: aliasQuery }) });
-  }
-  if (deepMode) {
-    jobs.push({ tag: 'tv', promise: tmdb('/search/tv', { ...baseParams, query }) });
-    if (aliasQuery && aliasQuery !== normalizedQuery) {
-      jobs.push({ tag: 'multi', promise: tmdb('/search/multi', { ...baseParams, query: aliasQuery }) });
-    }
+  try {
+    const response = await tmdb('/search/multi', { ...baseParams, query: searchQuery }, { signal });
+    searchResults = response.results || [];
+  } catch (error) {
+    if (error && error.name === 'AbortError') throw error;
+    console.warn('[MovieZone] Search request failed:', error);
+    return { results: [], correction: null };
   }
 
-  const settled = await Promise.allSettled(jobs.map(job => job.promise));
-  let catalog = { media: [], people: [] };
   const directMedia = [];
   const directPeople = [];
-
-  settled.forEach((result, index) => {
-    if (result.status !== 'fulfilled' || !result.value) return;
-    const tag = jobs[index].tag;
-    if (tag === 'catalog') { catalog = result.value || catalog; return; }
-    (result.value.results || []).forEach(item => {
-      if (!item || !item.id) return;
-      const type = item.media_type || (tag === 'tv' ? 'tv' : tag === 'movie' ? 'movie' : (item.name ? 'tv' : 'movie'));
-      if (type === 'person') directPeople.push({ ...item, media_type: 'person' });
-      else directMedia.push({ ...item, media_type: type });
-    });
+  searchResults.forEach(item => {
+    if (!item || !item.id) return;
+    if (item.media_type === 'person') directPeople.push({ ...item, media_type: 'person' });
+    else directMedia.push({ ...item, media_type: item.media_type || (item.name ? 'tv' : 'movie') });
   });
-
-  const localMedia = [...allMovies, ...carouselMovies, ...allUpcoming].map(item => ({
-    ...item,
-    media_type: item.media_type || (item.name ? 'tv' : 'movie')
-  }));
 
   // No engine (script blocked) -> still show plain TMDb order.
   if (!engine) {
@@ -5431,29 +5437,14 @@ async function intelligentMovieSearch(query, limit = 20) {
     return value;
   }
 
-  const rankedPeople = engine.rankSearchCandidates(query, directPeople.concat(catalog.people), 5);
+  const rankedPeople = engine.rankSearchCandidates(query, directPeople, 5);
   const personMedia = expandPersonResults(rankedPeople);
-  let pool = directMedia.concat(catalog.media, localMedia, personMedia);
+  let pool = directMedia.concat(personMedia);
   let ranked = engine.rankSearchCandidates(query, pool, Math.max(limit * 3, 30));
   let correction = engine.getCorrection(query, ranked);
 
   const bestPerson = rankedPeople[0];
   if (bestPerson && bestPerson._searchScore >= 700) correction = bestPerson.name;
-
-  // One extra fetch on the corrected spelling (typo rescue). Only on the full
-  // results page — the dropdown already gets the right title from the fuzzy
-  // ranking, so suggestions never pay for this round-trip.
-  if (deepMode && correction && engine.normalizeSearchText(correction) !== normalizedQuery) {
-    try {
-      const corrected = await tmdb('/search/multi', { ...baseParams, query: correction });
-      const correctedPeople = (corrected.results || []).filter(item => item.media_type === 'person');
-      const correctedMedia = (corrected.results || []).filter(item => item.media_type !== 'person');
-      pool = pool.concat(correctedMedia, expandPersonResults(correctedPeople));
-      ranked = engine.rankSearchCandidates(query, pool, Math.max(limit * 3, 30));
-    } catch (error) {
-      console.warn('[MovieZone] Corrected search failed:', error);
-    }
-  }
 
   ranked.forEach(item => {
     if (item._matchedPerson) item._matchQuality = 'With ' + item._matchedPerson;
@@ -5475,15 +5466,17 @@ function openSearchResult(item, activationEvent) {
   if (searchInput && !isMzTV()) searchInput.blur();
 }
 
-async function searchDropdownFill(query) {
+async function searchDropdownFill(query, signal) {
+  const requestSignal = signal || beginSearchRequest();
   const requestId = ++searchRequestId;
   try {
-    const search = await intelligentMovieSearch(query, SEARCH_SUGGESTION_LIMIT);
+    const search = await intelligentMovieSearch(query, SEARCH_SUGGESTION_LIMIT, requestSignal);
     // Stale-response guard: ignore anything the user has already typed past.
     if (requestId !== searchRequestId || searchInput?.value.trim() !== query) return;
     renderSearchDropdown(query, search);
   } catch (error) {
     if (requestId !== searchRequestId) return;
+    if (error && error.name === 'AbortError') return;
     console.warn('[MovieZone] Intelligent search failed:', error);
     renderSearchDropdown(query, { results: [], correction: null });
   }
@@ -5580,6 +5573,7 @@ function renderSearchDropdown(query, search) {
 async function searchAndDisplay(query) {
   const grid = document.getElementById('movieGrid');
   if (!grid) return;
+  const signal = beginSearchRequest();
   isSearchResultsMode = true;
   document.querySelectorAll('.cat-tab').forEach(t => t.classList.remove('active'));
   const scrollTrigger = document.getElementById('infiniteScrollTrigger');
@@ -5591,7 +5585,7 @@ async function searchAndDisplay(query) {
   if (section) section.scrollIntoView({ behavior: isMzTVMode() ? 'auto' : 'smooth' });
 
   try {
-    const search = await intelligentMovieSearch(query, 40);
+    const search = await intelligentMovieSearch(query, 40, signal);
     const movies = search.results.filter(item => item.poster_path && item.media_type !== 'person');
     allMovies = movies;
     if (heading) {
@@ -5604,6 +5598,7 @@ async function searchAndDisplay(query) {
     if (movies.length) renderMovies(movies);
     else grid.innerHTML = '<div class="search-grid-empty"><strong>No close matches found</strong><span>Try a title fragment, actor name, or check the spelling.</span></div>';
   } catch (error) {
+    if (error && error.name === 'AbortError') return;
     console.warn('[MovieZone] Search page failed:', error);
     grid.innerHTML = '<div class="search-grid-empty"><strong>Search is temporarily unavailable</strong><span>Please try again in a moment.</span></div>';
   }
