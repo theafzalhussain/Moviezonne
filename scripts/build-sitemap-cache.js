@@ -39,7 +39,8 @@ const API_KEY = process.env.TMDB_API_KEY || process.env.TMDB_KEY;
 // first name we look for — these scripts must work with the env you already have.
 const READ_TOKEN = process.env.TMDB_TOKEN || process.env.TMDB_READ_TOKEN || process.env.TMDB_BEARER;
 const BASE = 'https://api.themoviedb.org/3';
-const OUT_FILE = path.join(__dirname, '..', 'sitemap-cache.json');
+const ROOT = path.join(__dirname, '..');
+const OUT_FILE = path.join(ROOT, 'sitemap-cache.json');
 
 // How deep to walk each endpoint. 500 is TMDB's hard page cap.
 const PAGES = {
@@ -133,6 +134,32 @@ function endpointsFor(kind) {
   ];
 }
 
+/**
+ * The hand-curated franchise/universe catalogue (Marvel, DC, Bond, Fast &
+ * Furious, Conjuring…). TMDB's popularity sweeps do NOT reliably surface these
+ * — the original collectSitemapItems() merged this file for exactly that
+ * reason, and dropping it silently lost ~100 titles Google had already
+ * discovered. It ships id, title and release_date, so no API call is needed.
+ */
+function catalogItems(kind) {
+  const file = path.join(ROOT, 'collections-catalog.json');
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    console.warn('  ! collections-catalog.json unreadable — skipping franchise merge');
+    return [];
+  }
+  const bucket = kind === 'tv' ? 'tv' : 'movies';
+  const out = [];
+  Object.values((data && data.universes) || {}).forEach((universe) => {
+    ((universe && universe[bucket]) || []).forEach((item) => {
+      if (item && item.id && (item.title || item.name)) out.push(item);
+    });
+  });
+  return out;
+}
+
 async function collect(kind) {
   const seen = new Map();
   const endpoints = endpointsFor(kind);
@@ -165,8 +192,21 @@ async function collect(kind) {
     });
   });
 
+  // Merge the curated franchise catalogue last so API data wins on conflicts,
+  // but nothing curated is ever dropped.
+  const fromApi = seen.size;
+  catalogItems(kind).forEach((item) => {
+    const key = String(item.id);
+    if (seen.has(key)) return;
+    seen.set(key, {
+      id: item.id,
+      title: item.title || item.name,
+      lastmod: String(item.release_date || item.first_air_date || '').slice(0, 10) || undefined
+    });
+  });
+
   const out = [...seen.values()];
-  console.log(`  ${kind}: ${out.length} unique titles`);
+  console.log(`  ${kind}: ${out.length} unique titles (${fromApi} from TMDB + ${out.length - fromApi} from the franchise catalogue)`);
   return out;
 }
 

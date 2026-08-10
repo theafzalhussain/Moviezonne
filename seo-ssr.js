@@ -1602,7 +1602,10 @@ function renderHomeLinkBlock(groups) {
   return HOME_MARK_START
     + '<div class="mz-ssr-index">'
     + '<style>'
-    + '.mz-ssr-index{max-width:1140px;margin:40px auto 0;padding:0 20px}'
+    // content-visibility keeps this block out of the render path until the user
+    // scrolls to it. Googlebot still parses the links; the browser skips the
+    // layout work, so 60 extra links cost nothing in Speed Index.
+    + '.mz-ssr-index{max-width:1140px;margin:40px auto 0;padding:0 20px;content-visibility:auto;contain-intrinsic-size:0 1400px}'
     + '.mz-ssr-sec{margin:0 0 34px}'
     + '.mz-ssr-index h2{font-size:1.2rem;margin:0 0 6px}'
     + '.mz-ssr-blurb{opacity:.62;margin:0 0 14px;font-size:.92rem;max-width:78ch}'
