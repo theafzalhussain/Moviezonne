@@ -448,7 +448,86 @@ const CATEGORIES = {
     params: { with_watch_providers: '119', watch_region: 'IN', sort_by: 'popularity.desc' },
     title: 'Amazon Prime Video Movies in India (2026) — Full List, New Releases & Top Picks',
     description: 'The complete movie catalogue on Amazon Prime Video India, ranked by popularity. Find Prime originals, regional Indian cinema and international films with ratings and details.',
-    intro: 'Prime carries the deepest regional Indian film library of the major platforms, so this page runs long on Tamil, Telugu and Malayalam titles alongside the Hindi and English ones.'
+    intro: 'Prime carries the deepest regional Indian film library of the major platforms, so this page runs long on Tamil, Telugu and Malayalam titles alongside the Hindi and English ones.',
+    updated: 'August 2026',
+    editorial: [
+      {
+        h: 'What is on Amazon Prime Video India in 2026',
+        p: [
+          "Amazon Prime Video is the broadest of the major Indian streaming services when you measure it by language coverage rather than headline titles. Alongside the Hollywood slate and Prime Originals, the India catalogue carries a deep library of Hindi, Tamil, Telugu, Malayalam, Kannada, Marathi, Bengali and Punjabi films, a large share of it licensed from studios that do not sell to any other platform in the country.",
+          "The list above is rebuilt from live availability data for the India region, so it reflects what Prime actually holds a licence for today rather than a hand-written list that quietly goes stale. Titles drop off when a licensing window closes and appear the day a new deal starts, which is why a film you watched last month may not be on this page now.",
+          "Post-theatrical premieres are Prime's strongest habit in India. Most mid-budget Hindi and South Indian releases reach the service somewhere between four and eight weeks after their theatrical run, and Prime often holds those digital rights outright instead of sharing them with a second platform."
+        ]
+      },
+      {
+        h: 'Amazon Prime Video plans and pricing in India',
+        p: [
+          'Prime Video in India is sold as part of an Amazon Prime membership rather than as a standalone video service, which is why the tiers below bundle shopping and music benefits alongside streaming.'
+        ],
+        table: {
+          caption: 'Amazon Prime membership tiers in India and what each one includes',
+          head: ['Plan', 'Price', 'What you get'],
+          rows: [
+            ['Prime Shopping Edition', '₹399 / year', 'Prime Video with ads on one device, plus Prime shopping benefits and early access to deals'],
+            ['Prime Lite', '₹799 / year', 'Prime Video, Prime Music and Prime Reading, with shopping benefits; ad-free viewing needs an upgrade'],
+            ['Prime', '₹1,499 / year or ₹299 / month', 'Up to 4K Ultra HD on five devices including two TVs, full shopping benefits, Prime Music and Prime Reading']
+          ]
+        },
+        p2: [
+          "Ad-supported playback is now the default on the lower tiers, and ad-free viewing is sold as a separate add-on rather than being included automatically. Amazon also discounts every tier heavily around Prime Day in July, so the annual price you pay in that window is usually well below the list price shown here.",
+          'Prices are current as of August 2026. Amazon revises them without much notice, so treat the table as a guide and confirm on Amazon before you subscribe.'
+        ]
+      },
+      {
+        h: 'How to find new releases on Prime Video India',
+        p: [
+          'Prime does not publish a clean "added this month" feed in India, which is the single most common complaint about the service. The practical workaround is to sort by popularity rather than by date: a title that has just landed climbs the popularity ranking within days because everyone searching for it arrives at once. That is exactly how the list at the top of this page is ordered, so recent arrivals cluster near the front.',
+          'For anything still in cinemas, check the release date on the title page first. A film in its theatrical window will not be on Prime yet no matter what an aggregator claims, and the digital premiere date is usually announced only a week or two in advance.',
+          'If you are tracking a specific upcoming film, the upcoming movies page lists confirmed release dates pulled from live studio data, so a delay shows up there as soon as it is announced.'
+        ]
+      },
+      {
+        h: 'Prime Video\u2019s regional Indian library',
+        p: [
+          'The regional catalogue is where Prime genuinely separates itself in India. Tamil and Telugu cinema in particular arrive on Prime first far more often than on any competitor, and the back catalogue reaches decades further than the other platforms bother to license.',
+          'Malayalam film is the other standout. Prime has quietly become the default home for the post-2018 Malayalam wave, including the smaller character-led dramas that never got a wide release outside Kerala. Kannada, Marathi, Bengali and Punjabi are thinner but still present, usually skewed towards recent releases rather than classics.',
+          'Most major Hindi and English titles also carry a second audio track, so a Hollywood film will typically offer Hindi dubbed audio alongside the original. Language options appear in the player once a title loads rather than being listed on the catalogue page.'
+        ]
+      },
+      {
+        h: 'Prime Video compared with Netflix and JioHotstar in India',
+        p: [
+          'The three services barely compete on the same ground. Prime is the volume play: the largest overall film library, the deepest regional coverage and the most post-theatrical premieres. JioHotstar owns the Disney, HBO and Star catalogues plus live sport, which makes it the strongest for prestige series and for anyone who follows cricket. Netflix runs the smallest India library of the three but spends the most per title, so its originals slate is heavier even though the licensed catalogue is lighter.',
+          'For films specifically, Prime is usually the right first stop in India. For series, JioHotstar and Netflix pull ahead. You can browse each platform\u2019s current catalogue separately from the links under this page.'
+        ]
+      }
+    ],
+    faq: [
+      {
+        q: 'How many movies are on Amazon Prime Video in India?',
+        a: 'The India catalogue runs to several thousand films at any given time, and the exact number moves every week as licensing windows open and close. This page lists what is currently available in the India region, ordered by popularity, so it is an accurate live view rather than a fixed count.'
+      },
+      {
+        q: 'What are the latest movies on Amazon Prime Video India?',
+        a: 'The newest arrivals sit near the top of the list on this page, because a freshly added title climbs the popularity ranking within a few days of landing. Most Hindi and South Indian theatrical releases reach Prime four to eight weeks after their cinema run.'
+      },
+      {
+        q: 'How much does Amazon Prime Video cost in India?',
+        a: 'As of August 2026, Amazon Prime is ₹1,499 per year or ₹299 per month, Prime Lite is ₹799 per year, and the Prime Shopping Edition is ₹399 per year with ad-supported video on a single device. Amazon discounts all three around Prime Day in July.'
+      },
+      {
+        q: 'Is Amazon Prime Video free in India?',
+        a: 'No. Prime Video requires an Amazon Prime membership, although Amazon regularly offers a 30-day free trial and bundles Prime with some Airtel and Jio postpaid plans. Certain Amazon miniTV content is free with ads, but that is a separate service from Prime Video.'
+      },
+      {
+        q: 'Does Amazon Prime Video have Tamil and Telugu movies?',
+        a: 'Yes, and this is the strongest part of the India catalogue. Prime carries more Tamil, Telugu and Malayalam cinema than any other major platform in India, including a back catalogue that reaches decades further than its competitors license.'
+      },
+      {
+        q: 'Can I watch Amazon Prime Video in 4K in India?',
+        a: 'Yes, on the full Prime plan, which supports up to 4K Ultra HD across five devices including two televisions. The Prime Shopping Edition is limited to one device and includes ads, and ad-free playback is sold as a separate add-on.'
+      }
+    ]
   },
   jiohotstar: {
     family: 'movies', kind: 'movie', heading: 'JioHotstar Movies',
@@ -456,7 +535,86 @@ const CATEGORIES = {
     params: { with_watch_providers: '2336', watch_region: 'IN', sort_by: 'popularity.desc' },
     title: 'JioHotstar Movies List (2026) — New Releases & Full India Catalogue',
     description: 'Movies streaming on JioHotstar in India, sorted by popularity. Browse Disney and HBO licensed films, Hindi releases and regional cinema with ratings, cast and synopses.',
-    intro: 'JioHotstar is the merged Disney+ Hotstar and JioCinema service, which is why its catalogue mixes Disney, HBO and Star studio output with a large Indian film library.'
+    intro: 'JioHotstar is the merged Disney+ Hotstar and JioCinema service, which is why its catalogue mixes Disney, HBO and Star studio output with a large Indian film library.',
+    updated: 'August 2026',
+    editorial: [
+      {
+        h: 'What is on JioHotstar in 2026',
+        p: [
+          'JioHotstar is the service created when Disney+ Hotstar and JioCinema merged, and the combined catalogue is unlike anything else in India. In one place it holds the Disney and Pixar libraries, Marvel and Star Wars, the HBO and Warner Bros. slate, the Star network back catalogue, Paramount titles, National Geographic, and a very large Indian film library across Hindi, Tamil, Telugu, Malayalam, Kannada, Marathi and Bengali.',
+          'The platform reports a library of more than 300,000 hours across 19 languages, which makes it the largest single content pool available to Indian viewers. The list above filters that down to films licensed for the India region right now, ordered by what people are actually watching.',
+          'The other half of JioHotstar is live sport, which is not covered on this page. Cricket in particular drives most of the platform\u2019s traffic spikes, and the film catalogue is quieter and more stable than the headline subscriber numbers suggest.'
+        ]
+      },
+      {
+        h: 'JioHotstar subscription plans and pricing',
+        p: [
+          'JioHotstar moved to monthly billing across every tier in January 2026, having previously sold quarterly and annual plans only. The prices below reflect that change.'
+        ],
+        table: {
+          caption: 'JioHotstar plan tiers and pricing in India, effective January 2026',
+          head: ['Plan', 'Monthly', 'Quarterly', 'Annual'],
+          rows: [
+            ['Mobile', '₹79', '₹149', '₹499'],
+            ['Super', '₹149', '₹349', '₹1,099'],
+            ['Premium', '₹299', '₹699', '₹2,199']
+          ]
+        },
+        p2: [
+          'The important detail is what changed alongside the pricing. Hollywood content is now bundled with the Super and Premium tiers for new subscribers, while Mobile users have to buy a separate Hollywood add-on to reach the Marvel, Disney, Pixar, Warner Bros., HBO, Star, Fox and Paramount catalogues. Subscribers who were already on auto-renew kept their earlier pricing and benefits.',
+          'Prices are current as of August 2026 and are taken from JioHotstar\u2019s own plan announcement. Check the plans page in the app before subscribing, since tier benefits shift more often than the prices do.'
+        ]
+      },
+      {
+        h: 'Where the JioHotstar film catalogue is strongest',
+        p: [
+          'Disney and Marvel are the obvious answer, and JioHotstar is the only legal home for that catalogue in India. Less obviously, it is also where the HBO and Warner Bros. film library lives, which covers a large slice of prestige American cinema that simply is not licensed elsewhere in the country.',
+          'On the Indian side, the Star studio relationship means a steady stream of Hindi theatrical titles, and the regional catalogue is genuinely broad rather than a token selection. Tamil and Telugu coverage is solid without matching Prime, and Malayalam and Marathi are better represented than most viewers expect.',
+          'Animation is a quiet strength worth calling out. Between Disney, Pixar and the Star Kids catalogue, JioHotstar has the deepest family film library of any Indian platform, most of it available with Hindi, Tamil and Telugu audio tracks rather than English only.'
+        ]
+      },
+      {
+        h: 'How to find new movies on JioHotstar',
+        p: [
+          'The list on this page is ordered by live popularity, which is the most reliable proxy for "recently added" on a platform that does not publish a clean new-releases feed. A film that has just arrived draws a burst of searches and climbs the ranking within days, so recent additions sit near the top.',
+          'For Hindi theatrical releases, the usual gap between cinema and JioHotstar is around six to eight weeks, though Star-backed productions often arrive faster. Disney and Marvel titles follow the global Disney+ schedule, which is typically a little over two months after theatrical release.',
+          'If a title you expect is missing, it is almost always a rights issue rather than an error. Individual seasons or films can be pulled while the rest of a franchise stays available, and Hollywood titles will not appear at all for Mobile-tier accounts without the Hollywood add-on.'
+        ]
+      },
+      {
+        h: 'JioHotstar compared with Prime Video and Netflix',
+        p: [
+          'JioHotstar wins on breadth and on studio exclusivity. Nothing else in India carries Disney, Marvel, HBO and Star in one subscription, and the Mobile tier at ₹79 a month is the cheapest way into a major catalogue anywhere in the market.',
+          'Prime Video is the stronger choice purely for films, especially regional Indian cinema and post-theatrical premieres. Netflix carries the fewest titles of the three but invests the most per original. If you only subscribe to one and you watch a mix of family films, Hollywood franchises and prestige series, JioHotstar covers the most ground for the money.'
+        ]
+      }
+    ],
+    faq: [
+      {
+        q: 'How much does JioHotstar cost per month?',
+        a: 'As of August 2026, JioHotstar Mobile is ₹79 per month, Super is ₹149 per month and Premium is ₹299 per month. Annual plans work out cheaper at ₹499, ₹1,099 and ₹2,199 respectively.'
+      },
+      {
+        q: 'Which JioHotstar plan do I need for Hollywood movies?',
+        a: 'Super or Premium. Hollywood content from Marvel, Disney, Pixar, Warner Bros., HBO, Star, Fox and Paramount is bundled with those two tiers for new subscribers. Mobile-tier users have to buy a separate Hollywood add-on, which is only available in the latest Android app and not through Google Play or iTunes billing.'
+      },
+      {
+        q: 'What movies are available on JioHotstar?',
+        a: 'The catalogue combines Disney, Pixar, Marvel, Star Wars, HBO and Warner Bros. titles with a large Indian film library across Hindi, Tamil, Telugu, Malayalam, Kannada, Marathi and Bengali. The full list of films currently licensed in India is on this page, ordered by popularity.'
+      },
+      {
+        q: 'Is JioHotstar the same as Disney+ Hotstar?',
+        a: 'JioHotstar is the service formed by merging Disney+ Hotstar with JioCinema. Existing Disney+ Hotstar subscriptions carried over, and the combined catalogue is larger than either service was on its own.'
+      },
+      {
+        q: 'Can I watch JioHotstar movies in Hindi?',
+        a: 'Yes. Most Hollywood and animated titles carry a Hindi audio track alongside the original, and many also offer Tamil and Telugu. Audio language is selected in the player after a title loads rather than being listed on the catalogue page.'
+      },
+      {
+        q: 'How many hours of content does JioHotstar have?',
+        a: 'JioHotstar reports more than 300,000 hours of content across 19 languages, which makes it the largest single library available to viewers in India. That figure includes live sport and television alongside films.'
+      }
+    ]
   },
   zee5: {
     family: 'movies', kind: 'movie', heading: 'Zee5 Movies',
@@ -627,6 +785,19 @@ footer.foot h3{font-size:.74rem;letter-spacing:1.4px;text-transform:uppercase;co
 .foot-cols ul{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:8px}
 .foot-cols a{color:rgba(255,255,255,.66);font-size:.87rem}
 .empty{background:#0c0c17;border:1px solid rgba(255,255,255,.09);border-radius:13px;padding:34px;text-align:center;color:rgba(255,255,255,.6)}
+.editorial{margin:52px 0}
+.editorial h2{margin:34px 0 10px}
+.editorial h2:first-child{margin-top:0}
+.editorial p{color:rgba(255,255,255,.72);max-width:78ch;margin:0 0 14px}
+.editorial-list{margin:0 0 16px;padding-left:20px;color:rgba(255,255,255,.72);max-width:78ch}
+.editorial-list li{margin-bottom:7px}
+.table-wrap{overflow-x:auto;margin:0 0 18px}
+.editorial-table{min-width:520px}
+.editorial-table thead th{color:rgba(255,255,255,.5);font-size:.78rem;letter-spacing:.6px;text-transform:uppercase;border-bottom:1px solid rgba(255,255,255,.16)}
+.editorial-table tbody th{width:auto;color:#fff;font-weight:700;padding-right:18px}
+.updated{color:rgba(255,255,255,.42);font-size:.82rem;margin:0 0 6px}
+.faq dt{font-weight:700;color:#fff;margin:20px 0 6px;font-size:.98rem}
+.faq dd{margin:0;color:rgba(255,255,255,.7);max-width:78ch}
 .pager-cur{background:rgba(245,197,24,.16);border:1px solid rgba(245,197,24,.42);border-radius:10px;padding:10px 16px;font-weight:800;color:#f5c518}
 .pager-gap{padding:0 2px;color:rgba(255,255,255,.3)}
 .faq dt{font-weight:700;color:#fff;margin:18px 0 6px;font-size:.98rem}
@@ -1285,6 +1456,68 @@ function buildAboutParagraph(item, kind, genres, langName, runtimeMins) {
 //  CATEGORY PAGE
 // ══════════════════════════════════════════════════════════════════════
 
+/**
+ * Long-form editorial for a category, rendered on page 1 only.
+ *
+ * Paginated pages deliberately skip it: repeating 1,000 words of identical copy
+ * across 25 URLs is a duplicate-content problem, not a content strategy.
+ *
+ * A section may carry prose (p), a table, a bullet list, and closing prose (p2).
+ */
+function renderEditorial(cat) {
+  const sections = (cat && cat.editorial) || [];
+  if (!sections.length) return '';
+
+  const paras = (list) => (list || []).map((t) => '<p>' + esc(t) + '</p>').join('');
+
+  const tableHtml = (t) => {
+    if (!t) return '';
+    return '<div class="table-wrap"><table class="facts-table editorial-table">'
+      + (t.caption ? '<caption class="skip">' + esc(t.caption) + '</caption>' : '')
+      + '<thead><tr>' + (t.head || []).map((c) => '<th scope="col">' + esc(c) + '</th>').join('') + '</tr></thead>'
+      + '<tbody>' + (t.rows || []).map((row) => '<tr>'
+        + row.map((cell, i) => (i === 0
+          ? '<th scope="row">' + esc(cell) + '</th>'
+          : '<td>' + esc(cell) + '</td>')).join('')
+        + '</tr>').join('') + '</tbody>'
+      + '</table></div>';
+  };
+
+  const listHtml = (items) => (items && items.length)
+    ? '<ul class="editorial-list">' + items.map((i) => '<li>' + esc(i) + '</li>').join('') + '</ul>'
+    : '';
+
+  return '<section class="editorial">'
+    + sections.map((s) => '<h2>' + esc(s.h) + '</h2>'
+      + paras(s.p) + tableHtml(s.table) + listHtml(s.list) + paras(s.p2)).join('')
+    + '</section>';
+}
+
+/** Visible Q&A block. Pairs with the FAQPage schema so both stay in sync. */
+function renderFaqBlock(cat) {
+  const faq = (cat && cat.faq) || [];
+  if (!faq.length) return '';
+  return '<section id="faq">'
+    + '<h2>' + esc(cat.heading) + ' — frequently asked questions</h2>'
+    + '<dl class="faq">'
+    + faq.map((f) => '<dt>' + esc(f.q) + '</dt><dd>' + esc(f.a) + '</dd>').join('')
+    + '</dl></section>';
+}
+
+function faqSchemaFor(cat) {
+  const faq = (cat && cat.faq) || [];
+  if (!faq.length) return null;
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: faq.map((f) => ({
+      '@type': 'Question',
+      name: f.q,
+      acceptedAnswer: { '@type': 'Answer', text: f.a }
+    }))
+  };
+}
+
 /** Page 1 has no ?page= param, so it never competes with its own canonical. */
 function pageHref(basePath, page) {
   return page > 1 ? basePath + '?page=' + page : basePath;
@@ -1328,6 +1561,14 @@ function renderCategoryPage(slug, cat, results, page, totalPages) {
     isPartOf: { '@type': 'WebSite', name: SITE_NAME, url: SITE_URL + '/' }
   };
 
+  // Editorial and FAQ are page-1 only — see renderEditorial().
+  const editorialHtml = page === 1 ? renderEditorial(cat) : '';
+  const faqHtml = page === 1 ? renderFaqBlock(cat) : '';
+  const faqSchema = page === 1 ? faqSchemaFor(cat) : null;
+  const updatedHtml = (page === 1 && cat.updated)
+    ? '<p class="updated">Catalogue updated continuously from live availability data · guide last reviewed ' + esc(cat.updated) + '</p>'
+    : '';
+
   const siblings = (isTv ? SERIES_CATEGORY_SLUGS : MOVIE_CATEGORY_SLUGS).filter((s) => s !== slug);
   const crossFamily = isTv ? MOVIE_CATEGORY_SLUGS.slice(0, 8) : SERIES_CATEGORY_SLUGS.slice(0, 8);
 
@@ -1362,6 +1603,7 @@ function renderCategoryPage(slug, cat, results, page, totalPages) {
     <h1>${esc(cat.heading)}${page > 1 ? ' — page ' + page : ''}</h1>
     <p class="lede">${esc(cat.description)}</p>
     ${page === 1 && cat.intro ? '<p class="lede">' + esc(cat.intro) + '</p>' : ''}
+    ${updatedHtml}
   </section>
 
   <section>
@@ -1371,6 +1613,10 @@ function renderCategoryPage(slug, cat, results, page, totalPages) {
     : '<div class="empty"><p>No titles could be loaded for this category right now. Please try again in a moment.</p></div>'}
     ${totalPages > 1 ? '<nav class="pager" aria-label="Pagination">' + pager.join('') + '</nav>' : ''}
   </section>
+
+  ${editorialHtml}
+
+  ${faqHtml}
 
   <section>
     <h2>Related ${esc(isTv ? 'series' : 'movie')} categories</h2>
@@ -1396,7 +1642,9 @@ function renderCategoryPage(slug, cat, results, page, totalPages) {
     description,
     canonicalPath,
     ogImage: LOGO_URL,
-    schemas: [collectionSchema, itemListSchema],
+    schemas: faqSchema
+      ? [collectionSchema, itemListSchema, faqSchema]
+      : [collectionSchema, itemListSchema],
     breadcrumbs: [
       { name: 'Home', path: '/' },
       { name: isTv ? 'Series' : 'Movies', path: isTv ? '/series/web-series' : '/movies/popular' },
@@ -2140,6 +2388,9 @@ module.exports = {
   buildAboutParagraph,
   renderDetailPage,
   renderCategoryPage,
+  renderEditorial,
+  renderFaqBlock,
+  faqSchemaFor,
   renderShell,
   buildSitemapIndex,
   buildStaticSitemap,
