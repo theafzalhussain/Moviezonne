@@ -22,7 +22,10 @@
     "verify:tv": "node tv-e2e-check.js",
     "perf:tv": "node tv-perf-check.js",
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "sitemap:build": "node scripts/build-sitemap-cache.js",
+    "home:inject": "node scripts/inject-home-links.js",
+    "seo:refresh": "npm run sitemap:build && npm run home:inject"
   },
   "repository": {
     "type": "git",

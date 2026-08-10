@@ -1,0 +1,60 @@
+name: SEO refresh
+
+# Rebuilds the sitemap cache and the homepage link block, then commits them.
+# Vercel deploys on push, so the live sitemaps and homepage links stay current
+# without anyone touching the repo.
+#
+# Runs at 01:30 IST daily (20:00 UTC the previous day).
+
+on:
+  schedule:
+    - cron: '0 20 * * *'
+  workflow_dispatch:        # lets you run it by hand from the Actions tab
+
+permissions:
+  contents: write
+
+concurrency:
+  group: seo-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci --omit=dev
+
+      - name: Rebuild the sitemap catalogue cache
+        env:
+          TMDB_TOKEN: ${{ secrets.TMDB_TOKEN }}
+        run: node scripts/build-sitemap-cache.js
+
+      - name: Refresh the homepage link block
+        env:
+          TMDB_TOKEN: ${{ secrets.TMDB_TOKEN }}
+        run: node scripts/inject-home-links.js
+
+      - name: Sanity-check the SEO layer before committing
+        run: node seo-ssr.test.js
+
+      - name: Commit if anything changed
+        run: |
+          git config user.name  "seo-refresh[bot]"
+          git config user.email "seo-refresh@users.noreply.github.com"
+          git add sitemap-cache.json index.html
+          if git diff --staged --quiet; then
+            echo "No changes — nothing to commit."
+          else
+            COUNT=$(node -p "const c=require('./sitemap-cache.json');c.movie.length+c.tv.length")
+            git commit -m "chore(seo): refresh sitemap cache (${COUNT} titles) + homepage links"
+            git push
+          fi

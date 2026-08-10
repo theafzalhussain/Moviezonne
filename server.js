@@ -356,6 +356,27 @@ app.get('/sw.js', (req, res) => {
   });
 });
 
+// ── Homepage SSR link block ────────────────────────────────────────────────
+// MUST sit above express.static: otherwise the static middleware answers "/"
+// with the raw index.html and this never runs.
+//
+// index.html is a client-rendered SPA, so the HTML Googlebot receives for the
+// homepage contained zero links to any /movie/ or /tv/ page. The homepage earns
+// ~82% of the site's clicks, and none of that authority was reaching the
+// catalogue. This injects real detail-page links into the served HTML, and
+// marks /?search=... noindex so search URLs stay out of the index.
+//
+// tmdbForSsr is a hoisted function declaration so it is safe to reference here.
+// apiCache is a const declared further down, so it is read lazily via getCache()
+// at request time rather than now.
+try {
+  const { registerHomeSsr } = require('./seo-ssr');
+  registerHomeSsr(app, { tmdb: tmdbForSsr, getCache: () => apiCache });
+} catch (err) {
+  // A broken SEO layer must never stop the homepage from serving traffic.
+  console.error('⚠️  Homepage SSR could not be registered:', err.message);
+}
+
 // Frontend files (index.html, css, js) ko browser mein dikhane ke liye
 app.use(express.static(__dirname, { 
   maxAge: '30d',

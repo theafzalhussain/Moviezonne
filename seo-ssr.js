@@ -49,6 +49,30 @@ const IMG_PROFILE = 'https://image.tmdb.org/t/p/w185';
 const DETAIL_CACHE = 'public, max-age=1800, s-maxage=86400, stale-while-revalidate=604800';
 const CATEGORY_CACHE = 'public, max-age=900, s-maxage=21600, stale-while-revalidate=86400';
 const SITEMAP_CACHE = 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800';
+const HOME_CACHE = 'public, max-age=600, s-maxage=3600, stale-while-revalidate=86400';
+const BROWSE_CACHE = 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800';
+
+// ── Sitemap freshness ──────────────────────────────────────────────────────
+// Google learns to distrust <lastmod> when every URL claims to have changed
+// today, every day. This date is a deliberate, hand-bumped constant: change it
+// only when the SSR templates or category copy actually change. Detail-page
+// lastmod comes from the title's real release/air date instead.
+const SITEMAP_FALLBACK_DATE = process.env.SITEMAP_LASTMOD || '2026-08-10';
+
+// Categories whose contents genuinely rotate day to day. Everything else is
+// evergreen and gets a weekly changefreq.
+const VOLATILE_CATEGORY_SLUGS = new Set([
+  'trending', 'popular', 'now-playing', 'upcoming', 'airing-today', 'on-the-air'
+]);
+
+// Where the nightly sitemap builder writes the full catalogue.
+const SITEMAP_CACHE_FILE = path.join(__dirname, 'sitemap-cache.json');
+const SITEMAP_CHUNK_SIZE = 5000;
+
+// A-Z hubs turn the catalogue into a flat index: any title is 2 clicks from
+// the homepage instead of sitting 25 pages deep in a prev/next chain.
+const BROWSE_LETTERS = 'abcdefghijklmnopqrstuvwxyz'.split('').concat(['0-9']);
+const BROWSE_PER_PAGE = 120;
 
 // TMDB genre ids → display names (discover endpoints return ids, not names).
 const GENRE_NAMES = {
@@ -260,7 +284,7 @@ const CATEGORIES = {
   'top-rated': {
     family: 'movies', kind: 'movie', heading: 'Top Rated Movies',
     endpoint: '/movie/top_rated',
-    title: 'Top Rated Movies of All Time — Watch Online in HD & 4K',
+    title: 'Top 250 Movies of All Time — Best Films Ranked (2026)',
     description: 'The highest rated movies ever made, ranked by audience score across hundreds of thousands of votes. Watch critically acclaimed classics and modern masterpieces online in HD and 4K.',
     intro: 'Every film here clears a high bar on both rating and vote count, which filters out the small-sample flukes that dominate raw score lists. If you want a guaranteed good watch rather than something merely new, start at the top of this page.'
   },
@@ -414,7 +438,7 @@ const CATEGORIES = {
     family: 'movies', kind: 'movie', heading: 'Netflix Movies',
     endpoint: '/discover/movie',
     params: { with_watch_providers: '8', watch_region: 'IN', sort_by: 'popularity.desc' },
-    title: 'Netflix Movies in India — Full List, Watch Online in HD & 4K',
+    title: 'Netflix Movies in India (2026) — Full List & New Releases',
     description: 'Every movie streaming on Netflix India right now, sorted by popularity. Browse Netflix originals, Bollywood titles and Hollywood licences with ratings, runtimes and full synopses.',
     intro: 'This list is filtered by what Netflix actually carries in India, so it reflects the Indian catalogue rather than the US one — the two differ substantially on licensed films.'
   },
@@ -422,7 +446,7 @@ const CATEGORIES = {
     family: 'movies', kind: 'movie', heading: 'Amazon Prime Video Movies',
     endpoint: '/discover/movie',
     params: { with_watch_providers: '119', watch_region: 'IN', sort_by: 'popularity.desc' },
-    title: 'Amazon Prime Video Movies India — Full List in HD & 4K',
+    title: 'Amazon Prime Video Movies in India (2026) — Full List, New Releases & Top Picks',
     description: 'The complete movie catalogue on Amazon Prime Video India, ranked by popularity. Find Prime originals, regional Indian cinema and international films with ratings and details.',
     intro: 'Prime carries the deepest regional Indian film library of the major platforms, so this page runs long on Tamil, Telugu and Malayalam titles alongside the Hindi and English ones.'
   },
@@ -430,7 +454,7 @@ const CATEGORIES = {
     family: 'movies', kind: 'movie', heading: 'JioHotstar Movies',
     endpoint: '/discover/movie',
     params: { with_watch_providers: '2336', watch_region: 'IN', sort_by: 'popularity.desc' },
-    title: 'JioHotstar Movies — Full List, Watch Online in HD & 4K',
+    title: 'JioHotstar Movies List (2026) — New Releases & Full India Catalogue',
     description: 'Movies streaming on JioHotstar in India, sorted by popularity. Browse Disney and HBO licensed films, Hindi releases and regional cinema with ratings, cast and synopses.',
     intro: 'JioHotstar is the merged Disney+ Hotstar and JioCinema service, which is why its catalogue mixes Disney, HBO and Star studio output with a large Indian film library.'
   },
@@ -603,6 +627,17 @@ footer.foot h3{font-size:.74rem;letter-spacing:1.4px;text-transform:uppercase;co
 .foot-cols ul{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:8px}
 .foot-cols a{color:rgba(255,255,255,.66);font-size:.87rem}
 .empty{background:#0c0c17;border:1px solid rgba(255,255,255,.09);border-radius:13px;padding:34px;text-align:center;color:rgba(255,255,255,.6)}
+.pager-cur{background:rgba(245,197,24,.16);border:1px solid rgba(245,197,24,.42);border-radius:10px;padding:10px 16px;font-weight:800;color:#f5c518}
+.pager-gap{padding:0 2px;color:rgba(255,255,255,.3)}
+.faq dt{font-weight:700;color:#fff;margin:18px 0 6px;font-size:.98rem}
+.faq dd{margin:0;color:rgba(255,255,255,.7);max-width:78ch}
+.cta-sec{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.16);border-radius:10px;padding:10px 20px;font-weight:700;font-size:.9rem}
+.link-cols{columns:3 200px;column-gap:26px;padding:0;margin:0;list-style:none}
+.link-cols li{break-inside:avoid;margin-bottom:9px}
+.link-cols a{color:rgba(255,255,255,.78);font-size:.88rem}
+.az{display:flex;flex-wrap:wrap;gap:7px;padding:0;margin:0;list-style:none}
+.az a{display:inline-block;min-width:38px;text-align:center;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.13);border-radius:8px;padding:7px 10px;font-weight:700;font-size:.85rem;text-transform:uppercase;color:rgba(255,255,255,.8)}
+.az a:hover{border-color:rgba(245,197,24,.5);color:#f5c518;text-decoration:none}
 @media (max-width:640px){
   .hero-in{padding:20px;gap:18px}
   .poster{width:132px;flex:0 0 132px}
@@ -679,7 +714,7 @@ ${allSchemas.map((s) => '<script type="application/ld+json">' + jsonLdScript(s) 
 <a class="skip" href="#main">Skip to content</a>
 <header class="bar">
   <div class="wrap">
-    <a class="brand" href="/"><img src="/moviezone-logo.webp" alt="" width="30" height="30" style="border-radius:7px"> MOVIE<span>ZONE</span></a>
+    <a class="brand" href="/"><img src="/moviezone-logo.webp" alt="MovieZone" width="30" height="30" style="border-radius:7px"> MOVIE<span>ZONE</span></a>
     <nav class="top" aria-label="Browse">
       <a href="/movies/trending">Trending</a>
       <a href="/movies/bollywood">Bollywood</a>
@@ -744,9 +779,18 @@ ${body}
           <li><a href="/movies/top-rated">Top rated of all time</a></li>
           <li><a href="/movies/4k">4K Ultra HD</a></li>
           <li><a href="/movies/upcoming">Upcoming releases</a></li>
+          <li><a href="/browse">Browse every title A-Z</a></li>
         </ul>
       </div>
     </div>
+    <nav aria-label="All categories" style="margin:0 0 22px">
+      <h3>All categories</h3>
+      <ul class="link-cols">
+        ${MOVIE_CATEGORY_SLUGS.concat(SERIES_CATEGORY_SLUGS)
+    .map((s) => '<li><a href="' + esc(categoryPath(s)) + '">' + esc(CATEGORIES[s].heading) + '</a></li>')
+    .join('')}
+      </ul>
+    </nav>
     <p>&copy; 2025-2026 ${esc(SITE_NAME)}. All rights reserved.</p>
     <!-- Attribution notice required verbatim by the TMDB API Terms of Use.
          Do not reword: TMDB specifies this exact sentence. -->
@@ -806,6 +850,116 @@ function renderCard(item, kindHint) {
 // ══════════════════════════════════════════════════════════════════════
 //  DETAIL PAGE
 // ══════════════════════════════════════════════════════════════════════
+
+/**
+ * India streaming availability from TMDB's watch/providers payload.
+ * This is the block that makes a detail page answer a real query
+ * ("where can I watch X in India") instead of restating the TMDB overview
+ * that a few hundred other sites already publish verbatim.
+ */
+function watchProvidersIN(item) {
+  const box = item && item['watch/providers'] && item['watch/providers'].results;
+  const region = box && (box.IN || box.US);
+  if (!region) return null;
+  const pick = (list) => [...new Set((list || []).map((p) => p && p.provider_name).filter(Boolean))];
+  const out = {
+    region: box && box.IN ? 'India' : 'the US',
+    stream: pick(region.flatrate),
+    rent: pick(region.rent),
+    buy: pick(region.buy),
+    free: pick(region.ads).concat(pick(region.free))
+  };
+  return (out.stream.length || out.rent.length || out.buy.length || out.free.length) ? out : null;
+}
+
+/** Official trailer key, if TMDB has one. Linked, not embedded — keeps LCP low. */
+function trailerOf(item) {
+  const vids = (item && item.videos && item.videos.results) || [];
+  const yt = vids.filter((v) => v && v.site === 'YouTube' && v.key);
+  const best = yt.find((v) => v.type === 'Trailer' && v.official)
+    || yt.find((v) => v.type === 'Trailer')
+    || yt.find((v) => v.type === 'Teaser');
+  return best ? { key: best.key, name: best.name || 'Official trailer' } : null;
+}
+
+/** India certification (U / UA / A) from release_dates or content_ratings. */
+function certificationIN(item, isTv) {
+  if (isTv) {
+    const rows = (item.content_ratings && item.content_ratings.results) || [];
+    const row = rows.find((r) => r && r.iso_3166_1 === 'IN');
+    return (row && row.rating) || '';
+  }
+  const rows = (item.release_dates && item.release_dates.results) || [];
+  const row = rows.find((r) => r && r.iso_3166_1 === 'IN');
+  const entry = ((row && row.release_dates) || []).find((d) => d && d.certification);
+  return (entry && entry.certification) || '';
+}
+
+/** Dubbed/original audio, phrased for the query it answers. */
+function audioLanguages(item) {
+  return (item.spoken_languages || [])
+    .map((l) => l && (l.english_name || l.name))
+    .filter(Boolean);
+}
+
+/**
+ * Page-specific Q&A. Every answer is built from this title's own data, so the
+ * block is unique per page rather than boilerplate — and it is FAQPage-eligible.
+ */
+function buildFaq(item, kind, providers, langNames, cert, runtimeMins) {
+  const title = titleOf(item);
+  const year = yearOf(item);
+  const isTv = kind === 'tv';
+  const label = title + (year ? ' (' + year + ')' : '');
+  const faq = [];
+
+  if (providers) {
+    const parts = [];
+    if (providers.stream.length) parts.push('included with a subscription on ' + providers.stream.join(', '));
+    if (providers.free.length) parts.push('free with ads on ' + providers.free.join(', '));
+    if (providers.rent.length) parts.push('available to rent on ' + providers.rent.join(', '));
+    if (providers.buy.length) parts.push('available to buy on ' + providers.buy.join(', '));
+    faq.push({
+      q: 'Where can I watch ' + label + ' in ' + providers.region + '?',
+      a: label + ' is ' + parts.join('; ') + '. Availability is checked against live streaming data and can change when a licensing window ends.'
+    });
+  } else {
+    faq.push({
+      q: 'Where can I watch ' + label + '?',
+      a: 'No Indian streaming licence is listed for ' + label + ' right now. This page updates automatically when a platform picks it up, so it is worth re-checking after a new release window opens.'
+    });
+  }
+
+  if (langNames.length) {
+    faq.push({
+      q: 'Is ' + title + ' available in Hindi?',
+      a: langNames.indexOf('Hindi') >= 0
+        ? 'Yes — ' + title + ' has a Hindi audio track alongside ' + (langNames.filter((l) => l !== 'Hindi').join(', ') || 'the original audio') + '.'
+        : title + ' is listed with ' + langNames.join(', ') + ' audio. A Hindi dub is not part of the official language list for this title.'
+    });
+  }
+
+  if (!isTv && runtimeMins) {
+    faq.push({
+      q: 'How long is ' + title + '?',
+      a: title + ' runs for ' + runtimeLabel(runtimeMins) + '.'
+    });
+  }
+  if (isTv && item.number_of_seasons) {
+    faq.push({
+      q: 'How many seasons does ' + title + ' have?',
+      a: title + ' has ' + item.number_of_seasons + ' season' + (item.number_of_seasons > 1 ? 's' : '')
+        + (item.number_of_episodes ? ' and ' + item.number_of_episodes + ' episodes in total' : '') + '.'
+    });
+  }
+  if (cert) {
+    faq.push({
+      q: 'What is the age rating of ' + title + ' in India?',
+      a: title + ' carries a ' + cert + ' certificate in India.'
+    });
+  }
+  return faq.slice(0, 5);
+}
 
 function renderDetailPage(item, kind) {
   const title = titleOf(item);
@@ -902,6 +1056,7 @@ function renderDetailPage(item, kind) {
   if (!isTv && item.budget > 0) pushRow('Budget', '$' + esc((item.budget / 1e6).toFixed(1)) + 'M');
   if (!isTv && item.revenue > 0) pushRow('Box office', '$' + esc((item.revenue / 1e6).toFixed(1)) + 'M');
   pushRow('Streaming quality', 'Up to 4K Ultra HD (2160p), 1080p, 720p and 480p');
+  pushRow('India certification', esc(certificationIN(item, isTv)));
 
   // ── JSON-LD ──
   const schema = {
@@ -946,6 +1101,60 @@ function renderDetailPage(item, kind) {
 
   const watchHref = '/#watch-' + (isTv ? 'tv' : 'movie') + '-' + item.id;
 
+  // ── unique-value blocks ──
+  const providers = watchProvidersIN(item);
+  const trailer = trailerOf(item);
+  const cert = certificationIN(item, isTv);
+  const langNames = audioLanguages(item);
+  const faq = buildFaq(item, kind, providers, langNames, cert, runtimeMins);
+
+  const providerRow = (label, names) => (names && names.length)
+    ? '<tr><th scope="row">' + esc(label) + '</th><td>' + esc(names.join(', ')) + '</td></tr>'
+    : '';
+
+  const whereToWatchHtml = providers ? `
+  <section id="where-to-watch">
+    <h2>Where to watch ${esc(title)} in ${esc(providers.region)}</h2>
+    <p class="lede">${esc(
+    title + ' is currently licensed to the platforms below in ' + providers.region
+    + '. Streaming rights move between services, so this list is rebuilt from live availability data rather than hand-written.'
+  )}</p>
+    <table class="facts-table">
+      <caption class="skip">Streaming availability for ${esc(title)}</caption>
+      <tbody>
+        ${providerRow('Stream with subscription', providers.stream)}
+        ${providerRow('Watch free with ads', providers.free)}
+        ${providerRow('Rent', providers.rent)}
+        ${providerRow('Buy', providers.buy)}
+      </tbody>
+    </table>
+  </section>` : '';
+
+  const trailerHtml = trailer ? `
+  <section id="trailer">
+    <h2>${esc(title)} trailer</h2>
+    <p class="lede">Watch the official trailer for ${esc(title)}${year ? ' (' + esc(year) + ')' : ''} before you start.</p>
+    <p><a class="cta-sec" href="https://www.youtube.com/watch?v=${esc(trailer.key)}" rel="noopener nofollow" target="_blank">▶ ${esc(trailer.name)}</a></p>
+  </section>` : '';
+
+  const faqHtml = faq.length ? `
+  <section id="faq">
+    <h2>${esc(title)} — frequently asked questions</h2>
+    <dl class="faq">
+      ${faq.map((f) => '<dt>' + esc(f.q) + '</dt><dd>' + esc(f.a) + '</dd>').join('')}
+    </dl>
+  </section>` : '';
+
+  const faqSchema = faq.length ? {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: faq.map((f) => ({
+      '@type': 'Question',
+      name: f.q,
+      acceptedAnswer: { '@type': 'Answer', text: f.a }
+    }))
+  } : null;
+
   const body = `
 <div class="wrap">
   <article class="hero">
@@ -981,6 +1190,10 @@ function renderDetailPage(item, kind) {
     </table>
   </section>
 
+  ${whereToWatchHtml}
+
+  ${trailerHtml}
+
   ${cast.length ? `<section>
     <h2>Cast &amp; characters</h2>
     <p class="lede">The principal cast of ${esc(title)}${directors.length ? ', directed by ' + esc(directors[0]) : ''}.</p>
@@ -1001,6 +1214,8 @@ function renderDetailPage(item, kind) {
     <ul class="grid">${related.map((r) => renderCard(r, kind)).join('')}</ul>
   </section>` : ''}
 
+  ${faqHtml}
+
   <section>
     <h2>Browse more on ${esc(SITE_NAME)}</h2>
     <ul class="pill-links">
@@ -1016,7 +1231,7 @@ function renderDetailPage(item, kind) {
     canonicalPath,
     ogImage: posterLg || (backdrop || LOGO_URL),
     ogType: 'video.movie',
-    schemas: [schema],
+    schemas: faqSchema ? [schema, faqSchema] : [schema],
     breadcrumbs,
     body
   });
@@ -1070,6 +1285,11 @@ function buildAboutParagraph(item, kind, genres, langName, runtimeMins) {
 //  CATEGORY PAGE
 // ══════════════════════════════════════════════════════════════════════
 
+/** Page 1 has no ?page= param, so it never competes with its own canonical. */
+function pageHref(basePath, page) {
+  return page > 1 ? basePath + '?page=' + page : basePath;
+}
+
 function renderCategoryPage(slug, cat, results, page, totalPages) {
   const basePath = categoryPath(slug);
   const canonicalPath = page > 1 ? basePath + '?page=' + page : basePath;
@@ -1111,13 +1331,29 @@ function renderCategoryPage(slug, cat, results, page, totalPages) {
   const siblings = (isTv ? SERIES_CATEGORY_SLUGS : MOVIE_CATEGORY_SLUGS).filter((s) => s !== slug);
   const crossFamily = isTv ? MOVIE_CATEGORY_SLUGS.slice(0, 8) : SERIES_CATEGORY_SLUGS.slice(0, 8);
 
+  // A prev/next-only chain puts page 25 twenty-six clicks from the homepage,
+  // which is past the depth Googlebot will follow on a low-authority site.
+  // Emitting first/last, neighbours and every 5th page caps real depth at ~3.
   const pager = [];
   if (page > 1) {
-    pager.push('<a href="' + esc(basePath + (page - 1 > 1 ? '?page=' + (page - 1) : '')) + '" rel="prev">← Previous</a>');
+    pager.push('<a href="' + esc(pageHref(basePath, page - 1)) + '" rel="prev">← Previous</a>');
   }
-  pager.push('<span>Page ' + page + ' of ' + totalPages + '</span>');
+
+  const wanted = new Set([1, totalPages, page - 1, page, page + 1]);
+  for (let p = 5; p <= totalPages; p += 5) wanted.add(p);
+  const numbers = [...wanted].filter((p) => p >= 1 && p <= totalPages).sort((a, b) => a - b);
+
+  let previous = 0;
+  numbers.forEach((p) => {
+    if (previous && p - previous > 1) pager.push('<span class="pager-gap">…</span>');
+    pager.push(p === page
+      ? '<span class="pager-cur" aria-current="page">' + p + '</span>'
+      : '<a href="' + esc(pageHref(basePath, p)) + '" aria-label="Page ' + p + '">' + p + '</a>');
+    previous = p;
+  });
+
   if (page < totalPages) {
-    pager.push('<a href="' + esc(basePath + '?page=' + (page + 1)) + '" rel="next">Next →</a>');
+    pager.push('<a href="' + esc(pageHref(basePath, page + 1)) + '" rel="next">Next →</a>');
   }
 
   const body = `
@@ -1174,6 +1410,219 @@ function renderCategoryPage(slug, cat, results, page, totalPages) {
 //  SITEMAPS
 // ══════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  A-Z BROWSE HUBS
+//  A flat, paginated index of the whole catalogue. Category pages can only
+//  surface 20 titles at a time behind a long pagination chain; these hubs put
+//  120 crawlable links on one page, so nothing in the catalogue is orphaned.
+// ═══════════════════════════════════════════════════════════════════════════
+
+function browseLetterOf(title) {
+  const ch = String(title || '').trim().charAt(0).toLowerCase();
+  return /[a-z]/.test(ch) ? ch : '0-9';
+}
+
+function renderBrowseIndexPage(counts) {
+  const body = `
+<div class="wrap">
+  <section style="margin-top:26px">
+    <h1>Browse every title on ${esc(SITE_NAME)} A-Z</h1>
+    <p class="lede">The complete ${esc(SITE_NAME)} catalogue, indexed alphabetically. Pick a letter to see every movie and series whose title starts with it, with ratings, year and a direct link to each title's page.</p>
+  </section>
+  <section>
+    <h2>Jump to a letter</h2>
+    <ul class="az">
+      ${BROWSE_LETTERS.map((l) => '<li><a href="/browse/' + esc(l) + '">' + esc(l) + (counts && counts[l] ? ' <span style="opacity:.45;font-weight:500">' + counts[l] + '</span>' : '') + '</a></li>').join('')}
+    </ul>
+  </section>
+  <section>
+    <h2>Browse by category instead</h2>
+    <ul class="pill-links">
+      ${MOVIE_CATEGORY_SLUGS.concat(SERIES_CATEGORY_SLUGS).slice(0, 24)
+    .map((s) => '<li><a href="' + esc(categoryPath(s)) + '">' + esc(CATEGORIES[s].heading) + '</a></li>').join('')}
+    </ul>
+  </section>
+</div>`;
+
+  return renderShell({
+    title: 'Browse All Movies & Series A-Z | ' + SITE_NAME,
+    description: 'The full ' + SITE_NAME + ' catalogue indexed A to Z. Browse every movie and web series alphabetically and jump straight to any title.',
+    canonicalPath: '/browse',
+    ogImage: LOGO_URL,
+    breadcrumbs: [{ name: 'Home', path: '/' }, { name: 'Browse A-Z' }],
+    body
+  });
+}
+
+function renderBrowseLetterPage(letter, entries, page, totalPages) {
+  const basePath = '/browse/' + letter;
+  const canonicalPath = pageHref(basePath, page);
+  const shown = letter === '0-9' ? 'a number or symbol' : 'the letter ' + letter.toUpperCase();
+  const heading = letter === '0-9' ? 'Titles starting with 0-9' : 'Titles starting with ' + letter.toUpperCase();
+
+  const rows = entries.map((e) => {
+    const kind = e.media_type === 'tv' ? 'tv' : 'movie';
+    const year = yearOf(e);
+    return '<li><a href="' + esc(detailPath(kind, e)) + '">' + esc(titleOf(e))
+      + (year ? ' <span style="opacity:.45">(' + esc(year) + ')</span>' : '') + '</a></li>';
+  }).join('');
+
+  const pager = [];
+  if (page > 1) pager.push('<a href="' + esc(pageHref(basePath, page - 1)) + '" rel="prev">&larr; Previous</a>');
+  for (let p = 1; p <= totalPages; p++) {
+    pager.push(p === page
+      ? '<span class="pager-cur" aria-current="page">' + p + '</span>'
+      : '<a href="' + esc(pageHref(basePath, p)) + '">' + p + '</a>');
+  }
+  if (page < totalPages) pager.push('<a href="' + esc(pageHref(basePath, page + 1)) + '" rel="next">Next &rarr;</a>');
+
+  const body = `
+<div class="wrap">
+  <section style="margin-top:26px">
+    <h1>${esc(heading)}${page > 1 ? ' &mdash; page ' + page : ''}</h1>
+    <p class="lede">${esc('Every movie and series on ' + SITE_NAME + ' whose title begins with ' + shown + '. ' + entries.length + ' titles on this page' + (totalPages > 1 ? ' of ' + totalPages + '.' : '.'))}</p>
+  </section>
+  <section>
+    <h2 class="skip">${esc(heading)} list</h2>
+    ${rows ? '<ul class="link-cols">' + rows + '</ul>' : '<div class="empty"><p>No titles indexed under this letter yet.</p></div>'}
+    ${totalPages > 1 ? '<nav class="pager" aria-label="Pagination">' + pager.join('') + '</nav>' : ''}
+  </section>
+  <section>
+    <h2>Other letters</h2>
+    <ul class="az">
+      ${BROWSE_LETTERS.filter((l) => l !== letter).map((l) => '<li><a href="/browse/' + esc(l) + '">' + esc(l) + '</a></li>').join('')}
+    </ul>
+  </section>
+</div>`;
+
+  const itemList = {
+    '@context': 'https://schema.org',
+    '@type': 'ItemList',
+    name: heading,
+    numberOfItems: entries.length,
+    itemListElement: entries.slice(0, 50).map((e, i) => ({
+      '@type': 'ListItem',
+      position: (page - 1) * BROWSE_PER_PAGE + i + 1,
+      url: SITE_URL + detailPath(e.media_type === 'tv' ? 'tv' : 'movie', e),
+      name: titleOf(e)
+    }))
+  };
+
+  return renderShell({
+    title: heading + (page > 1 ? ' — Page ' + page : '') + ' | ' + SITE_NAME,
+    description: 'Browse every movie and web series on ' + SITE_NAME + ' starting with ' + shown
+      + '. Alphabetical index with release years and direct links to each title.',
+    canonicalPath,
+    ogImage: LOGO_URL,
+    schemas: [itemList],
+    breadcrumbs: [
+      { name: 'Home', path: '/' },
+      { name: 'Browse A-Z', path: '/browse' },
+      { name: heading + (page > 1 ? ' — page ' + page : '') }
+    ],
+    body
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  HOMEPAGE LINK INJECTION
+//  index.html is a client-rendered SPA: its poster grid is built in JS, so the
+//  served HTML contains zero links to any detail page. The homepage holds most
+//  of the site's authority, and none of it was reaching the catalogue. This
+//  injects a server-rendered link block into the static file before it ships.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const HOME_FILE = path.join(__dirname, 'index.html');
+const HOME_ANCHOR = '<footer class="site-footer" role="contentinfo">';
+const HOME_MARK_START = '<!--MZ_SSR_LINKS_START-->';
+const HOME_MARK_END = '<!--MZ_SSR_LINKS_END-->';
+const HOME_BLOCK_RE = /<!--MZ_SSR_LINKS_START-->[\s\S]*?<!--MZ_SSR_LINKS_END-->/;
+
+/**
+ * Injects (or replaces) the server-rendered link block in an index.html string.
+ * Idempotent: running it twice produces the same output, so the build-time
+ * injector and the runtime handler can never stack two blocks on the page.
+ */
+function injectHomeLinks(shell, block) {
+  if (!shell || !block) return shell;
+  const cleaned = shell.replace(HOME_BLOCK_RE, '');
+  if (cleaned.indexOf(HOME_ANCHOR) === -1) return null;
+  return cleaned.replace(HOME_ANCHOR, block + '\n' + HOME_ANCHOR);
+}
+
+let homeShellMemo = null;
+let homeShellMtime = 0;
+
+function readHomeShell() {
+  const stat = fs.statSync(HOME_FILE);
+  if (homeShellMemo && stat.mtimeMs === homeShellMtime) return homeShellMemo;
+  homeShellMemo = fs.readFileSync(HOME_FILE, 'utf8');
+  homeShellMtime = stat.mtimeMs;
+  return homeShellMemo;
+}
+
+function renderHomeLinkBlock(groups) {
+  const section = (id, heading, blurb, items) => {
+    if (!items || !items.length) return '';
+    const links = items.map((it) => {
+      const kind = resolveKind(it, it.first_air_date || it.name ? 'tv' : 'movie');
+      const t = titleOf(it);
+      if (!t) return '';
+      const y = yearOf(it);
+      return '<li><a href="' + esc(detailPath(kind, it)) + '">' + esc(t)
+        + (y ? ' <span style="opacity:.45">(' + esc(y) + ')</span>' : '') + '</a></li>';
+    }).filter(Boolean).join('');
+    if (!links) return '';
+    return '<section class="mz-ssr-sec" aria-labelledby="' + id + '">'
+      + '<h2 id="' + id + '">' + esc(heading) + '</h2>'
+      + '<p class="mz-ssr-blurb">' + esc(blurb) + '</p>'
+      + '<ul class="mz-ssr-links">' + links + '</ul></section>';
+  };
+
+  const inner = [
+    section('mz-ssr-trending', 'Trending movies this week',
+      'The titles people are watching on ' + SITE_NAME + ' right now. Each one opens a full page with cast, ratings and streaming availability.',
+      groups.trending),
+    section('mz-ssr-popular', 'Popular movies right now',
+      'Broadly popular films across Bollywood, Hollywood and South Indian cinema.',
+      groups.popular),
+    section('mz-ssr-tv', 'Popular web series and shows',
+      'Web series, K-drama and anime currently drawing the most viewers.',
+      groups.tv)
+  ].filter(Boolean).join('');
+
+  // Even with zero TMDB data the category and A-Z links are worth shipping:
+  // they are the static half of the crawl graph and never go stale.
+  const cats = MOVIE_CATEGORY_SLUGS.concat(SERIES_CATEGORY_SLUGS)
+    .map((s) => '<li><a href="' + esc(categoryPath(s)) + '">' + esc(CATEGORIES[s].heading) + '</a></li>').join('');
+
+  const az = BROWSE_LETTERS
+    .map((l) => '<li><a href="/browse/' + esc(l) + '">' + esc(l) + '</a></li>').join('');
+
+  return HOME_MARK_START
+    + '<div class="mz-ssr-index">'
+    + '<style>'
+    + '.mz-ssr-index{max-width:1140px;margin:40px auto 0;padding:0 20px}'
+    + '.mz-ssr-sec{margin:0 0 34px}'
+    + '.mz-ssr-index h2{font-size:1.2rem;margin:0 0 6px}'
+    + '.mz-ssr-blurb{opacity:.62;margin:0 0 14px;font-size:.92rem;max-width:78ch}'
+    + '.mz-ssr-links,.mz-ssr-cats{columns:3 210px;column-gap:24px;padding:0;margin:0;list-style:none}'
+    + '.mz-ssr-links li,.mz-ssr-cats li{break-inside:avoid;margin-bottom:8px;font-size:.9rem}'
+    + '.mz-ssr-az{display:flex;flex-wrap:wrap;gap:7px;padding:0;margin:0;list-style:none}'
+    + '.mz-ssr-az a{display:inline-block;min-width:36px;text-align:center;padding:6px 9px;border:1px solid rgba(255,255,255,.14);border-radius:8px;text-transform:uppercase;font-weight:700;font-size:.82rem}'
+    + '</style>'
+    + inner
+    + '<section class="mz-ssr-sec" aria-labelledby="mz-ssr-cats-h">'
+    + '<h2 id="mz-ssr-cats-h">Browse ' + esc(SITE_NAME) + ' by category</h2>'
+    + '<ul class="mz-ssr-cats">' + cats + '</ul></section>'
+    + '<section class="mz-ssr-sec" aria-labelledby="mz-ssr-az-h">'
+    + '<h2 id="mz-ssr-az-h">Browse the full catalogue A-Z</h2>'
+    + '<p class="mz-ssr-blurb">Every title on ' + esc(SITE_NAME) + ', indexed alphabetically.</p>'
+    + '<ul class="mz-ssr-az">' + az + '</ul></section>'
+    + '</div>'
+    + HOME_MARK_END;
+}
+
 function sitemapUrl(loc, opts) {
   const o = opts || {};
   return '<url><loc>' + escXml(SITE_URL + loc) + '</loc>'
@@ -1194,20 +1643,28 @@ function today() {
 }
 
 function buildSitemapIndex() {
-  const children = ['/sitemap-static.xml', '/sitemap-movies.xml', '/sitemap-tv.xml'];
+  const cache = readSitemapCache();
+  const children = ['/sitemap-static.xml', '/sitemap-browse.xml']
+    .concat(sitemapChunkPaths('movie', cache))
+    .concat(sitemapChunkPaths('tv', cache));
   return '<?xml version="1.0" encoding="UTF-8"?>\n'
     + '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
     + children.map((c) => '<sitemap><loc>' + escXml(SITE_URL + c) + '</loc>'
-      + '<lastmod>' + today() + '</lastmod></sitemap>').join('\n')
+      + '<lastmod>' + escXml(sitemapCacheDate(cache)) + '</lastmod></sitemap>').join('\n')
     + '\n</sitemapindex>\n';
 }
 
 function buildStaticSitemap() {
-  const urls = [sitemapUrl('/', { lastmod: today(), changefreq: 'daily', priority: '1.0' })];
+  const urls = [sitemapUrl('/', {
+    lastmod: SITEMAP_FALLBACK_DATE, changefreq: 'daily', priority: '1.0'
+  })];
+  urls.push(sitemapUrl('/browse', {
+    lastmod: SITEMAP_FALLBACK_DATE, changefreq: 'weekly', priority: '0.6'
+  }));
   Object.keys(CATEGORIES).forEach((slug) => {
     urls.push(sitemapUrl(categoryPath(slug), {
-      lastmod: today(),
-      changefreq: 'daily',
+      lastmod: SITEMAP_FALLBACK_DATE,
+      changefreq: VOLATILE_CATEGORY_SLUGS.has(slug) ? 'daily' : 'weekly',
       priority: '0.8'
     }));
   });
@@ -1268,13 +1725,74 @@ async function collectSitemapItems(tmdb, kind, pagesPerEndpoint) {
   return Array.from(seen.values());
 }
 
+/**
+ * A title's real last-meaningful-change date. Falls back to the hand-bumped
+ * constant rather than today() so the value stays stable between crawls.
+ */
+function releaseLastmod(item) {
+  const raw = String((item && (item.release_date || item.first_air_date || item.lastmod)) || '').slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : SITEMAP_FALLBACK_DATE;
+}
+
+let sitemapCacheMemo = null;
+let sitemapCacheMtime = 0;
+
+/**
+ * Reads sitemap-cache.json, written by scripts/build-sitemap-cache.js.
+ * Returns null when the file is absent so every caller can fall back to the
+ * old live-TMDB path — a missing cache must never take the sitemaps down.
+ */
+function readSitemapCache() {
+  try {
+    const stat = fs.statSync(SITEMAP_CACHE_FILE);
+    if (sitemapCacheMemo && stat.mtimeMs === sitemapCacheMtime) return sitemapCacheMemo;
+    const parsed = JSON.parse(fs.readFileSync(SITEMAP_CACHE_FILE, 'utf8'));
+    if (!parsed || !Array.isArray(parsed.movie) || !Array.isArray(parsed.tv)) return null;
+    sitemapCacheMemo = parsed;
+    sitemapCacheMtime = stat.mtimeMs;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function sitemapCacheDate(cache) {
+  const d = cache && String(cache.generated || '').slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : SITEMAP_FALLBACK_DATE;
+}
+
+/**
+ * Sitemap files must stay under 50k URLs; chunk the catalogue to match.
+ * Chunk 1 deliberately keeps the original /sitemap-movies.xml name — that URL
+ * is already submitted in Search Console and there is no reason to churn it.
+ */
+function sitemapChunkPaths(kind, cache) {
+  const plural = kind === 'tv' ? 'tv' : 'movies';
+  const first = '/sitemap-' + plural + '.xml';
+  const items = cache && cache[kind];
+  if (!items || !items.length) return [first];
+  const chunks = Math.ceil(items.length / SITEMAP_CHUNK_SIZE);
+  if (chunks <= 1) return [first];
+  const out = [first];
+  for (let i = 2; i <= chunks; i++) out.push('/sitemap-' + plural + '-' + i + '.xml');
+  return out;
+}
+
+/** The A–Z hub pages, so Google can find the flat index of the catalogue. */
+function buildBrowseSitemap() {
+  const urls = BROWSE_LETTERS.map((letter) => sitemapUrl('/browse/' + letter, {
+    lastmod: SITEMAP_FALLBACK_DATE, changefreq: 'weekly', priority: '0.5'
+  }));
+  return wrapUrlset(urls);
+}
+
 function buildMediaSitemap(items, kind) {
   const urls = items.map((item) => {
     const t = titleOf(item);
     if (!t) return null;
     return sitemapUrl(detailPath(resolveKind(item, kind), item), {
-      lastmod: today(),
-      changefreq: 'weekly',
+      lastmod: releaseLastmod(item),
+      changefreq: 'monthly',
       priority: '0.7'
     });
   }).filter(Boolean);
@@ -1319,7 +1837,7 @@ function registerSeoRoutes(app, deps) {
       try {
         item = await tmdb('/' + kind + '/' + parsed.id, {
           language: 'en-US',
-          append_to_response: 'credits,similar,recommendations'
+          append_to_response: 'credits,similar,recommendations,videos,watch/providers,release_dates,content_ratings'
         });
       } catch (err) {
         const status = err && (err.tmdbStatus || err.status);
@@ -1411,17 +1929,80 @@ function registerSeoRoutes(app, deps) {
     return res.status(200).send(xml);
   };
 
+  // ── A-Z browse hubs ──────────────────────────────────────────────────
+  const browseEntries = () => {
+    const cache = readSitemapCache();
+    if (!cache) return null;
+    return cache.movie.map((m) => Object.assign({ media_type: 'movie' }, m))
+      .concat(cache.tv.map((t) => Object.assign({ media_type: 'tv' }, t)));
+  };
+
+  app.get('/browse', (req, res, next) => {
+    const all = browseEntries();
+    if (!all) return next();
+    const counts = {};
+    all.forEach((e) => {
+      const l = browseLetterOf(titleOf(e));
+      counts[l] = (counts[l] || 0) + 1;
+    });
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.set('Cache-Control', BROWSE_CACHE);
+    res.set('X-Robots-Tag', 'index, follow');
+    return res.status(200).send(renderBrowseIndexPage(counts));
+  });
+
+  app.get('/browse/:letter', (req, res, next) => {
+    const letter = String(req.params.letter || '').toLowerCase();
+    if (BROWSE_LETTERS.indexOf(letter) === -1) return next();
+
+    const all = browseEntries();
+    if (!all) return next();
+
+    const entries = all
+      .filter((e) => browseLetterOf(titleOf(e)) === letter)
+      .sort((a, b) => titleOf(a).localeCompare(titleOf(b), 'en'));
+
+    const totalPages = Math.max(1, Math.ceil(entries.length / BROWSE_PER_PAGE));
+    let page = parseInt(req.query.page, 10);
+    if (!Number.isFinite(page) || page < 1) page = 1;
+    if (page > totalPages) return res.redirect(301, '/browse/' + letter);
+
+    const slice = entries.slice((page - 1) * BROWSE_PER_PAGE, page * BROWSE_PER_PAGE);
+
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.set('Cache-Control', BROWSE_CACHE);
+    res.set('X-Robots-Tag', 'index, follow');
+    return res.status(200).send(renderBrowseLetterPage(letter, slice, page, totalPages));
+  });
+
   app.get('/sitemap.xml', (req, res) => sendXml(res, buildSitemapIndex()));
+  app.get('/sitemap-browse.xml', (req, res) => sendXml(res, buildBrowseSitemap()));
   app.get('/sitemap-static.xml', (req, res) => sendXml(res, buildStaticSitemap()));
 
+  // Prefer the nightly cache (full catalogue, zero upstream calls). Fall back
+  // to the original bounded live fetch whenever the cache file is missing.
   const mediaSitemap = (kind) => async (req, res) => {
+    const chunk = parseInt(req.params.chunk, 10);
+    const fileCache = readSitemapCache();
+
+    if (fileCache && fileCache[kind] && fileCache[kind].length) {
+      const all = fileCache[kind];
+      const chunks = Math.ceil(all.length / SITEMAP_CHUNK_SIZE);
+      const index = Number.isFinite(chunk) ? chunk : 1;
+      if (index < 1 || index > Math.max(1, chunks)) return res.status(404).end();
+      const slice = chunks > 1
+        ? all.slice((index - 1) * SITEMAP_CHUNK_SIZE, index * SITEMAP_CHUNK_SIZE)
+        : all;
+      return sendXml(res, buildMediaSitemap(slice, kind));
+    }
+
     const cacheKey = 'ssr:sitemap:' + kind;
     const cached = cacheGet(cacheKey);
     if (cached) return sendXml(res, cached);
 
     let xml;
     try {
-      const items = await collectSitemapItems(tmdb, kind, 4);
+      const items = await collectSitemapItems(tmdb, kind, 8);
       xml = buildMediaSitemap(items, kind);
       if (items.length) cacheSet(cacheKey, xml);
     } catch (err) {
@@ -1434,12 +2015,112 @@ function registerSeoRoutes(app, deps) {
 
   app.get('/sitemap-movies.xml', mediaSitemap('movie'));
   app.get('/sitemap-tv.xml', mediaSitemap('tv'));
+  app.get('/sitemap-movies-:chunk.xml', mediaSitemap('movie'));
+  app.get('/sitemap-tv-:chunk.xml', mediaSitemap('tv'));
 
-  console.log('🔎 SEO SSR routes active: /movie/:slug, /tv/:slug, /movies/:slug, /series/:slug, /sitemap*.xml');
+  console.log('🔎 SEO SSR routes active: /movie/:slug, /tv/:slug, /movies/:slug, /series/:slug, /browse, /sitemap*.xml');
+}
+
+/**
+ * Registers the homepage handler. MUST be called BEFORE app.use(express.static(...))
+ * in server.js, otherwise the static middleware answers "/" first and this
+ * never runs.
+ *
+ * Two jobs:
+ *   1. Inject server-rendered links to real detail pages into index.html, so
+ *      the homepage passes authority into the catalogue instead of dead-ending.
+ *   2. Mark "/?search=..." noindex — search result URLs are an infinite
+ *      duplicate space and should never enter the index.
+ *
+ * Any failure calls next(), so express.static serves the untouched file. The
+ * homepage can never go down because of this layer.
+ */
+function registerHomeSsr(app, deps) {
+  const tmdb = deps && deps.tmdb;
+  const getCache = (deps && deps.getCache) || (() => (deps && deps.cache) || null);
+
+  app.get('/', async (req, res, next) => {
+    let shell;
+    try {
+      shell = readHomeShell();
+    } catch {
+      return next();
+    }
+
+    // ── search results: same page, but never indexable ──
+    if (req.query && typeof req.query.search === 'string' && req.query.search.trim()) {
+      const noindex = shell.replace(
+        /<meta name="robots" content="[^"]*">/i,
+        '<meta name="robots" content="noindex, follow">'
+      );
+      res.set('Content-Type', 'text/html; charset=utf-8');
+      res.set('Cache-Control', 'public, max-age=0, must-revalidate');
+      res.set('X-Robots-Tag', 'noindex, follow');
+      return res.status(200).send(noindex);
+    }
+
+    if (typeof tmdb !== 'function' || shell.indexOf(HOME_ANCHOR) === -1) return next();
+    // Already injected at build time and TMDB is unreachable? Ship it as-is.
+
+    let cache = null;
+    try { cache = getCache(); } catch { cache = null; }
+    const cacheKey = 'ssr:home:links';
+
+    let html;
+    try { html = cache && cache.get(cacheKey); } catch { html = null; }
+
+    if (!html) {
+      let block = '';
+      try {
+        const [trending, popular, tv] = await Promise.all([
+          tmdb('/trending/movie/week', { language: 'en-US', page: '1' }).catch(() => null),
+          tmdb('/movie/popular', { language: 'en-US', page: '1' }).catch(() => null),
+          tmdb('/tv/popular', { language: 'en-US', page: '1' }).catch(() => null)
+        ]);
+        const pick = (d, n) => ((d && d.results) || []).filter((r) => r && r.id).slice(0, n);
+        block = renderHomeLinkBlock({
+          trending: pick(trending, 20),
+          popular: pick(popular, 20),
+          tv: pick(tv, 20)
+        });
+      } catch (err) {
+        console.warn('[seo-ssr] homepage link block failed:', err && err.message);
+      }
+
+      // Even with no TMDB data the category + A-Z links are worth shipping.
+      if (!block) block = renderHomeLinkBlock({ trending: [], popular: [], tv: [] });
+      if (!block) return next();
+
+      html = injectHomeLinks(shell, block);
+      if (!html) return next();
+      try { if (cache) cache.set(cacheKey, html); } catch { /* best effort */ }
+    }
+
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.set('Cache-Control', HOME_CACHE);
+    res.set('X-Robots-Tag', 'index, follow');
+    return res.status(200).send(html);
+  });
+
+  console.log('🏠 Homepage SSR link block active on /');
 }
 
 module.exports = {
   registerSeoRoutes,
+  registerHomeSsr,
+  renderBrowseIndexPage,
+  renderBrowseLetterPage,
+  renderHomeLinkBlock,
+  injectHomeLinks,
+  readSitemapCache,
+  releaseLastmod,
+  browseLetterOf,
+  buildBrowseSitemap,
+  pageHref,
+  watchProvidersIN,
+  buildFaq,
+  BROWSE_LETTERS,
+  SITEMAP_FALLBACK_DATE,
   // exported for tests
   esc,
   escXml,

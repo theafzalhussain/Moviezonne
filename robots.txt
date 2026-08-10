@@ -1,13 +1,72 @@
+# As a condition of accessing this website, you agree to abide by the following
+# content signals:
+#
+# (a)  If a Content-Signal = yes, you may collect content for the corresponding
+#      use.
+# (b)  If a Content-Signal = no, you may not collect content for the
+#      corresponding use.
+# (c)  If the website operator does not include a Content-Signal for a
+#      corresponding use, the website operator neither grants nor restricts
+#      permission via Content-Signal with respect to the corresponding use.
+#
+# search:   building a search index and providing search results.
+# ai-input: inputting content into one or more AI models.
+# ai-train: training or fine-tuning AI models.
+# use:      how AI systems may consume the content.
+#
+# ANY RESTRICTIONS EXPRESSED VIA CONTENT SIGNALS ARE EXPRESS RESERVATIONS OF
+# RIGHTS UNDER ARTICLE 4 OF THE EUROPEAN UNION DIRECTIVE 2019/790 ON COPYRIGHT
+# AND RELATED RIGHTS IN THE DIGITAL SINGLE MARKET.
+
+# ── Everyone else ──────────────────────────────────────────────────────────
+# One group for User-agent: * instead of two. Two separate "*" groups is legal
+# but fragile — crawlers differ on whether they merge them or honour only the
+# first, and the rules below are the ones that actually matter.
+#
+# No Crawl-delay. Google ignores it, but Bing and Yandex obey it, and at one
+# request per second a 1,200-page catalogue takes 20+ minutes of continuous
+# crawling to get through. There is no reason to throttle them.
 User-agent: *
+Content-Signal: search=yes,ai-train=no,use=reference
 Allow: /
 Disallow: /api/
 Disallow: /sw.js
+# Search result URLs are an unbounded duplicate space. The homepage also
+# serves these with a noindex tag; this keeps them out of the crawl entirely.
+Disallow: /*?search=
+Disallow: /*&search=
+
+# ── AI crawlers ────────────────────────────────────────────────────────────
+User-agent: Amazonbot
+Disallow: /
+
+User-agent: Applebot-Extended
+Disallow: /
+
+User-agent: Bytespider
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+User-agent: CloudflareBrowserRenderingCrawler
+Disallow: /
+
+User-agent: Google-Extended
+Disallow: /
+
+User-agent: GPTBot
+Disallow: /
+
+User-agent: meta-externalagent
+Disallow: /
 
 # Paginated category URLs are intentionally crawlable: each one carries a
 # rel=canonical and its own description, so Google can resolve duplicates
 # itself. Blocking them here would hide those signals instead.
 
-# Sitemap index — lists the static, movie and series child sitemaps
+# Sitemap index — lists the static, browse, movie and series child sitemaps
 Sitemap: https://moviezone.dev/sitemap.xml
-
-Crawl-delay: 1
