@@ -40,7 +40,7 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const HOME_FILE = path.join(ROOT, 'index.html');
 
-const { renderHomeLinkBlock, injectHomeLinks } = require(path.join(ROOT, 'seo-ssr.js'));
+const { renderHomeLinkBlock, injectHomeLinks, optimizeHomeHead } = require(path.join(ROOT, 'seo-ssr.js'));
 
 const API_KEY = process.env.TMDB_API_KEY || process.env.TMDB_KEY;
 // server.js authenticates with a v4 bearer token in TMDB_TOKEN, so that is the
@@ -79,6 +79,15 @@ async function tmdb(endpoint) {
     tmdb('/tv/popular')
   ]);
 
+  // The homepage LCP element is the first carousel slide background, which the
+  // app builds from movie/popular[0].backdrop_path at w780. Preloading it turns
+  // a 2.4s serial wait (bundle -> API -> render -> image) into a parallel fetch.
+  // Regenerated on every build, so it tracks whatever is popular that day.
+  const heroItem = ((popular && popular.results) || [])[0];
+  const heroUrl = heroItem && heroItem.backdrop_path
+    ? 'https://image.tmdb.org/t/p/w780' + heroItem.backdrop_path
+    : null;
+
   const pick = (d, n) => ((d && d.results) || []).filter((r) => r && r.id).slice(0, n);
   const groups = {
     trending: pick(trending, 20),
@@ -91,8 +100,10 @@ async function tmdb(endpoint) {
     console.warn('  ! No TMDB data — injecting category + A-Z links only.');
   }
 
+  // Head first, then the link block, so both live in one generated file.
+  const tuned = optimizeHomeHead(shell, heroUrl);
   const block = renderHomeLinkBlock(groups);
-  const out = injectHomeLinks(shell, block);
+  const out = injectHomeLinks(tuned, block);
 
   if (!out) {
     console.error('✖ Could not find the footer anchor in index.html. Nothing injected.');
@@ -105,9 +116,12 @@ async function tmdb(endpoint) {
   const detailLinks = (out.match(/href="\/(?:movie|tv)\/[^"]+"/g) || []).length;
   const catLinks = new Set(out.match(/href="\/(?:movies|series)\/[a-z0-9-]+"/g) || []).size;
   const azLinks = (out.match(/href="\/browse\/[^"]+"/g) || []).length;
+  const tunedHead = out.includes('<!--MZ_PERF_HEAD-->');
 
   console.log('✔ index.html updated');
   console.log(`  detail-page links : ${detailLinks}  (was 0)`);
   console.log(`  category links    : ${catLinks} unique`);
   console.log(`  A-Z hub links     : ${azLinks}`);
+  console.log(`  critical path     : ${tunedHead ? 'tuned' : 'NOT tuned — check index.html <head>'}`);
+  console.log(`  hero preload      : ${heroUrl ? heroItem.title + ' — ' + heroUrl.split('/').pop() : 'none (no TMDB data)'}`);
 })();
