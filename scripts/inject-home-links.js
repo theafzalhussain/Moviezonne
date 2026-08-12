@@ -84,9 +84,17 @@ async function tmdb(endpoint) {
   // a 2.4s serial wait (bundle -> API -> render -> image) into a parallel fetch.
   // Regenerated on every build, so it tracks whatever is popular that day.
   const heroItem = ((popular && popular.results) || [])[0];
-  const heroUrl = heroItem && heroItem.backdrop_path
+  const freshHero = heroItem && heroItem.backdrop_path
     ? 'https://image.tmdb.org/t/p/w780' + heroItem.backdrop_path
     : null;
+
+  // If this run could not resolve a hero, keep whatever is already preloaded
+  // rather than dropping the preload and regressing LCP.
+  const existingHero = (shell.match(/as="image" href="(https:\/\/image\.tmdb\.org[^"]+)"/) || [])[1];
+  const heroUrl = freshHero || existingHero || null;
+  if (!freshHero && existingHero) {
+    console.warn('  ! No hero from TMDB — keeping the existing preload.');
+  }
 
   const pick = (d, n) => ((d && d.results) || []).filter((r) => r && r.id).slice(0, n);
   const groups = {
@@ -96,8 +104,20 @@ async function tmdb(endpoint) {
   };
 
   const titleCount = groups.trending.length + groups.popular.length + groups.tv.length;
+
+  // Regression guard. With no TMDB data the generated block still carries the
+  // category and A-Z links, so writing it would look like a success while
+  // silently deleting every detail-page link from the homepage — the exact thing
+  // this script exists to add. On a scheduled run that would be committed and
+  // deployed unnoticed. Refuse instead: yesterday's homepage is strictly better.
+  const existingDetailLinks = (shell.match(/href="\/(?:movie|tv)\/[^"]+"/g) || []).length;
   if (!titleCount) {
-    console.warn('  ! No TMDB data — injecting category + A-Z links only.');
+    if (existingDetailLinks > 0) {
+      console.error(`✖ TMDB returned no titles, but index.html already has ${existingDetailLinks} detail links.`);
+      console.error('  Refusing to overwrite them with an empty block. Nothing written.');
+      process.exit(1);
+    }
+    console.warn('  ! No TMDB data — injecting category + A-Z links only (none to lose).');
   }
 
   // Head first, then the link block, so both live in one generated file.
@@ -108,6 +128,13 @@ async function tmdb(endpoint) {
   if (!out) {
     console.error('✖ Could not find the footer anchor in index.html. Nothing injected.');
     console.error('  Expected: <footer class="site-footer" role="contentinfo">');
+    process.exit(1);
+  }
+
+  const newDetailLinks = (out.match(/href="\/(?:movie|tv)\/[^"]+"/g) || []).length;
+  if (newDetailLinks < existingDetailLinks) {
+    console.error(`✖ Generated page has fewer detail links than the current one `
+      + `(${newDetailLinks} < ${existingDetailLinks}). Nothing written.`);
     process.exit(1);
   }
 

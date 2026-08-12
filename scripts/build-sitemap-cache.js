@@ -34,10 +34,25 @@ try { require('dotenv').config(); } catch { /* no .env — env vars come from th
 const fs = require('fs');
 const path = require('path');
 
-const API_KEY = process.env.TMDB_API_KEY || process.env.TMDB_KEY;
-// server.js authenticates with a v4 bearer token in TMDB_TOKEN, so that is the
-// first name we look for — these scripts must work with the env you already have.
-const READ_TOKEN = process.env.TMDB_TOKEN || process.env.TMDB_READ_TOKEN || process.env.TMDB_BEARER;
+// server.js authenticates with a v4 bearer token in TMDB_TOKEN, so that name is
+// checked first — these scripts must work with the env that already exists.
+//
+// A v3 key and a v4 token are not interchangeable: v3 goes in an ?api_key= query
+// param, v4 goes in an Authorization: Bearer header. Putting a v3 key in
+// TMDB_TOKEN would send it as a bearer and every request would 401. Rather than
+// trust the variable name, the value is inspected: v3 keys are 32 hex chars,
+// v4 tokens are long JWTs starting with "ey".
+const RAW_TOKEN = process.env.TMDB_TOKEN || process.env.TMDB_READ_TOKEN || process.env.TMDB_BEARER;
+const RAW_KEY = process.env.TMDB_API_KEY || process.env.TMDB_KEY;
+
+const looksLikeV3 = (v) => !!v && /^[a-f0-9]{32}$/i.test(v.trim());
+
+const API_KEY = RAW_KEY || (looksLikeV3(RAW_TOKEN) ? RAW_TOKEN : null);
+const READ_TOKEN = looksLikeV3(RAW_TOKEN) ? null : RAW_TOKEN;
+
+if (looksLikeV3(RAW_TOKEN)) {
+  console.log('ℹ TMDB_TOKEN looks like a v3 key — sending it as ?api_key= instead of a bearer.');
+}
 const BASE = 'https://api.themoviedb.org/3';
 const ROOT = path.join(__dirname, '..');
 const OUT_FILE = path.join(ROOT, 'sitemap-cache.json');
@@ -53,7 +68,13 @@ const CONCURRENCY = 6;
 const RETRY_LIMIT = 3;
 
 if (!API_KEY && !READ_TOKEN) {
-  console.error('✖ Set TMDB_TOKEN (v4 bearer, same as server.js) or TMDB_API_KEY (v3 key) before running.');
+  console.error('✖ No TMDB credential found. Checked, in order:');
+  ['TMDB_TOKEN', 'TMDB_READ_TOKEN', 'TMDB_BEARER', 'TMDB_API_KEY', 'TMDB_KEY']
+    .forEach((n) => console.error(`    ${n.padEnd(16)} ${process.env[n] ? 'set' : 'not set'}`));
+  console.error('');
+  console.error('  Locally  : add TMDB_TOKEN=... to .env (the script loads it automatically).');
+  console.error('  In CI    : GitHub repo > Settings > Secrets and variables > Actions >');
+  console.error('             New repository secret, named TMDB_TOKEN.');
   process.exit(1);
 }
 
@@ -210,15 +231,66 @@ async function collect(kind) {
   return out;
 }
 
+/**
+ * One cheap call before the fan-out. Without this, a rejected credential looks
+ * identical to a quiet TMDB: hundreds of failed requests, then an unhelpful
+ * "returned nothing" at the end.
+ */
+async function preflight() {
+  const qs = new URLSearchParams({ language: 'en-US', page: '1' });
+  if (API_KEY && !READ_TOKEN) qs.set('api_key', API_KEY);
+  const headers = { accept: 'application/json' };
+  if (READ_TOKEN) headers.Authorization = 'Bearer ' + READ_TOKEN;
+
+  let res;
+  try {
+    res = await fetch(`${BASE}/movie/popular?${qs}`, { headers });
+  } catch (err) {
+    console.error(`✖ Could not reach TMDB: ${err.message}`);
+    process.exit(1);
+  }
+  if (res.status === 401) {
+    console.error('✖ TMDB rejected the credential (401).');
+    console.error(`  Sent as: ${READ_TOKEN ? 'Authorization: Bearer …' : '?api_key=…'}`);
+    console.error('  A v4 read access token is a long string starting "ey".');
+    console.error('  A v3 API key is 32 hex characters. Check which one the secret holds.');
+    process.exit(1);
+  }
+  if (!res.ok) {
+    console.error(`✖ TMDB preflight failed: ${res.status} ${res.statusText}`);
+    process.exit(1);
+  }
+  console.log('✔ TMDB credential accepted');
+}
+
 (async () => {
   const started = Date.now();
   console.log('Building sitemap cache from TMDB…');
+  await preflight();
 
   const [movie, tv] = await Promise.all([collect('movie'), collect('tv')]);
 
   if (!movie.length && !tv.length) {
     console.error('✖ TMDB returned nothing — leaving the existing cache untouched.');
     process.exit(1);
+  }
+
+  // Shrink guard. The curated franchise catalogue is merged in unconditionally,
+  // so a total TMDB outage still yields a few hundred titles and would sail past
+  // the emptiness check above — quietly collapsing a live 8,000-URL sitemap to a
+  // few hundred, and committing it. A partial result is worse than a stale one.
+  const total = movie.length + tv.length;
+  if (fs.existsSync(OUT_FILE)) {
+    try {
+      const prev = JSON.parse(fs.readFileSync(OUT_FILE, 'utf8'));
+      const prevTotal = (prev.movie || []).length + (prev.tv || []).length;
+      if (prevTotal > 0 && total < prevTotal * 0.8) {
+        console.error(`✖ Refusing to write: ${total} titles is far below the existing ${prevTotal}.`);
+        console.error('  TMDB was probably degraded during this run. Keeping the current cache.');
+        console.error('  Re-run once TMDB is healthy, or set SITEMAP_ALLOW_SHRINK=1 to override.');
+        if (!process.env.SITEMAP_ALLOW_SHRINK) process.exit(1);
+      }
+    } catch { /* unreadable previous cache is not a reason to block a good run */ }
   }
 
   const payload = {

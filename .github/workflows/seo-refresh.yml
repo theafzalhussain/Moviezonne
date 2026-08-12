@@ -33,6 +33,18 @@ jobs:
       - name: Install dependencies
         run: npm ci --omit=dev
 
+      - name: Check the TMDB secret is present
+        env:
+          TMDB_TOKEN: ${{ secrets.TMDB_TOKEN }}
+        run: |
+          if [ -z "$TMDB_TOKEN" ]; then
+            echo "::error::Repository secret TMDB_TOKEN is not set."
+            echo "Add it at: Settings > Secrets and variables > Actions > New repository secret"
+            echo "Name it TMDB_TOKEN and use the same value server.js already uses."
+            exit 1
+          fi
+          echo "TMDB_TOKEN is present (${#TMDB_TOKEN} characters)"
+
       - name: Rebuild the sitemap catalogue cache
         env:
           TMDB_TOKEN: ${{ secrets.TMDB_TOKEN }}
