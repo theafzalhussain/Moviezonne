@@ -42,10 +42,25 @@ const HOME_FILE = path.join(ROOT, 'index.html');
 
 const { renderHomeLinkBlock, injectHomeLinks, optimizeHomeHead } = require(path.join(ROOT, 'seo-ssr.js'));
 
-const API_KEY = process.env.TMDB_API_KEY || process.env.TMDB_KEY;
-// server.js authenticates with a v4 bearer token in TMDB_TOKEN, so that is the
-// first name we look for — these scripts must work with the env you already have.
-const READ_TOKEN = process.env.TMDB_TOKEN || process.env.TMDB_READ_TOKEN || process.env.TMDB_BEARER;
+// server.js authenticates with a v4 bearer token in TMDB_TOKEN, so that name is
+// checked first — these scripts must work with the env that already exists.
+//
+// A v3 key and a v4 token are not interchangeable: v3 goes in an ?api_key= query
+// param, v4 goes in an Authorization: Bearer header. Putting a v3 key in
+// TMDB_TOKEN would send it as a bearer and every request would 401. Rather than
+// trust the variable name, the value is inspected: v3 keys are 32 hex chars,
+// v4 tokens are long JWTs starting with "ey".
+const RAW_TOKEN = process.env.TMDB_TOKEN || process.env.TMDB_READ_TOKEN || process.env.TMDB_BEARER;
+const RAW_KEY = process.env.TMDB_API_KEY || process.env.TMDB_KEY;
+
+const looksLikeV3 = (v) => !!v && /^[a-f0-9]{32}$/i.test(v.trim());
+
+const API_KEY = RAW_KEY || (looksLikeV3(RAW_TOKEN) ? RAW_TOKEN : null);
+const READ_TOKEN = looksLikeV3(RAW_TOKEN) ? null : RAW_TOKEN;
+
+if (looksLikeV3(RAW_TOKEN)) {
+  console.log('ℹ TMDB_TOKEN looks like a v3 key — sending it as ?api_key= instead of a bearer.');
+}
 const BASE = 'https://api.themoviedb.org/3';
 
 async function tmdb(endpoint) {
