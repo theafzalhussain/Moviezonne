@@ -68,5 +68,6 @@ jobs:
           else
             COUNT=$(node -p "const c=require('./sitemap-cache.json');c.movie.length+c.tv.length")
             git commit -m "chore(seo): refresh sitemap cache (${COUNT} titles) + homepage links"
+            git pull --rebase origin main
             git push
           fi
