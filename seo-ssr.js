@@ -2303,6 +2303,43 @@ function registerSeoRoutes(app, deps) {
 //  Web Vital, FCP is not, and the LCP gain is four times larger.
 // ═══════════════════════════════════════════════════════════════════════════
 
+/*  The hero backdrop is the homepage LCP element, and it is chosen at runtime
+ *  from a re-ranked candidate list — not necessarily the title this build saw.
+ *  A single-URL preload therefore missed twice over: wrong size on desktop
+ *  (the client asks for w1280, the preload named w780) and, whenever the
+ *  ranking picked a different title, wrong image entirely. Both cost a full
+ *  backdrop download on the critical path and delayed the real LCP.
+ *
+ *  Declaring the candidate set instead lets the preload and the <img> resolve
+ *  to the identical URL on every viewport, and the accompanying meta tag lets
+ *  the client pin this exact title to slide 0 so the guess is not wasted.
+ */
+/*  Kept byte-identical to HERO_WIDE_MQ in moviezone.js. If one side changes,
+ *  the preload stops matching the request and the hero is downloaded twice. */
+const WIDE_MQ = '(min-width: 1025px)';
+const MOBILE_MQ = '(max-width: 1024px)';
+
+function heroPreloadTag(heroUrl) {
+  const m = /^(https:\/\/image\.tmdb\.org\/t\/p\/)w\d+(\/.+)$/.exec(heroUrl);
+  if (!m) {
+    return '<link rel="preload" as="image" href="' + escAttr(heroUrl) + '" fetchpriority="high">\n';
+  }
+  const base = m[1], path = m[2];
+
+  /*  Two links, one per branch of HERO_WIDE_MQ in moviezone.js. A srcset was
+   *  tried first and rejected by measurement: `sizes` resolves against device
+   *  pixels, so a DPR2 phone asks for ~820px and the browser upgrades it to
+   *  w1280 — 116KB where the app intends 45KB. A media query is evaluated on
+   *  CSS pixels, which is the same axis the client branches on, so the two
+   *  always agree.
+   */
+  return '<link rel="preload" as="image" media="' + MOBILE_MQ + '"'
+       + ' href="' + escAttr(base + 'w780' + path) + '" fetchpriority="high">\n'
+       + '<link rel="preload" as="image" media="' + WIDE_MQ + '"'
+       + ' href="' + escAttr(base + 'w1280' + path) + '" fetchpriority="high">\n'
+       + '<meta name="mz-hero-backdrop" content="' + escAttr(path) + '">\n';
+}
+
 const PERF_HEAD_MARK = '<!--MZ_PERF_HEAD-->';
 const PERF_HEAD_RE = /<!--MZ_PERF_HEAD-->[\s\S]*?<!--\/MZ_PERF_HEAD-->\n?/;
 
@@ -2326,6 +2363,7 @@ const WARM_ENDPOINTS = [
 function optimizeHomeHead(shell, heroUrl) {
   if (!shell) return shell;
   let html = shell.replace(PERF_HEAD_RE, '');
+  html = html.replace(/[ \t]*<meta name="mz-hero-backdrop"[^>]*>\n?/g, '');
 
   // Restore anything a previous run rewrote, so this is a pure function of the
   // original file rather than a diff on top of itself.
@@ -2356,9 +2394,7 @@ function optimizeHomeHead(shell, heroUrl) {
   // 3. everything that has to start early, in priority order, after the CSS link
   const block = PERF_HEAD_MARK + '\n'
     + '<link rel="preload" href="' + cssLink[1] + '" as="style" fetchpriority="high">\n'
-    + (heroUrl
-      ? '<link rel="preload" as="image" href="' + escAttr(heroUrl) + '" fetchpriority="high">\n'
-      : '')
+    + (heroUrl ? heroPreloadTag(heroUrl) : '')
     + '<script>\n'
     + '/* Warms the HTTP cache for first-screen data while the parser is still\n'
     + '   working; moviezone.js requests the same URLs a second later and gets a\n'

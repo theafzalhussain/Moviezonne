@@ -67,6 +67,57 @@ const IMG = 'https://image.tmdb.org/t/p/w342'; // Optimized: w500 is too heavy f
 // title and buttons over it, and it is never displayed above 1280 logical px
 // of detail — w1280 is also the largest size TMDB offers below `original`, so
 // there is no middle option being skipped here.
+/*  The breakpoint the hero preload in <head> is scoped to. Must stay identical
+ *  to WIDE_MQ in seo-ssr.js — if the two drift, <head> preloads one size, the
+ *  carousel requests another, and the LCP image is downloaded twice.
+ */
+const HERO_WIDE_MQ = '(min-width: 1025px)';
+
+/*  Size for slide 0 only.
+ *
+ *  getResponsiveBackdrop() branches on a UA test (isMobile), which a
+ *  <link media> query cannot express — a narrow desktop window would be
+ *  preloaded w780 and then request w1280, the exact double-download this is
+ *  meant to remove. Deciding on viewport width instead puts both sides on the
+ *  same axis, and a 1024px-wide window genuinely does not need the 1280 asset.
+ *
+ *  save-data / 2-3G keeps its w500 ceiling: honouring an explicit request to
+ *  spend less data matters more than the preload landing, and the preload
+ *  scanner has already started that fetch either way.
+ */
+function getHeroBackdrop(path) {
+  if (!path) return '';
+  const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (conn && (conn.saveData || /^[23]g/.test(conn.effectiveType))) {
+    return 'https://image.tmdb.org/t/p/w500' + path;
+  }
+  const wide = window.matchMedia && window.matchMedia(HERO_WIDE_MQ).matches;
+  return 'https://image.tmdb.org/t/p/' + (wide ? 'w1280' : 'w780') + path;
+}
+
+/*  Moves the title the server preloaded to slide 0. The preload is a build-time
+ *  guess at what the ranking will surface; when the guess is in the deck this
+ *  turns it into a cache hit for the LCP element, and when it is not, the deck
+ *  is returned untouched rather than forced.
+ */
+function pinPreloadedHero(list, pool) {
+  try {
+    const meta = document.querySelector('meta[name="mz-hero-backdrop"]');
+    const want = meta && meta.getAttribute('content');
+    if (!want || !Array.isArray(list) || !list.length) return list;
+    const idx = list.findIndex(m => m && m.backdrop_path === want);
+    if (idx === 0) return list;
+    if (idx > 0) {
+      const hit = list.splice(idx, 1)[0];
+      list.unshift(hit);
+      return list;
+    }
+    const fromPool = (pool || []).find(m => m && m.backdrop_path === want);
+    if (fromPool) return [fromPool].concat(list).slice(0, 10);
+  } catch (e) { /* preload stays a miss — never break the carousel over it */ }
+  return list;
+}
+
 function getResponsiveBackdrop(path) {
   if (!path) return '';
   const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
@@ -2173,6 +2224,9 @@ async function loadCarousel() {
 
   carouselMovies = diverseCarousel.slice(0, 10);
   if (carouselMovies.length === 0) carouselMovies = candidates.slice(0, 6); // Ultimate fallback
+  // Align slide 0 with the backdrop <head> already preloaded, so the LCP image
+  // is served from cache instead of being requested after the bundle parses.
+  carouselMovies = pinPreloadedHero(carouselMovies, candidates);
   console.log('🎬 Carousel Movies:', carouselMovies.map(m => `${m.title || m.name} (${m.original_language})`));
   buildCarousel();
 }
@@ -2188,12 +2242,19 @@ function buildCarousel() {
   const trackFrag = document.createDocumentFragment();
   const dotsFrag = document.createDocumentFragment();
   const thumbsFrag = document.createDocumentFragment();
- 
-  carouselMovies.forEach((m, i) => {
+
+  /*  Long tasks: building all ten slides in one pass is a single multi-second
+   *  block on a phone, competing with the hero image decode. Only slide 0 is
+   *  visible, so it is built inline and the rest are handed to the idle
+   *  queue in small batches. Order and markup are identical either way.
+   */
+  const buildOne = (m, i, trackFrag, dotsFrag, thumbsFrag) => {
     const genres = (m.genre_ids||[]).slice(0,3).map(id => '<span class="genre-tag">'+escapeHTML(GENRE_MAP[id]||'Movie')+'</span>').join('');
     const slide = document.createElement('div');
     slide.className = 'carousel-slide' + (i === 0 ? ' active' : '');
-    const bgUrl = m.backdrop_path ? getResponsiveBackdrop(m.backdrop_path) : `https://image.tmdb.org/t/p/w780${m.poster_path}`;
+    const bgUrl = m.backdrop_path
+      ? (i === 0 ? getHeroBackdrop(m.backdrop_path) : getResponsiveBackdrop(m.backdrop_path))
+      : `https://image.tmdb.org/t/p/w780${m.poster_path}`;
 
     /*  LCP — slide 0's backdrop IS this page's Largest Contentful Paint element.
      *
@@ -2219,7 +2280,8 @@ function buildCarousel() {
      *  is on the critical path.
      */
     const heroImg = i === 0
-      ? '<img class="slide-bg-img" src="' + bgUrl + '" alt="" width="1280" height="720" style="aspect-ratio:16/9;object-fit:cover;" fetchpriority="high" decoding="async" draggable="false">'
+      ? '<img class="slide-bg-img" src="' + bgUrl
+        + '" alt="" width="1280" height="720" style="aspect-ratio:16/9;object-fit:cover;" fetchpriority="high" decoding="async" draggable="false">'
       : '';
 
     if (i === 0) {
@@ -2281,11 +2343,42 @@ function buildCarousel() {
       '" alt="" width="60" height="84" loading="lazy" decoding="async">';
     thumb.addEventListener('click', () => { goToSlide(i); resetAutoSlide(); });
     thumbsFrag.appendChild(thumb);
-  });
- 
+  };
+
+  //  Slide 0 is the LCP element and slide 1 is what the auto-slide timer shows
+  //  next — the warm-up below also needs it in the DOM to prime its backdrop.
+  //  Both are cheap (slide 1 carries no image request, only data-bg), so they
+  //  are built inline and everything after them is deferred.
+  const INLINE_SLIDES = 2;
+  carouselMovies.slice(0, INLINE_SLIDES).forEach((m, i) =>
+    buildOne(m, i, trackFrag, dotsFrag, thumbsFrag));
+
   track.appendChild(trackFrag);
   dots.appendChild(dotsFrag);
   thumbs.appendChild(thumbsFrag);
+
+  if (carouselMovies.length > INLINE_SLIDES) {
+    const rest = carouselMovies.slice(INLINE_SLIDES);
+    let cursor = 0;
+    const BATCH = 3;
+    const drain = () => {
+      const tf = document.createDocumentFragment();
+      const df = document.createDocumentFragment();
+      const hf = document.createDocumentFragment();
+      const end = Math.min(cursor + BATCH, rest.length);
+      for (; cursor < end; cursor++) {
+        buildOne(rest[cursor], cursor + INLINE_SLIDES, tf, df, hf);
+      }
+      track.appendChild(tf);
+      dots.appendChild(df);
+      thumbs.appendChild(hf);
+      if (cursor < rest.length) schedule(drain);
+    };
+    const schedule = (fn) => ('requestIdleCallback' in window)
+      ? requestIdleCallback(fn, { timeout: 1500 })
+      : setTimeout(fn, 32);
+    schedule(drain);
+  }
  
   // Slide 1's backdrop used to be requested right here, in the same tick as the
   // hero. Two full-width backdrops racing each other means the one the user can
@@ -5411,6 +5504,18 @@ function setActiveSearchItem(index, items) {
 function showSearchLoading(message, skeleton) {
   const dropdown = document.getElementById('searchDropdown');
   if (!dropdown) return;
+
+  // INP: this fires on every keystroke. Rebuilding identical markup discards
+  // and recreates the skeleton nodes each time, which is the entire typing
+  // cost. When the shape already matches, only the label needs to change.
+  const label = dropdown.querySelector('.search-state > span:last-child');
+  if (label && (!!dropdown.querySelector('.mz-sugg-skeleton')) === !!skeleton) {
+    if (label.textContent !== message) label.textContent = message;
+    dropdown.classList.add('open');
+    searchInput?.setAttribute('aria-expanded', 'true');
+    return;
+  }
+
   const rows = skeleton
     ? '<div class="mz-sugg-skeleton"><i class="p"></i><i class="l"></i></div>'.repeat(3)
     : '';
@@ -5742,6 +5847,25 @@ function runSearchFromUrl() {
 window.addEventListener('load', () => setTimeout(runSearchFromUrl, 350), { once: true });
  
 // MODAL
+/*  Resolves after the browser has had a chance to paint.
+ *
+ *  rAF alone only gets us to just BEFORE the next frame — work scheduled there
+ *  still delays it. Chaining a task after the frame (scheduler.postTask at
+ *  user-visible priority, setTimeout elsewhere) means the pixels are committed
+ *  first and the interaction is recorded as responsive.
+ */
+function mzYieldToPaint() {
+  return new Promise(resolve => {
+    requestAnimationFrame(() => {
+      if (typeof scheduler !== 'undefined' && scheduler && typeof scheduler.postTask === 'function') {
+        scheduler.postTask(resolve, { priority: 'user-visible' });
+      } else {
+        setTimeout(resolve, 0);
+      }
+    });
+  });
+}
+
 async function openModal(id, type = 'movie', activationEvent) {
   if (!claimExplicitDetailActivation(activationEvent)) return;
   // Add hash to URL to behave like a separate page
@@ -5778,7 +5902,22 @@ async function openModal(id, type = 'movie', activationEvent) {
     '</div>';
  
   // Saare servers aur buttons instantly show karo taaki user immediately click kar sake
+  //
+  // Deliberately synchronous: #externalSources is 450-700px of the modal on a
+  // phone, so deferring it past the opening frame would trade INP for a shift
+  // of the same block. It renders from a static list — the cost is the
+  // innerHTML write, not a fetch.
   try { renderExternalSources(id, getSelectedSourceIdx(), getSelectedLang()); } catch(e){}
+
+  // CLS: the related row is display:none until the detail fetch resolves, then
+  // adds ~350px inside .modal-bottom. Reserving it here means the modal reaches
+  // its full height in the frame it opens instead of growing under the user.
+  try { primeRelatedSection(); } catch (e) {}
+
+  // INP: the frame above is what the tap is waiting on. Everything below is
+  // preparation for a click that has not happened yet, so hand the frame back
+  // before starting it. Ordering is unchanged, only the paint boundary moved.
+  await mzYieldToPaint();
 
   // ⚡ SPEED: provider handshake details aane se pehle shuru kar do.
   //
@@ -6395,13 +6534,53 @@ document.addEventListener('keydown', (e) => {
 }, true);
  
 // -- RELATED MOVIES LOGIC (Advanced Recommendation Engine) --
+/*  A placeholder built from the real card's own elements.
+ *
+ *  The previous skeleton was a flat 170x255 box, but a populated
+ *  .related-slider .movie-card measures 307-443px depending on breakpoint —
+ *  poster plus title, rating/year and genre chips. Filling the row therefore
+ *  grew it by 75-210px every time. Reusing the card's markup means the box is
+ *  correct at every width by construction, with no numbers to keep in sync.
+ */
+const RELATED_SKELETON = Array(6).fill(
+  '<div class="movie-card mz-related-skel" aria-hidden="true">' +
+    '<div class="card-poster"><span class="skeleton mz-skel-poster"></span></div>' +
+    '<div class="card-info">' +
+      '<div class="card-title skeleton mz-skel-text">Placeholder<br>title</div>' +
+      '<div class="card-meta">' +
+        '<div class="card-rating skeleton mz-skel-text">RATING 0.0</div>' +
+        '<div class="card-year skeleton mz-skel-text">YEAR 0000</div>' +
+      '</div>' +
+      '<div class="card-genres">' +
+        '<span class="card-genre skeleton mz-skel-text">Genre</span>' +
+        '<span class="card-genre skeleton mz-skel-text">Genre</span>' +
+      '</div>' +
+    '</div>' +
+  '</div>'
+).join('');
+
+/*  Puts the related row into the layout before the detail fetch starts.
+ *
+ *  loadRelatedMovies() used to be the first thing to reveal this section, which
+ *  meant ~350px appeared inside .modal-bottom a full round-trip after the modal
+ *  had painted — measured as the largest single shift on the page. Showing the
+ *  correctly-sized skeleton up front makes the later fill a pure content swap.
+ *  The section still hides itself if the fetch comes back empty.
+ */
+function primeRelatedSection() {
+  const section = document.getElementById('relatedMoviesSection');
+  const grid = document.getElementById('relatedMoviesGrid');
+  if (!section || !grid) return;
+  section.style.display = 'block';
+  if (!grid.childElementCount) grid.innerHTML = RELATED_SKELETON;
+}
+
 async function loadRelatedMovies(id, type) {
   const section = document.getElementById('relatedMoviesSection');
   const grid = document.getElementById('relatedMoviesGrid');
   if (!section || !grid) return;
- 
-  section.style.display = 'block';
-  grid.innerHTML = Array(6).fill('<div class="skeleton skeleton-card" style="flex-shrink:0;width:170px;height:255px;border-radius:12px;"></div>').join('');
+
+  primeRelatedSection();
  
   try {
     const combinedResults = [];
