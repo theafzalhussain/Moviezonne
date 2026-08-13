@@ -15,6 +15,42 @@
   .overlay.open { display: block; }
 </style>
 <!-- No user-agent spoofing and no ?tv=1: this is a plain desktop Chrome run. -->
+<script>
+/*  ── DETERMINISTIC DESKTOP INPUT STACK ──────────────────────────────────
+ *  This page asserts that tv-mode.js stays inert on a desktop. It used to take
+ *  the host machine's word for "desktop", which made the result depend on the
+ *  hardware running the suite rather than on the code under test: a laptop with
+ *  a mouse reported (pointer: fine) and all 14 checks passed, while the same
+ *  commit in a container reported no pointing device at all, tripped the
+ *  remote-only heuristic, and failed 11 of them. Green on one machine and red on
+ *  another, with no bug in either — which is worse than a plain failure, because
+ *  it teaches whoever sees the red to ignore it.
+ *
+ *  Pointer and hover queries are answered here as a desktop would answer them,
+ *  so the assertions below are about detectTvPlatform's logic. Everything else
+ *  is delegated to the real implementation. Must run before tv-mode.js, which
+ *  reads matchMedia once at parse time.
+ */
+(function () {
+  var real = typeof window.matchMedia === 'function' ? window.matchMedia.bind(window) : null;
+  function result(query, matches) {
+    return {
+      matches: matches, media: query, onchange: null,
+      addEventListener: function () {}, removeEventListener: function () {},
+      addListener: function () {}, removeListener: function () {},
+      dispatchEvent: function () { return false; }
+    };
+  }
+  window.matchMedia = function (query) {
+    var q = String(query);
+    if (/pointer|hover/i.test(q)) {
+      // A desktop matches the fine-pointer and hover forms, nothing else.
+      return result(q, /pointer:\s*fine|hover:\s*hover/i.test(q));
+    }
+    return real ? real(q) : result(q, false);
+  };
+})();
+</script>
 <script src="tv-mode.js"></script>
 </head>
 <body>

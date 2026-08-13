@@ -123,6 +123,39 @@ check('missing matchMedia data does not enable TV mode',
   TV.detectTvPlatform({ userAgent: 'Mozilla/5.0 (Linux) Chrome/90', search: '', hasFinePointer: null, hasAnyPointer: null }).isTv === false);
 check('empty environment is safe', TV.detectTvPlatform().isTv === false);
 
+/*  ── Automated clients ──────────────────────────────────────────────────
+ *  A crawler runs headless in a container, so it reports no pointing device at
+ *  all and used to fall straight into the remote-only rule above — Googlebot
+ *  was being handed a TV layout. These lock the guard in place, including the
+ *  two directions it must NOT change: a real TV user-agent still wins (a bot
+ *  token is not proof the device is not a TV), and ?tv=1 still overrides
+ *  everything, which is the escape hatch if a real device is ever caught.
+ */
+const AUTOMATED_AGENTS = [
+  ['Googlebot', 'Mozilla/5.0 (Linux; Android 6.0.1;) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'],
+  ['Googlebot desktop', 'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Googlebot/2.1; +http://www.google.com/bot.html) Chrome/125.0.0.0 Safari/537.36'],
+  ['bingbot', 'Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)'],
+  ['Lighthouse', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/125.0.0.0 Safari/537.36 Chrome-Lighthouse'],
+  ['headless Chrome', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 HeadlessChrome/125.0.0.0 Safari/537.36'],
+  ['Google inspection tool', 'Mozilla/5.0 (compatible; Google-InspectionTool/1.0;)'],
+  ['facebook link preview', 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)'],
+  ['AhrefsBot', 'Mozilla/5.0 (compatible; AhrefsBot/7.0; +http://ahrefs.com/robot/)']
+];
+AUTOMATED_AGENTS.forEach(([label, ua]) => {
+  const r = TV.detectTvPlatform({ userAgent: ua, search: '', hasFinePointer: false, hasAnyPointer: false });
+  check(label + ' with no pointer is not treated as a TV', r.isTv === false, 'platform=' + r.platform + ' reason=' + r.reason);
+  eq(label + ' reason', r.reason, 'automated client');
+});
+
+check('a TV user-agent still wins over the bot guard',
+  TV.detectTvPlatform({ userAgent: 'Mozilla/5.0 (SMART-TV; Linux; Tizen 6.0) crawler', search: '', hasFinePointer: false, hasAnyPointer: false }).isTv === true);
+check('?tv=1 still forces TV mode for an automated client',
+  TV.detectTvPlatform({ userAgent: AUTOMATED_AGENTS[0][1], search: '?tv=1', hasFinePointer: false, hasAnyPointer: false }).isTv === true);
+check('an anonymous pointer-less box is still a TV after the guard',
+  TV.detectTvPlatform({ userAgent: 'Mozilla/5.0 (Linux) AppleWebKit/537.36 Chrome/90', search: '', hasFinePointer: false, hasAnyPointer: false }).isTv === true);
+check('a real desktop UA is not mistaken for automation',
+  TV.detectTvPlatform({ userAgent: NON_TV_AGENTS[0][0], search: '', hasFinePointer: true, hasAnyPointer: true }).platform === 'browser');
+
 /* ═══════════════════════════════════════════════════════════════
    3. REMOTE KEY MAPPING
    ═══════════════════════════════════════════════════════════════ */

@@ -81,13 +81,51 @@
       return { isTv: true, platform: matched.platform, confidence: 'confirmed', reason: 'user-agent match' };
     }
 
-    // 3. No pointing device at all (not even a coarse one) means a remote-only
+    // 3. Automated clients never carry an input device, so they land in the
+    //    pointer heuristic below and get a TV experience nobody asked for.
+    //    Googlebot renders with headless Chromium in a container, Lighthouse
+    //    and screenshot services do the same, and none of them announce a TV
+    //    UA — the heuristic is the only rule they can trip.
+    //
+    //    Cosmetic-only today: TV mode hides three decorative layers (cursor,
+    //    ambient canvas, shine sweep) and swaps image sizes, so a crawler still
+    //    sees identical text, links and headings. It is guarded anyway because
+    //    "the audit tool sees a different page than the user" is a debugging
+    //    trap, and because the rule below cannot tell an unknown TV from a
+    //    scripted browser on its own.
+    //
+    //    Deliberately placed AFTER the UA match: a bot string is not proof the
+    //    device is not a TV, and an explicit ?tv=1 still wins over everything.
+    if (isAutomatedClient(ua)) {
+      return { isTv: false, platform: 'browser', confidence: 'none', reason: 'automated client' };
+    }
+
+    // 4. No pointing device at all (not even a coarse one) means a remote-only
     //    device. Emulated coarse pointers on phones/tablets never report this.
     if (e.hasAnyPointer === false && e.hasFinePointer === false) {
       return { isTv: true, platform: 'remote-only', confidence: 'probable', reason: 'no pointing device reported' };
     }
 
     return { isTv: false, platform: 'browser', confidence: 'none', reason: 'no TV signal' };
+  }
+
+  /*  Crawlers and headless automation. Kept narrow on purpose: every entry is a
+   *  string that only a non-interactive client sends, so no real device can be
+   *  excluded by accident. "HeadlessChrome" covers Chrome's own headless build,
+   *  which is what CI, Lighthouse and most screenshot services drive. */
+  var AUTOMATED_UA_RE = new RegExp([
+    'googlebot', 'bingbot', 'yandex(?:bot|images)', 'duckduckbot', 'baiduspider',
+    'applebot', 'slurp', 'petalbot', 'ahrefsbot', 'semrushbot',
+    'facebookexternalhit', 'twitterbot', 'linkedinbot', 'whatsapp', 'telegrambot',
+    'discordbot', 'slackbot', 'embedly', 'redditbot',
+    'chrome-lighthouse', 'headlesschrome', 'phantomjs', 'puppeteer', 'playwright',
+    'google-inspectiontool', 'googleother', 'google page speed', 'pagespeed',
+    'bot\\b', 'crawler', 'spider'
+  ].join('|'), 'i');
+
+  function isAutomatedClient(ua) {
+    if (!ua) return false;
+    return AUTOMATED_UA_RE.test(ua);
   }
 
   // Returns true (force on), false (force off) or null (no override present).
