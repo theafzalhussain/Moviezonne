@@ -67,21 +67,26 @@ const VOLATILE_CATEGORY_SLUGS = new Set([
 
 // Where the nightly sitemap builder writes the full catalogue.
 const SITEMAP_CACHE_FILE = path.join(__dirname, 'sitemap-cache.json');
-const SITEMAP_CHUNK_SIZE = 5000;
-
-/*  How many shards past the current count still answer with an empty urlset
- *  instead of 404.
+/*  Sized so a boundary is never near the catalogue's working range.
  *
- *  The catalogue sits close to SITEMAP_CHUNK_SIZE and crosses it in both
- *  directions between refreshes (4962 -> 5024 -> 5034 -> 4722 over four runs),
- *  so the trailing shard appears and disappears. Once Google has read
- *  /sitemap-movies-2.xml it keeps asking for it, and a 404 on a sitemap it
- *  already knows is reported as an error in Search Console rather than being
- *  dropped quietly. An empty urlset is the documented way to retire a sitemap:
- *  it parses, it reports zero URLs, and Google releases what it had listed
- *  there. Bounded so the route cannot become an unbounded crawl space.
+ *  At 5000 the movie count straddled the split point and the trailing shard
+ *  blinked in and out between refreshes — 4962, 5024, 5034, 4722 over four
+ *  consecutive runs, i.e. shard counts of 1, 1, 2, 2. Every time it vanished,
+ *  /sitemap-movies-2.xml started 404ing on a URL Search Console had already
+ *  registered, and that is reported as an error rather than forgotten.
+ *
+ *  Shard counts over those same four refreshes:
+ *      5000 -> [1, 1, 2, 2]   flips
+ *      2500 -> [2, 2, 3, 3]   flips
+ *      1000 -> [5, 5, 6, 6]   flips
+ *      2000 -> [3, 3, 3, 3]   stable
+ *
+ *  At 2000 the catalogue would have to gain 1278 titles or lose 721 before the
+ *  movie shard count moves at all, and 716 / 1283 for TV. Well inside Google's
+ *  50,000-URL ceiling, and smaller files are cheaper for it to refetch.
  */
-const SITEMAP_RETIRED_SHARD_WINDOW = 4;
+const SITEMAP_CHUNK_SIZE = 2000;
+
 
 // A-Z hubs turn the catalogue into a flat index: any title is 2 clicks from
 // the homepage instead of sitting 25 pages deep in a prev/next chain.
@@ -2265,14 +2270,12 @@ function registerSeoRoutes(app, deps) {
       const all = fileCache[kind];
       const chunks = Math.ceil(all.length / SITEMAP_CHUNK_SIZE);
       const index = Number.isFinite(chunk) ? chunk : 1;
-      const live = Math.max(1, chunks);
-      if (index < 1) return res.status(404).end();
-      // A shard the catalogue has shrunk past is retired, not missing — see
-      // SITEMAP_RETIRED_SHARD_WINDOW. Beyond the window it never existed.
-      if (index > live) {
-        if (index > live + SITEMAP_RETIRED_SHARD_WINDOW) return res.status(404).end();
-        return sendXml(res, buildMediaSitemap([], kind));
-      }
+      // 404 is how a sitemap is retired. An empty <urlset> was tried instead and
+      // reverted: sitemap.xsd requires at least one <url>, so the response was
+      // rejected as invalid XML — a worse report than a clean fetch failure.
+      // The shard count is kept stable by SITEMAP_CHUNK_SIZE, so this path is
+      // now only reached by URLs that never existed.
+      if (index < 1 || index > Math.max(1, chunks)) return res.status(404).end();
       const slice = chunks > 1
         ? all.slice((index - 1) * SITEMAP_CHUNK_SIZE, index * SITEMAP_CHUNK_SIZE)
         : all;
