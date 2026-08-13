@@ -114,7 +114,14 @@ for (const name of LAZY_SCRIPTS) {
 
 for (const name of STYLES) {
   check(name + '.min.css is the stylesheet that ships', () => {
-    const tag = new RegExp('<link rel="stylesheet" href="' + name + '\\.min\\.css\\?v=[\\d.]+">');
+    /*  Trailing attributes are allowed on purpose. tv-mode.min.css ships as
+     *  `media="print" onload="this.media='all'"` — the deferred-stylesheet
+     *  pattern — because it styles a mode most visits never enter, so making it
+     *  render-blocking to satisfy an exact-match regex would be a real
+     *  regression. What this check is actually for is unchanged: the minified
+     *  file must be the one linked, with a version query, and the unminified
+     *  source must not be linked at all. */
+    const tag = new RegExp('<link rel="stylesheet" href="' + name + '\\.min\\.css\\?v=[\\d.]+"[^>]*>');
     assert.ok(tag.test(html), name + '.min.css is not linked');
     const bare = new RegExp('href="' + name + '\\.css\\?');
     assert.ok(!bare.test(html), 'unminified ' + name + '.css is still linked');
@@ -159,8 +166,7 @@ console.log('\n-- how early the network can start ' + '-'.repeat(27));
  */
 const OFFSET_BUDGET = 4096;
 [['main stylesheet', '<link rel="stylesheet" href="moviezone.min.css'],
- ['TMDB preconnect', '<link rel="preconnect" href="https://image.tmdb.org"'],
- ['script preloads', '<link rel="preload" href="search-engine.min.js']
+ ['TMDB preconnect', '<link rel="preconnect" href="https://image.tmdb.org"']
 ].forEach(([label, needle]) => {
   const at = html.indexOf(needle);
   console.log('  ' + label.padEnd(20) + 'discovered at byte ' + String(at).padStart(6));
@@ -170,6 +176,32 @@ const OFFSET_BUDGET = 4096;
       'found at byte ' + at + '; the network sits idle while the parser gets there');
   });
 });
+
+/*  This used to hunt for one hard-coded needle, a preload of search-engine.min.js
+ *  that no longer exists — that bundle is a deferred <script> and preloading it
+ *  would put it in the same priority lane as the LCP image for no gain. A missing
+ *  file cannot be "late", so the check was reporting byte -1 forever instead of
+ *  guarding anything.
+ *
+ *  Whatever IS preloaded as a script is what the preload scanner has to reach
+ *  early, so the assertion now derives its subjects from the markup. It covers
+ *  every script preload rather than one name, and it fails if a preload is added
+ *  below the 4 KB mark, which is the failure the original was written for.
+ */
+{
+  const scriptPreloads = [...html.matchAll(/<link rel="preload" href="([^"]+\.js\?[^"]*)" as="script">/g)]
+    .map((m) => ({ url: m[1], at: m.index }));
+  scriptPreloads.forEach((p) => {
+    console.log('  ' + ('preload ' + p.url).padEnd(20) + ' discovered at byte ' + String(p.at).padStart(6));
+  });
+  check('every script preload is discovered within the first ' + (OFFSET_BUDGET / 1024) + ' KB of head', () => {
+    assert.ok(scriptPreloads.length > 0, 'no script preloads found at all');
+    scriptPreloads.forEach((p) => {
+      assert.ok(p.at < OFFSET_BUDGET,
+        p.url + ' is preloaded at byte ' + p.at + '; the network sits idle while the parser gets there');
+    });
+  });
+}
 
 check('charset stays in the first 1024 bytes', () => {
   const at = html.indexOf('<meta charset=');
@@ -205,7 +237,10 @@ console.log('\n-- service worker agrees with the page ' + '-'.repeat(23));
 check('sw.js precaches exactly the URLs index.html requests', () => {
   const pageAssets = [
     ...[...html.matchAll(/<script src="([^"]+\.js\?[^"]*)" defer>/g)].map((m) => m[1]),
-    ...[...html.matchAll(/<link rel="stylesheet" href="([^"]+\.css\?[^"]*)">/g)].map((m) => m[1])
+    // Same reason as the .min.css check above: tv-mode.min.css carries
+    // media/onload attributes because it is deferred, and it still has to be in
+    // the precache list — an offline TV client would otherwise render unstyled.
+    ...[...html.matchAll(/<link rel="stylesheet" href="([^"]+\.css\?[^"]*)"[^>]*>/g)].map((m) => m[1])
   ];
   // 3 scripts + 2 stylesheets. pwa-install used to be a fourth script tag here;
   // it is injected at runtime now and is asserted separately.
