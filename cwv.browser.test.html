@@ -558,8 +558,150 @@
       ok('synchronous cost per renderer is recorded',
         ranked.length > 0,
         ranked.map(function (t) { return t.n + ' ' + t.ms + 'ms/' + t.c + ' calls'; }).join(', '));
-      report();
+      runInteractionChecks(doc, win);
     }, 6000);
+  }
+
+  /*  ══════════════════════════════════════════════════════════════════════
+   *  THE TWO THINGS A NON-SCROLLING, NON-CLICKING LOAD CANNOT SEE
+   *  ══════════════════════════════════════════════════════════════════════
+   *  The load-time CLS above reads ~0.0000 while Datadog RUM reported 0.139 at
+   *  p95, because both real sources need an interaction to happen at all:
+   *
+   *    • #upcoming is filled by an IntersectionObserver, so it only ever
+   *      re-flows once the user has scrolled it into view.
+   *    • .modal-info is filled by openModal's detail response, so it only ever
+   *      re-flows after a card has been tapped.
+   *
+   *  Reserved-vs-final box heights are asserted alongside CLS because they are
+   *  the mechanism: CLS is zero for an off-screen change, but a placeholder
+   *  that does not match its content is a shift waiting for a scroll position.
+   */
+  function runInteractionChecks(doc, win) {
+    var section = doc.getElementById('upcoming');
+    var grid = doc.getElementById('upcomingGrid');
+    if (!section || !grid) {
+      ok('the upcoming section exists to be measured', false, 'no #upcoming / #upcomingGrid');
+      return report();
+    }
+
+    // Put the section on screen first — a shift nobody can see is not a shift.
+    win.scrollTo(0, Math.max(0, section.offsetTop - 200));
+
+    setTimeout(function () {
+      win.__mzCls = 0;
+      win.__mzShifts = [];
+
+      win.loadUpcoming();                       // skeleton paints synchronously
+      var reserved = Math.round(grid.getBoundingClientRect().height);
+      var skeletons = grid.querySelectorAll('.upcoming-skeleton, .skeleton').length;
+
+      var waited = 0;
+      var fill = setInterval(function () {
+        waited += 100;
+        if (grid.querySelector('.upcoming-card') || waited > 15000) {
+          clearInterval(fill);
+          setTimeout(function () {
+            var finalH = Math.round(grid.getBoundingClientRect().height);
+            var cards = grid.querySelectorAll('.upcoming-card').length;
+            var drift = Math.abs(finalH - reserved);
+
+            ok('the upcoming placeholder reserves the height its cards need',
+              cards > 0 && drift <= 80,
+              skeletons + ' skeletons reserved ' + reserved + 'px, ' + cards +
+              ' cards rendered ' + finalH + 'px (drift ' + drift + 'px)');
+            ok('one skeleton is painted per card the first fill renders',
+              skeletons === Math.min(12, cards) || (cards === 0 && skeletons === 12),
+              skeletons + ' skeletons vs ' + cards + ' cards');
+            ok('filling #upcoming in view keeps CLS in the "good" band',
+              win.__mzCls < 0.1,
+              'CLS=' + win.__mzCls.toFixed(4) +
+              (win.__mzShifts.length ? ' | ' + JSON.stringify(win.__mzShifts.slice(-3)) : ''));
+
+            runModalChecks(doc, win);
+          }, 1500);
+        }
+      }, 100);
+    }, 600);
+  }
+
+  function runModalChecks(doc, win) {
+    var card = doc.querySelector('#movieGrid .movie-card');
+    var meta = doc.getElementById('modalMeta');
+    if (!card || !meta) {
+      ok('a card and the modal exist to be measured', false, 'card=' + !!card + ' meta=' + !!meta);
+      return report();
+    }
+
+    win.scrollTo(0, 0);
+    setTimeout(function () {
+      win.__mzCls = 0;
+      win.__mzShifts = [];
+
+      /*  claimExplicitDetailActivation() only accepts a trusted activation, and
+       *  a headless run has no way to produce one. It reads plain properties off
+       *  whatever it is handed, so a keydown-shaped object takes the same branch
+       *  a real Enter press would — the code under test is unchanged. */
+      function activation() {
+        return { isTrusted: true, type: 'keydown', key: 'Enter', repeat: false };
+      }
+      function openOnce() {
+        var t = win.performance.now();
+        win.openModal(Number(card.dataset.id), card.dataset.type || 'movie', activation());
+        return Math.round(win.performance.now() - t);
+      }
+
+      /*  One sample is worthless here: the first open also pays for compiling
+       *  everything it touches and for the modal's very first layout, and it
+       *  swung between 7ms and 101ms across runs on the same code. Three opens
+       *  are taken and the median is asserted, with the cold sample reported
+       *  next to it so a regression in either is visible. */
+      var samples = [openOnce()];
+      var titleAtOpen = (doc.getElementById('modalTitle').textContent || '').trim();
+      var metaReserved = Math.round(meta.getBoundingClientRect().height);
+      var infoEl = doc.querySelector('.modal-info');
+      var infoReserved = Math.round(infoEl ? infoEl.getBoundingClientRect().height : 0);
+      try { win.closeModal(); samples.push(openOnce()); } catch (e) {}
+      try { win.closeModal(); samples.push(openOnce()); } catch (e) {}
+      var median = samples.slice().sort(function (a, b) { return a - b; })[Math.floor(samples.length / 2)];
+
+      ok('opening the modal does not block the interaction',
+        median < 200,
+        'median ' + median + 'ms of synchronous work in the click handler (samples ' +
+        samples.join('/') + 'ms)');
+      ok('the modal title paints its real text, not "Loading..."',
+        titleAtOpen.length > 0 && titleAtOpen !== 'Loading...',
+        'title at open: "' + titleAtOpen.slice(0, 60) + '"');
+
+      var waited = 0;
+      var fill = setInterval(function () {
+        waited += 100;
+        if (meta.querySelector('.modal-meta-badges') || waited > 15000) {
+          clearInterval(fill);
+          setTimeout(function () {
+            var metaFinal = Math.round(meta.getBoundingClientRect().height);
+            var infoFinal = Math.round(infoEl ? infoEl.getBoundingClientRect().height : 0);
+            var titleFinal = (doc.getElementById('modalTitle').textContent || '').trim();
+
+            ok('the modal meta block does not resize when the details land',
+              Math.abs(metaFinal - metaReserved) <= 60,
+              'reserved ' + metaReserved + 'px, filled ' + metaFinal + 'px');
+            ok('the modal info column does not resize when the details land',
+              Math.abs(infoFinal - infoReserved) <= 80,
+              'reserved ' + infoReserved + 'px, filled ' + infoFinal + 'px');
+            ok('the seeded title matches the one the details return',
+              titleAtOpen === titleFinal,
+              'at open "' + titleAtOpen.slice(0, 40) + '" vs final "' + titleFinal.slice(0, 40) + '"');
+            ok('opening a modal keeps CLS in the "good" band',
+              win.__mzCls < 0.1,
+              'CLS=' + win.__mzCls.toFixed(4) +
+              (win.__mzShifts.length ? ' | ' + JSON.stringify(win.__mzShifts.slice(-3)) : ''));
+
+            report();
+          }, 1200);
+        }
+      }, 100);
+    }, 400);
   }
 })();
 </script>

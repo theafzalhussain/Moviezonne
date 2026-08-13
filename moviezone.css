@@ -3309,6 +3309,17 @@ html[data-mz-tv="true"] .cat-group-menu {
   aspect-ratio: 2/3.6;
 }
 
+/*  The upcoming grid does NOT use poster-shaped cards — its cards are a 185px
+ *  16:9 still plus a fixed info block. Reserving them with .skeleton-card
+ *  (aspect-ratio 2/3.6) meant the placeholder was ~1.8x the column width tall
+ *  while the real card is ~370px, so the section resized the moment the cards
+ *  landed and pushed the whole footer down. This mirrors .upcoming-card's box
+ *  exactly instead. */
+.upcoming-skeleton {
+  height: 370px;
+  aspect-ratio: auto;
+}
+
 
 /* ═══════════════════════════════════════════════════════════════
    UPCOMING SECTION
@@ -3326,6 +3337,12 @@ html[data-mz-tv="true"] .cat-group-menu {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(285px, 1fr));
   gap: 1.25rem;
+  /*  Fixed row height, so the grid's final height is a pure function of the
+   *  card count. That is what lets .upcoming-skeleton reserve the exact space
+   *  the real cards will take: 185px still + 185px info block. Without it a
+   *  single long title in a row grew that row and re-flowed everything below
+   *  the section. `auto` is kept as the max so nothing can ever be clipped. */
+  grid-auto-rows: minmax(370px, auto);
 }
 
 .upcoming-card {
@@ -3407,6 +3424,8 @@ html[data-mz-tv="true"] .cat-group-menu {
   padding: 1.05rem 1.1rem 0.9rem;
   flex: 1;
   transform: translateZ(25px);
+  /* Pairs with .upcoming-grid's 370px row: 185px still + 185px here. */
+  min-height: 185px;
 }
 
 .upcoming-title {
@@ -3415,6 +3434,15 @@ html[data-mz-tv="true"] .cat-group-menu {
   color: var(--text);
   margin-bottom: 0.5rem;
   letter-spacing: 0.1px;
+  /*  A title that wrapped to a second line made its card — and therefore its
+   *  whole grid row — taller than its neighbours. Held at a two-line box so
+   *  every card in the section is the same height. */
+  line-height: 1.35;
+  min-height: 2.7em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .upcoming-meta {
@@ -4225,6 +4253,48 @@ html[data-mz-tv="true"] .cat-group-menu {
   transition: transform 0.4s ease;
 }
 
+/*  ── MODAL LOADING SKELETON ─────────────────────────────────────────────
+ *  openModal paints these into #modalMeta while the detail request is in
+ *  flight. They exist so the loading state occupies the same box as the
+ *  loaded state — a 28px spinner in a 300px slot was a 270px jump. Sizes
+ *  mirror .modal-meta-badges / .modal-genres-row / .modal-cast-row. */
+.modal-meta-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.modal-skel-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.modal-skel-chip {
+  height: 30px;
+  width: 88px;
+  border-radius: 10px;
+  flex: none;
+}
+
+.modal-skel-chip--wide {
+  width: 132px;
+}
+
+.modal-skel-line {
+  height: 16px;
+  width: 62%;
+  border-radius: 6px;
+}
+
+.modal-skel-face {
+  height: 48px;
+  width: 118px;
+  border-radius: 12px;
+  flex: none;
+}
+
 .modal-meta {
   display: flex;
   flex-direction: column;
@@ -4236,11 +4306,26 @@ html[data-mz-tv="true"] .cat-group-menu {
   scrollbar-color: rgba(245, 197, 24, 0.2) transparent;
   transition: opacity 0.4s ease, max-height 0.5s ease, margin 0.4s ease, padding 0.4s ease;
   padding: 2px 0;
+  /*  THE modal CLS source. This block is empty while /movie/{id} is in flight
+   *  and then fills with badges + genres + tagline + crew + an 8-face cast row
+   *  — roughly 300px arriving in one paint, which used to push the overview,
+   *  the action buttons and the whole video block down the page. A floor that
+   *  matches the loaded height (and the skeleton openModal paints into it)
+   *  keeps the box the same size before and after, and anything taller than
+   *  the 380px cap scrolls here rather than re-flowing the modal.
+   *
+   *  The floor is the cap on purpose: a released title always comes back with
+   *  rating, year, runtime, genres, a tagline and a cast row, which overflows
+   *  380px on every viewport measured — so "reserve the cap" is the same thing
+   *  as "reserve what it will actually be", and it is the only value that is
+   *  exact rather than approximate. */
+  min-height: 380px;
 }
 
 .modal-meta.meta-hidden {
   opacity: 0;
   max-height: 0 !important;
+  min-height: 0 !important;
   margin-bottom: 0;
   padding: 0;
   overflow: hidden;

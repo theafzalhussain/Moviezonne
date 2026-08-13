@@ -4837,7 +4837,13 @@ async function loadUpcoming(isLoadMore = false) {
   
   if (!isLoadMore) {
     currentUpcomingPage = 1;
-    grid.innerHTML = Array(4).fill('<div class="skeleton skeleton-card"></div>').join('');
+    /*  CLS — the placeholder count and shape have to match what actually
+     *  renders below (allUpcoming.slice(0, 12)), because this section is
+     *  filled from an IntersectionObserver, i.e. exactly when it is on
+     *  screen. Four poster-shaped .skeleton-cards reserved roughly half the
+     *  height twelve 370px cards then needed, so the section grew under the
+     *  user and dragged the footer with it. */
+    grid.innerHTML = Array(12).fill('<div class="skeleton upcoming-skeleton" aria-hidden="true"></div>').join('');
     allUpcoming = [];
   } else {
     currentUpcomingPage++;
@@ -5828,6 +5834,64 @@ function closeDropdown() {
   searchActiveIndex = -1;
 }
 
+/*  ══════════════════════════════════════════════════════════════════════
+ *  MODAL FIRST PAINT
+ *  ══════════════════════════════════════════════════════════════════════
+ *  The modal opens instantly and only then awaits /{type}/{id}. That is the
+ *  right call for responsiveness, but it used to paint "Loading..." into the
+ *  3.2rem title and a one-line string into the overview, then swap both for
+ *  text of a completely different height — the single largest layout shift a
+ *  session could record (Datadog RUM attributed CLS 0.215 to
+ *  #modalBox > .modal-info).
+ *
+ *  Every feed this modal is opened from already holds the title AND the
+ *  overview: they are fields on the TMDB list objects the cards were built
+ *  from. Seeding the two text blocks from that data means the first paint is
+ *  already the final text, so nothing re-lines when the detail response lands
+ *  — only the meta block below fills in, and .modal-meta reserves that.
+ *
+ *  Deep links (#watch-movie-123 with a cold feed) find nothing and fall back
+ *  to the placeholder, which is why the placeholder is kept.
+ */
+function findSeededTitleData(id) {
+  const numericId = Number(id);
+  if (!numericId) return null;
+  const pools = [
+    typeof carouselMovies !== 'undefined' ? carouselMovies : null,
+    typeof allMovies !== 'undefined' ? allMovies : null,
+    typeof allUpcoming !== 'undefined' ? allUpcoming : null,
+    typeof watchlist !== 'undefined' ? watchlist : null
+  ];
+  for (const pool of pools) {
+    if (!Array.isArray(pool)) continue;
+    const hit = pool.find(m => m && Number(m.id) === numericId);
+    if (hit && (hit.title || hit.name)) return hit;
+  }
+  return null;
+}
+
+/*  The loading state for #modalMeta. Shaped like the badges + genres +
+ *  tagline + cast rows that replace it, so the box does not resize on fill. */
+function modalMetaSkeleton() {
+  return '<div class="modal-meta-skeleton" aria-hidden="true">' +
+    '<div class="modal-skel-row">' +
+      '<div class="skeleton modal-skel-chip modal-skel-chip--wide"></div>' +
+      '<div class="skeleton modal-skel-chip"></div>' +
+      '<div class="skeleton modal-skel-chip"></div>' +
+    '</div>' +
+    '<div class="modal-skel-row">' +
+      '<div class="skeleton modal-skel-chip"></div>' +
+      '<div class="skeleton modal-skel-chip"></div>' +
+    '</div>' +
+    '<div class="skeleton modal-skel-line"></div>' +
+    '<div class="modal-skel-row">' +
+      '<div class="skeleton modal-skel-face"></div>' +
+      '<div class="skeleton modal-skel-face"></div>' +
+      '<div class="skeleton modal-skel-face"></div>' +
+    '</div>' +
+  '</div>';
+}
+
 /* ------------------------------------------------------------------ *
  * SEO: makes the Google "sitelinks searchbox" schema real.
  * https://moviezone.dev/?search=jawan  -> runs that search on load.
@@ -5875,11 +5939,17 @@ async function openModal(id, type = 'movie', activationEvent) {
   if (!overlay) return;
  
   // 1. INSTANT UI OPEN (Bina backend wait kiye instantly page open karo)
+  /*  INP — the scroll reset comes BEFORE the class flip on purpose. The overlay
+   *  is display:none until .open lands, so writing scrollTop here is free;
+   *  writing it afterwards forced a full synchronous layout of the entire modal
+   *  subtree inside the click handler, which was the most expensive single thing
+   *  the interaction did. primePlayerSurface() repeats it after the paint for
+   *  engines that restore a remembered offset. */
+  overlay.scrollTop = 0;
   overlay.classList.add('open');
   if (!isMzTV()) {
     document.body.style.overflow = 'hidden';
   }
-  overlay.scrollTop = 0;
  
   const titleEl = document.getElementById('modalTitle');
   const descEl = document.getElementById('modalDesc');
@@ -5887,9 +5957,10 @@ async function openModal(id, type = 'movie', activationEvent) {
   const metaEl = document.getElementById('modalMeta');
   const embedEl = document.getElementById('videoEmbed');
   
-  if (titleEl) titleEl.textContent = 'Loading...';
-  if (descEl) descEl.textContent = 'Fetching high-speed servers...';
-  if (metaEl) metaEl.innerHTML = '<div class="player-spinner" style="width:28px; height:28px; border-width:3px; margin: 5px 0;"></div>';
+  const seeded = findSeededTitleData(id);
+  if (titleEl) titleEl.textContent = (seeded && (seeded.title || seeded.name)) || 'Loading...';
+  if (descEl) descEl.textContent = (seeded && seeded.overview) || 'Fetching high-speed servers...';
+  if (metaEl) metaEl.innerHTML = modalMetaSkeleton();
   if (bgEl) {
     bgEl.src = '';
     bgEl.classList.remove('blur-in');
@@ -5939,6 +6010,12 @@ async function openModal(id, type = 'movie', activationEvent) {
   } catch(e){}
  
   try {
+    /*  tmdb() is only async after its cache lookups: it does a synchronous
+     *  localStorage.getItem plus a JSON.parse of a 20-50 KB payload before it
+     *  ever awaits, and for this endpoint (append_to_response=videos,credits)
+     *  that is ~70ms. It is already off the interaction because the
+     *  mzYieldToPaint() above committed the frame first — worth knowing before
+     *  anything is moved back above that boundary. */
     const details = await tmdb('/'+type+'/'+id, { language: 'en-US', append_to_response: 'videos,credits' });
 
     /*  TMDB has no record for this id — confirmed 404, already logged silently by
