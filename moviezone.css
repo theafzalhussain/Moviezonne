@@ -4984,6 +4984,52 @@ html[data-mz-tv="true"] .cat-group-menu {
   scroll-snap-align: start;
 }
 
+/* ── Related-row placeholder ──────────────────────────────────────────────
+   Shares .movie-card so it inherits the exact width, padding and typography
+   of the card that replaces it; only the inner fills are greyed out. Sized in
+   the flow rather than by fixed pixel heights, so it stays correct at every
+   breakpoint without a second set of numbers to maintain. */
+.related-slider .mz-related-skel {
+  pointer-events: none;
+}
+
+/* The placeholder is the real card with its text greyed out, not a set of
+   stand-in boxes. Titles clamp at two lines, the rating/year chips wrap to a
+   second row inside a 170px card, and every one of those boxes is formed by
+   the element's own font metrics — restating them as pixel heights was off by
+   40-50px at desktop widths and needed a new number at every breakpoint. */
+.related-slider .mz-related-skel .mz-skel-text {
+  color: transparent !important;
+  background: linear-gradient(90deg,
+    rgba(255, 255, 255, 0.045) 25%,
+    rgba(255, 255, 255, 0.085) 50%,
+    rgba(255, 255, 255, 0.045) 75%) !important;
+  background-size: 250% 100% !important;
+  border-color: transparent !important;
+  border-radius: 6px;
+  user-select: none;
+}
+
+.related-slider .mz-related-skel .mz-skel-poster {
+  display: block;
+  width: 100%;
+  aspect-ratio: 170 / 255;
+  border-radius: 12px;
+  background: linear-gradient(90deg,
+    rgba(255, 255, 255, 0.045) 25%,
+    rgba(255, 255, 255, 0.085) 50%,
+    rgba(255, 255, 255, 0.045) 75%);
+  background-size: 250% 100%;
+}
+
+/* Phones paint a 213-241px info column once title + meta + overview land;
+   the shared 200px floor left a few px of shift on every modal open. */
+@media (max-width: 768px) {
+  .modal-info {
+    min-height: 240px;
+  }
+}
+
 .related-slider .movie-card .card-poster img {
   width: 170px;
   height: 255px;
