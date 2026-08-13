@@ -69,6 +69,20 @@ const VOLATILE_CATEGORY_SLUGS = new Set([
 const SITEMAP_CACHE_FILE = path.join(__dirname, 'sitemap-cache.json');
 const SITEMAP_CHUNK_SIZE = 5000;
 
+/*  How many shards past the current count still answer with an empty urlset
+ *  instead of 404.
+ *
+ *  The catalogue sits close to SITEMAP_CHUNK_SIZE and crosses it in both
+ *  directions between refreshes (4962 -> 5024 -> 5034 -> 4722 over four runs),
+ *  so the trailing shard appears and disappears. Once Google has read
+ *  /sitemap-movies-2.xml it keeps asking for it, and a 404 on a sitemap it
+ *  already knows is reported as an error in Search Console rather than being
+ *  dropped quietly. An empty urlset is the documented way to retire a sitemap:
+ *  it parses, it reports zero URLs, and Google releases what it had listed
+ *  there. Bounded so the route cannot become an unbounded crawl space.
+ */
+const SITEMAP_RETIRED_SHARD_WINDOW = 4;
+
 // A-Z hubs turn the catalogue into a flat index: any title is 2 clicks from
 // the homepage instead of sitting 25 pages deep in a prev/next chain.
 const BROWSE_LETTERS = 'abcdefghijklmnopqrstuvwxyz'.split('').concat(['0-9']);
@@ -1982,7 +1996,18 @@ async function collectSitemapItems(tmdb, kind, pagesPerEndpoint) {
  */
 function releaseLastmod(item) {
   const raw = String((item && (item.release_date || item.first_air_date || item.lastmod)) || '').slice(0, 10);
-  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : SITEMAP_FALLBACK_DATE;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return SITEMAP_FALLBACK_DATE;
+
+  /*  lastmod is "when this page last changed", and release_date is a premiere
+   *  date — for an unreleased title that is ahead of today, which was putting
+   *  dates as far out as 2028 into the file for 80 entries.
+   *
+   *  Google treats a future lastmod as invalid and discards it, so the entry
+   *  ends up with no freshness signal at all. Clamping to today keeps the
+   *  signal and stays truthful: the page really was regenerated today.
+   */
+  const now = today();
+  return raw > now ? now : raw;
 }
 
 let sitemapCacheMemo = null;
@@ -2240,7 +2265,14 @@ function registerSeoRoutes(app, deps) {
       const all = fileCache[kind];
       const chunks = Math.ceil(all.length / SITEMAP_CHUNK_SIZE);
       const index = Number.isFinite(chunk) ? chunk : 1;
-      if (index < 1 || index > Math.max(1, chunks)) return res.status(404).end();
+      const live = Math.max(1, chunks);
+      if (index < 1) return res.status(404).end();
+      // A shard the catalogue has shrunk past is retired, not missing — see
+      // SITEMAP_RETIRED_SHARD_WINDOW. Beyond the window it never existed.
+      if (index > live) {
+        if (index > live + SITEMAP_RETIRED_SHARD_WINDOW) return res.status(404).end();
+        return sendXml(res, buildMediaSitemap([], kind));
+      }
       const slice = chunks > 1
         ? all.slice((index - 1) * SITEMAP_CHUNK_SIZE, index * SITEMAP_CHUNK_SIZE)
         : all;
