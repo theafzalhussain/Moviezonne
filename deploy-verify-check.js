@@ -25,6 +25,29 @@ function get(path) {
   });
 }
 
+/*  The bundle versions are read out of the local index.html rather than written
+ *  in here. Pinned literals (they said v7.6 and v5.5) turn this check into a
+ *  countdown: it passes until the next cache-bust and then reports "not
+ *  deployed" on a deploy that is perfectly fine, which is worse than not
+ *  checking at all — 33/2 trains you to ignore the summary line.
+ *
+ *  Derived from the build, the assertion also gets sharper: it now fails when
+ *  the live HTML serves a DIFFERENT version from the one this checkout builds,
+ *  which is the actual thing worth catching — a CDN still handing out the
+ *  previous bundle. Missing tags are covered separately by asset-perf-check.
+ */
+const localIndexHtml = require('fs').readFileSync(require('path').join(__dirname, 'index.html'), 'utf8');
+function builtVersionOf(asset) {
+  const m = new RegExp(asset.replace(/\./g, '\\.') + '\\?v=([\\d.]+)').exec(localIndexHtml);
+  if (!m) {
+    console.error('FAILED: ' + asset + ' has no ?v= tag in the local index.html');
+    process.exit(1);
+  }
+  return m[1];
+}
+const JS_VERSION = builtVersionOf('moviezone.min.js');
+const CSS_VERSION = builtVersionOf('moviezone.min.css');
+
 // [label, regex, expectedPresent]
 const HTML_MARKS = [
   ['self-hosted fonts preloaded',        /<link rel="preload" href="\/fonts\/outfit-latin-var\.woff2"/, true],
@@ -39,8 +62,10 @@ const HTML_MARKS = [
   ['hero LCP hint reader',               /localStorage\.getItem\('mz_hero_lcp'\)/, true],
   ['pwa-install off critical path',      /<script src="pwa-install\.min\.js[^>]*defer>/, false],
   ['pwa-install lazy loader present',    /__mzLoadPwaInstall/, true],
-  ['moviezone.min.js at v7.6',           /moviezone\.min\.js\?v=7\.6/, true],
-  ['moviezone.min.css at v5.5',          /moviezone\.min\.css\?v=5\.5/, true],
+  ['moviezone.min.js at the built version (v' + JS_VERSION + ')',
+    new RegExp('moviezone\\.min\\.js\\?v=' + JS_VERSION.replace(/\./g, '\\.')), true],
+  ['moviezone.min.css at the built version (v' + CSS_VERSION + ')',
+    new RegExp('moviezone\\.min\\.css\\?v=' + CSS_VERSION.replace(/\./g, '\\.')), true],
   ['idle lazy->eager hack removed',      /if \(i < 4\) img\.loading = 'eager'/, false]
 ];
 
