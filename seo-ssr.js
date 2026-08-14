@@ -91,7 +91,35 @@ const SITEMAP_CHUNK_SIZE = 2000;
 // A-Z hubs turn the catalogue into a flat index: any title is 2 clicks from
 // the homepage instead of sitting 25 pages deep in a prev/next chain.
 const BROWSE_LETTERS = 'abcdefghijklmnopqrstuvwxyz'.split('').concat(['0-9']);
-const BROWSE_PER_PAGE = 120;
+
+/*  Sized so every letter fits on one page, which is what makes the 2-clicks
+ *  promise above actually true.
+ *
+ *  At 120 it was not true for most of the catalogue. Only the first 120 titles
+ *  per letter sat at depth 2; the remaining 5,034 of 7,924 (63.5%) were on
+ *  ?page=N sub-pages, i.e. depth 3, each reachable by exactly one link from a
+ *  paginated hub that sitemap-browse.xml does not list. That is the shape that
+ *  produces "Discovered - currently not indexed" in bulk: not orphaned, but one
+ *  weak link deep behind a page Google has little reason to re-crawl.
+ *
+ *  The largest letter is T at 1,043 titles, rendering a 96 KB page (~13 KB
+ *  gzipped) with 1,043 links. Google's own limit is around 15 MB of HTML, and
+ *  the "100 links per page" guidance was retired years ago, so a flat index
+ *  page of this size is well within what a hub page may carry.
+ *
+ *  Not unbounded, deliberately: the pager below stays as an overflow valve so a
+ *  catalogue that grows several times over degrades to today's behaviour rather
+ *  than serving a megabyte of anchors. 1500 leaves T 44% headroom, and the
+ *  catalogue as a whole has only moved between 7,924 and 8,285 in practice.
+ *
+ *  Kept off sitemap-browse.xml on purpose. Per-letter page counts are unstable
+ *  in exactly the way SITEMAP_CHUNK_SIZE was - C sits 1 title above a boundary,
+ *  0-9 six above, N eight - so listing ?page=N would submit URLs that 301 to
+ *  page 1 the moment a letter shrinks. That is the defect this file already
+ *  fixed once for the media shards; there is no reason to reintroduce it when
+ *  making the pages exhaustive removes the need entirely.
+ */
+const BROWSE_PER_PAGE = 1500;
 
 // TMDB genre ids → display names (discover endpoints return ids, not names).
 const GENRE_NAMES = {
@@ -2594,6 +2622,7 @@ module.exports = {
   watchProvidersIN,
   buildFaq,
   BROWSE_LETTERS,
+  BROWSE_PER_PAGE,
   SITEMAP_FALLBACK_DATE,
   SITEMAP_MIN_LASTMOD,
   isCalendarDate,
