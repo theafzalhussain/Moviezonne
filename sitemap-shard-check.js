@@ -49,6 +49,14 @@ function writeCache(movieCount, tvCount, opts = {}) {
   const tv = Array.from({ length: tvCount }, (_, i) => mk(i, 700000));
   if (opts.future) movie[0] = { id: 999001, title: 'Future Premiere', lastmod: '2028-03-16' };
   if (opts.past) movie[1] = { id: 999002, title: 'Old Film', lastmod: '1999-01-02' };
+  // Real catalogue entries: Au Bonheur des Dames (1930) and Tagesschau (1952)
+  // are the kind of title that produced the 278 + 72 "Invalid date" errors.
+  if (opts.preEpoch) movie[2] = { id: 999003, title: 'Silent Era Film', lastmod: '1930-07-03' };
+  if (opts.preEpoch) movie[3] = { id: 999004, title: 'Epoch Edge', lastmod: '1970-01-01' };
+  if (opts.preEpoch) movie[4] = { id: 999005, title: 'Day Before Epoch', lastmod: '1969-12-31' };
+  // Passes a \d{4}-\d{2}-\d{2} regex, is not a day that exists.
+  if (opts.preEpoch) movie[5] = { id: 999006, title: 'Impossible Day', lastmod: '2019-11-31' };
+  if (opts.preEpoch) movie[6] = { id: 999007, title: 'Zeroed Month', lastmod: '2015-00-00' };
   fs.writeFileSync(CACHE, JSON.stringify({ movie, tv }));
 }
 
@@ -110,7 +118,7 @@ const childSitemaps = (xml) => [...xml.matchAll(/<loc>https?:\/\/[^/]+([^<]+)<\/
 
     // ── 2. everything the index advertises is fetchable and non-empty ──
     console.log('\n2. every advertised sitemap is fetchable and non-empty');
-    writeCache(4722, 3284, { future: true, past: true });
+    writeCache(4722, 3284, { future: true, past: true, preEpoch: true });
     let seo = loadSeo();
     let s = await serve(seo);
     let port = s.address().port;
@@ -171,6 +179,64 @@ const childSitemaps = (xml) => [...xml.matchAll(/<loc>https?:\/\/[^/]+([^<]+)<\/
       const row = all.split('\n').find((l) => l.includes('/movie/999002'));
       assert.ok(row, 'past-dated entry missing from the shards');
       assert.match(row, /<lastmod>1999-01-02<\/lastmod>/);
+    });
+
+    /*  ── 4b. lastmod is never before the epoch ──
+     *
+     *  This is what the 278 + 72 "Invalid date" errors actually were. Google
+     *  reads lastmod as a W3C datetime, which cannot represent a date before
+     *  1970-01-01, so every classic title shipped an unusable value. The
+     *  future-date clamp above covered a different 81 entries and left these
+     *  313 untouched.
+     */
+    console.log('\n4b. lastmod is never before the epoch, and always a real day');
+    const FALLBACK = seo.SITEMAP_FALLBACK_DATE;
+    // Literal, not seo.SITEMAP_MIN_LASTMOD: comparing against an undefined
+    // export makes `d < undefined` false for every date, so the assertion would
+    // pass on exactly the code it is meant to catch.
+    const EPOCH = '1970-01-01';
+    // Local copy for the same reason — the guard must not be able to pass by
+    // accident if the helper stops being exported.
+    const isRealDay = (v) => {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+      if (!m) return false;
+      const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+      return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3];
+    };
+    ok('SITEMAP_MIN_LASTMOD is exported and is the epoch', () =>
+      assert.strictEqual(seo.SITEMAP_MIN_LASTMOD, EPOCH));
+    ok('no lastmod before 1970-01-01 across every shard', () => {
+      const dates = [...all.matchAll(/<lastmod>([^<]+)<\/lastmod>/g)].map((m) => m[1]);
+      assert.ok(dates.length > 0, 'expected lastmod values');
+      const preEpoch = dates.filter((d) => d < EPOCH);
+      assert.strictEqual(preEpoch.length, 0, 'pre-epoch dates: ' + preEpoch.slice(0, 3));
+    });
+    ok('every lastmod is a date that exists on the calendar', () => {
+      const dates = [...all.matchAll(/<lastmod>([^<]+)<\/lastmod>/g)].map((m) => m[1]);
+      const unreal = dates.filter((d) => !isRealDay(d));
+      assert.strictEqual(unreal.length, 0, 'not real dates: ' + unreal.slice(0, 3));
+    });
+    const lastmodOf = (id) => {
+      const row = all.split('\n').find((l) => l.includes('/movie/' + id));
+      assert.ok(row, 'entry ' + id + ' missing from the shards');
+      const m = /<lastmod>([^<]+)<\/lastmod>/.exec(row);
+      assert.ok(m, 'entry ' + id + ' carries no lastmod');
+      return m[1];
+    };
+    ok('the 1930 premiere falls back to the template date', () =>
+      assert.strictEqual(lastmodOf(999003), FALLBACK));
+    ok('1970-01-01 itself is accepted unchanged', () =>
+      assert.strictEqual(lastmodOf(999004), '1970-01-01'));
+    ok('1969-12-31 falls back — the boundary is inclusive of the epoch only', () =>
+      assert.strictEqual(lastmodOf(999005), FALLBACK));
+    ok('a date that passes the regex but is not a real day falls back', () =>
+      assert.strictEqual(lastmodOf(999006), FALLBACK));
+    ok('a zeroed month/day falls back', () =>
+      assert.strictEqual(lastmodOf(999007), FALLBACK));
+    ok('every entry still carries a lastmod (none dropped by the clamp)', () => {
+      const urls = urlCount(all);
+      const dates = (all.match(/<lastmod>/g) || []).length;
+      assert.strictEqual(dates, urls, urls + ' urls but ' + dates + ' lastmod values');
     });
     await new Promise((r) => s.close(r));
 

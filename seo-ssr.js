@@ -1995,13 +1995,56 @@ async function collectSitemapItems(tmdb, kind, pagesPerEndpoint) {
   return Array.from(seen.values());
 }
 
+/*  The oldest <lastmod> Google's sitemap parser will accept.
+ *
+ *  Search Console reported "Invalid date" on 278 URLs in /sitemap-movies.xml and
+ *  72 in /sitemap-tv.xml. Those two numbers are exactly the count of URLs in
+ *  each file whose lastmod fell before 1970-01-01 — 278 and 72, not off by one.
+ *  Google reads lastmod as a W3C datetime, which has no representation before
+ *  the epoch, so a genuine premiere date like Tagesschau's 1952-12-26 or
+ *  Au Bonheur des Dames' 1930-07-03 is rejected outright.
+ *
+ *  This is a separate defect from the future-date clamp below and was not
+ *  addressed by it: future dates accounted for 79 movie and 2 TV entries, which
+ *  never matched the reported counts.
+ */
+const SITEMAP_MIN_LASTMOD = '1970-01-01';
+
+/**
+ * True only for a date that exists on the calendar.
+ *
+ * A regex on \d{4}-\d{2}-\d{2} happily passes 2019-11-31 and 2015-00-00, and
+ * Google rejects both as invalid dates — the same failure class as the
+ * pre-epoch dates above, so it is screened here rather than left to chance.
+ */
+function isCalendarDate(value) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!m) return false;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const dt = new Date(Date.UTC(year, month - 1, day));
+  return dt.getUTCFullYear() === year
+    && dt.getUTCMonth() === month - 1
+    && dt.getUTCDate() === day;
+}
+
 /**
  * A title's real last-meaningful-change date. Falls back to the hand-bumped
  * constant rather than today() so the value stays stable between crawls.
  */
 function releaseLastmod(item) {
   const raw = String((item && (item.release_date || item.first_air_date || item.lastmod)) || '').slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return SITEMAP_FALLBACK_DATE;
+  if (!isCalendarDate(raw)) return SITEMAP_FALLBACK_DATE;
+
+  /*  Pre-epoch premieres fall back to the template date rather than being
+   *  clamped up to 1970-01-01. Both would parse, but "this page last changed in
+   *  1970" is a dead freshness signal on a page that is regenerated on every
+   *  deploy, and it is not true either. The fallback is the same value the ~119
+   *  titles with no release date at all already carry, so classic films and
+   *  undated titles now agree instead of one group being silently dropped.
+   */
+  if (raw < SITEMAP_MIN_LASTMOD) return SITEMAP_FALLBACK_DATE;
 
   /*  lastmod is "when this page last changed", and release_date is a premiere
    *  date — for an unreleased title that is ahead of today, which was putting
@@ -2552,6 +2595,8 @@ module.exports = {
   buildFaq,
   BROWSE_LETTERS,
   SITEMAP_FALLBACK_DATE,
+  SITEMAP_MIN_LASTMOD,
+  isCalendarDate,
   // exported for tests
   esc,
   escXml,
