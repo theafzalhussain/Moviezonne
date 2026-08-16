@@ -82,6 +82,53 @@ console.log('  saving vs shipping sources: ' + kb(rawSrc - rawMin) + ' raw, '
   + Math.round((1 - rawMin / rawSrc) * 100) + '% / '
   + Math.round((1 - gzMin / gzSrc) * 100) + '%)');
 
+/*  ── FIRST-PAINT BUDGETS ──
+ *  Measured, not assumed: the CDN serves every one of these with
+ *  `content-encoding: br` (verified against the live host), so brotli is the
+ *  number a real visitor pays, and gzip above only exists for comparison.
+ *
+ *  Today: index.html 21KB + moviezone.min.css 27KB + moviezone.min.js 50KB =
+ *  98KB brotli. At 1.5 Mbps that is ~0.5s of download, which is why "make the
+ *  bundle smaller over the wire" is NOT this page's problem and never was.
+ *
+ *  The second budget is the one that hurts: a browser decompresses and then
+ *  PARSES the full 179KB of CSS and 227KB of JS on every cold visit, and does a
+ *  style recalculation against every one of those rules. Chrome coverage says a
+ *  desktop first load uses 44KB of that CSS (25%) and executes 56KB of that JS
+ *  (25%). On a 6x-throttled TV the same work shows up as ~2.4s of style recalc.
+ *  So the ceiling here is on parse weight, and it is the number to watch if the
+ *  bundles ever start growing again.
+ *
+ *  Both budgets have deliberate headroom: they are regression alarms, not a
+ *  demand to shrink today.
+ */
+const brotliOf = (p) => zlib.brotliCompressSync(fs.readFileSync(p), {
+  params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 }
+}).length;
+
+const CRITICAL_WIRE_BUDGET = 115 * 1024;
+const CRITICAL_PARSE_BUDGET = 430 * 1024;
+
+check('the first-paint transfer stays inside its brotli budget', () => {
+  const parts = ['index.html', 'moviezone.min.css', 'moviezone.min.js'];
+  const total = parts.reduce((sum, f) => sum + brotliOf(f), 0);
+  console.log('          brotli on the wire: '
+    + parts.map((f) => f.replace('moviezone.min.', '') + ' ' + kb(brotliOf(f))).join(' + ')
+    + ' = ' + kb(total) + ' / ' + kb(CRITICAL_WIRE_BUDGET) + ' budget');
+  assert.ok(total <= CRITICAL_WIRE_BUDGET,
+    'first paint now transfers ' + kb(total) + ', over the ' + kb(CRITICAL_WIRE_BUDGET) + ' budget');
+});
+
+check('the browser is not asked to parse more than it can afford', () => {
+  const parse = fs.statSync('moviezone.min.css').size + fs.statSync('moviezone.min.js').size;
+  console.log('          parse weight: css ' + kb(fs.statSync('moviezone.min.css').size)
+    + ' + js ' + kb(fs.statSync('moviezone.min.js').size)
+    + ' = ' + kb(parse) + ' / ' + kb(CRITICAL_PARSE_BUDGET) + ' budget');
+  assert.ok(parse <= CRITICAL_PARSE_BUDGET,
+    'render-critical parse weight is ' + kb(parse) + ', over the ' + kb(CRITICAL_PARSE_BUDGET)
+      + ' budget — this is what costs weak devices their style-recalc time');
+});
+
 console.log('\n-- index.html references the built bundles ' + '-'.repeat(19));
 
 for (const name of SCRIPTS) {
