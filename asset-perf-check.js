@@ -129,6 +129,47 @@ check('the browser is not asked to parse more than it can afford', () => {
       + ' budget — this is what costs weak devices their style-recalc time');
 });
 
+/*  ── THE MAIN STYLESHEET STAYS RENDER-BLOCKING. THIS WAS MEASURED. ──
+ *
+ *  "179KB of CSS blocks the first paint, defer it" is the most obvious-looking
+ *  optimisation on this page, and it is wrong. It was tried, on the TV profile
+ *  that has the most to gain (Tizen UA, 6x CPU throttle, three runs each,
+ *  medians):
+ *
+ *                        blocking (shipped)   deferred (media=print)
+ *      first card             3121 ms              4643 ms
+ *      style recalc           1.797 s              2.684 s
+ *      layout                 2.047 s              3.352 s
+ *
+ *  Deferring made every number worse, by a lot. The reason is that the CSS was
+ *  never the network bottleneck — it is 27KB brotli and arrives in a blink. Take
+ *  it off the critical path and the browser lays the whole document out once
+ *  UNSTYLED, then throws that away and does it again when the sheet lands. Two
+ *  passes on a slow CPU cost more than one.
+ *
+ *  So the lever for weak devices is not WHEN the CSS loads, it is HOW MANY rules
+ *  it contains (coverage: 25% used on a first load). Deleting genuinely dead
+ *  rules would help; deferring the file does not.
+ *
+ *  This check does not forbid a real critical-CSS split — inline the critical
+ *  set and defer the rest and it passes. It forbids the naive half of the change,
+ *  which is the one that regresses.
+ */
+check('the main stylesheet is not deferred without inlined critical CSS', () => {
+  const linkTag = /<link rel="stylesheet" href="moviezone\.min\.css\?v=[\d.]+"([^>]*)>/.exec(htmlCode);
+  assert.ok(linkTag, 'moviezone.min.css is not linked as a stylesheet at all');
+  const deferred = /media\s*=\s*"print"/.test(linkTag[1]);
+  if (!deferred) return;
+  const headEnd = htmlCode.indexOf('</head>');
+  const head = headEnd === -1 ? htmlCode : htmlCode.slice(0, headEnd);
+  const inlineCss = (head.match(/<style[^>]*>[\s\S]*?<\/style>/g) || [])
+    .reduce((sum, block) => sum + block.length, 0);
+  assert.ok(inlineCss > 8 * 1024,
+    'moviezone.min.css is deferred but only ' + kb(inlineCss) + ' of CSS is inlined. Measured on the '
+      + 'TV profile: deferring without a critical set moved first card 3121ms -> 4643ms and style '
+      + 'recalc 1.80s -> 2.68s, because the document is laid out unstyled and then again.');
+});
+
 console.log('\n-- index.html references the built bundles ' + '-'.repeat(19));
 
 for (const name of SCRIPTS) {
