@@ -250,7 +250,7 @@
         && order.indexOf('UPGRADED') < order.indexOf('OLD'), order.join(' > '));
     ok('strict priority groups are annotated correctly',
       brandNew._priorityGroup === 0 && justUpgraded._priorityGroup === 1
-        && midOld._priorityGroup === 2 && oldBlockbuster._priorityGroup === 2,
+        && midOld._priorityGroup === 4 && oldBlockbuster._priorityGroup === 4,
       [brandNew._priorityGroup, justUpgraded._priorityGroup,
         midOld._priorityGroup, oldBlockbuster._priorityGroup].join(','));
     ok('ranking annotates every item', [oldBlockbuster, justUpgraded].every(function (m) {
@@ -280,19 +280,28 @@
       mixed.indexOf('NEW') < mixed.indexOf('UPGRADED')
         && mixed.indexOf('UPGRADED') < mixed.indexOf('SERIES-NEW'),
       mixed.join(' > '));
-    var moviePositions = mixedItems.filter(function (m) { return m.media_type !== 'tv'; })
-      .map(function (m) { return mixed.indexOf(m.title); });
-    var seriesPositions = mixedItems.filter(function (m) { return m.media_type === 'tv'; })
-      .map(function (m) { return mixed.indexOf(m.name); });
-    ok('every movie group stays above every web series and anime',
-      Math.max.apply(Math, moviePositions) < Math.min.apply(Math, seriesPositions), mixed.join(' > '));
-    ok('fresh relevant series and anime share the final featured group',
-      newSeries._priorityGroup === 3 && newAnime._priorityGroup === 3
-        && seriesUpg._priorityGroup === 3 && animeUpg._priorityGroup === 3,
-      [newSeries._priorityGroup, newAnime._priorityGroup,
-        seriesUpg._priorityGroup, animeUpg._priorityGroup].join(','));
+    /*  The contract changed here on purpose. Fresh web series and anime used to
+     *  sit below EVERY movie, including hundreds of catalogue films, so a user
+     *  would have had to scroll past ~150 cards to meet one — the section looked
+     *  like it had no series at all. Now the two fresh MOVIE groups still lead,
+     *  and the trending series/anime come before the remaining catalogue movies. */
+    ok('both fresh movie groups still lead every series and anime',
+      Math.max(mixed.indexOf('NEW'), mixed.indexOf('UPGRADED'))
+        < Math.min(mixed.indexOf('SERIES-NEW'), mixed.indexOf('SERIES-FHD'),
+          mixed.indexOf('ANIME-NEW'), mixed.indexOf('ANIME-BD')),
+      mixed.join(' > '));
+    ok('trending series and anime are reachable, ahead of the catalogue movies',
+      mixed.indexOf('SERIES-NEW') < mixed.indexOf('MID')
+        && mixed.indexOf('ANIME-NEW') < mixed.indexOf('OLD'),
+      mixed.join(' > '));
+    ok('web series sit above anime, and anime above the catalogue',
+      newSeries._priorityGroup === 2 && seriesUpg._priorityGroup === 2
+        && newAnime._priorityGroup === 3 && animeUpg._priorityGroup === 3
+        && midOld._priorityGroup === 4,
+      [newSeries._priorityGroup, seriesUpg._priorityGroup,
+        newAnime._priorityGroup, animeUpg._priorityGroup, midOld._priorityGroup].join(','));
     ok('a stale series is kept in the last fallback group',
-      oldSeries._priorityGroup === 4 && mixed[mixed.length - 1] === 'SERIES-OLD',
+      oldSeries._priorityGroup === 5 && mixed[mixed.length - 1] === 'SERIES-OLD',
       oldSeries._priorityGroup + ' / ' + mixed.join(' > '));
 
     // Inside the series group, freshness tiers and trending relevance still
@@ -309,7 +318,7 @@
     var relevanceOrder = win.rankByFreshness([obscureSeries, establishedSeries])
       .map(function (m) { return m.name; });
     ok('the relevance floor keeps obscure series out of the featured series group',
-      establishedSeries._priorityGroup === 3 && obscureSeries._priorityGroup === 4
+      establishedSeries._priorityGroup === 2 && obscureSeries._priorityGroup === 5
         && relevanceOrder[0] === 'SERIES-ESTABLISHED',
       relevanceOrder.join(' > '));
 
@@ -319,44 +328,63 @@
     // it dropped out of the latest-release group entirely — which is why the top
     // of the feed stayed Hollywood-only in a week when two Bollywood films had
     // just come out.
+    //
+    // The list is the three industries the site has tabs for. Popularity 24 is
+    // not an invented number: it is what Batwara 1947 actually carried on the
+    // live feed two days after release, with zero votes.
     var industries = [
       { lang: 'hi', label: 'Bollywood' },
-      { lang: 'te', label: 'Tollywood' },
       { lang: 'ta', label: 'Tamil' },
-      { lang: 'ml', label: 'Malayalam' },
-      { lang: 'kn', label: 'Kannada' }
+      { lang: 'te', label: 'Tollywood' }
     ];
     var missedIndustries = industries.filter(function (i) {
       return win.allFeedPriorityGroup(movie(2, { title: i.label, original_language: i.lang,
-        vote_average: 7.0, popularity: 9, vote_count: 6 })) !== 0;
+        vote_average: 7.0, popularity: 24, vote_count: 0 })) !== 0;
     }).map(function (i) { return i.label; });
-    ok('a modest new release from every industry reaches the latest-release group',
+    ok('a real new release from every tabbed industry reaches the latest-release group',
       missedIndustries.length === 0, 'left out: ' + missedIndustries.join(', '));
 
     var hiNew = movie(2, { title: 'HI-NEW', original_language: 'hi',
-      vote_average: 7.0, popularity: 9, vote_count: 6 });
+      vote_average: 7.0, popularity: 24, vote_count: 0 });
     var industryOrder = win.rankByFreshness([oldBlockbuster, hiNew])
       .map(function (m) { return m.title; });
     ok('a fresh regional release leads an old English blockbuster',
       industryOrder[0] === 'HI-NEW', industryOrder.join(' > '));
 
-    // The smaller bar is a bar, not an open door: one-vote regional titles must
-    // still stay out of the latest group.
-    var hiJunk = movie(2, { title: 'HI-JUNK', original_language: 'hi', popularity: 2, vote_count: 1 });
+    /*  The small industries were on this list and it went wrong in practice: they
+     *  release a long tail with almost no audience signal, so single-digit
+     *  popularity films landed at the top of the feed beside real releases. They
+     *  are still fetched and still in the feed — they just do not jump the queue.  */
+    var smallIndustries = ['ml', 'kn', 'bn', 'mr', 'pa', 'gu'];
+    var jumpedQueue = smallIndustries.filter(function (lang) {
+      return win.allFeedPriorityGroup(movie(2, { title: lang.toUpperCase(),
+        original_language: lang, popularity: 9, vote_count: 3 })) === 0;
+    });
+    ok('a no-name release from a small industry does not jump the queue',
+      jumpedQueue.length === 0, 'still jumping: ' + jumpedQueue.join(', '));
+    ok('the small industries use the standard 20/20 bar',
+      smallIndustries.every(function (lang) {
+        return win.freshTierFloors(movie(2, { original_language: lang })).popularity === 20;
+      }));
+
+    // The floor is a bar, not an open door — for the tabbed industries too.
+    var hiJunk = movie(2, { title: 'HI-JUNK', original_language: 'hi', popularity: 3, vote_count: 1 });
+    var hiWeak = movie(2, { title: 'HI-WEAK', original_language: 'hi', popularity: 8, vote_count: 2 });
     ok('the regional floor still keeps no-name titles out of the latest group',
-      win.allFeedPriorityGroup(hiJunk) === 2, String(win.allFeedPriorityGroup(hiJunk)));
+      win.allFeedPriorityGroup(hiJunk) === 4 && win.allFeedPriorityGroup(hiWeak) === 4,
+      win.allFeedPriorityGroup(hiJunk) + ' / ' + win.allFeedPriorityGroup(hiWeak));
 
     // English keeps the original 20/20 bar, so nothing about the Hollywood half
     // of the feed moved.
     var enSmall = movie(2, { title: 'EN-SMALL', original_language: 'en', popularity: 9, vote_count: 6 });
     ok('the English relevance bar is unchanged',
-      win.allFeedPriorityGroup(enSmall) === 2 && win.freshTierFloors(enSmall).popularity === 20,
+      win.allFeedPriorityGroup(enSmall) === 4 && win.freshTierFloors(enSmall).popularity === 20,
       win.allFeedPriorityGroup(enSmall) + ' / floor ' + win.freshTierFloors(enSmall).popularity);
 
     // A Bollywood/South film whose HD print just landed has to re-surface the
     // same way a Hollywood one does.
     var hiUpgraded = movie(76, { title: 'HI-HD', original_language: 'hi',
-      vote_average: 7.2, popularity: 12, vote_count: 10 });
+      vote_average: 7.2, popularity: 14, vote_count: 10 });
     ok('a regional film whose HD print just landed reaches the quality-update group',
       win.allFeedPriorityGroup(hiUpgraded) === 1, String(win.allFeedPriorityGroup(hiUpgraded)));
 
@@ -367,14 +395,14 @@
     ok('the regional floor never touches web series or anime',
       win.freshTierFloors(hiSeriesSmall).popularity === 20
         && win.freshTierFloors(hiSeriesSmall).votes === 20
-        && win.allFeedPriorityGroup(hiSeriesSmall) === 4,
+        && win.allFeedPriorityGroup(hiSeriesSmall) === 5,
       'floors ' + JSON.stringify(win.freshTierFloors(hiSeriesSmall))
         + ' group ' + win.allFeedPriorityGroup(hiSeriesSmall));
     var jaAnimeSmall = series(3, { name: 'ANIME-SMALL', original_language: 'ja',
       genre_ids: [16], popularity: 9, vote_count: 6 });
     ok('anime keeps its own traction floor too',
       win.freshTierFloors(jaAnimeSmall).popularity === 20
-        && win.allFeedPriorityGroup(jaAnimeSmall) === 4,
+        && win.allFeedPriorityGroup(jaAnimeSmall) === 5,
       'floors ' + JSON.stringify(win.freshTierFloors(jaAnimeSmall))
         + ' group ' + win.allFeedPriorityGroup(jaAnimeSmall));
 

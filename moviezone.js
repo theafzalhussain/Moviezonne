@@ -1758,22 +1758,33 @@ const FRESH_TIER_MIN_VOTES = 20;
 /*  INDUSTRY-SCALE RELEVANCE FLOOR — MOVIES ONLY.
  *
  *  TMDB popularity and vote counts are not comparable across industries. A
- *  Hindi, Telugu, Tamil, Malayalam or Kannada release that the whole country is
- *  searching for in its first week still carries a fraction of the votes an
- *  English blockbuster collects in its opening weekend. Judged by the same
- *  20/20 bar, almost every regional new release failed the gate, dropped to the
- *  "remaining movies" group and never appeared among the latest releases — which
- *  is exactly why the top of the ALL feed looked Hollywood-only even in a week
- *  when two Bollywood films had just come out.
+ *  Hindi, Tamil or Telugu release that the whole country is searching for in its
+ *  first week still carries a fraction of the votes an English blockbuster
+ *  collects in its opening weekend. Judged by the same 20/20 bar, almost every
+ *  regional new release failed the gate, dropped to the "remaining movies" group
+ *  and never appeared among the latest releases — which is why the top of the ALL
+ *  feed looked Hollywood-only even in a week when two Bollywood films had just
+ *  come out.
+ *
+ *  The list is the three industries this site actually has tabs for: Bollywood,
+ *  South (Tamil) and Tollywood (Telugu). It briefly included Malayalam, Kannada,
+ *  Bengali, Marathi, Punjabi, Gujarati, Odia and Assamese as well, and that was
+ *  wrong in practice: those industries release a long tail of titles with almost
+ *  no audience signal, so single-digit-popularity films reached the top of the
+ *  feed next to real releases. They still reach the feed — the Indian windows
+ *  fetch them — they just do not jump the queue any more.
+ *
+ *  The floor is also higher than it first was (12/8, not 6/4). Real releases pass
+ *  it comfortably: measured on the live feed, Batwara 1947 (24), Awarapan 2 (23),
+ *  DC (29), Jana Nayagan (32), Vishwanath & Sons (70). The titles it now stops
+ *  are the ones nobody searched for: Ohh My Dog (3), Tera Yaar Hoon Main (2).
  *
  *  Deliberately scoped to movies: the web series and anime floors stay at 20/20,
- *  so nothing in those halves of the feed changes. The fetch side is what keeps
- *  the long tail out — only the most popular titles of each industry's release
- *  window are ever requested, so a lower floor cannot let junk in.
+ *  so nothing in those halves of the feed changes.
  */
-const REGIONAL_MOVIE_LANGUAGES = ['hi', 'ta', 'te', 'ml', 'kn', 'bn', 'mr', 'pa', 'gu', 'or', 'as'];
-const REGIONAL_FRESH_MIN_POPULARITY = 6;
-const REGIONAL_FRESH_MIN_VOTES = 4;
+const REGIONAL_MOVIE_LANGUAGES = ['hi', 'ta', 'te'];
+const REGIONAL_FRESH_MIN_POPULARITY = 12;
+const REGIONAL_FRESH_MIN_VOTES = 8;
 
 /** The popularity/vote bar a title must clear to be treated as a relevant fresh
  *  release. Regional-industry movies get the smaller bar; everything else, and
@@ -1806,13 +1817,22 @@ function freshnessTier(title, eventAgeDays) {
  *  Freshness is deliberately evaluated inside these groups, never across them:
  *    0 — relevant movies released inside the latest-release window
  *    1 — relevant movies with a recent real quality upgrade
- *    2 — every other movie
- *    3 — relevant latest/trending web series and anime
- *    4 — remaining series/anime fallback
+ *    2 — trending/latest streaming web series
+ *    3 — trending/latest anime
+ *    4 — every other movie
+ *    5 — remaining series/anime fallback
  *
- *  This guarantees that an even fresher TV premiere cannot jump above a latest
- *  movie release or a movie whose HD/FHD/4K print just landed. The relevance
- *  gate still prevents obscure one-vote titles from entering a fresh group. */
+ *  Groups 2 and 3 used to sit BELOW every movie, including the hundreds of
+ *  catalogue films that are now group 4. Technically the web series and anime
+ *  were "in the feed"; in practice a user had to scroll past ~150 cards to reach
+ *  one, so the section looked like it had none. They now sit directly after the
+ *  two fresh movie groups: movies still lead, and what just dropped on Netflix /
+ *  Prime / JioHotstar is actually reachable. Anime keeps its own group below web
+ *  series, so it is present without taking the front row.
+ *
+ *  This still guarantees that an even fresher TV premiere cannot jump above a
+ *  latest movie release or a movie whose HD/FHD/4K print just landed. The
+ *  relevance gate still keeps obscure one-vote titles out of every fresh group. */
 function allFeedPriorityGroup(title, qualityState, freshTier) {
   const state = qualityState || titleQualityState(title);
   const tier = freshTier == null
@@ -1828,10 +1848,11 @@ function allFeedPriorityGroup(title, qualityState, freshTier) {
         && state.upgradedDaysAgo < state.daysOld) {
       return 1;
     }
-    return 2;
+    return 4;
   }
 
-  return hasFreshRelevance ? 3 : 4;
+  if (!hasFreshRelevance) return 5;
+  return isAnimeContent(title) ? 3 : 2;
 }
 
 /** Annotates a pool in place with ranking fields, then sorts by the strict
@@ -4045,8 +4066,8 @@ async function loadMovies(cat, isLoadMore = false) {
       const uniqueMovies = Array.from(movieMap.values());
       
       // STRICT PRIORITY RANKING: latest movie releases first, recent movie
-      // quality updates second, remaining movies next, and only then the
-      // latest/trending web series and anime.
+      // quality updates second, then the trending/latest web series and anime,
+      // and only then the remaining catalogue movies.
       rankByFreshness(uniqueMovies);
 
       // Balance languages only inside each priority group. A skipped movie is
