@@ -514,6 +514,116 @@
       onlyFeed.length === 12 && onlyFeed.every(function (m) { return !!m; }),
       onlyFeed.length + ' items');
 
+    /*  The first-screen industry pass. Ranking alone gave the top four cards to
+     *  three English films and one Tamil, with Bollywood at 10 and Telugu absent
+     *  from the first sixteen — a catalogue that serves four industries cannot
+     *  open like that. */
+    function industryPool() {
+      var pool = [
+        movie(2, { title: 'EN-BIG', original_language: 'en', popularity: 900, vote_count: 5000, vote_average: 8.1 }),
+        movie(3, { title: 'EN-2', original_language: 'en', popularity: 700, vote_count: 3000 }),
+        movie(4, { title: 'EN-3', original_language: 'en', popularity: 600, vote_count: 2500 }),
+        movie(5, { title: 'PT-1', original_language: 'pt', popularity: 500, vote_count: 900 }),
+        movie(6, { title: 'DE-1', original_language: 'de', popularity: 400, vote_count: 800 }),
+        movie(3, { title: 'TA-1', original_language: 'ta', popularity: 70, vote_count: 5 }),
+        movie(2, { title: 'HI-1', original_language: 'hi', popularity: 24, vote_count: 0 }),
+        movie(4, { title: 'TE-1', original_language: 'te', popularity: 20, vote_count: 3 }),
+        series(2, { name: 'S-1', popularity: 300, vote_count: 900 }),
+        series(3, { name: 'A-1', original_language: 'ja', genre_ids: [16], popularity: 200, vote_count: 600 })
+      ];
+      win.rankByFreshness(pool);
+      var ranked = win.diversifyByLanguageWithinPriority(pool);
+      return { ranked: ranked.map(function (m) { return m.title || m.name; }),
+        feed: win.interleaveFeedByType(ranked).map(function (m) { return m.title || m.name; }) };
+    }
+    var industryRun = industryPool();
+    var industryFeed = industryRun.feed;
+    var movieHead = industryFeed.filter(function (t) { return t !== 'S-1' && t !== 'A-1'; }).slice(0, 4);
+    ok('every industry gets a first-screen slot: Hollywood, Bollywood, Tamil, Telugu',
+      ['EN-BIG', 'HI-1', 'TA-1', 'TE-1'].every(function (t) { return movieHead.indexOf(t) !== -1; }),
+      'first four movies: ' + movieHead.join(', '));
+    ok('the biggest of the promoted titles still opens the feed',
+      industryFeed[0] === 'EN-BIG', industryFeed.slice(0, 6).join(' > '));
+    /*  Promotion moves titles forward, it does not re-score them: among the four
+     *  promoted slots the order must be the same as it was in the ranked pool. */
+    var rankedIndexOf = function (t) { return industryRun.ranked.indexOf(t); };
+    var headRankPositions = movieHead.map(rankedIndexOf);
+    ok('promotion never reorders the titles it promotes',
+      headRankPositions.every(function (pos, i) { return i === 0 || pos > headRankPositions[i - 1]; }),
+      movieHead.map(function (t, i) { return t + '(rank ' + headRankPositions[i] + ')'; }).join(', '));
+    ok('nothing is lost when the first screen is rebalanced',
+      industryFeed.length === 10 && new Set(industryFeed).size === 10,
+      industryFeed.length + ' items');
+
+    /*  An industry with no new release must not be filled in with an old title —
+     *  and must not leave a gap either. A film whose HD print just landed IS
+     *  eligible, because that is a new arrival for the catalogue; a year-old film
+     *  is not, at any popularity. */
+    function missingIndustryPool() {
+      var pool = [
+        movie(2, { title: 'EN-NEW', original_language: 'en', popularity: 500, vote_count: 2000 }),
+        movie(2, { title: 'HI-NEW', original_language: 'hi', popularity: 30, vote_count: 10 }),
+        movie(600, { title: 'TE-OLD', original_language: 'te', popularity: 400, vote_count: 9000 }),
+        movie(3, { title: 'EN-2', original_language: 'en', popularity: 300, vote_count: 1200 })
+      ];
+      win.rankByFreshness(pool);
+      return win.interleaveFeedByType(win.diversifyByLanguageWithinPriority(pool));
+    }
+    var missingFeed = missingIndustryPool().map(function (m) { return m.title; });
+    ok('an industry with no fresh release is skipped, not padded with an old title',
+      missingFeed.indexOf('TE-OLD') === missingFeed.length - 1 && missingFeed.length === 4,
+      missingFeed.join(' > '));
+
+    /*  The measured case that made group 1 eligible: in a week with no new Telugu
+     *  release, Telugu's first title otherwise appeared at card 60. A Telugu film
+     *  whose HD print just landed (day 76) is a new arrival and takes the slot. */
+    function upgradeOnlyIndustryPool() {
+      var pool = [
+        movie(2, { title: 'EN-NEW', original_language: 'en', popularity: 500, vote_count: 2000 }),
+        movie(3, { title: 'EN-2', original_language: 'en', popularity: 450, vote_count: 1800 }),
+        movie(4, { title: 'EN-3', original_language: 'en', popularity: 400, vote_count: 1600 }),
+        movie(5, { title: 'EN-4', original_language: 'en', popularity: 350, vote_count: 1400 }),
+        movie(2, { title: 'HI-NEW', original_language: 'hi', popularity: 30, vote_count: 10 }),
+        movie(76, { title: 'TE-HD', original_language: 'te', popularity: 40, vote_count: 200, vote_average: 7.2 }),
+        movie(500, { title: 'TE-ANCIENT', original_language: 'te', popularity: 900, vote_count: 20000 })
+      ];
+      win.rankByFreshness(pool);
+      return win.interleaveFeedByType(win.diversifyByLanguageWithinPriority(pool))
+        .map(function (m) { return m.title; });
+    }
+    var upgradeFeed = upgradeOnlyIndustryPool();
+    ok('an industry with only a fresh HD print still reaches the first screen',
+      upgradeFeed.indexOf('TE-HD') < 4 && upgradeFeed.indexOf('TE-HD') !== -1,
+      upgradeFeed.join(' > '));
+    ok('the ancient blockbuster of that industry is never the one promoted',
+      upgradeFeed.indexOf('TE-ANCIENT') > upgradeFeed.indexOf('TE-HD'),
+      upgradeFeed.join(' > '));
+
+    /*  A print upgrade only defends a front-row slot while the card can still say
+     *  so. Day 155 is 35 days past the FHD mark: still the upgrade group, but the
+     *  ribbon expired at day 21, so promoting it would put an unexplained
+     *  five-month-old title at card 3. (Day 135 would still be badged — the
+     *  boundary matters, which is why this uses 155.) */
+    function staleUpgradePool() {
+      var pool = [
+        movie(2, { title: 'EN-NEW', original_language: 'en', popularity: 500, vote_count: 2000 }),
+        movie(3, { title: 'EN-2', original_language: 'en', popularity: 450, vote_count: 1800 }),
+        movie(4, { title: 'EN-3', original_language: 'en', popularity: 400, vote_count: 1600 }),
+        movie(2, { title: 'HI-NEW', original_language: 'hi', popularity: 30, vote_count: 10 }),
+        movie(155, { title: 'TE-STALE-HD', original_language: 'te', popularity: 40, vote_count: 200, vote_average: 7.2 })
+      ];
+      win.rankByFreshness(pool);
+      return win.interleaveFeedByType(win.diversifyByLanguageWithinPriority(pool))
+        .map(function (m) { return m.title; });
+    }
+    var staleFeed = staleUpgradePool();
+    ok('a print upgrade whose ribbon has expired does not get a front-row slot',
+      staleFeed.indexOf('TE-STALE-HD') >= 3, staleFeed.join(' > '));
+    /*  ...while one that still wears its ribbon does. Day 76 is one day past the
+     *  HD mark, which is exactly the case this whole rule exists to allow. */
+    ok('a print upgrade that still wears its ribbon keeps its front-row slot',
+      upgradeFeed.indexOf('TE-HD') < 4, upgradeFeed.join(' > '));
+
     // ── 6. the rendered card ────────────────────────────────────────────
     win.renderMovies([justUpgraded]);
     var card = doc.querySelector('#movieGrid .movie-card');

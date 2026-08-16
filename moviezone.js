@@ -1941,16 +1941,97 @@ function feedLaneOf(title) {
   return isAnimeContent(title) ? 'anime' : 'series';
 }
 
+/*  ── FIRST-SCREEN INDUSTRY REPRESENTATION ──
+ *
+ *  Ranking alone hands the top of the feed to whoever wins on global popularity,
+ *  and that is always Hollywood plus whatever foreign title happens to be
+ *  trending. Measured on the live feed: the first four cards were three English
+ *  films and one Tamil, with Bollywood at 10 and 11 and Telugu nowhere in the
+ *  first sixteen. For a catalogue whose audience comes for all four industries,
+ *  that reads as "this site is Hollywood".
+ *
+ *  So the first movie slots are guaranteed, one per industry: the freshest
+ *  relevant release from Hollywood, Bollywood, Tamil and Telugu. This is the
+ *  standard first-screen diversity pass — Netflix's rows do the same thing with
+ *  regions — and it is deliberately narrow:
+ *
+ *    • an industry's slot is filled from group 0 (a genuinely new release) and,
+ *      only if it has none this week, from group 1 (a film whose HD/FHD/4K print
+ *      just landed). Both are new arrivals as far as the catalogue is concerned,
+ *      which is the promise this section makes. Measured case: on a week with no
+ *      new Telugu release, the alternative to group 1 was Telugu's first title
+ *      appearing at card 60.
+ *    • a group-1 promotion must still be recent enough to WEAR its ribbon —
+ *      within QUALITY_UPGRADE_BADGE_DAYS of the upgrade. Without that rule the
+ *      front row could show a four-month-old film with no badge and no
+ *      explanation, which reads as a broken "latest" feed. Measured: it promoted
+ *      a 135-day-old Telugu title whose print had long since stopped being news.
+ *    • nothing older is ever eligible. If an industry has neither, it simply gets
+ *      no slot; padding the front row with a year-old film would make the section
+ *      lie about what it is.
+ *    • the promoted titles keep their own relative ranking, so the biggest of
+ *      them still leads the feed.
+ *    • everything after them is untouched, in exact rank order.
+ *
+ *  Malayalam, Kannada and the rest are not on this list — they reach the feed on
+ *  merit through the normal ranking, which is what stops single-digit-popularity
+ *  titles from taking a guaranteed front-row seat.
+ */
+const FEED_FIRST_SCREEN_INDUSTRIES = ['en', 'hi', 'ta', 'te'];
+const FEED_PROMOTABLE_GROUPS = [0, 1];
+
+/** True when a title is new enough to defend a guaranteed front-row slot. */
+function promotableToFirstScreen(item, group) {
+  if (mediaTypeOf(item) !== 'movie') return false;
+  if (item._priorityGroup !== group) return false;
+  if (group !== 1) return true;
+  const state = item._qualityState || titleQualityState(item);
+  return state.upgradedDaysAgo != null && state.upgradedDaysAgo <= QUALITY_UPGRADE_BADGE_DAYS;
+}
+
+function promoteFreshIndustryMix(pool) {
+  const chosen = [];
+  const takenIndexes = new Set();
+
+  FEED_FIRST_SCREEN_INDUSTRIES.forEach((lang) => {
+    for (const group of FEED_PROMOTABLE_GROUPS) {
+      let found = -1;
+      for (let i = 0; i < pool.length; i++) {
+        const item = pool[i];
+        if (takenIndexes.has(i)) continue;
+        if ((item.original_language || 'en') !== lang) continue;
+        if (!promotableToFirstScreen(item, group)) continue;
+        found = i;
+        break;                                            // pool is ranked: first is best
+      }
+      if (found !== -1) { takenIndexes.add(found); chosen.push(found); break; }
+    }
+  });
+
+  if (chosen.length < 2) return pool.slice();            // nothing to balance
+
+  // Rank order among the promoted titles is preserved: the strongest of them
+  // still opens the feed, they are simply all on the first screen now.
+  chosen.sort((a, b) => a - b);
+  return chosen.map((i) => pool[i])
+    .concat(pool.filter((_, i) => !takenIndexes.has(i)));
+}
+
 function interleaveFeedByType(pool) {
+  /*  The industry mix is applied first and kept whatever happens next: if the tv
+   *  queries failed and this pool is movies only, the early return below must
+   *  still hand back the balanced order, not the raw one. */
+  const promoted = promoteFreshIndustryMix(pool);
+
   const lanes = { movie: [], series: [], anime: [] };
-  pool.forEach((item) => { lanes[feedLaneOf(item)].push(item); });
+  promoted.forEach((item) => { lanes[feedLaneOf(item)].push(item); });
 
   // Nothing to interleave — one type only, so the ranked order already is the feed.
   const activeLanes = ['movie', 'series', 'anime'].filter((lane) => lanes[lane].length > 0);
-  if (activeLanes.length < 2) return pool.slice();
+  if (activeLanes.length < 2) return promoted;
 
   const output = [];
-  const total = pool.length;
+  const total = promoted.length;
   let slot = 0;
   while (output.length < total) {
     const wanted = FEED_SLOT_PATTERN[slot % FEED_SLOT_PATTERN.length];
