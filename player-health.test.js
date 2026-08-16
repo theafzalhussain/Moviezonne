@@ -375,7 +375,7 @@ it('server switching is warmed on touch, not only on hover', () => {
   ['mouseenter', 'focus', 'pointerdown', 'touchstart'].forEach((evt) => {
     assert.ok(listeners[1].includes(evt), evt + ' no longer warms the server the user is about to pick');
   });
-  assert.ok(/warmEmbedUrl\(buildPlayerUrl\(id, type, idx\)\)/.test(wiring),
+  assert.ok(/warmEmbedUrl\(buildPlayerUrl\(id, type, idx\),/.test(wiring),
     'the light warm path (preconnect + provider document) is gone from the chip handler');
 });
 
@@ -397,13 +397,43 @@ it('switching while something is already playing still warms the next server', (
     'the hidden prewarm frame is no longer restricted to hover/focus — a tap would build one');
 });
 
+/*  A live probe from one Indian connection: nine of the ten servers answered in
+ *  232-928ms, one did not answer within twelve seconds. A dead server must cost
+ *  the user a warm-up, not a spinner after they press play — so the warm-up is
+ *  bounded and its failure is fed to the same ranking playback attempts feed. */
+it('a warm-up is bounded by a timeout', () => {
+  const warmEmbed = block('function warmEmbedUrl(url, sourceName)');
+  assert.ok(/AbortController/.test(warmEmbed), 'the warm-up fetch can hang forever');
+  assert.ok(/MZ_WARM_TIMEOUT_MS/.test(warmEmbed), 'the warm-up has no timeout constant');
+  const timeout = Number(/const MZ_WARM_TIMEOUT_MS = (\d+)/.exec(src)[1]);
+  assert.ok(timeout >= 3000 && timeout <= 15000, 'implausible warm timeout: ' + timeout);
+});
+
+it('an unreachable server is demoted from the warm-up, before any play', () => {
+  const warmEmbed = block('function warmEmbedUrl(url, sourceName)');
+  assert.ok(/recordPlayerFailure\(sourceName\)/.test(warmEmbed),
+    'a failed warm-up teaches the ranking nothing, so the next pick repeats it');
+  assert.ok(/_mzWarmedDocs\.delete\(url\)/.test(warmEmbed),
+    'a failed warm-up is never retried — a recovered provider would stay cold forever');
+});
+
+it('every warm-up call site names the server it is warming', () => {
+  // One level of nesting is enough: warmEmbedUrl(buildPlayerUrl(...), name)
+  const calls = src.match(/warmEmbedUrl\((?:[^()]|\([^()]*\))*\)/g) || [];
+  const callSites = calls.filter((c) => !/^warmEmbedUrl\(url/.test(c));
+  assert.ok(callSites.length >= 3, 'expected at least three warm-up call sites, found ' + callSites.length);
+  const unnamed = callSites.filter((c) => !/name/.test(c));
+  assert.strictEqual(unnamed.length, 0,
+    'these warm-ups cannot report a failure to the ranking: ' + unnamed.join(' | '));
+});
+
 /*  Warming must never start video in the background: that is what produced
  *  Chrome's "background media paused" abort, and on a phone it is data the user
  *  did not ask to spend. */
 it('warming never delegates autoplay or spends data on a metered link', () => {
   const warmUrl = block('function warmUrlVariant(url)');
   assert.ok(/autoplay\|autoPlay/.test(warmUrl), 'autoplay params are no longer neutralised for warm-ups');
-  const warmEmbed = block('function warmEmbedUrl(url)');
+  const warmEmbed = block('function warmEmbedUrl(url, sourceName)');
   assert.ok(/isDataSaver\(\)/.test(warmEmbed), 'warmEmbedUrl no longer respects data saver / 2g');
   /*  Read the attribute VALUE, not the surrounding prose — the code comments here
    *  mention autoplay precisely because it must stay absent. */
