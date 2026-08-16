@@ -294,6 +294,127 @@ it('two dead servers cost far less than the old flat 10s', () => {
     + 'subsequent visits ~' + nextVisit + ' ms (working server ranked first)');
 });
 
+/* ── PROVIDER WARM-UP PATH ──────────────────────────────────────────────────
+ *  Playback speed is decided before the click: whether the provider's origin is
+ *  already connected, and whether its document is already in the HTTP cache.
+ *  Two things silently broke that, and both are cheap to guard.
+ */
+console.log('\nprovider warm-up path\n' + '-'.repeat(62));
+
+/*  Extracts the real playerSources array and asks each server for a URL, which
+ *  is exactly what playerHostOrigins() does at runtime. */
+function realPlayerOrigins() {
+  const start = src.indexOf('const playerSources = [');
+  const end = src.indexOf('\n];', start) + 3;
+  const sandbox = {
+    console, URL, String, Number, parseInt, Array, Object, JSON, Math, Date,
+    currentModalMovie: null,
+    isAnimeContent: () => false,
+    isCartoonContent: () => false,
+    getAnilistIdSync: () => null,
+    animeAudioTrack: (l) => (l === 'hi' ? 'hindi' : l === 'en' ? 'dub' : 'sub')
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(src.slice(start, end) + '\nthis.__sources = playerSources;', sandbox);
+  const sources = sandbox.__sources;
+  const movie = [], tv = [];
+  sources.forEach((s) => {
+    try { movie.push(new URL(s.url(550, 'en', 'movie', '1', '1')).origin); } catch (e) { movie.push(null); }
+    try { tv.push(new URL(s.url(1396, 'hi', 'tv', '1', '1')).origin); } catch (e) { tv.push(null); }
+  });
+  return { sources, movie, tv };
+}
+
+it('every shipped server yields a warmable origin', () => {
+  const { sources, movie } = realPlayerOrigins();
+  assert.ok(sources.length >= 8, 'only ' + sources.length + ' servers found');
+  const broken = sources.filter((s, i) => !movie[i]).map((s) => s.name);
+  assert.strictEqual(broken.length, 0,
+    'these servers build no usable URL, so their host can never be preconnected: ' + broken.join(', '));
+  console.log('        ' + sources.length + ' servers -> '
+    + new Set(movie).size + ' unique origins, all resolvable');
+});
+
+/*  The regression this replaces: the warm list was a hand-copied array. It still
+ *  named vidrock.ru and embed.smashystream.com (a commented-out source) while
+ *  vidfast.pro, flicky.host and 111movies.com — live servers — were never warmed,
+ *  so switching to one of those paid a cold DNS + TLS handshake at the exact
+ *  moment the user wanted video. Deriving the list is the fix; this keeps it. */
+it('the warm list is derived from playerSources, never hand-written', () => {
+  const hostList = /const PLAYER_HOSTS\s*=\s*\[/.test(src);
+  assert.ok(!hostList, 'PLAYER_HOSTS is a hardcoded list again — it will drift from playerSources');
+  assert.ok(/function playerHostOrigins\(\)/.test(src), 'playerHostOrigins() is gone');
+  assert.ok(/playerSources\.forEach/.test(src.slice(src.indexOf('function playerHostOrigins()'), src.indexOf('function playerHostOrigins()') + 900)),
+    'playerHostOrigins() no longer reads playerSources');
+  const preconnectBlock = src.slice(src.indexOf('function preconnectServers()'),
+    src.indexOf('function preconnectServers()') + 1600);
+  assert.ok(/playerHostOrigins\(\)/.test(preconnectBlock),
+    'the page-load preconnect still uses its own server list');
+  ['cinextream.net', '2embed.stream', 'vidsrc.sbs', 'multiembed.mov', 'vidrock.ru', 'smashystream.com']
+    .forEach((deadHost) => {
+      assert.ok(!new RegExp(deadHost.replace('.', '\\.')).test(preconnectBlock),
+        'dead/unused host ' + deadHost + ' is being warmed again');
+    });
+});
+
+it('a movie and a series warm the same origins (no cold host on episode play)', () => {
+  const { movie, tv } = realPlayerOrigins();
+  const missed = tv.filter((o) => o && movie.indexOf(o) === -1);
+  assert.strictEqual(missed.length, 0,
+    'series playback uses origins the movie probe never warms: ' + missed.join(', '));
+});
+
+/*  On a phone there is no hover, so mouseenter/focus warmed nothing at all and
+ *  every server switch on touch paid the full handshake after the tap. */
+it('server switching is warmed on touch, not only on hover', () => {
+  const at = src.indexOf('const srcButtons = ext.querySelectorAll');
+  assert.ok(at !== -1, 'the server chip wiring could not be found');
+  const wiring = src.slice(at, at + 2000);
+  const listeners = /\[([^\]]*)\]\s*\n?\s*\.forEach\(evt => btn\.addEventListener\(evt, warmThis/.exec(wiring);
+  assert.ok(listeners, 'the chip warm-up listeners could not be read');
+  ['mouseenter', 'focus', 'pointerdown', 'touchstart'].forEach((evt) => {
+    assert.ok(listeners[1].includes(evt), evt + ' no longer warms the server the user is about to pick');
+  });
+  assert.ok(/warmEmbedUrl\(buildPlayerUrl\(id, type, idx\)\)/.test(wiring),
+    'the light warm path (preconnect + provider document) is gone from the chip handler');
+});
+
+/*  prewarmPlayer() deliberately refuses to build a hidden frame once #playerFrame
+ *  exists, which is exactly the "switch server while watching" case. If the chip
+ *  handler only called prewarmPlayer, that case would warm nothing. */
+it('switching while something is already playing still warms the next server', () => {
+  assert.ok(/if \(!id \|\| isDataSaver\(\) \|\| document\.getElementById\('playerFrame'\)\) return;/.test(src),
+    'prewarmPlayer no longer bails while a player is open — the assumption below changed');
+  const at = src.indexOf('const warmThis = (event) =>');
+  assert.ok(at !== -1, 'the chip warm handler was renamed');
+  const handler = src.slice(at, src.indexOf('};', at));
+  const lightAt = handler.indexOf('warmEmbedUrl');
+  const heavyAt = handler.indexOf('prewarmPlayer');
+  assert.ok(lightAt !== -1 && heavyAt !== -1, 'the handler lost one of its two warm paths');
+  assert.ok(lightAt < heavyAt,
+    'the light path must run first so it is not skipped when the heavy one bails');
+  assert.ok(/kind === 'mouseenter' \|\| kind === 'focus'/.test(handler),
+    'the hidden prewarm frame is no longer restricted to hover/focus — a tap would build one');
+});
+
+/*  Warming must never start video in the background: that is what produced
+ *  Chrome's "background media paused" abort, and on a phone it is data the user
+ *  did not ask to spend. */
+it('warming never delegates autoplay or spends data on a metered link', () => {
+  const warmUrl = block('function warmUrlVariant(url)');
+  assert.ok(/autoplay\|autoPlay/.test(warmUrl), 'autoplay params are no longer neutralised for warm-ups');
+  const warmEmbed = block('function warmEmbedUrl(url)');
+  assert.ok(/isDataSaver\(\)/.test(warmEmbed), 'warmEmbedUrl no longer respects data saver / 2g');
+  /*  Read the attribute VALUE, not the surrounding prose — the code comments here
+   *  mention autoplay precisely because it must stay absent. */
+  const prewarm = block('function prewarmPlayer(id, type, srcIdxOverride)');
+  const allowAttr = /setAttribute\('allow',\s*'([^']*)'\)/.exec(prewarm);
+  assert.ok(allowAttr, 'the prewarm frame no longer sets an allow attribute at all');
+  assert.ok(!/autoplay/i.test(allowAttr[1]),
+    'the prewarm frame delegates autoplay again (allow="' + allowAttr[1] + '"), which is what made '
+      + 'Chrome abort the background load');
+});
+
 console.log('\n' + '='.repeat(62));
 console.log('  player-health: ' + pass + ' passed, ' + fail + ' failed');
 if (fail) failures.forEach((f) => console.log('   x ' + f));

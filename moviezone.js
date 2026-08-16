@@ -297,9 +297,19 @@ if (!isMzTV() && !isTouchOnly && !isMobile) {
 // Ab: DNS resolve turant (sasta hai), TLS handshake page interactive hone ke
 // baad idle time me. Playback speed same, LCP fast. Movie khulte waqt
 // openModal() already preconnectPlayerHosts(4) call karta hai.
+//
+// The host list is no longer written out here. It was a copy of the provider
+// list that had gone stale in both directions — it warmed cinextream.net (dead
+// domain, DNS record gone), 2embed.stream, vidsrc.sbs and multiembed.mov, none
+// of which the player uses any more, while vidfast.pro, flicky.host,
+// 111movies.com, vidrock.net, vidlink.pro and vidsrc.pm — all live servers —
+// stayed cold. Now it reads playerHostOrigins(), which is derived from
+// playerSources itself, so the two can never disagree again.
+//
+// playerSources is declared much further down the file, so the list is read from
+// a timer rather than inline: a 0ms timeout runs after this script finishes
+// parsing, which is still long before a user can open a title.
 (function preconnectServers() {
-  const servers = ['https://www.viduki.net', 'https://cinextream.net', 'https://www.2embed.stream', 'https://vidnest.fun', 'https://vidsrc.sbs', 'https://multiembed.mov', 'https://autoembed.co'];
-
   const addHint = (rel, url, crossOrigin) => {
     const link = document.createElement('link');
     link.rel = rel;
@@ -308,15 +318,19 @@ if (!isMzTV() && !isTouchOnly && !isMobile) {
     document.head.appendChild(link);
   };
 
-  // Cheap: DNS only, no socket. Safe to do immediately.
-  servers.forEach(url => addHint('dns-prefetch', url));
+  // Cheap: DNS only, no socket. Safe to do as soon as the script has parsed.
+  setTimeout(() => {
+    try { playerHostOrigins().forEach(url => addHint('dns-prefetch', url)); } catch (e) {}
+  }, 0);
 
   const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
   if (conn && (conn.saveData || ['slow-2g', '2g'].indexOf(conn.effectiveType) !== -1)) return;
 
   // Expensive: full TLS handshake — only for the two most-used providers, and
   // only once the browser is idle (i.e. after the first paint is done).
-  const warm = () => servers.slice(0, 2).forEach(url => addHint('preconnect', url, true));
+  const warm = () => {
+    try { playerHostOrigins().slice(0, 2).forEach(url => addHint('preconnect', url, true)); } catch (e) {}
+  };
   const schedule = () => {
     if ('requestIdleCallback' in window) requestIdleCallback(warm, { timeout: 4000 });
     else setTimeout(warm, 2500);
@@ -7393,13 +7407,34 @@ function renderExternalSources(id, srcIdx, lang) {
 
   const srcButtons = ext.querySelectorAll('.player-chip--source');
   srcButtons.forEach(btn => {
-    // ⚡ Hover/focus par us server ki stream pehle se warm kar do
-    const warmThis = () => {
+    /*  ⚡ Warm the server the user is about to pick.
+     *
+     *  This used to listen on mouseenter and focus only, which means it did
+     *  nothing at all on a phone or tablet — there is no hover there, so every
+     *  server switch on touch paid the full DNS + TCP + TLS + provider-document
+     *  cost after the tap. That is most of the wait users feel when they try a
+     *  different server.
+     *
+     *  pointerdown/touchstart fire while the finger is still down, ~100-300ms
+     *  before click, and they run the LIGHT path: preconnect plus the provider
+     *  document into the HTTP cache. No iframe, so nothing can start media in the
+     *  background and a mistaken tap costs one cached document.
+     *
+     *  The heavy path (hidden prewarm frame) stays on hover/focus, where there is
+     *  a real signal of intent and a desktop or TV to afford it. prewarmPlayer()
+     *  also refuses once #playerFrame exists — which is exactly the switch-while-
+     *  watching case — so the light path is what carries that scenario, and it
+     *  now runs there too.
+     */
+    const warmThis = (event) => {
       const idx = parseInt(btn.getAttribute('data-srcidx') || '0', 10);
       const type = currentModalMovie ? (currentModalMovie.media_type || 'movie') : 'movie';
-      prewarmPlayer(id, type, idx);
+      try { warmEmbedUrl(buildPlayerUrl(id, type, idx)); } catch (e) {}
+      const kind = event && event.type;
+      if (kind === 'mouseenter' || kind === 'focus') prewarmPlayer(id, type, idx);
     };
-    ['mouseenter', 'focus'].forEach(evt => btn.addEventListener(evt, warmThis, { passive: true }));
+    ['mouseenter', 'focus', 'pointerdown', 'touchstart']
+      .forEach(evt => btn.addEventListener(evt, warmThis, { passive: true }));
     btn.addEventListener('click', () => {
       const idx = parseInt(btn.getAttribute('data-srcidx')||'0', 10);
       const type = currentModalMovie ? currentModalMovie.media_type : 'movie';
@@ -7652,18 +7687,38 @@ function playNextEpisode() {
       jab user description/servers dekh raha hota hai
    3. Play dabate hi wahi ready frame reveal hota hai (naya load nahi)
    ══════════════════════════════════════════════════════════════ */
-const PLAYER_HOSTS = [
-  'https://vidnest.fun',
-  'https://player.videasy.net',
-  'https://www.viduki.net',
-  'https://vidrock.net',
-  'https://vidrock.ru',
-  'https://embed.smashystream.com',
-  'https://autoembed.co',
-  'https://vidlink.pro',
-  'https://vidsrc.pm',
-  'https://graphql.anilist.co'
-];
+/*  Every provider origin the player can actually navigate to, derived from
+ *  playerSources instead of written out by hand.
+ *
+ *  The hand-written list had drifted badly and silently: it still warmed
+ *  vidrock.ru and embed.smashystream.com (the latter is a commented-out source)
+ *  while three live servers — vidfast.pro, flicky.host and 111movies.com — were
+ *  never warmed at all. A user switching to one of those paid a full DNS + TCP +
+ *  TLS handshake at the exact moment they wanted video. Deriving the list means
+ *  adding or replacing a server warms the right host automatically.
+ *
+ *  The URL builders read currentModalMovie for anime detection; with no modal
+ *  open they take the plain movie branch, which is the origin we want. Each call
+ *  is guarded because a builder for a server that needs an AniList id may throw.
+ */
+const ANILIST_HOST = 'https://graphql.anilist.co';
+let _mzPlayerOrigins = null;
+
+function playerHostOrigins() {
+  if (_mzPlayerOrigins) return _mzPlayerOrigins;
+  const origins = [];
+  playerSources.forEach((source) => {
+    try {
+      const url = source.url(550, 'en', 'movie', '1', '1');
+      const origin = new URL(url).origin;
+      if (origins.indexOf(origin) === -1) origins.push(origin);
+    } catch (e) { /* a builder that cannot run without a modal is simply skipped */ }
+  });
+  origins.push(ANILIST_HOST);
+  _mzPlayerOrigins = origins;
+  return origins;
+}
+
 const _mzPreconnected = new Set();
 let _mzPrewarm = null;
 
@@ -7681,7 +7736,7 @@ function preconnectHost(origin) {
 }
 
 function preconnectPlayerHosts(limit) {
-  PLAYER_HOSTS.slice(0, limit || 4).forEach(preconnectHost);
+  playerHostOrigins().slice(0, limit || 4).forEach(preconnectHost);
 }
 
 /*  Warm the handshakes for the servers this user would ACTUALLY fall back to.
