@@ -1906,6 +1906,58 @@ function diversifyByLanguageWithinPriority(pool) {
   return output;
 }
 
+/*  ── TYPE INTERLEAVE (the shape a large catalogue actually ships) ──
+ *
+ *  Priority groups alone produce blocks: thirty fresh films, thirty print
+ *  upgrades, then the web series. Measured on the live feed that put the first
+ *  series at card 60 and the first anime at card 95 — present, but far past where
+ *  anyone scrolls, so the surface looked like a movies-only feed.
+ *
+ *  No large catalogue ships blocks. They rank inside each content type and then
+ *  fill a repeating slot pattern, so every type is represented on the first
+ *  screen while the strongest type still leads. That is what this does, and it is
+ *  the only ordering step that is allowed to cross a group boundary.
+ *
+ *  The pattern below is one screen's worth of cards. Movies take three quarters
+ *  of it and the whole top of it — the feed is still a movie feed, and the two
+ *  fresh movie groups still open it. A web series lands at slot 6, anime at slot
+ *  9, and the pattern repeats for as long as the pool lasts.
+ *
+ *  Every lane is already sorted by rankByFreshness, so taking from the front of a
+ *  lane always takes its best remaining title. A lane that runs dry never leaves
+ *  a hole: the slot falls through to whatever is left, movies first.
+ */
+const FEED_SLOT_PATTERN = ['movie', 'movie', 'movie', 'movie', 'movie', 'series',
+  'movie', 'movie', 'anime', 'movie', 'movie', 'series'];
+
+function feedLaneOf(title) {
+  if (mediaTypeOf(title) === 'movie') return 'movie';
+  return isAnimeContent(title) ? 'anime' : 'series';
+}
+
+function interleaveFeedByType(pool) {
+  const lanes = { movie: [], series: [], anime: [] };
+  pool.forEach((item) => { lanes[feedLaneOf(item)].push(item); });
+
+  // Nothing to interleave — one type only, so the ranked order already is the feed.
+  const activeLanes = ['movie', 'series', 'anime'].filter((lane) => lanes[lane].length > 0);
+  if (activeLanes.length < 2) return pool.slice();
+
+  const output = [];
+  const total = pool.length;
+  let slot = 0;
+  while (output.length < total) {
+    const wanted = FEED_SLOT_PATTERN[slot % FEED_SLOT_PATTERN.length];
+    slot++;
+    // Preference order: the slot's own lane, then movies, then whatever is left.
+    const order = [wanted, 'movie', 'series', 'anime'];
+    for (const lane of order) {
+      if (lanes[lane].length) { output.push(lanes[lane].shift()); break; }
+    }
+  }
+  return output;
+}
+
 /** IST calendar date, optionally shifted back by N days — used to build the
  *  release-window queries. TMDB expects plain YYYY-MM-DD. */
 function istDateStr(daysAgo) {
@@ -4073,7 +4125,13 @@ async function loadMovies(cat, isLoadMore = false) {
       // Balance languages only inside each priority group. A skipped movie is
       // reinserted before the next group, so this pass cannot lift a series
       // above a movie release or quality update.
-      movies.push(...diversifyByLanguageWithinPriority(uniqueMovies));
+      const ranked = diversifyByLanguageWithinPriority(uniqueMovies);
+
+      // Finally, fill the slot pattern: movies keep the top and three quarters of
+      // the feed, while trending web series and anime reach the first screen
+      // instead of sitting sixty cards down. This is the only step that crosses a
+      // priority group, and it never reorders within a lane.
+      movies.push(...interleaveFeedByType(ranked));
     } else if (cat === 'tv') {
       // EXPANDED OTT LIST: Now includes JioCinema, MX Player, HBO, aha, Hoichoi and more major platforms.
       const STREAMING_NETWORKS = STREAMING_NETWORK_IDS;

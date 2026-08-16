@@ -85,7 +85,8 @@
     // ── 0. the helpers exist at all ──────────────────────────────────────
     var required = ['titleQualityState', 'catalogueEventAgeDays',
       'freshnessTier', 'allFeedPriorityGroup', 'rankByFreshness',
-      'diversifyByLanguageWithinPriority', 'calculateMovieScore', 'latestWindowQuery',
+      'diversifyByLanguageWithinPriority', 'interleaveFeedByType', 'calculateMovieScore',
+      'latestWindowQuery',
       'printUpgradeWindowQuery', 'latestSeriesWindowQuery', 'seriesUpgradeWindowQuery',
       'latestAnimeWindowQuery', 'freshTierFloors', 'latestIndianWindowQuery',
       'latestBollywoodWindowQuery', 'indianUpgradeWindowQuery', 'indianCatalogueQuery',
@@ -420,6 +421,79 @@
       .map(function (m) { return m.title || m.name; });
     ok('language diversity cannot move a series above a skipped movie release',
       diversified.indexOf('HI-SERIES') === 4, diversified.join(' > '));
+
+    // ── 5d. the slot pattern — what the user actually scrolls ────────────
+    /*  Priority groups alone shipped blocks: the live feed put the first web
+     *  series at card 60 and the first anime at 95, which reads as a movies-only
+     *  feed. A large catalogue ranks inside each type and then fills a repeating
+     *  slot pattern. These checks pin that shape: movies own the top and the
+     *  majority, every type reaches the first screen, and no lane can starve. */
+    function bigPool() {
+      var pool = [];
+      for (var i = 0; i < 40; i++) {
+        pool.push(movie(1 + (i % 20), { title: 'M' + i, vote_average: 7.5,
+          popularity: 400 - i, vote_count: 900 }));
+      }
+      for (var j = 0; j < 20; j++) {
+        pool.push(series(2 + j, { name: 'S' + j, vote_average: 7.5,
+          popularity: 300 - j, vote_count: 800 }));
+      }
+      for (var k = 0; k < 8; k++) {
+        pool.push(series(3 + k, { name: 'A' + k, original_language: 'ja', genre_ids: [16],
+          vote_average: 8.0, popularity: 200 - k, vote_count: 600 }));
+      }
+      win.rankByFreshness(pool);
+      return win.interleaveFeedByType(win.diversifyByLanguageWithinPriority(pool));
+    }
+    var feed = bigPool();
+    var laneOf = function (m) {
+      if (!m.media_type || m.media_type !== 'tv') return 'movie';
+      return (m.original_language === 'ja' && (m.genre_ids || []).indexOf(16) !== -1) ? 'anime' : 'series';
+    };
+    var lanes = feed.map(laneOf);
+
+    ok('nothing is lost or duplicated by the interleave', feed.length === 68
+      && new Set(feed.map(function (m) { return m.id; })).size === 68,
+      feed.length + ' items');
+    ok('movies still open the feed', lanes.slice(0, 5).every(function (l) { return l === 'movie'; }),
+      lanes.slice(0, 8).join(','));
+    var firstSeries = lanes.indexOf('series');
+    var firstAnime = lanes.indexOf('anime');
+    ok('a web series reaches the first screen', firstSeries > 0 && firstSeries < 12,
+      'first web series at slot ' + firstSeries);
+    ok('anime reaches the first screen, after the web series',
+      firstAnime > firstSeries && firstAnime < 16,
+      'first anime at slot ' + firstAnime + ', first series at ' + firstSeries);
+    var movieShare = lanes.filter(function (l) { return l === 'movie'; }).length / lanes.length;
+    ok('the feed stays a movie feed (movies are the clear majority)',
+      movieShare >= 0.55 && movieShare <= 0.85, Math.round(movieShare * 100) + '% movies');
+    var longestRun = 1, run = 1;
+    for (var r = 1; r < lanes.length; r++) {
+      run = lanes[r] === lanes[r - 1] ? run + 1 : 1;
+      if (run > longestRun) longestRun = run;
+    }
+    ok('no single type is allowed to run away with the feed', longestRun <= 8,
+      'longest same-type run: ' + longestRun);
+
+    /*  Ranking inside a lane must survive the interleave — the pattern decides
+     *  WHICH lane fills a slot, never which title inside it. */
+    var seriesOrder = feed.filter(function (m) { return laneOf(m) === 'series'; })
+      .map(function (m) { return m.name; });
+    var seriesRanked = win.rankByFreshness(feed.filter(function (m) { return laneOf(m) === 'series'; }))
+      .map(function (m) { return m.name; });
+    ok('interleaving preserves each lane\'s own ranking',
+      seriesOrder.join(',') === seriesRanked.join(','),
+      seriesOrder.slice(0, 5).join(',') + ' vs ' + seriesRanked.slice(0, 5).join(','));
+
+    /*  The realistic failure: TMDB's tv queries fail and the pool is movies only.
+     *  The pattern must not leave holes or drop titles. */
+    var moviesOnly = [];
+    for (var q = 0; q < 12; q++) moviesOnly.push(movie(2 + q, { title: 'ONLY' + q }));
+    win.rankByFreshness(moviesOnly);
+    var onlyFeed = win.interleaveFeedByType(moviesOnly);
+    ok('a movies-only pool passes through untouched',
+      onlyFeed.length === 12 && onlyFeed.every(function (m) { return !!m; }),
+      onlyFeed.length + ' items');
 
     // ── 6. the rendered card ────────────────────────────────────────────
     win.renderMovies([justUpgraded]);
