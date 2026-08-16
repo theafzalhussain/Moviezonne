@@ -455,7 +455,7 @@
     ok('nothing is lost or duplicated by the interleave', feed.length === 68
       && new Set(feed.map(function (m) { return m.id; })).size === 68,
       feed.length + ' items');
-    ok('movies still open the feed', lanes.slice(0, 5).every(function (l) { return l === 'movie'; }),
+    ok('movies still open the feed', lanes.slice(0, 4).every(function (l) { return l === 'movie'; }),
       lanes.slice(0, 8).join(','));
     var firstSeries = lanes.indexOf('series');
     var firstAnime = lanes.indexOf('anime');
@@ -464,6 +464,25 @@
     ok('anime reaches the first screen, after the web series',
       firstAnime > firstSeries && firstAnime < 16,
       'first anime at slot ' + firstAnime + ', first series at ' + firstSeries);
+    /*  The product order is movies, then web series, then anime — and it has to
+     *  hold in the three ways a user can perceive it: what opens the feed, how
+     *  much of the feed each type gets, and which type appears first. */
+    ok('web series clearly precede anime, not just by one slot',
+      lanes.slice(0, firstAnime).filter(function (l) { return l === 'series'; }).length >= 2,
+      'only ' + lanes.slice(0, firstAnime).filter(function (l) { return l === 'series'; }).length
+        + ' web series before the first anime (slot ' + firstAnime + ')');
+    var share = { movie: 0, series: 0, anime: 0 };
+    lanes.forEach(function (l) { share[l]++; });
+    ok('share follows the same order: movies > web series > anime',
+      share.movie > share.series && share.series > share.anime,
+      JSON.stringify(share));
+    /*  "Mixed, not sectioned" is the other half of the request: the feed must not
+     *  degrade into a page of films followed by a page of series. Series and anime
+     *  have to keep appearing all the way down. */
+    var secondHalf = lanes.slice(Math.floor(lanes.length / 2));
+    ok('the mix continues into the second half of the feed, never sections',
+      secondHalf.indexOf('series') !== -1 || secondHalf.indexOf('anime') !== -1,
+      'second half lanes: ' + secondHalf.join(','));
     var movieShare = lanes.filter(function (l) { return l === 'movie'; }).length / lanes.length;
     ok('the feed stays a movie feed (movies are the clear majority)',
       movieShare >= 0.55 && movieShare <= 0.85, Math.round(movieShare * 100) + '% movies');

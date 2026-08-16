@@ -1918,17 +1918,23 @@ function diversifyByLanguageWithinPriority(pool) {
  *  screen while the strongest type still leads. That is what this does, and it is
  *  the only ordering step that is allowed to cross a group boundary.
  *
- *  The pattern below is one screen's worth of cards. Movies take three quarters
- *  of it and the whole top of it — the feed is still a movie feed, and the two
- *  fresh movie groups still open it. A web series lands at slot 6, anime at slot
- *  9, and the pattern repeats for as long as the pool lasts.
+ *  The pattern below is one screen's worth of cards, and it encodes the product
+ *  order directly: movies first, then web series, then anime.
+ *
+ *  Movies take three quarters of it and the whole top of it — the feed is still a
+ *  movie feed, and the two fresh movie groups still open it. A web series lands at
+ *  slot 5 and another at 9; anime waits until slot 11, so at least two web series
+ *  are always ahead of the first anime. Nothing is blocked off into a section: the
+ *  pattern repeats for as long as the pool lasts, so someone scrolling sees a mix
+ *  the whole way down instead of a page of films, then a page of series, then a
+ *  page of anime.
  *
  *  Every lane is already sorted by rankByFreshness, so taking from the front of a
  *  lane always takes its best remaining title. A lane that runs dry never leaves
  *  a hole: the slot falls through to whatever is left, movies first.
  */
-const FEED_SLOT_PATTERN = ['movie', 'movie', 'movie', 'movie', 'movie', 'series',
-  'movie', 'movie', 'anime', 'movie', 'movie', 'series'];
+const FEED_SLOT_PATTERN = ['movie', 'movie', 'movie', 'movie', 'series',
+  'movie', 'movie', 'movie', 'series', 'movie', 'anime', 'movie'];
 
 function feedLaneOf(title) {
   if (mediaTypeOf(title) === 'movie') return 'movie';
