@@ -87,7 +87,9 @@
       'freshnessTier', 'allFeedPriorityGroup', 'rankByFreshness',
       'diversifyByLanguageWithinPriority', 'calculateMovieScore', 'latestWindowQuery',
       'printUpgradeWindowQuery', 'latestSeriesWindowQuery', 'seriesUpgradeWindowQuery',
-      'latestAnimeWindowQuery', 'renderMovies'];
+      'latestAnimeWindowQuery', 'freshTierFloors', 'latestIndianWindowQuery',
+      'latestBollywoodWindowQuery', 'indianUpgradeWindowQuery', 'indianCatalogueQuery',
+      'renderMovies'];
     var missing = required.filter(function (n) { return typeof win[n] === 'undefined'; });
     ok('ranking helpers are reachable', missing.length === 0, 'missing: ' + missing.join(', '));
     if (missing.length) { report(); return; }
@@ -311,6 +313,71 @@
         && relevanceOrder[0] === 'SERIES-ESTABLISHED',
       relevanceOrder.join(' > '));
 
+    // ── 5c. every industry reaches the latest-release group ─────────────
+    // A regional release with genuine demand still carries a fraction of an
+    // English blockbuster's popularity and votes. Judged by the same 20/20 bar
+    // it dropped out of the latest-release group entirely — which is why the top
+    // of the feed stayed Hollywood-only in a week when two Bollywood films had
+    // just come out.
+    var industries = [
+      { lang: 'hi', label: 'Bollywood' },
+      { lang: 'te', label: 'Tollywood' },
+      { lang: 'ta', label: 'Tamil' },
+      { lang: 'ml', label: 'Malayalam' },
+      { lang: 'kn', label: 'Kannada' }
+    ];
+    var missedIndustries = industries.filter(function (i) {
+      return win.allFeedPriorityGroup(movie(2, { title: i.label, original_language: i.lang,
+        vote_average: 7.0, popularity: 9, vote_count: 6 })) !== 0;
+    }).map(function (i) { return i.label; });
+    ok('a modest new release from every industry reaches the latest-release group',
+      missedIndustries.length === 0, 'left out: ' + missedIndustries.join(', '));
+
+    var hiNew = movie(2, { title: 'HI-NEW', original_language: 'hi',
+      vote_average: 7.0, popularity: 9, vote_count: 6 });
+    var industryOrder = win.rankByFreshness([oldBlockbuster, hiNew])
+      .map(function (m) { return m.title; });
+    ok('a fresh regional release leads an old English blockbuster',
+      industryOrder[0] === 'HI-NEW', industryOrder.join(' > '));
+
+    // The smaller bar is a bar, not an open door: one-vote regional titles must
+    // still stay out of the latest group.
+    var hiJunk = movie(2, { title: 'HI-JUNK', original_language: 'hi', popularity: 2, vote_count: 1 });
+    ok('the regional floor still keeps no-name titles out of the latest group',
+      win.allFeedPriorityGroup(hiJunk) === 2, String(win.allFeedPriorityGroup(hiJunk)));
+
+    // English keeps the original 20/20 bar, so nothing about the Hollywood half
+    // of the feed moved.
+    var enSmall = movie(2, { title: 'EN-SMALL', original_language: 'en', popularity: 9, vote_count: 6 });
+    ok('the English relevance bar is unchanged',
+      win.allFeedPriorityGroup(enSmall) === 2 && win.freshTierFloors(enSmall).popularity === 20,
+      win.allFeedPriorityGroup(enSmall) + ' / floor ' + win.freshTierFloors(enSmall).popularity);
+
+    // A Bollywood/South film whose HD print just landed has to re-surface the
+    // same way a Hollywood one does.
+    var hiUpgraded = movie(76, { title: 'HI-HD', original_language: 'hi',
+      vote_average: 7.2, popularity: 12, vote_count: 10 });
+    ok('a regional film whose HD print just landed reaches the quality-update group',
+      win.allFeedPriorityGroup(hiUpgraded) === 1, String(win.allFeedPriorityGroup(hiUpgraded)));
+
+    // Series and anime floors must not move with this: a low-traction Hindi
+    // series is not promoted merely for being regional.
+    var hiSeriesSmall = series(3, { name: 'HI-SERIES-SMALL', original_language: 'hi',
+      popularity: 9, vote_count: 6 });
+    ok('the regional floor never touches web series or anime',
+      win.freshTierFloors(hiSeriesSmall).popularity === 20
+        && win.freshTierFloors(hiSeriesSmall).votes === 20
+        && win.allFeedPriorityGroup(hiSeriesSmall) === 4,
+      'floors ' + JSON.stringify(win.freshTierFloors(hiSeriesSmall))
+        + ' group ' + win.allFeedPriorityGroup(hiSeriesSmall));
+    var jaAnimeSmall = series(3, { name: 'ANIME-SMALL', original_language: 'ja',
+      genre_ids: [16], popularity: 9, vote_count: 6 });
+    ok('anime keeps its own traction floor too',
+      win.freshTierFloors(jaAnimeSmall).popularity === 20
+        && win.allFeedPriorityGroup(jaAnimeSmall) === 4,
+      'floors ' + JSON.stringify(win.freshTierFloors(jaAnimeSmall))
+        + ' group ' + win.allFeedPriorityGroup(jaAnimeSmall));
+
     // Four same-language releases force the fourth item through the diversity
     // skip path. It must be restored before the next (series) priority group.
     var diversityPool = [
@@ -439,6 +506,52 @@
       latest.page === '1' && upgradeWin.page === '1' && seriesWin.page === '1'
         && seriesUpgWin.page === '1' && animeWin.page === '1');
 
+    // The industry windows: same two questions asked per industry instead of on
+    // a single global popularity sort that Hollywood always wins.
+    var indianWin = win.latestIndianWindowQuery('1');
+    var bollyWin = win.latestBollywoodWindowQuery('1');
+    var indianUpgWin = win.indianUpgradeWindowQuery('1');
+    ok('the Indian release window covers every Indian industry in one request',
+      indianWin.with_origin_country === 'IN' && !indianWin.with_original_language,
+      JSON.stringify(indianWin));
+    ok('the Indian release window is the same five-week window as the global one',
+      indianWin['primary_release_date.gte'] === latest['primary_release_date.gte']
+        && indianWin['primary_release_date.lte'] === latest['primary_release_date.lte'],
+      indianWin['primary_release_date.gte'] + '..' + indianWin['primary_release_date.lte']);
+    ok('Bollywood gets its own release window so South cannot crowd it out',
+      bollyWin.with_original_language === 'hi'
+        && ageOf(bollyWin['primary_release_date.lte']) < 1.5
+        && Math.abs(ageOf(bollyWin['primary_release_date.gte']) - 35) < 2,
+      JSON.stringify(bollyWin));
+    // A regional release in its first days has a handful of votes and real
+    // demand; a vote floor here is exactly what used to hide it.
+    ok('the industry release windows carry no vote floor',
+      !indianWin['vote_count.gte'] && !bollyWin['vote_count.gte'],
+      'indian=' + indianWin['vote_count.gte'] + ' bollywood=' + bollyWin['vote_count.gte']);
+    ok('the Indian print-upgrade window matches the global HD/FHD cohort',
+      indianUpgWin.with_origin_country === 'IN'
+        && indianUpgWin['primary_release_date.gte'] === upgradeWin['primary_release_date.gte']
+        && indianUpgWin['primary_release_date.lte'] === upgradeWin['primary_release_date.lte'],
+      JSON.stringify(indianUpgWin));
+    ok('the industry windows page like every other source',
+      indianWin.page === '1' && bollyWin.page === '1' && indianUpgWin.page === '1');
+
+    // The catalogue query took over from three siloed per-language popularity
+    // queries. Its date ceiling is what keeps it out of the release windows'
+    // territory — without it, it would re-fetch the same fresh titles and the
+    // tail of the feed would lose its regional depth for nothing.
+    var catalogueWin = win.indianCatalogueQuery('1');
+    ok('the Indian catalogue query covers every industry in one request',
+      catalogueWin.with_origin_country === 'IN' && !catalogueWin.with_original_language,
+      JSON.stringify(catalogueWin));
+    ok('the Indian catalogue query only asks for titles older than the latest window',
+      catalogueWin['primary_release_date.lte'] === latest['primary_release_date.gte']
+        && !catalogueWin['primary_release_date.gte'],
+      catalogueWin['primary_release_date.lte'] + ' vs window start '
+        + latest['primary_release_date.gte']);
+    ok('the Indian catalogue query pages like every other source',
+      catalogueWin.page === '1');
+
     // ── 8. the feed really requests them ────────────────────────────────
     // index.html boots straight into loadMovies('all'), so the window queries
     // must show up as real requests, not just exist as functions.
@@ -455,6 +568,38 @@
     ok('the ALL feed actually requests the anime window',
       tvDiscover.some(function (u) { return u.indexOf('with_genres=16') !== -1 && u.indexOf('first_air_date.gte') !== -1; }),
       tvDiscover.length + ' tv discover requests seen');
+    // The whole point of the industry windows is that they are really sent — a
+    // helper nobody calls surfaces nothing.
+    ok('the ALL feed actually requests the Indian industry windows',
+      movieDiscover.filter(function (u) { return u.indexOf('with_origin_country=IN') !== -1; }).length >= 2,
+      movieDiscover.filter(function (u) { return u.indexOf('with_origin_country=IN') !== -1; }).length
+        + ' origin-country requests of ' + movieDiscover.length + ' movie discover requests');
+    // The three siloed per-language popularity queries were merged into one
+    // origin-country catalogue request specifically to stay inside the client's
+    // rate budget. Past that budget tmdb() parks a request for a full window, so
+    // the invariant worth guarding is that nothing on the FIRST-SCREEN path is
+    // ever parked — background page-2 prefetch may be, and that is fine.
+    var apiEntries = (win.performance.getEntriesByType('resource') || [])
+      .filter(function (e) { return e.name.indexOf('/api/tmdb/') !== -1; });
+    // Page-2 prefetch starts well after the first paint; everything before that
+    // is what the visible feed and carousel waited on.
+    var firstScreen = apiEntries.filter(function (e) { return e.startTime < 1500; });
+    var rateBudget = win.eval('MZ_RATE_LIMIT');
+    var rateWindow = win.eval('MZ_RATE_WINDOW_MS');
+    ok('the first-screen requests fit inside the client rate budget',
+      firstScreen.length > 0 && firstScreen.length <= rateBudget,
+      firstScreen.length + ' first-screen TMDB requests against a budget of '
+        + rateBudget + ' per ' + (rateWindow / 1000) + 's (' + apiEntries.length + ' total)');
+    var slowest = firstScreen.reduce(function (max, e) {
+      return Math.max(max, e.responseEnd); }, 0);
+    ok('no first-screen request was parked by the rate limiter',
+      slowest < rateWindow, 'slowest first-screen response ended at '
+        + Math.round(slowest) + 'ms; a parked one would land after ' + rateWindow + 'ms');
+    ok('the ALL feed actually requests the Bollywood release window',
+      movieDiscover.some(function (u) {
+        return u.indexOf('with_original_language=hi') !== -1
+          && u.indexOf('primary_release_date.gte') !== -1;
+      }), movieDiscover.length + ' movie discover requests seen');
 
     ok('no uncaught error surfaced in the app frame', !win.__mzHarnessError, win.__mzHarnessError || '');
     report();

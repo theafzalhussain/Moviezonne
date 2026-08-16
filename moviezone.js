@@ -1741,13 +1741,45 @@ const FRESH_TIER_DAYS = [7, 14, 30, 60, 120];
 const FRESH_TIER_MIN_POPULARITY = 20;
 const FRESH_TIER_MIN_VOTES = 20;
 
+/*  INDUSTRY-SCALE RELEVANCE FLOOR — MOVIES ONLY.
+ *
+ *  TMDB popularity and vote counts are not comparable across industries. A
+ *  Hindi, Telugu, Tamil, Malayalam or Kannada release that the whole country is
+ *  searching for in its first week still carries a fraction of the votes an
+ *  English blockbuster collects in its opening weekend. Judged by the same
+ *  20/20 bar, almost every regional new release failed the gate, dropped to the
+ *  "remaining movies" group and never appeared among the latest releases — which
+ *  is exactly why the top of the ALL feed looked Hollywood-only even in a week
+ *  when two Bollywood films had just come out.
+ *
+ *  Deliberately scoped to movies: the web series and anime floors stay at 20/20,
+ *  so nothing in those halves of the feed changes. The fetch side is what keeps
+ *  the long tail out — only the most popular titles of each industry's release
+ *  window are ever requested, so a lower floor cannot let junk in.
+ */
+const REGIONAL_MOVIE_LANGUAGES = ['hi', 'ta', 'te', 'ml', 'kn', 'bn', 'mr', 'pa', 'gu', 'or', 'as'];
+const REGIONAL_FRESH_MIN_POPULARITY = 6;
+const REGIONAL_FRESH_MIN_VOTES = 4;
+
+/** The popularity/vote bar a title must clear to be treated as a relevant fresh
+ *  release. Regional-industry movies get the smaller bar; everything else, and
+ *  every series or anime whatever its language, keeps the original one. */
+function freshTierFloors(title) {
+  if (mediaTypeOf(title) === 'movie'
+      && REGIONAL_MOVIE_LANGUAGES.indexOf(title.original_language || 'en') !== -1) {
+    return { popularity: REGIONAL_FRESH_MIN_POPULARITY, votes: REGIONAL_FRESH_MIN_VOTES };
+  }
+  return { popularity: FRESH_TIER_MIN_POPULARITY, votes: FRESH_TIER_MIN_VOTES };
+}
+
 /*  How long a card keeps its "NEW HD / NEW FHD / NEW 4K" ribbon after the print
  *  improved. Roughly matches how long the top freshness tiers keep it lifted. */
 const QUALITY_UPGRADE_BADGE_DAYS = 21;
 
 function freshnessTier(title, eventAgeDays) {
-  const relevant = (title.popularity || 0) >= FRESH_TIER_MIN_POPULARITY
-    || (title.vote_count || 0) >= FRESH_TIER_MIN_VOTES;
+  const floors = freshTierFloors(title);
+  const relevant = (title.popularity || 0) >= floors.popularity
+    || (title.vote_count || 0) >= floors.votes;
   if (!relevant || !isFinite(eventAgeDays)) return FRESH_TIER_DAYS.length;
   for (let i = 0; i < FRESH_TIER_DAYS.length; i++) {
     if (eventAgeDays <= FRESH_TIER_DAYS[i]) return i;
@@ -1876,6 +1908,95 @@ function printUpgradeWindowQuery(page) {
     'primary_release_date.gte': istDateStr(fhdDay + 15),
     'primary_release_date.lte': istDateStr(hdDay - 2),
     'vote_count.gte': '20',
+    page: page,
+    language: 'en-US'
+  };
+}
+
+/*  ── INDUSTRY RELEASE WINDOWS (BOLLYWOOD / SOUTH / TOLLYWOOD / REGIONAL) ──
+ *
+ *  latestWindowQuery() and printUpgradeWindowQuery() rank the whole world by
+ *  popularity, and on that scale a Hollywood weekend always wins the first page.
+ *  So a Hindi or Telugu film that released two days ago was never even fetched,
+ *  and no amount of re-ranking can surface a title that is not in the pool —
+ *  which is the real reason the latest-release group looked English-only.
+ *
+ *  These three ask the same two questions per industry instead of globally:
+ *  what just released, and whose HD print just landed. Indian titles all carry
+ *  origin_country IN, so one request covers Bollywood, Tollywood, Tamil,
+ *  Malayalam, Kannada and the rest together; Bollywood additionally gets its own
+ *  request, because on a shared popularity sort South releases regularly fill
+ *  the whole first page and would push Hindi out of it.
+ *
+ *  No vote floor: an Indian release in its first days often has a handful of
+ *  votes and real search demand. Popularity ordering plus the regional relevance
+ *  floor above keeps the long tail out, and only the first page is ever read.
+ *
+ *  Movies only, on purpose — web series and anime keep their own windows.
+ */
+const INDIAN_ORIGIN_COUNTRY = 'IN';
+const BOLLYWOOD_LANGUAGE = 'hi';
+
+/** Newest releases across every Indian industry in one request. */
+function latestIndianWindowQuery(page) {
+  return {
+    with_origin_country: INDIAN_ORIGIN_COUNTRY,
+    sort_by: 'popularity.desc',
+    'primary_release_date.gte': istDateStr(LATEST_WINDOW_DAYS),
+    'primary_release_date.lte': istDateStr(0),
+    page: page,
+    language: 'en-US'
+  };
+}
+
+/** Newest Bollywood releases specifically, so Hindi cannot be crowded out of
+ *  the shared Indian window by a big South release week. */
+function latestBollywoodWindowQuery(page) {
+  return {
+    with_original_language: BOLLYWOOD_LANGUAGE,
+    sort_by: 'popularity.desc',
+    'primary_release_date.gte': istDateStr(LATEST_WINDOW_DAYS),
+    'primary_release_date.lte': istDateStr(0),
+    page: page,
+    language: 'en-US'
+  };
+}
+
+/** The Indian half of the print-upgrade cohort: the same HD/FHD window the
+ *  global query uses, so a Bollywood or South film whose HD print just landed
+ *  gets pulled back to the top exactly like a Hollywood one does. */
+function indianUpgradeWindowQuery(page) {
+  const hdDay = MOVIE_QUALITY_TIMELINE[3].fromDay;   // 75  — digital / HD
+  const fhdDay = MOVIE_QUALITY_TIMELINE[4].fromDay;  // 120 — FHD
+  return {
+    with_origin_country: INDIAN_ORIGIN_COUNTRY,
+    sort_by: 'popularity.desc',
+    'primary_release_date.gte': istDateStr(fhdDay + 15),
+    'primary_release_date.lte': istDateStr(hdDay - 2),
+    page: page,
+    language: 'en-US'
+  };
+}
+
+/*  The Indian catalogue — what fills the "remaining movies" part of the feed
+ *  once the fresh groups are exhausted.
+ *
+ *  This replaced three separate undated popularity queries (hi, ta, te). They
+ *  cost three requests, were siloed to those three languages — Malayalam,
+ *  Kannada and Bengali could never appear at all — and, because TMDB popularity
+ *  is dominated by whatever released this week, most of their first page was the
+ *  same fresh titles the release windows above already fetch.
+ *
+ *  One request, every Indian industry, and the date ceiling gives it the job the
+ *  release windows deliberately do NOT do: everything OLDER than the latest
+ *  window. Nothing overlaps, so nothing is deduped away, and the tail of the
+ *  feed keeps its regional depth on a third of the request budget.
+ */
+function indianCatalogueQuery(page) {
+  return {
+    with_origin_country: INDIAN_ORIGIN_COUNTRY,
+    sort_by: 'popularity.desc',
+    'primary_release_date.lte': istDateStr(LATEST_WINDOW_DAYS),
     page: page,
     language: 'en-US'
   };
@@ -3017,9 +3138,6 @@ function prefetchMoviesPage(cat, pageNum) {
     tmdb('/trending/movie/week', { language: 'en-US', page: pageStr });
     tmdb('/trending/movie/day', { language: 'en-US', page: pageStr });
     tmdb('/movie/popular', { language: 'en-US', page: pageStr });
-    tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
-    tmdb('/discover/movie', { with_original_language: 'ta', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
-    tmdb('/discover/movie', { with_original_language: 'te', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
     tmdb('/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
     tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
     tmdb('/movie/now_playing', { language: 'en-US', page: pageStr });
@@ -3027,6 +3145,10 @@ function prefetchMoviesPage(cat, pageNum) {
     // prefetch actually warms the cache instead of missing it.
     tmdb('/discover/movie', latestWindowQuery(pageStr));
     tmdb('/discover/movie', printUpgradeWindowQuery(pageStr));
+    tmdb('/discover/movie', latestIndianWindowQuery(pageStr));
+    tmdb('/discover/movie', latestBollywoodWindowQuery(pageStr));
+    tmdb('/discover/movie', indianUpgradeWindowQuery(pageStr));
+    tmdb('/discover/movie', indianCatalogueQuery(pageStr));
     tmdb('/trending/tv/week', { language: 'en-US', page: pageStr });
     tmdb('/discover/tv', latestSeriesWindowQuery(pageStr));
     tmdb('/discover/tv', seriesUpgradeWindowQuery(pageStr));
@@ -3845,11 +3967,16 @@ async function loadMovies(cat, isLoadMore = false) {
       //     (last ~6 weeks) and anime seasons (last ~2 months), so whatever just
       //     released is always in the candidate pool rather than whatever
       //     /movie/popular happens to return.
+      //   • INDUSTRY WINDOWS — the same release window asked per industry
+      //     (all Indian origins together, plus Bollywood on its own) because a
+      //     single global popularity sort is always won by Hollywood, so no
+      //     Bollywood/South/Tollywood release ever reached the pool.
       //   • PRINT-UPGRADE WINDOWS — the cohorts that just crossed a real print
-      //     stage: movies at the HD/FHD marks, series at their clean-encode and
-      //     BD/4K marks. Without deliberately fetching them, a four-month-old
-      //     film whose HD print just dropped would never appear in the pool, so
-      //     no amount of re-ranking could surface it.
+      //     stage: movies at the HD/FHD marks (globally and for Indian titles),
+      //     series at their clean-encode and BD/4K marks. Without deliberately
+      //     fetching them, a four-month-old film whose HD print just dropped
+      //     would never appear in the pool, so no amount of re-ranking could
+      //     surface it.
       //
       // Series and anime are also the only way TV reaches this feed at all —
       // before this it fetched movies exclusively.
@@ -3858,13 +3985,14 @@ async function loadMovies(cat, isLoadMore = false) {
         tmdb('/trending/movie/week', { language: 'en-US', page: pageStr }),
         tmdb('/trending/movie/day', { language: 'en-US', page: pageStr }),
         tmdb('/movie/popular', { language: 'en-US', page: pageStr }),
-        tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }),
-        tmdb('/discover/movie', { with_original_language: 'ta', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }),
-        tmdb('/discover/movie', { with_original_language: 'te', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }),
         tmdb('/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }),
         tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }),
         tmdb('/discover/movie', latestWindowQuery(pageStr)),
         tmdb('/discover/movie', printUpgradeWindowQuery(pageStr)),
+        tmdb('/discover/movie', latestIndianWindowQuery(pageStr)),
+        tmdb('/discover/movie', latestBollywoodWindowQuery(pageStr)),
+        tmdb('/discover/movie', indianUpgradeWindowQuery(pageStr)),
+        tmdb('/discover/movie', indianCatalogueQuery(pageStr)),
         tmdb('/trending/tv/week', { language: 'en-US', page: pageStr }),
         tmdb('/discover/tv', latestSeriesWindowQuery(pageStr)),
         tmdb('/discover/tv', seriesUpgradeWindowQuery(pageStr)),
@@ -3873,7 +4001,9 @@ async function loadMovies(cat, isLoadMore = false) {
       
       // /discover/tv results carry no media_type, so tag them here instead of
       // relying on the name-vs-title guess further down the pipeline.
-      const TV_SOURCE_FROM = 11;
+      // Index of the first TV source above — must move whenever a movie source
+      // is added or removed, or series would be tagged as movies and vice versa.
+      const TV_SOURCE_FROM = 12;
       const combinedMovies = [];
       res.forEach((r, idx) => {
         if (r.status === 'fulfilled' && r.value && r.value.results) {
