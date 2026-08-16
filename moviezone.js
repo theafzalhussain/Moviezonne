@@ -5039,8 +5039,20 @@ async function loadUpcoming(isLoadMore = false) {
       const card = document.createElement('div');
       card.className = 'upcoming-card reveal-up';
       card.tabIndex = 0;
-      card.style.willChange = 'transform, opacity';
-      card.style.animationDelay = ((i % 12) * 0.08) + 's';
+      /*  PERF (TV / low-end): will-change promotes every card to its own
+       *  compositor layer and keeps it there for the life of the page — twelve
+       *  layers of poster-sized texture on a device with a few hundred MB of
+       *  graphics memory. On TV it buys literally nothing: tv-mode.css forces
+       *  .reveal-up to full opacity, so the animation this was hinting at never
+       *  runs (same reason the reveal observer is skipped below). The staggered
+       *  animationDelay is dead weight there for exactly the same reason.
+       *
+       *  Capable devices keep both — the stagger is part of how the section
+       *  looks, and the hint still helps the animation that actually plays. */
+      if (!isMzTV() && !mzLowTier) {
+        card.style.willChange = 'transform, opacity';
+        card.style.animationDelay = ((i % 12) * 0.08) + 's';
+      }
       card.innerHTML =
         '<div class="upcoming-poster">' +
           // PERF FIX: same eager->lazy fix as the movie grid (see renderMovies).
@@ -5607,8 +5619,24 @@ document.addEventListener('keydown', event => {
 });
 
 // Meaningful page scroll (ignores the tiny scroll a mobile keyboard causes).
+/*  PERF (TV / low-end): this listener used to do real work on EVERY scroll
+ *  event even with the dropdown closed — a getElementById plus a classList read,
+ *  and then a window.scrollY read, which is a layout read on a page that is
+ *  still rendering rails. tv-perf-check attributed 113ms of TV main-thread time
+ *  to this one handler during a 34-key D-pad session, making it the second most
+ *  expensive piece of our own JavaScript in the profile.
+ *
+ *  A live HTMLCollection is the same trick scheduleCatGroupReflow above uses: it
+ *  is maintained by the engine, so .length is a field read with no query and no
+ *  layout. While the dropdown is closed — always, on a TV — the handler now
+ *  costs that one comparison.
+ *
+ *  Behaviour is unchanged: the 70px baseline is seeded by openDropdown(), which
+ *  already sets searchLastScrollY at the moment it opens, so the first scroll
+ *  after opening still measures from the right place. */
+const _openSearchDropdowns = document.getElementsByClassName('search-results-dropdown open');
 window.addEventListener('scroll', () => {
-  if (!isSearchDropdownOpen()) { searchLastScrollY = window.scrollY; return; }
+  if (_openSearchDropdowns.length === 0) return;
   if (Math.abs(window.scrollY - searchLastScrollY) > 70) {
     searchLastScrollY = window.scrollY;
     closeDropdown();
