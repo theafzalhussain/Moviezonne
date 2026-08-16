@@ -165,12 +165,29 @@ function schemas(html) {
 
   console.log('\n── sitemaps ────────────────────────────────────────────────────');
 
+  /*  The child count is deliberately a floor, not an exact number.
+   *  It was pinned at 3 and the live index now legitimately carries 7:
+   *  static + browse + three movie shards + two series shards. A sitemap that
+   *  GROWS as the catalogue grows is the whole point of sharding, so an equality
+   *  check here fails on success — and a check that always fails is a check
+   *  everybody learns to ignore. What must stay true is that the index is an
+   *  index, that it has all its sections, and that every child it names is a
+   *  real, absolute sitemap URL (the next checks fetch them).
+   */
   await check('/sitemap.xml is a valid sitemap index', async () => {
     const r = await get(server, '/sitemap.xml');
     assert.strictEqual(r.status, 200);
     assert.ok(/application\/xml/.test(r.headers['content-type']), r.headers['content-type']);
     assert.ok(r.body.includes('<sitemapindex'), 'not a sitemap index');
-    assert.strictEqual((r.body.match(/<sitemap>/g) || []).length, 3);
+    const children = (r.body.match(/<loc>([^<]+)<\/loc>/g) || []).map((s) => s.replace(/<\/?loc>/g, ''));
+    assert.ok(children.length >= 3, 'only ' + children.length + ' child sitemaps');
+    assert.strictEqual((r.body.match(/<sitemap>/g) || []).length, children.length,
+      'a <sitemap> entry is missing its <loc>');
+    const bad = children.filter((u) => !/^https:\/\/[^/]+\/sitemap-[a-z0-9-]+\.xml$/.test(u));
+    assert.strictEqual(bad.length, 0, 'malformed child sitemap URL: ' + bad.join(', '));
+    ['sitemap-static.xml', 'sitemap-movies.xml', 'sitemap-tv.xml'].forEach((section) => {
+      assert.ok(children.some((u) => u.endsWith('/' + section)), section + ' is not listed in the index');
+    });
   });
 
   await check('/sitemap-static.xml lists homepage + all category pages', async () => {
@@ -186,7 +203,32 @@ function schemas(html) {
     movieSitemapUrls = (r.body.match(/<loc>([^<]+)<\/loc>/g) || []).map((s) => s.replace(/<\/?loc>/g, ''));
     assert.ok(movieSitemapUrls.length >= 100,
       'only ' + movieSitemapUrls.length + ' movie URLs — expected 100+');
-    assert.ok(movieSitemapUrls.every((u) => /\/movie\/\d+-/.test(u)), 'malformed URL in movie sitemap');
+    /*  The slug is optional on purpose. A title written entirely in a non-Latin
+     *  script (仙逆剧场版, 母女汽车中心) slugifies to nothing, so its canonical URL
+     *  really is /movie/{id} — those pages answer 200 and self-canonicalise, they
+     *  are not broken. Requiring a slug flagged them as malformed and hid the
+     *  failure that would actually matter, which is the one below. */
+    const bad = movieSitemapUrls.filter((u) => !/\/movie\/\d+(?:-[a-z0-9-]+)?$/.test(u));
+    assert.strictEqual(bad.length, 0, 'malformed URL in movie sitemap: ' + bad.slice(0, 3).join(', '));
+  });
+
+  /*  A sitemap must only list URLs that answer 200. A slugless entry is the one
+   *  shape that could silently start redirecting (to /movie/{id}-{slug}) if the
+   *  slug rules ever change, and Google drops redirecting sitemap entries. */
+  await check('slugless sitemap entries are canonical, not redirects', async () => {
+    const slugless = movieSitemapUrls.filter((u) => /\/movie\/\d+$/.test(u));
+    if (slugless.length === 0) {
+      assert.ok(movieSitemapUrls.length > 0, 'no movie URLs to sample');
+      return;
+    }
+    const sample = slugless[0].replace(/^https:\/\/[^/]+/, '');
+    const r = await get(server, sample);
+    assert.strictEqual(r.status, 200, sample + ' returned ' + r.status
+      + ' — a redirecting URL must not be listed in a sitemap');
+    const canonical = /rel="canonical" href="([^"]+)"/.exec(r.body);
+    assert.ok(canonical, sample + ' has no canonical');
+    assert.ok(canonical[1].endsWith(sample),
+      sample + ' points its canonical elsewhere (' + canonical[1] + '), so the sitemap lists a duplicate');
   });
 
   await check('/sitemap-tv.xml contains many real series URLs', async () => {
