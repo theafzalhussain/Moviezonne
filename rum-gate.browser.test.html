@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MovieZone — RUM profile gate harness</title>
+</head>
+<body>
+<h1>RUM profile gate harness</h1>
+<p>Loads the real index.html in a same-origin iframe and reports the RUM gate's
+   decisions (window.__mzRumProfile) plus whether the Datadog agent was actually
+   requested. The runner opens this page once per user-agent profile.</p>
+<iframe id="app" src="/index.html" style="width:1280px;height:900px;border:1px solid #333"></iframe>
+
+<script>
+(function () {
+  var frame = document.getElementById('app');
+  // The agent is requested async, after the render-critical resources, so give
+  // the page a few seconds before deciding it was never asked for.
+  frame.addEventListener('load', function () { setTimeout(run, 5000); });
+
+  function run() {
+    var payload = { error: null };
+    try {
+      var win = frame.contentWindow;
+      var agentRequests = (win.performance.getEntriesByType('resource') || [])
+        .filter(function (e) { return e.name.indexOf('datadoghq-browser-agent.com') !== -1; });
+      payload = {
+        ua: win.navigator.userAgent,
+        profile: win.__mzRumProfile || null,
+        hasProfile: !!win.__mzRumProfile,
+        agentRequested: agentRequests.length > 0,
+        cores: win.navigator.hardwareConcurrency || 0,
+        memory: win.navigator.deviceMemory || 0,
+        ddRumDefined: typeof win.DD_RUM !== 'undefined',
+        error: win.__mzHarnessError || null
+      };
+    } catch (e) {
+      payload.error = e.message;
+    }
+    try {
+      fetch('/__results', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    } catch (e) { /* the runner will time out and fail loudly */ }
+  }
+
+  frame.addEventListener('load', function () {
+    try {
+      frame.contentWindow.addEventListener('error', function (ev) {
+        frame.contentWindow.__mzHarnessError = ev.message;
+      });
+    } catch (e) { /* cross-origin cannot happen here */ }
+  });
+})();
+</script>
+</body>
+</html>

@@ -209,6 +209,92 @@ check('charset stays in the first 1024 bytes', () => {
     'charset at byte ' + at + ' — browsers may restart the parse');
 });
 
+/*  ── DATADOG RUM PROFILE GATE ──
+ *  rum-gate.browser.test.js proves the gate's runtime decisions, but it can only
+ *  see the development branch: it is served from 127.0.0.1. These guards cover
+ *  what that test cannot reach — that the production branch still exists, that
+ *  the agent is never requested before the gate has run, and that the noise
+ *  filter has not quietly grown into a way to hide real errors.
+ */
+console.log('\n-- Datadog RUM profile gate ' + '-'.repeat(34));
+
+check('RUM env is derived, never hardcoded to production', () => {
+  assert.ok(!/env:\s*'production'/.test(htmlCode),
+    "env is pinned to 'production'; a localhost session would report as production again");
+  assert.ok(/env:\s*window\.__mzRumProfile\.env/.test(htmlCode),
+    'RUM init does not read its env from the profile gate');
+  assert.ok(/isLocal\s*\?\s*'development'\s*:\s*'production'/.test(htmlCode),
+    'the development/production branch is gone — dev and prod data would merge again');
+});
+
+check('a dev host samples no RUM sessions', () => {
+  assert.ok(/sessionSampleRate:\s*isLocal\s*\?\s*0\s*:\s*100/.test(htmlCode),
+    'localhost still samples sessions, so dev traffic reaches the production dashboard');
+});
+
+check('real crawlers are gated out before the agent is requested', () => {
+  const gateAt = htmlCode.indexOf('__mzRumProfile');
+  const agentAt = htmlCode.indexOf('datadoghq-browser-agent.com');
+  assert.ok(gateAt !== -1 && agentAt !== -1, 'the gate or the agent loader is missing');
+  assert.ok(gateAt < agentAt,
+    'the agent is requested before the gate runs, so a crawler would still download it');
+  assert.ok(/if\s*\(isCrawler\)\s*return;/.test(htmlCode),
+    'the crawler branch no longer stops the agent from loading');
+  ['googlebot', 'bingbot', 'applebot', 'ahrefsbot', 'semrushbot'].forEach((bot) => {
+    assert.ok(new RegExp(bot, 'i').test(htmlCode), bot + ' is not in the crawler list');
+  });
+});
+
+check('audits are never gated out — Lighthouse must see what users see', () => {
+  const gate = /var isCrawler = [\s\S]*?;/.exec(htmlCode);
+  assert.ok(gate, 'the crawler pattern could not be located');
+  ['lighthouse', 'pagespeed', 'headlesschrome', 'gtmetrix'].forEach((tool) => {
+    assert.ok(!new RegExp(tool, 'i').test(gate[0]),
+      tool + ' is in the crawler list; the audit would measure a page without RUM, '
+        + 'which reports a score no real user gets');
+  });
+});
+
+check('Session Replay is switched off on weak devices only', () => {
+  assert.ok(/sessionReplaySampleRate:\s*isWeak\s*\?\s*0\s*:\s*10/.test(htmlCode),
+    'the replay budget is not tied to the weak-device verdict');
+  assert.ok(/navigator\.hardwareConcurrency\s*<\s*4/.test(htmlCode)
+    && /navigator\.deviceMemory\s*<\s*4/.test(htmlCode),
+    'the weak-device thresholds no longer match isLowEnd in moviezone.js');
+  assert.ok(/tizen/i.test(htmlCode) && /smart-?tv/i.test(htmlCode),
+    'TVs are not detected, so the most affected device keeps paying for replay');
+});
+
+check('errors and metrics still reach Datadog on every device', () => {
+  assert.ok(!/trackLongTasks:\s*false/.test(htmlCode) && /trackLongTasks:\s*true/.test(htmlCode),
+    'long-task collection was turned off — the TV data we act on comes from it');
+  assert.ok(/trackResources:\s*true/.test(htmlCode) && /trackUserInteractions:\s*true/.test(htmlCode),
+    'resource or interaction tracking was turned off');
+});
+
+check('the RUM noise filter drops only third-party, non-actionable errors', () => {
+  const filter = /beforeSend:\s*function[\s\S]*?\n\s{6}\}/.exec(htmlCode);
+  assert.ok(filter, 'beforeSend is missing, so third-party noise is back in the error feed');
+  const body = filter[0];
+  assert.ok(/event\.type !== 'error'/.test(body),
+    'the filter inspects non-error events too, so it can drop real telemetry');
+  assert.ok(/ResizeObserver loop/i.test(body), 'the ResizeObserver noise is no longer filtered');
+  assert.ok(/extension:/i.test(body), 'browser-extension errors are no longer filtered');
+  // The whole value of the filter is that it stays this small.
+  const returnsFalse = (body.match(/return false/g) || []).length;
+  assert.ok(returnsFalse <= 3,
+    returnsFalse + ' discard branches in beforeSend; each one hides a class of error');
+  assert.ok(/return true;\s*\}/.test(body),
+    'the filter does not end by keeping everything else');
+});
+
+check('the RUM gate is exercised by a browser test', () => {
+  assert.ok(fs.existsSync('rum-gate.browser.test.js') && fs.existsSync('rum-gate.browser.test.html'),
+    'the gate has no browser test, so its runtime decisions are unverified');
+  assert.ok(pkg.scripts.test.includes('rum-gate.browser.test.js'),
+    'rum-gate.browser.test.js is never run by npm test');
+});
+
 console.log('\n-- build produces everything index.html asks for ' + '-'.repeat(13));
 
 check('npm run build minifies every shipped script', () => {

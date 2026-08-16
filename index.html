@@ -569,7 +569,7 @@ html.mz-has-cw #continueWatchingGrid{min-height:236px}
 </script>
 
 <!-- ════════════════════════════════════════════════════════════════════
-     DATADOG RUM — async loader.
+     DATADOG RUM — async loader, behind a profile gate.
      This used to be a plain <script src> at the very top of a duplicated
      <head>, which meant a third-party, cross-origin, PARSER-BLOCKING request
      sat in front of the stylesheet, the fonts and the bundles. Nothing on the
@@ -581,32 +581,94 @@ html.mz-has-cw #continueWatchingGrid{min-height:236px}
      document never waits on it. It is placed at the end of <head> so the
      request is issued after the resources that actually render the page.
 
-     sessionReplaySampleRate dropped 20 -> 10: replay instruments DOM mutations,
-     and this page mutates heavily while rendering rails, so it is the most
-     expensive RUM feature on INP. 10% is still plenty of sessions to debug from.
+     THE GATE (three decisions, each from a measurement, not a guess):
+
+     • Real crawlers get no RUM at all. A bot session is not a user session: it
+       skews every percentile in the dashboard, and the agent is pure waste on a
+       request no human is waiting for. Lighthouse/PageSpeed are deliberately
+       NOT in that list — an audit must see exactly what a user sees, otherwise
+       the score is a lie we tell ourselves.
+
+     • A dev machine reports env "development" and samples nothing. The init
+       used to say env:'production' unconditionally, so every "Failed to fetch"
+       thrown on localhost landed in the production error feed. That is why the
+       production error count could not be trusted at all.
+
+     • Weak devices keep errors and metrics but lose Session Replay. Replay
+       records DOM mutations and this page mutates heavily while rendering
+       rails; tv-perf-check measured ~220ms of main-thread time inside
+       datadog-rum.js during the D-pad phase alone — on the device least able to
+       afford it. Thresholds match isLowEnd in moviezone.js so "weak" means the
+       same thing everywhere.
+
+     sessionReplaySampleRate stays 10 (not 20) on capable devices: replay is the
+     most expensive RUM feature on INP, and 10% is still plenty of sessions.
+
+     window.__mzRumProfile exports the decisions so rum-gate.browser.test.js can
+     assert them instead of trusting them.
      ════════════════════════════════════════════════════════════════════ -->
 <script>
-(function (h, o, u, n, d) {
-  h = h[d] = h[d] || { q: [], onReady: function (c) { h.q.push(c); } };
-  d = o.createElement(u); d.async = 1; d.src = n;
-  n = o.getElementsByTagName(u)[0]; n.parentNode.insertBefore(d, n);
-})(window, document, 'script', 'https://www.datadoghq-browser-agent.com/us1/v5/datadog-rum.js', 'DD_RUM');
-window.DD_RUM.onReady(function () {
-  window.DD_RUM.init({
-    applicationId: '2d98ba56-1b76-4b3e-9591-e6964fe2733c',
-    clientToken: 'pub4dbf2c26e71ae61cfd49507556566886',
-    site: 'us5.datadoghq.com',
-    service: 'moviezone',
-    env: 'production',
-    version: '1.0.0',
-    sessionSampleRate: 100,
-    sessionReplaySampleRate: 10,
-    defaultPrivacyLevel: 'mask-user-input',
-    trackResources: true,
-    trackUserInteractions: true,
-    trackLongTasks: true
+(function () {
+  var ua = navigator.userAgent || '';
+  var host = location.hostname;
+
+  var isCrawler = /googlebot|bingbot|yandex(?:bot|images)|duckduckbot|baiduspider|applebot|facebookexternalhit|twitterbot|linkedinbot|slackbot|telegrambot|ahrefsbot|semrushbot|mj12bot|dotbot|petalbot|bytespider|uptimerobot|pingdom|statuscake/i.test(ua);
+  var isLocal = /^(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)$/.test(host)
+    || /^(?:192\.168\.|10\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(host);
+  var isTvUA = /\b(?:smart-?tv|smarttv|googletv|android\s*tv|appletv|tvos|crkey|roku|web0?s|tizen|vidaa|hbbtv|netcast|viera|bravia|aquos)\b|\bAFT[A-Z0-9]/i.test(ua);
+  var isWeak = isTvUA
+    || (navigator.deviceMemory && navigator.deviceMemory < 4)
+    || (navigator.hardwareConcurrency && navigator.hardwareConcurrency < 4);
+
+  window.__mzRumProfile = {
+    skipped: isCrawler,
+    env: isLocal ? 'development' : 'production',
+    sessionSampleRate: isLocal ? 0 : 100,
+    sessionReplaySampleRate: isWeak ? 0 : 10,
+    weakDevice: !!isWeak
+  };
+  if (isCrawler) return;
+
+  (function (h, o, u, n, d) {
+    h = h[d] = h[d] || { q: [], onReady: function (c) { h.q.push(c); } };
+    d = o.createElement(u); d.async = 1; d.src = n;
+    n = o.getElementsByTagName(u)[0]; n.parentNode.insertBefore(d, n);
+  })(window, document, 'script', 'https://www.datadoghq-browser-agent.com/us1/v5/datadog-rum.js', 'DD_RUM');
+  window.DD_RUM.onReady(function () {
+    window.DD_RUM.init({
+      applicationId: '2d98ba56-1b76-4b3e-9591-e6964fe2733c',
+      clientToken: 'pub4dbf2c26e71ae61cfd49507556566886',
+      site: 'us5.datadoghq.com',
+      service: 'moviezone',
+      env: window.__mzRumProfile.env,
+      version: '1.0.0',
+      sessionSampleRate: window.__mzRumProfile.sessionSampleRate,
+      sessionReplaySampleRate: window.__mzRumProfile.sessionReplaySampleRate,
+      defaultPrivacyLevel: 'mask-user-input',
+      trackResources: true,
+      trackUserInteractions: true,
+      trackLongTasks: true,
+      /*  Noise filter. Only drops errors that are provably not ours and not
+       *  actionable — everything else must still reach Datadog, or this filter
+       *  becomes a way to hide real bugs.
+       *
+       *  "ResizeObserver loop completed with undelivered notifications" is the
+       *  loudest one, and this codebase contains no ResizeObserver at all
+       *  (grep: zero matches) — it comes from the browser or an injected
+       *  script. Extension errors are the same story: an extension throws
+       *  inside the page and the page gets blamed. */
+      beforeSend: function (event) {
+        if (event.type !== 'error') return true;
+        var err = event.error || {};
+        var message = err.message || '';
+        var stack = err.stack || '';
+        if (/ResizeObserver loop/i.test(message)) return false;
+        if (/(?:chrome|moz|safari|chrome-extension|moz-extension)-?extension:\/\//.test(stack + ' ' + message)) return false;
+        return true;
+      }
+    });
   });
-});
+})();
 </script>
 </head>
 <body>
