@@ -1762,6 +1762,16 @@ function setupInfiniteScroll() {
     const trigger = document.getElementById('infiniteScrollTrigger');
     if (!trigger) return;
 
+    /*  Paged feed: the observer is simply never installed, so scrolling can no
+     *  longer append a page. MZ_FEED_PAGED is read here rather than deleting this
+     *  function, so handing the feed back to infinite scroll is one constant.
+     */
+    if (MZ_FEED_PAGED) {
+      ensurePagerDelegation();
+      renderFeedPager();
+      return;
+    }
+
     const observer = new IntersectionObserver((entries) => {
         const entry = entries[0];
         if (entry.isIntersecting && !isLoadingMore) {
@@ -4316,11 +4326,24 @@ function renderFeedError(cat) {
   }, { once: true });
 }
 
+/**
+ * @param {string}  cat        category slug
+ * @param {boolean} isLoadMore fetch the next TMDB page and APPEND it to the pool.
+ *        Under MZ_FEED_PAGED this is how the pager extends past what the pool
+ *        covers; it never appends to the DOM, it grows allMovies and then repaints
+ *        the current page out of it.
+ */
 async function loadMovies(cat, isLoadMore = false) {
   const grid = document.getElementById('movieGrid');
   if (!grid) return;
   
   if (!cat) cat = 'all';
+  if (cat !== mzFeedPagerCategory) {
+    // A different category is a different pool, so paging starts over.
+    mzFeedPage = 1;
+    mzFeedPoolExhausted = false;
+  }
+  mzFeedPagerCategory = cat;
   
   if (isLoadMore) {
     if (isLoadingMore) return;
@@ -4330,6 +4353,8 @@ async function loadMovies(cat, isLoadMore = false) {
     currentMoviePage++;
   } else {
     currentMoviePage = 1;
+    mzFeedPage = 1;
+    mzFeedPoolExhausted = false;
     grid.innerHTML = Array(8).fill('<div class="skeleton skeleton-card"></div>').join('');
     allMovies = [];
   }
@@ -4732,7 +4757,29 @@ async function loadMovies(cat, isLoadMore = false) {
       // TMDB answered fine, it just has nothing matching this category's filters.
       // Retrying an honest empty result can only ever produce the same result.
       state.attempts = 0;
+
+      /*  An extension that returned nothing means TMDB has no further pages for
+       *  this category. The pool is what the user is paging through and it still
+       *  holds every earlier page, so nothing is lost: mark the pool final, clamp
+       *  onto the last page that has content and repaint. renderFeedEmpty() would
+       *  be wrong here — the feed is not empty, it just has no MORE.
+       */
+      if (MZ_FEED_PAGED && isLoadMore && allMovies.length) {
+        mzFeedPoolExhausted = true;
+        mzFeedPage = Math.min(mzFeedPage, mzFeedTotalPages());
+        renderCurrentFeedPage();
+        renderFeedPager();
+        if (typeof showToast === 'function') showToast('That was the last page.');
+        // Owned by this early return, so the gate is released here too or every
+        // later extension would be refused.
+        isLoadingMore = false;
+        const doneIndicator = document.getElementById('loadingIndicator');
+        if (doneIndicator) doneIndicator.style.display = 'none';
+        return;
+      }
+
       renderFeedEmpty(cat);
+      renderFeedPager();
       return;
     }
 
@@ -4795,13 +4842,33 @@ async function loadMovies(cat, isLoadMore = false) {
   const FIRST_PAINT_CARDS = 8;
   const firstPaintCount = mzLowTier ? 4 : FIRST_PAINT_CARDS;
 
-  if (isLoadMore) {
+  if (MZ_FEED_PAGED && !isFullViewMovies) {
+    /*  Paged feed: the pool just grew (or was just built), so repaint whichever
+     *  page the user is on out of it. An extension must NOT append to the DOM —
+     *  the point of paging is that the grid holds one page.
+     *
+     *  If the extension produced nothing new, TMDB is out of titles for this
+     *  category: mark the pool final and step back onto the last page that has
+     *  content, so the user is never left on a blank grid.
+     */
+    if (isLoadMore && !newMovies.length) {
+      mzFeedPoolExhausted = true;
+      mzFeedPage = Math.min(mzFeedPage, mzFeedTotalPages());
+      if (typeof showToast === 'function') showToast('That was the last page.');
+    }
+    if (!renderCurrentFeedPage() && mzFeedPage > 1) {
+      // Defensive: the slice came back empty even though the pool has titles.
+      mzFeedPoolExhausted = true;
+      mzFeedPage = mzFeedTotalPages();
+      renderCurrentFeedPage();
+    }
+  } else if (isLoadMore) {
     renderMovies(newMovies, true);
   } else if (isFullViewMovies) {
     renderMovies(allMovies, false);
   } else {
     const head = allMovies.slice(0, firstPaintCount);
-    const tail = allMovies.slice(firstPaintCount, 24);
+    const tail = allMovies.slice(firstPaintCount, MZ_FEED_PAGE_SIZE);
     renderMovies(head, false);
     if (tail.length) {
       const paintTail = () => renderMovies(tail, true);
@@ -4811,7 +4878,11 @@ async function loadMovies(cat, isLoadMore = false) {
   }
   
   const loadMoreBtn = document.getElementById('loadMoreMoviesBtn');
-  if (loadMoreBtn) loadMoreBtn.style.display = 'none'; // Always hide button for infinite scroll
+  if (loadMoreBtn) loadMoreBtn.style.display = 'none'; // Paged feed uses #feedPager instead
+
+  // Drawn after the grid so the button row cannot appear before the cards it
+  // pages through, which looked broken while the skeletons were still up.
+  renderFeedPager();
  
   // Har load ke baad agle page ko chupke se fetch karke ready rakho
   if (!isMzTV()) {
@@ -4911,9 +4982,18 @@ function renderMovies(movies, append = false) {
   if (!append) {
     if (!movies.length) {
       grid.innerHTML = '<div class="no-results"><h3>No movies found</h3><p>Try a different search or category.</p></div>';
+      renderFeedPager();
       return;
     }
     grid.innerHTML = '';
+    /*  Second call site for the pager, and not redundant with the one in
+     *  loadMovies: search results and the watchlist repaint the grid through
+     *  renderMovies directly, never through loadMovies, and would otherwise be
+     *  left showing the feed's pager under a finite set of results.
+     *  renderFeedPager() reads isSearchResultsMode / isWatchlistMode and clears
+     *  itself in those modes, so this hook is the one that covers them.
+     */
+    renderFeedPager();
   }
 
   ensureGridDelegation(grid);
@@ -5288,6 +5368,237 @@ function filterCat(cat, e) {
   loadMovies(cat);
 }
  
+/*  ══════════════════════════════════════════════════════════════════════
+ *  FEED PAGINATION
+ *  ══════════════════════════════════════════════════════════════════════
+ *  The feed used to grow without end: an IntersectionObserver 400px below the
+ *  grid fired loadMoreMoviesAction() and appended another page, forever. Nothing
+ *  below the grid was ever reachable, the DOM grew on every scroll, and it
+ *  fetched titles nobody asked for.
+ *
+ *  ── HOW PAGES ARE PRODUCED, AND WHY IT IS NOT ONE FETCH PER PAGE ───────────
+ *  The obvious implementation — page N asks TMDB for page N — was wrong here,
+ *  and measurably so.
+ *
+ *  One gather already returns far more than a screenful. The ALL feed merges 16
+ *  sources at 20 results each, and after dedup and ranking that is a pool of
+ *  roughly 200 unique titles. The old code rendered allMovies.slice(0, 24) and
+ *  discarded the rest. So "page 2" refetched all 16 sources to build another 200
+ *  and again showed 24 — paying a full round-trip for titles it already had.
+ *
+ *  Worse, it produced duplicates. Source A's page 2 routinely contains titles
+ *  that were in source B's page 1, and dedup only ran within a single gather
+ *  (allMovies is cleared on a page change), so a title shown on page 1 could
+ *  reappear on page 2. That is the reported bug.
+ *
+ *  So pages are slices of the pool instead:
+ *
+ *      page N  =  allMovies[(N-1)*24 .. N*24]
+ *
+ *  Two things fall out of that, both of them the behaviour asked for:
+ *
+ *    • NO DUPLICATES, by construction. allMovies is deduped by type+id before it
+ *      is ever sliced, so a title cannot occupy two pages.
+ *    • NO REFETCH. Moving between pages that the pool already covers is a slice
+ *      and a render — no network, no skeletons, nothing to wait for. One gather
+ *      now serves ~8 pages instead of 1.
+ *
+ *  When the pool runs short the next TMDB page is fetched and APPENDED, so the
+ *  pool only ever grows and earlier pages keep showing exactly what they showed
+ *  before. Only whole pages are offered while more titles may exist, so a page is
+ *  never shown half-full and then quietly refilled underneath the user.
+ */
+
+/*  Cards per page.
+ *
+ *  30, i.e. five rows of six on a desktop window. The grid is
+ *  repeat(auto-fill, minmax(185px, 1fr)), so the column count follows the
+ *  viewport — six across on a wide window, two on a phone. This number is
+ *  therefore "cards per page", and the row count it produces depends on width;
+ *  30 is what gives five rows at the six-across desktop layout.
+ *
+ *  Was 24 (four rows). Raising it costs nothing in requests: one gather already
+ *  yields a pool of roughly 200 titles, so this only changes how much of that
+ *  pool each page reveals — about 6 pages per gather instead of 8.
+ */
+const MZ_FEED_PAGE_SIZE = 30;
+
+/*  Hard ceiling, to match the SSR category pager and because TMDB's popularity
+ *  ordering stops meaning much past this depth. */
+const MZ_FEED_PAGE_CAP = 25;
+
+/*  Set false to hand the feed back to infinite scroll. setupInfiniteScroll()
+ *  reads this rather than being deleted, so the old behaviour is one line away. */
+const MZ_FEED_PAGED = true;
+
+let mzFeedPage = 1;
+let mzFeedPagerCategory = 'all';
+let mzFeedPoolExhausted = false;   // TMDB has no further pages for this category
+let _mzPagerDelegated = false;
+
+/** Where the current page starts in the pool. */
+function mzFeedPageStart(page) {
+  return (Math.max(1, page) - 1) * MZ_FEED_PAGE_SIZE;
+}
+
+/*  How many pages to offer.
+ *
+ *  Only COMPLETE pages while the pool can still grow: offering a page that holds
+ *  eight titles today and twenty-four after the next extension would change
+ *  content under someone who had already looked at it. Once TMDB is exhausted the
+ *  final partial page is offered, because then it is final.
+ *
+ *  One extra page is offered beyond what the pool covers so that Next stays
+ *  reachable and can trigger the extension.
+ */
+function mzFeedTotalPages() {
+  const size = allMovies.length;
+  if (mzFeedPoolExhausted) {
+    return Math.max(1, Math.min(Math.ceil(size / MZ_FEED_PAGE_SIZE), MZ_FEED_PAGE_CAP));
+  }
+  return Math.max(1, Math.min(Math.floor(size / MZ_FEED_PAGE_SIZE) + 1, MZ_FEED_PAGE_CAP));
+}
+
+/** True when the pool can already fill the page without touching the network. */
+function mzFeedPageIsReady(page) {
+  const start = mzFeedPageStart(page);
+  return mzFeedPoolExhausted
+    ? start < allMovies.length
+    : allMovies.length >= start + MZ_FEED_PAGE_SIZE;
+}
+
+/*  Which page numbers to show: first, last, the current page's neighbours, and
+ *  every fifth page, with … standing in for the runs left out.
+ *
+ *  Deliberately the same rule as the SSR pager in seo-ssr.js, so the homepage
+ *  control and the category-page control are recognisably the same thing.
+ */
+function mzFeedPageNumbers(page, totalPages) {
+  const wanted = new Set([1, totalPages, page - 1, page, page + 1]);
+  for (let p = 5; p <= totalPages; p += 5) wanted.add(p);
+  return [...wanted].filter((p) => p >= 1 && p <= totalPages).sort((a, b) => a - b);
+}
+
+/*  Renders the current page out of the pool.
+ *
+ *  Keeps the two-stage paint the feed already used — a few cards immediately, the
+ *  rest on an idle callback — so a page change costs the same main-thread work as
+ *  the first load rather than one 24-card long task.
+ */
+function renderCurrentFeedPage() {
+  const start = mzFeedPageStart(mzFeedPage);
+  const slice = allMovies.slice(start, start + MZ_FEED_PAGE_SIZE);
+  const firstPaint = mzLowTier ? 4 : 8;
+
+  renderMovies(slice.slice(0, firstPaint), false);
+  const tail = slice.slice(firstPaint);
+  if (tail.length) {
+    const paintTail = () => renderMovies(tail, true);
+    if ('requestIdleCallback' in window) requestIdleCallback(paintTail, { timeout: 1500 });
+    else setTimeout(paintTail, 300);
+  }
+  return slice.length;
+}
+
+/*  Buttons, not links.
+ *
+ *  An <a href="?page=2"> would be the SEO-friendly choice, but this page already
+ *  runs two popstate listeners over hash-based routes (the player deep link and
+ *  the collections hub), and a competing query-param history entry would fight
+ *  them. The crawlable paginated URLs already exist as the SSR category pages
+ *  (/movies/action?page=2), which is where that job belongs.
+ */
+function renderFeedPager() {
+  const host = document.getElementById('feedPager');
+  if (!host) return;
+
+  // Search results and the watchlist are finite sets held locally — asking for
+  // page 2 of them is meaningless.
+  if (!MZ_FEED_PAGED || isSearchResultsMode || isWatchlistMode) {
+    host.innerHTML = '';
+    return;
+  }
+
+  const total = mzFeedTotalPages();
+  if (total <= 1) { host.innerHTML = ''; return; }
+
+  const page = Math.min(Math.max(1, mzFeedPage), total);
+  const parts = [];
+
+  if (page > 1) {
+    parts.push('<button type="button" class="mz-pager-btn mz-pager-step" data-page="'
+      + (page - 1) + '" aria-label="Previous page">&larr; Prev</button>');
+  }
+
+  let previous = 0;
+  mzFeedPageNumbers(page, total).forEach((p) => {
+    if (previous && p - previous > 1) {
+      parts.push('<span class="mz-pager-gap" aria-hidden="true">&hellip;</span>');
+    }
+    parts.push(p === page
+      ? '<span class="mz-pager-cur" aria-current="page">' + p + '</span>'
+      : '<button type="button" class="mz-pager-btn" data-page="' + p
+        + '" aria-label="Go to page ' + p + '">' + p + '</button>');
+    previous = p;
+  });
+
+  if (page < total) {
+    parts.push('<button type="button" class="mz-pager-btn mz-pager-step" data-page="'
+      + (page + 1) + '" aria-label="Next page">Next &rarr;</button>');
+  }
+
+  host.innerHTML = '<nav class="mz-pager" aria-label="Movie feed pagination">'
+    + parts.join('') + '</nav>';
+  ensurePagerDelegation();
+}
+
+/*  One listener on the container, not one per button — the pager is re-rendered
+ *  on every page change, and per-button handlers would leak a set each time.
+ */
+function ensurePagerDelegation() {
+  const host = document.getElementById('feedPager');
+  if (!host || _mzPagerDelegated) return;
+  _mzPagerDelegated = true;
+
+  host.addEventListener('click', (event) => {
+    const btn = event.target.closest('.mz-pager-btn[data-page]');
+    if (!btn) return;
+    goToFeedPage(parseInt(btn.dataset.page, 10));
+  });
+}
+
+function goToFeedPage(page) {
+  if (!Number.isInteger(page) || page < 1) return;
+  if (isLoadingMore) return;
+
+  const target = Math.min(page, mzFeedTotalPages());
+  if (target === mzFeedPage) return;
+
+  /*  Scroll before the paint, not after: the grid is about to be replaced, and
+   *  leaving the user at the old offset would put the new page's first row above
+   *  them. */
+  const sec = document.getElementById('movies-section');
+  if (sec) sec.scrollIntoView({ behavior: isMzTVMode() ? 'auto' : 'smooth', block: 'start' });
+
+  mzFeedPage = target;
+
+  /*  The pool already covers this page, so there is nothing to fetch. This is
+   *  the path Prev and any already-visited page take: a slice and a render, no
+   *  request, no skeletons, and byte-identical content to last time. */
+  if (mzFeedPageIsReady(target)) {
+    renderCurrentFeedPage();
+    renderFeedPager();
+    return;
+  }
+
+  /*  Past what the pool holds: extend it. isLoadMore appends the next TMDB page
+   *  to allMovies rather than replacing it, so every earlier page keeps showing
+   *  exactly what it showed before, and the new titles cannot repeat old ones —
+   *  loadMovies dedups the append against the whole pool. */
+  loadMovies(mzFeedPagerCategory, true);
+}
+window.goToFeedPage = goToFeedPage;
+
 function loadMoreMoviesAction() {
   const activeTab = document.querySelector('.cat-tab.active');
   let cat = 'all';

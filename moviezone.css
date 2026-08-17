@@ -11754,3 +11754,50 @@ img { content-visibility: auto; }
 .mz-lang-btn.mz-lang-avail.active{border-color:#f5c518!important}
 .mz-avail-dot{display:inline-block;width:6px;height:6px;background:#10b981;border-radius:50%;margin-left:3px;flex-shrink:0;box-shadow:0 0 5px rgba(16,185,129,.5)}
 .mz-lang-btn.active .mz-avail-dot{background:rgba(0,0,0,.4);box-shadow:none}
+/* ── Feed pagination ──────────────────────────────────────────────────────────
+   Replaces the endless-scroll append on the homepage feed. Deliberately styled
+   to read as the same control as the .pager on the SSR category pages: dark
+   rounded tiles, gold numerals, the current page filled.
+
+   Sizing note: the tiles are min 44x44 because this is the one control on the
+   page a phone user is expected to hit precisely, and 44px is the smallest
+   target that does not produce mis-taps. The gap markers are not buttons and are
+   aria-hidden, so they are allowed to be smaller.
+*/
+#feedPager:empty{display:none}
+/* Margins are modest because this now sits in the gap between .main-content and
+   .section-sep, which already contributes the panel's 2.5rem bottom padding
+   above and the separator's 4rem margin below. The earlier 2.6rem top was tuned
+   for living inside the panel and doubled the gap out here. */
+.mz-pager{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:.55rem;margin:1.4rem auto .4rem;padding:0 1rem;font-family:'Outfit',sans-serif}
+.mz-pager-btn,.mz-pager-cur{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;padding:0 .85rem;border-radius:14px;font-size:.95rem;font-weight:700;letter-spacing:.3px;line-height:1}
+.mz-pager-btn{background:linear-gradient(180deg,rgba(255,255,255,.07),rgba(255,255,255,.022));border:1px solid rgba(255,255,255,.12);color:var(--gold);cursor:pointer;transition:background .2s ease,border-color .2s ease,transform .2s ease,box-shadow .2s ease}
+.mz-pager-btn:hover{background:rgba(245,197,24,.13);border-color:rgba(245,197,24,.4);transform:translateY(-2px);box-shadow:0 8px 22px rgba(0,0,0,.45)}
+.mz-pager-btn:active{transform:translateY(0)}
+/* Keyboard and D-pad focus must be visible; the hover treatment alone is not
+   reachable without a pointer. */
+.mz-pager-btn:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.mz-pager-cur{background:rgba(245,197,24,.14);border:1px solid var(--gold);color:var(--gold);box-shadow:0 0 0 1px rgba(245,197,24,.18) inset}
+.mz-pager-step{padding:0 1.15rem;white-space:nowrap}
+.mz-pager-gap{color:rgba(255,255,255,.32);padding:0 .1rem;font-weight:700;user-select:none}
+
+@media (max-width:600px){
+  /* Numerals stay tappable; only the padding and the Prev/Next labels shrink. */
+  .mz-pager{gap:.4rem;margin-top:1rem}
+  .mz-pager-btn,.mz-pager-cur{min-width:42px;min-height:42px;padding:0 .6rem;font-size:.9rem;border-radius:12px}
+  .mz-pager-step{padding:0 .8rem}
+}
+
+/* The lift on hover is decorative; low-end-mode switches off exactly this class
+   of effect everywhere else on the page, so it does here too. */
+.low-end-mode .mz-pager-btn{transition:none}
+.low-end-mode .mz-pager-btn:hover{transform:none;box-shadow:none}
+@media (prefers-reduced-motion:reduce){
+  .mz-pager-btn{transition:none}
+  .mz-pager-btn:hover{transform:none}
+}
+
+/* TV: the rail is driven by a D-pad, so focus needs to be unmistakable and the
+   targets larger than a pointer would need. */
+[data-mz-tv="true"] .mz-pager-btn,[data-mz-tv="true"] .mz-pager-cur{min-width:56px;min-height:56px;font-size:1.05rem}
+[data-mz-tv="true"] .mz-pager-btn:focus{outline:3px solid var(--gold);outline-offset:3px;background:rgba(245,197,24,.2)}

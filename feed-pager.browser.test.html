@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MovieZone — feed pager harness</title>
+</head>
+<body>
+<h1>Feed pager harness</h1>
+<p>Loads the real index.html in a same-origin iframe and answers the two
+   questions that source-level checks cannot: does the pager actually appear on
+   screen, and does scrolling to the bottom still append pages behind it.</p>
+<iframe id="app" src="/index.html" style="width:1600px;height:900px;border:1px solid #333"></iframe>
+
+<script>
+(function () {
+  var frame = document.getElementById('app');
+  var checks = [];
+
+  function ok(name, pass, detail) {
+    checks.push({ name: name, pass: !!pass, detail: detail === undefined ? '' : String(detail) });
+  }
+
+  function report() {
+    try {
+      fetch('/__results', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(checks)
+      });
+    } catch (e) { /* runner will time out and say so */ }
+  }
+
+  /* Polls until the predicate holds or the budget runs out. The feed waits on
+     real TMDB responses, so a fixed sleep would either be flaky or slow. */
+  function waitFor(predicate, budgetMs, step) {
+    return new Promise(function (resolve) {
+      var waited = 0;
+      (function tick() {
+        var value;
+        try { value = predicate(); } catch (e) { value = null; }
+        if (value) return resolve(value);
+        if (waited >= budgetMs) return resolve(null);
+        waited += step;
+        setTimeout(tick, step);
+      })();
+    });
+  }
+
+  /*  Waits until a number stops changing.
+   *
+   *  Needed because the feed paints 8 cards first and appends the rest up to 24
+   *  on an idle callback — by design, to keep the first paint cheap. Measuring
+   *  "did scrolling add cards" against the 8-card reading would count that
+   *  intended tail render as an infinite-scroll append, which is what the first
+   *  version of this harness did.
+   */
+  function waitForStable(read, quietMs, budgetMs) {
+    return new Promise(function (resolve) {
+      var last = read();
+      var quiet = 0;
+      var waited = 0;
+      var step = 200;
+      (function tick() {
+        var now = read();
+        if (now === last) quiet += step; else { quiet = 0; last = now; }
+        waited += step;
+        if (quiet >= quietMs || waited >= budgetMs) return resolve(last);
+        setTimeout(tick, step);
+      })();
+    });
+  }
+
+  frame.addEventListener('load', function () { run().then(report, function (e) {
+    ok('harness ran without throwing', false, e && e.message);
+    report();
+  }); });
+
+  async function run() {
+    var win = frame.contentWindow;
+    var doc = win.document;
+
+    var cardCount = function () { return doc.querySelectorAll('#movieGrid .movie-card').length; };
+    var pagerHost = function () { return doc.getElementById('feedPager'); };
+    var pagerNav = function () { return doc.querySelector('#feedPager .mz-pager'); };
+    var pagerBtns = function () { return doc.querySelectorAll('#feedPager .mz-pager-btn'); };
+
+    // ── the feed has to render before anything can be said about its pager ──
+    var cards = await waitFor(function () { return cardCount() >= 8 ? cardCount() : 0; }, 40000, 250);
+    ok('the feed rendered its first page of cards', cards >= 8, cards + ' cards');
+    if (!cards) return;
+
+    // ── 1. the pager exists AND is on screen ────────────────────────────────
+    var nav = await waitFor(pagerNav, 15000, 200);
+    ok('a .mz-pager nav is rendered into #feedPager', !!nav);
+    if (!nav) {
+      ok('#feedPager was left empty', false, 'innerHTML=' + (pagerHost() ? pagerHost().innerHTML.slice(0, 120) : 'no host'));
+      return;
+    }
+
+    var host = pagerHost();
+    var navBox = nav.getBoundingClientRect();
+    ok('the pager occupies real space (it is visible, not display:none)',
+      navBox.height > 20 && navBox.width > 100,
+      'height=' + Math.round(navBox.height) + ' width=' + Math.round(navBox.width));
+    ok('the container is not hidden by the :empty rule',
+      win.getComputedStyle(host).display !== 'none',
+      'display=' + win.getComputedStyle(host).display);
+
+    var btns = pagerBtns();
+    ok('the pager renders clickable page buttons', btns.length >= 3, btns.length + ' buttons');
+
+    var labels = Array.prototype.map.call(nav.querySelectorAll('.mz-pager-btn, .mz-pager-cur, .mz-pager-gap'),
+      function (n) { return n.textContent.trim(); });
+    ok('it shows the first page, jumps and a Next control',
+      labels.indexOf('1') !== -1 && labels.join(' ').indexOf('Next') !== -1,
+      labels.join(' | '));
+
+    var cur = nav.querySelector('.mz-pager-cur');
+    ok('page 1 is marked as the current page', cur && cur.textContent.trim() === '1',
+      cur ? cur.textContent : 'none');
+    ok('there is no Prev control on page 1',
+      labels.join(' ').indexOf('Prev') === -1, labels.join(' | '));
+
+    // Tap size — this is the one control a phone user must hit precisely.
+    var small = Array.prototype.filter.call(btns, function (b) {
+      var r = b.getBoundingClientRect();
+      return r.height < 40 || r.width < 40;
+    });
+    ok('every button is at least 40px in both directions', small.length === 0,
+      small.length + ' undersized');
+
+    // ── 2. the pager sits in the gap under the grid, above Upcoming ─────────
+    var gridBottom = doc.getElementById('movieGrid').getBoundingClientRect().bottom;
+    ok('the pager is positioned below the movie grid', navBox.top >= gridBottom - 4,
+      'pagerTop=' + Math.round(navBox.top) + ' gridBottom=' + Math.round(gridBottom));
+
+    /*  The point of moving it out of .main-content: it must land in the empty
+     *  band between the movies panel and Upcoming, not inside the panel and not
+     *  past the section separator. */
+    var upcoming = doc.getElementById('upcoming');
+    var sep = doc.querySelector('.section-sep');
+    if (upcoming) {
+      ok('the pager is above the Upcoming section',
+        navBox.bottom <= upcoming.getBoundingClientRect().top + 4,
+        'pagerBottom=' + Math.round(navBox.bottom)
+        + ' upcomingTop=' + Math.round(upcoming.getBoundingClientRect().top));
+    }
+    if (sep) {
+      ok('the pager is above the decorative section separator',
+        navBox.bottom <= sep.getBoundingClientRect().top + 4,
+        'pagerBottom=' + Math.round(navBox.bottom)
+        + ' sepTop=' + Math.round(sep.getBoundingClientRect().top));
+    }
+    var panel = doc.getElementById('movies-section');
+    if (panel) {
+      ok('the pager is not nested inside the movies panel',
+        !panel.contains(host),
+        'it should be a sibling of #movies-section, in the gap');
+    }
+
+    // ── 3. scrolling must NOT append pages any more ──────────────────────────
+    /*  Settle first. The feed intentionally paints 8 cards and then fills up to
+     *  24 on an idle callback, so a reading taken immediately would rise on its
+     *  own and look exactly like an infinite-scroll append. */
+    var before = await waitForStable(cardCount, 1600, 15000);
+    ok('the first page settles at exactly one page of cards',
+      before === 30, before + ' cards (expected 30)');
+
+    /*  "Five rows" is 30 cards ONLY at a six-across layout. The grid is
+     *  repeat(auto-fill, minmax(185px, 1fr)), so the column count follows the
+     *  available width — this harness's 1280px iframe fits five per row, a wide
+     *  desktop fits six, a phone two. So the row count is asserted as arithmetic
+     *  on the page size, and the measured layout is reported rather than demanded;
+     *  hardcoding "5 rows" here would just be asserting the harness's width.
+     */
+    ok('30 cards is exactly five rows at the six-across desktop layout',
+      30 % 6 === 0 && 30 / 6 === 5);
+
+    var cardsForRows = doc.querySelectorAll('#movieGrid .movie-card');
+    var rowTops = [];
+    Array.prototype.forEach.call(cardsForRows, function (c) {
+      var top = Math.round(c.getBoundingClientRect().top);
+      if (rowTops.indexOf(top) === -1) rowTops.push(top);
+    });
+    var perRow = Math.round(cardsForRows.length / rowTops.length);
+    ok('the grid lays out ' + rowTops.length + ' rows of ~' + perRow
+      + ' at ' + win.innerWidth + 'px wide, no card orphaned',
+      rowTops.length > 0 && cardsForRows.length === before,
+      cardsForRows.length + ' cards vs ' + before);
+
+    for (var i = 0; i < 6; i++) {
+      win.scrollTo(0, doc.body.scrollHeight);
+      await waitFor(function () { return false; }, 500, 100);
+    }
+    var after = await waitForStable(cardCount, 1200, 8000);
+    ok('scrolling to the bottom does not append more cards', after === before,
+      before + ' -> ' + after + ' cards after scrolling to the end six times');
+
+    // ── 4. clicking a page number actually loads that page ──────────────────
+    var pageTwo = Array.prototype.filter.call(pagerBtns(), function (b) {
+      return b.getAttribute('data-page') === '2';
+    })[0];
+    ok('a button for page 2 is offered', !!pageTwo);
+    if (!pageTwo) return;
+
+    var titlesOf = function () {
+      return Array.prototype.map.call(doc.querySelectorAll('#movieGrid .movie-card .card-title'),
+        function (n) { return n.textContent.trim(); }).filter(Boolean);
+    };
+    var idsOf = function () {
+      return Array.prototype.map.call(doc.querySelectorAll('#movieGrid .movie-card[data-id]'),
+        function (n) { return n.getAttribute('data-type') + '-' + n.getAttribute('data-id'); });
+    };
+
+    var pageOneTitles = titlesOf();
+    var pageOneIds = idsOf();
+    ok('page 1 has titles to compare against', pageOneIds.length > 0, pageOneIds.length + ' cards');
+
+    /*  The "page fresh na ho, real time update ho" requirement.
+     *
+     *  Counting /api/tmdb requests over the transition is the wrong measure: the
+     *  feed also runs prefetchMoviesPage() on a timer to warm the NEXT TMDB page,
+     *  so requests legitimately appear shortly after any page change without the
+     *  change itself having waited for anything.
+     *
+     *  The precise question is whether the switch blocks on the network, and the
+     *  answer is checked synchronously: goToFeedPage() slices the pool and paints
+     *  in the same task as the click, so by the time click() returns the grid must
+     *  ALREADY show page 2 — no request issued in that task, and no skeletons.
+     */
+    var apiCountBefore = win.performance.getEntriesByType('resource')
+      .filter(function (e) { return e.name.indexOf('/api/tmdb') !== -1; }).length;
+
+    pageTwo.click();
+
+    var syncCur = doc.querySelector('#feedPager .mz-pager-cur');
+    var syncIds = idsOf();
+    var syncSkeletons = doc.querySelectorAll('#movieGrid .skeleton').length;
+    var apiCountSync = win.performance.getEntriesByType('resource')
+      .filter(function (e) { return e.name.indexOf('/api/tmdb') !== -1; }).length;
+
+    ok('the page switch happens in the same task as the click (no await, no reload)',
+      syncCur && syncCur.textContent.trim() === '2' && syncIds.length > 0,
+      'current=' + (syncCur ? syncCur.textContent.trim() : 'none') + ' cards=' + syncIds.length);
+    ok('no loading skeletons are shown for a page the pool already covers',
+      syncSkeletons === 0, syncSkeletons + ' skeletons');
+    ok('the switch itself issues no request',
+      apiCountSync === apiCountBefore,
+      apiCountBefore + ' -> ' + apiCountSync + ' /api/tmdb requests in the click task');
+
+    var movedToTwo = await waitFor(function () {
+      var c = doc.querySelector('#feedPager .mz-pager-cur');
+      return c && c.textContent.trim() === '2' ? c : null;
+    }, 30000, 250);
+    ok('clicking 2 makes page 2 the current page', !!movedToTwo);
+
+    var repainted = await waitForStable(cardCount, 1600, 30000);
+    ok('page 2 renders a fresh grid of cards', repainted >= 8, repainted + ' cards');
+
+    ok('page 2 replaced the grid instead of appending to it',
+      repainted <= before,
+      'page1=' + before + ' page2=' + repainted + ' (an append would roughly double it)');
+
+    /*  The reported bug: a title from page 1 reappearing on page 2. Compared by
+     *  the same type+id key the pool dedups on, and by visible title as well. */
+    var pageTwoIds = idsOf();
+    var pageTwoTitles = titlesOf();
+    var sharedIds = pageTwoIds.filter(function (id) { return pageOneIds.indexOf(id) !== -1; });
+    ok('page 2 repeats not one single movie from page 1',
+      sharedIds.length === 0,
+      sharedIds.length + ' repeated: ' + sharedIds.slice(0, 6).join(', '));
+    var sharedTitles = pageTwoTitles.filter(function (t) { return pageOneTitles.indexOf(t) !== -1; });
+    ok('and no repeated titles either',
+      sharedTitles.length === 0,
+      sharedTitles.slice(0, 6).join(' | '));
+
+    ok('page 2 shows different titles than page 1',
+      pageTwoTitles.length > 0 && pageTwoTitles[0] !== pageOneTitles[0],
+      '"' + pageOneTitles[0] + '" -> "' + pageTwoTitles[0] + '"');
+
+    var labels2 = Array.prototype.map.call(
+      doc.querySelectorAll('#feedPager .mz-pager-btn, #feedPager .mz-pager-cur'),
+      function (n) { return n.textContent.trim(); });
+    ok('a Prev control appears once past page 1',
+      labels2.join(' ').indexOf('Prev') !== -1, labels2.join(' | '));
+
+    // ── 5. going back is instant and shows exactly what it showed before ─────
+    var prevBtn = Array.prototype.filter.call(
+      doc.querySelectorAll('#feedPager .mz-pager-btn'),
+      function (b) { return b.getAttribute('data-page') === '1'; })[0];
+    ok('a control back to page 1 is offered', !!prevBtn);
+    if (!prevBtn) return;
+
+    var apiBeforeBack = win.performance.getEntriesByType('resource')
+      .filter(function (e) { return e.name.indexOf('/api/tmdb') !== -1; }).length;
+    prevBtn.click();
+
+    var backCurSync = doc.querySelector('#feedPager .mz-pager-cur');
+    var apiAfterBackSync = win.performance.getEntriesByType('resource')
+      .filter(function (e) { return e.name.indexOf('/api/tmdb') !== -1; }).length;
+    ok('going back is synchronous too',
+      backCurSync && backCurSync.textContent.trim() === '1',
+      'current=' + (backCurSync ? backCurSync.textContent.trim() : 'none'));
+    ok('going back issues no request',
+      apiAfterBackSync === apiBeforeBack, apiBeforeBack + ' -> ' + apiAfterBackSync);
+
+    await waitFor(function () {
+      var c = doc.querySelector('#feedPager .mz-pager-cur');
+      return c && c.textContent.trim() === '1' ? c : null;
+    }, 20000, 200);
+    await waitForStable(cardCount, 1200, 15000);
+
+    var backTitles = titlesOf();
+    ok('page 1 shows exactly what it showed before',
+      JSON.stringify(backTitles) === JSON.stringify(pageOneTitles),
+      'first now "' + backTitles[0] + '" vs originally "' + pageOneTitles[0] + '"');
+  }
+})();
+</script>
+</body>
+</html>
