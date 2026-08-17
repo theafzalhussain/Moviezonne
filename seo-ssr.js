@@ -813,8 +813,33 @@ nav.top a:hover{color:#f5c518}
 .hero-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.32;filter:saturate(1.05)}
 .hero-veil{position:absolute;inset:0;background:linear-gradient(105deg,rgba(3,3,10,.96) 12%,rgba(3,3,10,.72) 52%,rgba(3,3,10,.42) 100%)}
 .hero-in{position:relative;display:flex;gap:28px;padding:30px;flex-wrap:wrap}
-.poster{width:214px;flex:0 0 214px;border-radius:14px;box-shadow:0 18px 44px rgba(0,0,0,.6);background:#14141f}
+/*  align-self is the fix, not the width.
+ *
+ *  .hero-in is a flex row, and a flex item's default cross-axis behaviour is
+ *  align-items:stretch. flex:0 0 214px pins the WIDTH, so the poster looked
+ *  correctly sized — but nothing pinned the height, so the <img> was stretched to
+ *  match .hero-copy, which is as tall as the title, tagline, facts, chips,
+ *  synopsis and CTA stacked up. On a long synopsis that is 700px+ against an
+ *  intrinsic 321px, and the artwork was visibly distorted.
+ *
+ *  align-self:flex-start takes it out of the stretch, height:auto restores the
+ *  intrinsic ratio from the width/height attributes, and aspect-ratio + object-fit
+ *  keep it correct even if TMDB ever returns art that is not exactly 2:3. */
+.poster{width:214px;flex:0 0 214px;align-self:flex-start;height:auto;aspect-ratio:2/3;object-fit:cover;border-radius:14px;box-shadow:0 18px 44px rgba(0,0,0,.6);background:#14141f}
 .hero-copy{flex:1 1 380px;min-width:280px}
+/* ── Watch page ── */
+.player-shell{margin:20px 0 0;border-radius:18px;overflow:hidden;background:#000;box-shadow:0 18px 44px rgba(0,0,0,.6)}
+.player-frame{position:relative;width:100%;aspect-ratio:16/9;background:#000}
+.player-frame iframe{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}
+.srv{display:flex;flex-wrap:wrap;gap:9px;margin:16px 0 0;padding:0;list-style:none}
+.srv li{margin:0}
+.srv a,.srv span{display:inline-block;padding:8px 15px;border-radius:999px;font-size:.85rem;font-weight:700;text-decoration:none;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:#e8e8f0}
+.srv a:hover{border-color:rgba(245,197,24,.45);background:rgba(245,197,24,.12);color:#fff}
+.srv span{border-color:#f5c518;background:rgba(245,197,24,.16);color:#f5c518}
+.watch-note{color:#a9a9bb;font-size:.86rem;margin:12px 0 0;line-height:1.6}
+.ep-form{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin:14px 0 0;color:#c9c9d6;font-size:.86rem}
+.ep-form input{width:74px;padding:7px 10px;border-radius:9px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.05);color:#fff;font:inherit}
+.ep-form button{padding:8px 16px;border-radius:999px;border:1px solid rgba(245,197,24,.5);background:rgba(245,197,24,.16);color:#f5c518;font-weight:700;cursor:pointer;font:inherit}
 h1{font-size:clamp(1.6rem,4vw,2.5rem);line-height:1.15;margin:0 0 6px;color:#fff}
 .tagline{color:#f5c518;font-style:italic;margin:0 0 14px;font-size:.98rem}
 .facts{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px;padding:0;list-style:none}
@@ -1333,7 +1358,10 @@ function renderDetailPage(item, kind) {
       .map((c) => ({ '@type': 'Organization', name: c.name })),
     potentialAction: {
       '@type': 'WatchAction',
-      target: SITE_URL + '/#watch-' + (isTv ? 'tv' : 'movie') + '-' + item.id
+      /*  Must be the same real page the CTA uses. This used to be the
+       *  '/#watch-…' fragment, i.e. Google was being handed a WatchAction
+       *  pointing at a URL that only ever loaded the homepage. */
+      target: SITE_URL + detailPath(kind, item) + '/watch'
     }
   };
 
@@ -1345,7 +1373,13 @@ function renderDetailPage(item, kind) {
     { name: title + (year ? ' (' + year + ')' : '') }
   ];
 
-  const watchHref = '/#watch-' + (isTv ? 'tv' : 'movie') + '-' + item.id;
+  /*  A real page, not '/#watch-movie-<id>'.
+   *
+   *  The hash form did not work and could not be made to: moviezone.js strips a
+   *  '#watch-' hash on DOMContentLoaded and refuses to open a player without a
+   *  trusted user gesture, so the link only ever landed on the homepage. See
+   *  renderWatchPage() for the full reasoning. */
+  const watchHref = detailPath(kind, item) + '/watch';
 
   // ── unique-value blocks ──
   const providers = watchProvidersIN(item);
@@ -1422,7 +1456,7 @@ function renderDetailPage(item, kind) {
         + 'the cast, crew and technical details below are complete.')
   )}</p>
         <a class="cta" href="${esc(watchHref)}">▶ Watch ${esc(isTv ? 'Series' : 'Movie')}</a>
-        <span class="cta-note">Opens the MovieZone player. Choose audio language and quality after it loads.</span>
+        <span class="cta-note">Opens the player. Pick a different server on that page if one is blocked on your network.</span>
       </div>
     </div>
   </article>
@@ -2190,6 +2224,150 @@ function buildMediaSitemap(items, kind) {
  *        Cached TMDB fetcher. Must resolve JSON or reject.
  * @param {{get(k):any, set(k,v):any}} [deps.cache] Used to memoise rendered HTML/XML.
  */
+/*  ══════════════════════════════════════════════════════════════════════
+ *  WATCH PAGE  —  /movie/:slug/watch , /tv/:slug/watch
+ *  ══════════════════════════════════════════════════════════════════════
+ *  WHY THIS EXISTS
+ *  The detail page's CTA used to point at '/#watch-movie-<id>', which did not
+ *  work and could not be made to work:
+ *
+ *    • moviezone.js deliberately refuses to open a player from a URL. The comment
+ *      says so ("Direct #watch URLs are never auto-opened") and
+ *      resetRestoredWatchSurface() actively STRIPS a '#watch-' hash on
+ *      DOMContentLoaded, so the link landed on the homepage with the hash erased.
+ *    • That refusal is not a bug to route around. openModal() goes through
+ *      claimExplicitDetailActivation(), which requires a trusted, recent user
+ *      gesture — it is what stops a PWA relaunch or a BFCache restore from coming
+ *      back mid-playback, and on a TV it additionally demands a fresh D-pad press.
+ *      A freshly loaded document has no such gesture, by design.
+ *    • And this page ships no JavaScript at all, on purpose, so the player cannot
+ *      simply be opened in place.
+ *
+ *  So the player is server-rendered instead. The click is an ordinary link, the
+ *  iframe arrives inside the HTML, and there is no activation guard to satisfy
+ *  because nothing is being auto-opened — the document IS the player. That also
+ *  makes it work with JavaScript disabled and on the TV browsers where the SPA's
+ *  activation rules are strictest.
+ *
+ *  Server switching is plain links (?s=1, ?s=2 …) rather than the SPA's scripted
+ *  fallback chain. Same escape hatch when a host is blocked on someone's network,
+ *  no JS required.
+ *
+ *  noindex: a bare player frame has nothing for Google to rank, and it would
+ *  compete with the detail page, which is the page that should rank for the title.
+ *  'follow' is kept so the links back into the catalogue still carry weight.
+ */
+
+/*  Server-side mirror of the embed hosts in moviezone.js's source list.
+ *
+ *  Deliberately a short list of the most reliable three rather than a copy of all
+ *  ten: this is a fallback surface, not a replacement for the in-app player.
+ *  watch-page-check.js asserts every host here still appears in moviezone.js, so
+ *  the two cannot drift apart silently when a dead domain is swapped out.
+ */
+const WATCH_SOURCES = [
+  {
+    name: 'VidFast 4K',
+    build: (id, type, s, e) => {
+      const opts = 'autoPlay=true&theme=FFC107&title=true&poster=true&autoNext=true&nextButton=true';
+      return type === 'tv'
+        ? 'https://vidfast.pro/tv/' + id + '/' + s + '/' + e + '?' + opts
+        : 'https://vidfast.pro/movie/' + id + '?' + opts;
+    }
+  },
+  {
+    name: 'VidRock HD',
+    build: (id, type, s, e) => (type === 'tv'
+      ? 'https://vidrock.net/tv/' + id + '/' + s + '/' + e
+      : 'https://vidrock.net/movie/' + id)
+  },
+  {
+    name: 'Turbo Stream',
+    build: (id, type, s, e) => (type === 'tv'
+      ? 'https://111movies.com/tv/' + id + '/' + s + '/' + e
+      : 'https://111movies.com/movie/' + id)
+  }
+];
+
+/** Clamps a user-supplied integer, so a hostile ?s=/?season= cannot reach a host. */
+function watchInt(value, min, max, fallback) {
+  const n = parseInt(value, 10);
+  if (!Number.isInteger(n) || n < min || n > max) return fallback;
+  return n;
+}
+
+function renderWatchPage(item, kind, opts) {
+  const isTv = kind === 'tv';
+  const title = titleOf(item);
+  const year = String(item.release_date || item.first_air_date || '').slice(0, 4);
+  const season = isTv ? watchInt(opts && opts.season, 1, 200, 1) : 1;
+  const episode = isTv ? watchInt(opts && opts.episode, 1, 500, 1) : 1;
+  const sourceIdx = watchInt(opts && opts.source, 0, WATCH_SOURCES.length - 1, 0);
+
+  const detail = detailPath(kind, item);
+  const watchBase = detail + '/watch';
+  const source = WATCH_SOURCES[sourceIdx];
+  const embed = source.build(item.id, isTv ? 'tv' : 'movie', season, episode);
+
+  const epSuffix = isTv ? ' — S' + season + 'E' + episode : '';
+  const heading = title + (year ? ' (' + year + ')' : '') + epSuffix;
+
+  // Server links carry the current episode so switching host keeps your place.
+  const keep = isTv ? '&season=' + season + '&episode=' + episode : '';
+  const servers = WATCH_SOURCES.map((s, i) => '<li>' + (i === sourceIdx
+    ? '<span aria-current="true">' + esc(s.name) + '</span>'
+    : '<a rel="nofollow" href="' + esc(watchBase + '?s=' + i + keep) + '">' + esc(s.name) + '</a>')
+    + '</li>').join('');
+
+  const episodePicker = isTv ? `
+    <form class="ep-form" method="get" action="${esc(watchBase)}">
+      <input type="hidden" name="s" value="${sourceIdx}">
+      <label for="season">Season</label>
+      <input id="season" name="season" type="number" min="1" max="200" value="${season}">
+      <label for="episode">Episode</label>
+      <input id="episode" name="episode" type="number" min="1" max="500" value="${episode}">
+      <button type="submit">Play</button>
+    </form>` : '';
+
+  const body = `
+<div class="wrap">
+  <section style="margin-top:22px">
+    <h1 style="font-size:clamp(1.35rem,3.2vw,2rem)">${esc(heading)}</h1>
+    <div class="player-shell">
+      <div class="player-frame">
+        <iframe src="${esc(embed)}"
+          title="${esc('Watch ' + heading + ' on MovieZone')}"
+          allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+          allowfullscreen referrerpolicy="origin" loading="eager"></iframe>
+      </div>
+    </div>
+
+    <h2 class="skip">Streaming servers</h2>
+    <ul class="srv">${servers}</ul>
+    ${episodePicker}
+    <p class="watch-note">If the player stays blank or says the video is unavailable, pick a
+      different server above — availability differs by network and region. Audio language and
+      quality are chosen inside the player.</p>
+    <p class="watch-note"><a href="${esc(detail)}">&larr; Back to ${esc(title)} details</a></p>
+  </section>
+</div>`;
+
+  return renderShell({
+    title: 'Watch ' + heading + ' online — MovieZone',
+    description: 'Stream ' + title + (year ? ' (' + year + ')' : '') + ' on MovieZone.',
+    canonicalPath: detail,          // the detail page is the canonical surface
+    ogImage: item.poster_path ? IMG_POSTER_LG + item.poster_path : '',
+    robots: 'noindex, follow',
+    breadcrumbs: [
+      { name: 'Home', path: '/' },
+      { name: isTv ? 'Web Series' : 'Movies', path: isTv ? '/series/web-series' : '/movies/popular' },
+      { name: title, path: detail },
+      { name: 'Watch' }
+    ],
+    body
+  });
+}
+
 function registerSeoRoutes(app, deps) {
   const tmdb = deps && deps.tmdb;
   if (typeof tmdb !== 'function') {
@@ -2252,6 +2430,59 @@ function registerSeoRoutes(app, deps) {
 
   app.get('/movie/:slug', detailHandler('movie'));
   app.get('/tv/:slug', detailHandler('tv'));
+
+  /*  Server-rendered player. Registered AFTER the detail routes but matched on a
+   *  longer path, so Express routes /movie/:slug/watch here and /movie/:slug to
+   *  the detail page above. Shares the detail cache entry for the TMDB item —
+   *  only the HTML differs, and the player HTML is cheap to build.
+   */
+  const watchHandler = (kind) => async (req, res, next) => {
+    const parsed = parseIdSlug(req.params.slug);
+    if (!parsed) return next();
+
+    const cacheKey = 'ssr:' + kind + ':' + parsed.id;
+    const cached = cacheGet(cacheKey);
+
+    let item = cached && cached.item;
+    if (!item) {
+      try {
+        item = await tmdb('/' + kind + '/' + parsed.id, { language: 'en-US' });
+      } catch (err) {
+        const status = err && (err.tmdbStatus || err.status);
+        if (status === 404) return next();
+        console.warn('[seo-ssr] watch ' + kind + '/' + parsed.id + ' failed:', err && err.message);
+        return next(err);
+      }
+    }
+    if (!item || !item.id) return next();
+
+    const title = titleOf(item);
+    if (!title) return next();
+
+    // Keep one URL per title here too, so a stale slug does not fork the page.
+    const wantSlug = slugify(title);
+    if (wantSlug && parsed.slug !== wantSlug) {
+      res.set('Cache-Control', DETAIL_CACHE);
+      return res.redirect(301, detailPath(kind, item) + '/watch' + (req.url.includes('?')
+        ? req.url.slice(req.url.indexOf('?')) : ''));
+    }
+
+    const html = renderWatchPage(item, kind, {
+      source: req.query.s,
+      season: req.query.season,
+      episode: req.query.episode
+    });
+
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    // Shorter than the detail page: embed hosts rotate, and a stale player frame
+    // is worse than a slightly slower page.
+    res.set('Cache-Control', 'public, max-age=300, s-maxage=900');
+    res.set('X-Robots-Tag', 'noindex, follow');
+    return res.status(200).send(html);
+  };
+
+  app.get('/movie/:slug/watch', watchHandler('movie'));
+  app.get('/tv/:slug/watch', watchHandler('tv'));
 
   // ── Category pages ────────────────────────────────────────────────
   const categoryHandler = (family) => async (req, res, next) => {
@@ -2726,6 +2957,8 @@ module.exports = {
   registerSeoRoutes,
   registerHomeSsr,
   renderBrowseIndexPage,
+  renderWatchPage,
+  WATCH_SOURCES,
   renderBrowseLetterPage,
   renderHomeLinkBlock,
   injectHomeLinks,

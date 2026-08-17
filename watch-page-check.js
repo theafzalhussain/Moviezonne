@@ -1,0 +1,189 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   watch-page-check.js — the detail page's poster is not stretched, and its
+   "Watch" button reaches a player that actually plays.
+
+   TWO BUGS THIS LOCKS DOWN
+
+   1. THE STRETCHED POSTER. .hero-in is a flex row and .poster only pinned its
+      WIDTH (flex:0 0 214px). A flex item's default cross-axis behaviour is
+      align-items:stretch, so the <img> was pulled to the height of .hero-copy —
+      title, tagline, facts, chips, synopsis and CTA stacked up, 700px+ against an
+      intrinsic 321px. The artwork was visibly distorted, and no width value could
+      have fixed it.
+
+   2. THE DEAD WATCH BUTTON. The CTA pointed at '/#watch-movie-<id>', which could
+      never work: moviezone.js strips a '#watch-' hash on DOMContentLoaded and
+      openModal() refuses to run without a trusted user gesture (that guard is what
+      stops a PWA relaunch or BFCache restore resuming playback, and on TV it wants
+      a fresh D-pad press). A freshly loaded document has no gesture. So the link
+      only ever dumped the user on the homepage.
+
+      It now points at a server-rendered /watch page where the iframe is in the
+      HTML — no JS, no guard to satisfy, nothing auto-opened.
+
+   Run: node watch-page-check.js
+   ═══════════════════════════════════════════════════════════════════════════ */
+'use strict';
+
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+
+const seo = require(path.join(__dirname, 'seo-ssr.js'));
+const ssrSrc = fs.readFileSync(path.join(__dirname, 'seo-ssr.js'), 'utf8');
+const appSrc = fs.readFileSync(path.join(__dirname, 'moviezone.js'), 'utf8');
+
+let pass = 0;
+let fail = 0;
+function check(label, ok, detail) {
+  if (ok) { pass++; console.log('  PASS  ' + label); }
+  else { fail++; console.log('  FAIL  ' + label + (detail ? '\n          ' + detail : '')); }
+}
+
+console.log('\ndetail page — poster geometry and a Watch button that works');
+console.log('-'.repeat(70));
+
+// ── 1. the poster cannot be stretched by the flex row ────────────────────────
+const posterRule = /\.poster\{([^}]*)\}/.exec(ssrSrc);
+check('a .poster rule exists', !!posterRule);
+const poster = posterRule ? posterRule[1] : '';
+
+check('the poster opts out of the flex row\'s stretch', /align-self:flex-start/.test(poster),
+  'without this, flex align-items:stretch forces the height and distorts the art');
+check('its height is intrinsic, not imposed', /height:auto/.test(poster), poster);
+check('the poster ratio is pinned as a backstop', /aspect-ratio:2\/3/.test(poster), poster);
+check('art that is not exactly 2:3 is cropped, not squashed',
+  /object-fit:cover/.test(poster), poster);
+check('the width is still fixed', /width:214px/.test(poster) && /flex:0 0 214px/.test(poster), poster);
+
+// The container that caused it must still be a flex row, or this test guards
+// nothing — if the layout ever stops being flex, these rules are harmless anyway.
+check('.hero-in is still the flex row that made this necessary',
+  /\.hero-in\{[^}]*display:flex/.test(ssrSrc));
+
+// The <img> keeps its intrinsic dimensions so the box is reserved before load.
+check('the poster img still declares width and height attributes',
+  /class="poster"[^>]*width="500"[^>]*height="750"/.test(ssrSrc)
+  || /class=\\?"poster\\?"[\s\S]{0,160}width="500"/.test(ssrSrc),
+  'needed so the slot is reserved and CLS stays at zero');
+
+// ── 2. the CTA points at a real page, not the dead hash ──────────────────────
+console.log('');
+check('the watch CTA no longer uses the stripped #watch- hash',
+  !/watchHref = '\/#watch-/.test(ssrSrc),
+  "moviezone.js deletes that hash on load, so the link could not work");
+check('the CTA points at the server-rendered /watch page',
+  /const watchHref = detailPath\(kind, item\) \+ '\/watch'/.test(ssrSrc));
+check('moviezone.js really does strip the hash (the reason for the change)',
+  /window\.location\.hash\.startsWith\('#watch-'\)[\s\S]{0,160}replaceState/.test(appSrc),
+  'if this ever stops being true, revisit the approach rather than this test');
+check('and really does gate opening on a trusted gesture',
+  /if \(!claimExplicitDetailActivation\(activationEvent\)\) return;/.test(appSrc));
+
+// ── 3. the watch page renders a playable frame ───────────────────────────────
+console.log('');
+const MOVIE = {
+  id: 1515729, title: 'Blast', release_date: '2026-01-09',
+  poster_path: '/p.jpg', backdrop_path: '/b.jpg'
+};
+const TV = {
+  id: 1396, name: 'Breaking Bad', first_air_date: '2008-01-20',
+  poster_path: '/p.jpg'
+};
+
+const movieHtml = seo.renderWatchPage(MOVIE, 'movie', {});
+check('the movie watch page renders a document',
+  /^<!DOCTYPE html>/.test(movieHtml) && movieHtml.length > 1000);
+check('the player iframe is present in the HTML, no JS required',
+  /<iframe src="https:\/\/[^"]+"/.test(movieHtml));
+check('the iframe carries the TMDB id', movieHtml.includes(String(MOVIE.id)));
+check('it is allowed to go fullscreen and autoplay',
+  /allow="autoplay; fullscreen; encrypted-media; picture-in-picture"/.test(movieHtml)
+  && /allowfullscreen/.test(movieHtml));
+check('the frame holds a 16:9 box so the page does not jump',
+  /\.player-frame\{[^}]*aspect-ratio:16\/9/.test(ssrSrc));
+check('the page ships no script tag of its own',
+  !/<script(?![^>]*application\/ld\+json)/.test(movieHtml),
+  'the whole point is that it needs no JS');
+
+check('every alternate server is offered as a link',
+  (movieHtml.match(/class="srv"/g) || []).length === 1
+  && seo.WATCH_SOURCES.every(function (s, i) {
+    return i === 0 ? movieHtml.includes(s.name) : movieHtml.includes('?s=' + i);
+  }),
+  'a blocked host must be escapable without JS');
+check('the current server is marked, not linked',
+  /<span aria-current="true">/.test(movieHtml));
+check('server links are nofollow', /class="srv">[\s\S]{0,400}rel="nofollow"/.test(movieHtml));
+check('there is a way back to the detail page',
+  movieHtml.includes(seo.pageHref ? '/movie/1515729-blast' : '/movie/1515729-blast'));
+
+// noindex: a bare player frame must not compete with the detail page.
+check('the watch page is noindex, follow',
+  /<meta name="robots" content="noindex, follow">/.test(movieHtml));
+check('it points its canonical at the detail page, not itself',
+  /<link rel="canonical" href="[^"]*\/movie\/1515729-blast">/.test(movieHtml),
+  'the detail page is the surface that should rank');
+
+// ── 4. episode handling and hostile input ────────────────────────────────────
+console.log('');
+const tvHtml = seo.renderWatchPage(TV, 'tv', { season: '2', episode: '5' });
+check('a series page embeds the requested season and episode',
+  /\/tv\/1396\/2\/5/.test(tvHtml), (tvHtml.match(/vidfast[^"]*/) || [''])[0]);
+check('a series page offers an episode picker', /class="ep-form"/.test(tvHtml));
+check('the picker is a plain GET form, so it needs no JS',
+  /<form class="ep-form" method="get"/.test(tvHtml));
+check('switching server keeps the current episode',
+  /\?s=1&amp;season=2&amp;episode=5/.test(tvHtml) || /\?s=1&season=2&episode=5/.test(tvHtml));
+check('a movie page has no episode picker',
+  !/class="ep-form"/.test(movieHtml));
+
+// Input reaches a URL, so it has to be clamped rather than trusted.
+const hostile = [
+  ['a non-numeric source', { source: 'evil' }],
+  ['an out-of-range source', { source: '99' }],
+  ['a negative source', { source: '-1' }]
+];
+hostile.forEach(function (entry) {
+  const html = seo.renderWatchPage(MOVIE, 'movie', entry[1]);
+  check('falls back to the first server for ' + entry[0],
+    html.includes(seo.WATCH_SOURCES[0].name) && /<iframe src="https:\/\//.test(html));
+});
+const wildEp = seo.renderWatchPage(TV, 'tv', { season: '../etc', episode: '99999' });
+check('a hostile season/episode is clamped to safe integers',
+  /\/tv\/1396\/1\/1/.test(wildEp), (wildEp.match(/vidfast[^"]*/) || [''])[0]);
+check('no unescaped user input reaches the iframe src',
+  !/src="[^"]*\.\./.test(wildEp));
+
+// ── 5. the server list must not drift from the app's ─────────────────────────
+console.log('');
+/*  WATCH_SOURCES is a deliberate short mirror of moviezone.js's list. When a dead
+ *  domain is swapped out there (it has happened — cinextream.net lost its DNS
+ *  record) this page would keep pointing at it, and the failure looks like "the
+ *  player is broken" rather than "one file was missed". */
+seo.WATCH_SOURCES.forEach(function (source) {
+  const url = source.build(1, 'movie', 1, 1);
+  const host = new URL(url).host;
+  check('moviezone.js still uses ' + host, appSrc.includes(host),
+    'swap it here too, or the watch page points at a dead host');
+});
+check('the mirror is a short fallback list, not a second copy of all ten',
+  seo.WATCH_SOURCES.length >= 2 && seo.WATCH_SOURCES.length <= 4,
+  seo.WATCH_SOURCES.length + ' sources');
+
+// ── 6. routing ───────────────────────────────────────────────────────────────
+console.log('');
+check('the watch routes are registered for both kinds',
+  /app\.get\('\/movie\/:slug\/watch', watchHandler\('movie'\)\)/.test(ssrSrc)
+  && /app\.get\('\/tv\/:slug\/watch', watchHandler\('tv'\)\)/.test(ssrSrc));
+check('a wrong slug is redirected so the page has one URL',
+  /redirect\(301, detailPath\(kind, item\) \+ '\/watch'/.test(ssrSrc));
+check('the watch response is sent noindex at the header level too',
+  /X-Robots-Tag', 'noindex, follow'/.test(ssrSrc));
+check('the player page is cached briefly, not for hours',
+  /max-age=300, s-maxage=900/.test(ssrSrc),
+  'embed hosts rotate; a stale frame is worse than a slower page');
+
+console.log('-'.repeat(70));
+console.log('  watch-page-check: ' + pass + ' passed, ' + fail + ' failed\n');
+process.exit(fail ? 1 : 0);
