@@ -46,7 +46,7 @@ const MUST_NOT_SHIP = [
   'tv-mode.browser.test.html', 'rum-gate.browser.test.html',
   'perf-baseline.json', 'sitemap-cache.json', 'asset-versions.json',
   '.env', '.env.example',
-  'server.js', 'seo-ssr.js', 'instrument.js', 'datadogRUM-init.js',
+  'server.js', 'seo-ssr.js', 'worker.js', 'instrument.js', 'datadogRUM-init.js',
   'package.json', 'package-lock.json', 'wrangler.jsonc',
   'scripts/build-sitemap-cache.js'
 ];

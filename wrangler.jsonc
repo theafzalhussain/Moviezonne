@@ -4,6 +4,15 @@
   "main": "worker.js",
   "compatibility_date": "2026-08-17",
   "observability": { "enabled": true },
+
+  // A Worker has no long-lived process, so the setInterval that used to drive
+  // release reminders on Render has nowhere to live. This trigger calls
+  // scheduled() -> processDueNotifications() instead. Hourly, because a title
+  // released today should not wait until tomorrow, and each pass is a KV list
+  // plus one POST per due reminder.
+  "triggers": {
+    "crons": ["15 * * * *"]
+  },
   "assets": {
     "directory": ".",
     "binding": "ASSETS",
@@ -16,8 +25,29 @@
       "id": "7afa38a8eae1409285fbbd368e6d0063"
     },
     {
+      // sub:<hash>            one row per browser push subscription
+      // notify:<hash>:<movie> one row per movie a subscriber asked about
       "binding": "PUSH_SUBS",
       "id": "11aac5b94b014f7bb1c04fc45a23f4a0"
     }
   ]
+
+  // SECRETS THIS WORKER NEEDS — set with `wrangler secret put <NAME>`, never here.
+  // They are not optional: without the VAPID pair /api/push/vapid-key answers 503
+  // and the browser silently skips subscribing, which is the failure this
+  // migration shipped with.
+  //
+  //   TMDB_TOKEN         v4 read access token for the /api/tmdb proxy
+  //   VAPID_PUBLIC_KEY   from `npx web-push generate-vapid-keys`
+  //   VAPID_PRIVATE_KEY  the matching private half — whoever holds it can push
+  //                      to every subscriber
+  //   VAPID_EMAIL        e.g. mailto:admin@moviezone.dev (contact for the push
+  //                      services, per RFC 8292)
+  //   CRON_SECRET        optional; when set, /api/notifications/process-due
+  //                      requires it. The cron trigger above does not — it calls
+  //                      scheduled() directly.
+  //
+  // Reuse the SAME VAPID pair the Render deployment used. A new pair invalidates
+  // every existing subscription: those browsers keep an applicationServerKey
+  // bound to the old public key and their endpoints start answering 403.
 }

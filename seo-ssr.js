@@ -2474,6 +2474,94 @@ function heroPreloadTag(heroUrl) {
        + '<meta name="mz-hero-backdrop" content="' + escAttr(path) + '">\n';
 }
 
+/* ── The hero slide, server-rendered ─────────────────────────────────────────
+ *
+ *  WHY THIS EXISTS
+ *  heroPreloadTag() above puts the LCP backdrop in <head>, but #carouselTrack
+ *  ships empty: slide 0's <img> is created by buildCarousel(), which cannot run
+ *  until the bundle has parsed AND several TMDB responses have been aggregated
+ *  and ranked. On a cold load that is comfortably more than the ~3s Chrome
+ *  allows, so the browser reported
+ *
+ *    The resource https://image.tmdb.org/t/p/w1280/… was preloaded using link
+ *    preload but not used within a few seconds from the window's load event.
+ *
+ *  and the warning was accurate: the preload was correct, just consumed far too
+ *  late to count. Verified against live TMDB — the preloaded title was
+ *  movie/popular[0], released, with both images, so pinPreloadedHero() does put
+ *  it on slide 0; the URL was never the problem.
+ *
+ *  So the fix is to give the parser something to consume immediately: the same
+ *  slide 0 markup buildOne() would produce, emitted statically. Three things
+ *  follow from that, all of them wanted:
+ *    • the preload is consumed during parse, so the warning cannot fire,
+ *    • the LCP image is requested before the bundle is even fetched rather than
+ *      after it plus three API calls,
+ *    • the hero paints something on the first frame instead of an empty box.
+ *
+ *  buildCarousel() clears #carouselTrack and rebuilds it, which drops this node.
+ *  That costs nothing: pinPreloadedHero() puts the same title on slide 0 and the
+ *  rebuilt <img> asks for the identical URL, so it is served from cache.
+ *
+ *  The <source media> branches are the same two as heroPreloadTag(), for the
+ *  same reason documented there — the img must resolve to whichever URL the
+ *  matching preload fetched, and only a CSS-pixel media query agrees with the
+ *  client's matchMedia() branch.
+ */
+const HERO_SLIDE_MARK = '<!--MZ_HERO_SLIDE-->';
+const HERO_SLIDE_END = '<!--/MZ_HERO_SLIDE-->';
+const HERO_SLIDE_RE = /<!--MZ_HERO_SLIDE-->[\s\S]*?<!--\/MZ_HERO_SLIDE-->/;
+const TRACK_OPEN = '<div class="carousel-track" id="carouselTrack">';
+
+function heroSlideMarkup(heroUrl) {
+  const m = /^(https:\/\/image\.tmdb\.org\/t\/p\/)w\d+(\/.+)$/.exec(heroUrl);
+  const img = (url) => '<img class="slide-bg-img" src="' + escAttr(url) + '" alt=""'
+    + ' width="1280" height="720" fetchpriority="high" decoding="async" draggable="false">';
+
+  const picture = !m ? img(heroUrl)
+    : '<picture>'
+      + '<source media="' + MOBILE_MQ + '" srcset="' + escAttr(m[1] + 'w780' + m[2]) + '">'
+      + '<source media="' + WIDE_MQ + '" srcset="' + escAttr(m[1] + 'w1280' + m[2]) + '">'
+      + img(m[1] + 'w1280' + m[2])
+      + '</picture>';
+
+  // aria-hidden: the real slide carries the title, link and badge. This is a
+  // backdrop only, and it is replaced within a second, so it must not be
+  // announced or land in the tab order.
+  return '<div class="carousel-slide active" data-mz-hero-ssr aria-hidden="true">'
+    + '<div class="slide-bg">' + picture + '</div>'
+    + '<div class="slide-gradient"></div>'
+    + '</div>';
+}
+
+/**
+ * Renders slide 0's backdrop into #carouselTrack so the <head> preload is
+ * consumed during parse.
+ *
+ * Idempotent, and a pure function of the original file: a previous run's region
+ * is removed before a new one is written, so build-time and runtime callers
+ * cannot stack. Returns the shell untouched when there is no hero to render or
+ * the carousel markup has moved.
+ *
+ * @param {string} shell     index.html contents
+ * @param {string} [heroUrl] absolute URL of the hero backdrop, same value passed
+ *                           to optimizeHomeHead
+ * @returns {string} rewritten HTML
+ */
+function injectHeroSlide(shell, heroUrl) {
+  if (!shell) return shell;
+  const html = shell.replace(HERO_SLIDE_RE, '');
+  if (!heroUrl) return html;
+
+  const at = html.indexOf(TRACK_OPEN);
+  if (at === -1) return html;
+
+  const cut = at + TRACK_OPEN.length;
+  return html.slice(0, cut)
+    + HERO_SLIDE_MARK + heroSlideMarkup(heroUrl) + HERO_SLIDE_END
+    + html.slice(cut);
+}
+
 const PERF_HEAD_MARK = '<!--MZ_PERF_HEAD-->';
 const PERF_HEAD_RE = /<!--MZ_PERF_HEAD-->[\s\S]*?<!--\/MZ_PERF_HEAD-->\n?/;
 
@@ -2642,6 +2730,7 @@ module.exports = {
   renderHomeLinkBlock,
   injectHomeLinks,
   optimizeHomeHead,
+  injectHeroSlide,
   readSitemapCache,
   releaseLastmod,
   browseLetterOf,

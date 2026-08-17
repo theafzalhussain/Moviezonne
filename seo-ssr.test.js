@@ -844,6 +844,99 @@ function request(server, urlPath) {
     assert.throws(() => seo.registerSeoRoutes(express(), {}), /deps\.tmdb/);
   });
 
+  section('injectHeroSlide — the LCP backdrop is rendered, not just preloaded');
+
+  const HERO_URL = 'https://image.tmdb.org/t/p/w780/qeQJx07rK2xm8SD2sJxFKhE7gs0.jpg';
+  const HERO_SHELL = '<html><head></head><body><section id="hero">'
+    + '<div class="carousel-track" id="carouselTrack"></div>'
+    + '<div class="carousel-nav"><div class="carousel-dots" id="carouselDots"></div></div>'
+    + '</section></body></html>';
+
+  test('the hero slide is written inside #carouselTrack', () => {
+    const out = seo.injectHeroSlide(HERO_SHELL, HERO_URL);
+    const at = out.indexOf('<div class="carousel-track" id="carouselTrack">');
+    assert.ok(at > -1, 'carousel track was lost');
+    assert.ok(out.indexOf('<!--MZ_HERO_SLIDE-->') > at, 'region is not inside the track');
+    assert.ok(out.includes('class="carousel-slide active"'), 'no slide 0 rendered');
+    assert.ok(out.includes('class="slide-bg-img"'), 'no LCP <img> rendered');
+  });
+
+  test('the rendered img resolves to the same URLs the head preloads', () => {
+    const out = seo.injectHeroSlide(HERO_SHELL, HERO_URL);
+    const slide = out.slice(out.indexOf('<!--MZ_HERO_SLIDE-->'), out.indexOf('<!--/MZ_HERO_SLIDE-->'));
+
+    // heroPreloadTag() rewrites the hero into exactly these two sizes, one per
+    // breakpoint. The slide must declare both, or the matching preload goes
+    // unused and Chrome warns again.
+    const path0 = '/qeQJx07rK2xm8SD2sJxFKhE7gs0.jpg';
+    for (const size of ['w780', 'w1280']) {
+      assert.ok(slide.includes('https://image.tmdb.org/t/p/' + size + path0),
+        'slide never requests the ' + size + ' variant the head preloads');
+    }
+    assert.ok(!/\/original\//.test(slide), 'original is 885KB average — never the LCP image');
+  });
+
+  test('the media breakpoints match the preload exactly', () => {
+    const out = seo.injectHeroSlide(HERO_SHELL, HERO_URL);
+    assert.ok(out.includes('<source media="(max-width: 1024px)"'), 'mobile branch drifted');
+    assert.ok(out.includes('<source media="(min-width: 1025px)"'), 'wide branch drifted');
+  });
+
+  test('the placeholder is hidden from assistive tech and carries no heading', () => {
+    const out = seo.injectHeroSlide(HERO_SHELL, HERO_URL);
+    assert.ok(/aria-hidden="true"/.test(out), 'placeholder is announced to screen readers');
+    assert.ok(!/<h1|<h2/.test(out.slice(out.indexOf('<!--MZ_HERO_SLIDE-->'))),
+      'placeholder must not add a competing heading');
+  });
+
+  test('injectHeroSlide is idempotent', () => {
+    const once = seo.injectHeroSlide(HERO_SHELL, HERO_URL);
+    const twice = seo.injectHeroSlide(once, HERO_URL);
+    assert.strictEqual(twice, once, 'a second run stacked another slide');
+    assert.strictEqual((twice.match(/carousel-slide active/g) || []).length, 1);
+  });
+
+  test('a new hero replaces the previous one instead of appending', () => {
+    const first = seo.injectHeroSlide(HERO_SHELL, HERO_URL);
+    const second = seo.injectHeroSlide(first, 'https://image.tmdb.org/t/p/w780/newer.jpg');
+    assert.ok(second.includes('/w780/newer.jpg'), 'new hero not written');
+    assert.ok(!second.includes('qeQJx07rK2xm8SD2sJxFKhE7gs0'), 'stale hero left behind');
+    assert.strictEqual((second.match(/MZ_HERO_SLIDE/g) || []).length, 2, 'region duplicated');
+  });
+
+  test('no hero means the track is left empty rather than half-rendered', () => {
+    assert.strictEqual(seo.injectHeroSlide(HERO_SHELL, null), HERO_SHELL);
+    assert.strictEqual(seo.injectHeroSlide(seo.injectHeroSlide(HERO_SHELL, HERO_URL), null),
+      HERO_SHELL);
+  });
+
+  test('markup without the carousel track is returned untouched', () => {
+    const other = '<html><body><div id="somethingelse"></div></body></html>';
+    assert.strictEqual(seo.injectHeroSlide(other, HERO_URL), other);
+  });
+
+  test('a non-TMDB hero URL still renders a single img', () => {
+    const out = seo.injectHeroSlide(HERO_SHELL, 'https://cdn.example/hero.jpg');
+    assert.ok(out.includes('src="https://cdn.example/hero.jpg"'));
+    assert.ok(!out.includes('<picture>'), 'no breakpoints to branch on');
+  });
+
+  test('the shipped index.html has a hero slide that matches its preload', () => {
+    const fs2 = require('fs');
+    const live = fs2.readFileSync(require('path').join(__dirname, 'index.html'), 'utf8');
+    const preloaded = [...live.matchAll(/<link rel="preload" as="image"[^>]*href="(https:\/\/image\.tmdb\.org[^"]+)"/g)]
+      .map((m) => m[1]);
+    if (!preloaded.length) return; // no hero preload committed — nothing to match
+
+    assert.ok(live.includes('<!--MZ_HERO_SLIDE-->'),
+      'index.html preloads a hero but never renders it — the preload will go unused');
+    const slide = live.slice(live.indexOf('<!--MZ_HERO_SLIDE-->'),
+      live.indexOf('<!--/MZ_HERO_SLIDE-->'));
+    for (const url of preloaded) {
+      assert.ok(slide.includes(url), 'index.html preloads ' + url + ' but the hero slide never requests it');
+    }
+  });
+
   await new Promise((resolve) => server.close(resolve));
 
   // ── summary ──

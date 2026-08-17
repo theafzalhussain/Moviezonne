@@ -40,7 +40,7 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const HOME_FILE = path.join(ROOT, 'index.html');
 
-const { renderHomeLinkBlock, injectHomeLinks, optimizeHomeHead } = require(path.join(ROOT, 'seo-ssr.js'));
+const { renderHomeLinkBlock, injectHomeLinks, optimizeHomeHead, injectHeroSlide } = require(path.join(ROOT, 'seo-ssr.js'));
 
 // server.js authenticates with a v4 bearer token in TMDB_TOKEN, so that name is
 // checked first — these scripts must work with the env that already exists.
@@ -135,8 +135,11 @@ async function tmdb(endpoint) {
     console.warn('  ! No TMDB data — injecting category + A-Z links only (none to lose).');
   }
 
-  // Head first, then the link block, so both live in one generated file.
-  const tuned = optimizeHomeHead(shell, heroUrl);
+  // Head first, then slide 0, then the link block, so all three live in one
+  // generated file. The hero slide MUST be written from the same heroUrl as the
+  // preload: if the two ever disagree the preload goes unused again, which is
+  // the warning this pairing exists to remove.
+  const tuned = injectHeroSlide(optimizeHomeHead(shell, heroUrl), heroUrl);
   const block = renderHomeLinkBlock(groups);
   const out = injectHomeLinks(tuned, block);
 

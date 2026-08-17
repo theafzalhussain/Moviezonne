@@ -36,6 +36,9 @@ sitemap-cache.json
 # just publishes our internals.
 server.js
 seo-ssr.js
+# wrangler bundles worker.js from "main"; it must not ALSO be served as a static
+# file, or /worker.js hands out our routing, KV key scheme and cron guard.
+worker.js
 instrument.js
 asset-seal.js
 ecosystem.config.js
