@@ -664,6 +664,32 @@ html.mz-has-cw #continueWatchingGrid{min-height:236px}
         var stack = err.stack || '';
         if (/ResizeObserver loop/i.test(message)) return false;
         if (/(?:chrome|moz|safari|chrome-extension|moz-extension)-?extension:\/\//.test(stack + ' ' + message)) return false;
+
+        /*  "Script error." is the browser's CORS mask, not an error. When a
+         *  cross-origin script throws, the spec replaces the message, file and
+         *  line with this exact string so a page cannot read another origin's
+         *  internals. It therefore carries zero information by construction —
+         *  there is nothing to fix and nothing to attribute. Ours come from the
+         *  player embeds (videasy / vidfast / flicky) inside #watch-*, which
+         *  keep working when they fire. */
+        if (/^Script error\.?$/.test(message)) return false;
+
+        /*  "<something>.at is not a function", thrown by a script injected into
+         *  the page from outside this deployment.
+         *
+         *  Attribution, not assumption: `.at(` appears zero times in every file
+         *  this site ships — moviezone/tv-mode/search-engine/pwa-install (source
+         *  and minified), sw.js, worker.js, seo-ssr.js — and zero times in the
+         *  RUM agent bundle we load. rum-filter.test.js re-checks that on every
+         *  run, so this line cannot start hiding a bug of ours.
+         *
+         *  It is also not a browser-support gap: the reporting device is Android
+         *  15 WebView, where Array.prototype.at has shipped since Chrome 92. A
+         *  WebView host app or carrier-injected script is calling .at() on a
+         *  value that is not an array or string. Not our code, not reachable
+         *  from our code, and not fixable from here. */
+        if (/\.at is not a function/.test(message)) return false;
+
         return true;
       }
     });

@@ -368,12 +368,39 @@ check('the RUM noise filter drops only third-party, non-actionable errors', () =
     'the filter inspects non-error events too, so it can drop real telemetry');
   assert.ok(/ResizeObserver loop/i.test(body), 'the ResizeObserver noise is no longer filtered');
   assert.ok(/extension:/i.test(body), 'browser-extension errors are no longer filtered');
-  // The whole value of the filter is that it stays this small.
+
+  /*  Budget raised from 3 to 4 when the "Script error." and ".at is not a
+   *  function" rules were added. The count was the only thing guarding this
+   *  filter at the time; it is now the weaker of two guards, because
+   *  rum-filter.test.js executes the real beforeSend and asserts, per rule,
+   *  what it drops AND what it must still keep. Raise this number again only
+   *  alongside a case there, plus evidence the class is not ours. */
   const returnsFalse = (body.match(/return false/g) || []).length;
-  assert.ok(returnsFalse <= 3,
+  assert.ok(returnsFalse <= 4,
     returnsFalse + ' discard branches in beforeSend; each one hides a class of error');
+
+  /*  The CORS-mask rule must stay anchored. Unanchored, /Script error/ would
+   *  also swallow a real message that merely contains those words. */
+  if (/Script error/.test(body)) {
+    assert.ok(/\^Script error\\\.\?\$/.test(body),
+      'the "Script error." rule is not anchored, so it can drop real messages '
+        + 'that merely contain that phrase');
+  }
+
   assert.ok(/return true;\s*\}/.test(body),
     'the filter does not end by keeping everything else');
+});
+
+check('every beforeSend discard rule is verified by rum-filter.test.js', () => {
+  assert.ok(fs.existsSync('rum-filter.test.js'),
+    'nothing executes the shipped beforeSend, so its rules are unverified');
+  assert.ok(pkg.scripts.test.includes('rum-filter.test.js'),
+    'rum-filter.test.js is never run by npm test');
+  const filterTest = fs.readFileSync('rum-filter.test.js', 'utf8');
+  /*  The ".at is not a function" rule is only safe while this site ships no
+   *  .at( call of its own. That invariant must be enforced, not assumed. */
+  assert.ok(/\.at\\\(/.test(filterTest) || /\\\.at\\\(/.test(filterTest),
+    'the .at invariant is not checked, so the filter could hide our own bug');
 });
 
 check('the RUM gate is exercised by a browser test', () => {

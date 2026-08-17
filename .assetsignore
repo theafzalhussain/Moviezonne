@@ -1,4 +1,54 @@
+# Files NOT uploaded as public Cloudflare assets.
+#
+# WHY THIS FILE MATTERS MORE THAN IT LOOKS
+# wrangler.jsonc sets assets.directory to "." — the whole repo root is published.
+# .vercelignore used to hold this list, but the Cloudflare migration did not
+# carry it over, so dev tooling went public again: /player-health.test.js,
+# /seo-ssr.test.js, /asset-perf-check.js and /perf-baseline.json all answered
+# 200, and /.env.example served real credentials.
+#
+# Anything the BROWSER loads must stay out of this list: index.html, the
+# moviezone/tv-mode/search-engine/pwa-install bundles, the CSS, sw.js,
+# manifest.json, collections-catalog.json, robots.txt, sitemap*.xml, fonts and
+# icons. assetsignore-check.js enforces exactly that.
+
 **/node_modules
 **/.git
 **/.DS_Store
 **/wrangler.jsonc
+
+# Browser test harness pages
+*.test.html
+
+# Node test suites
+*.test.js
+
+# One-off verification scripts (carousel geometry, OTT ids, SEO SSR, TV perf…)
+*-check.js
+
+# Dev-only data: TV perf baseline, asset seal ledger, and the 500 KB sitemap
+# catalogue that only the server reads.
+perf-baseline.json
+asset-versions.json
+sitemap-cache.json
+
+# Server-side and tooling code. The browser never requests these; serving them
+# just publishes our internals.
+server.js
+seo-ssr.js
+instrument.js
+asset-seal.js
+ecosystem.config.js
+datadogRUM-init.js
+scripts/
+
+# Environment files and dependency manifests must never be published.
+.env
+.env.*
+package.json
+package-lock.json
+
+# Config for other platforms
+vercel.json
+netlify.toml
+_perf-block.txt
