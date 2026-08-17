@@ -9197,6 +9197,19 @@ init();
   const NOTIFY_KEY = 'mz_notify_movies';
 
   // ── WEB PUSH SUBSCRIPTION ──
+
+  /*  True when a response is the SPA shell rather than the API answering.
+   *
+   *  wrangler.jsonc sets not_found_handling to "single-page-application", so an
+   *  /api/* route the Worker does not implement answers 200 with index.html
+   *  instead of 404. response.ok was therefore true and response.json() threw
+   *      Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+   *  which reads like a corrupt payload when the real fact is simply that the
+   *  endpoint is not deployed on this host. Checking the content type is what
+   *  separates those two cases. */
+  const servedSpaShell = (response) =>
+    !(response.headers.get('content-type') || '').toLowerCase().includes('application/json');
+
   async function subscribeToPush() {
     try {
       if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
@@ -9208,8 +9221,22 @@ init();
 
       if (!subscription) {
         const response = await fetch('/api/push/vapid-key', { cache: 'no-store' });
-        if (!response.ok) throw new Error('Could not load the push configuration');
+        if (!response.ok || servedSpaShell(response)) {
+          /*  Push is not wired up on this deployment. That is a deployment
+           *  state rather than a fault, so it is said once, plainly — a warning
+           *  carrying a SyntaxError stack taught us to scroll past the console
+           *  instead of reading it. */
+          if (!subscribeToPush.reportedMissing) {
+            subscribeToPush.reportedMissing = true;
+            console.info('[MovieZone] Push notifications are not configured here: '
+              + '/api/push/vapid-key returned ' + response.status + ' '
+              + (response.headers.get('content-type') || 'no content type')
+              + '. Skipping subscription.');
+          }
+          return null;
+        }
         const { publicKey } = await response.json();
+        if (!publicKey) throw new Error('The push configuration has no public key');
         subscription = await reg.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: urlBase64ToUint8Array(publicKey)
@@ -9221,9 +9248,12 @@ init();
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(subscription)
       });
-      if (!saveResponse.ok) {
-        const error = await saveResponse.json().catch(() => ({}));
-        throw new Error(error.error || 'Could not save push subscription');
+      if (!saveResponse.ok || servedSpaShell(saveResponse)) {
+        const error = servedSpaShell(saveResponse)
+          ? {}
+          : await saveResponse.json().catch(() => ({}));
+        throw new Error(error.error
+          || ('Could not save push subscription (' + saveResponse.status + ')'));
       }
 
       console.log('[MovieZone] Push subscription synced to server.');
@@ -9256,8 +9286,16 @@ init();
         confirm
       })
     });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(result.error || 'Could not save movie notification');
+    const result = servedSpaShell(response)
+      ? {}
+      : await response.json().catch(() => ({}));
+    if (!response.ok || servedSpaShell(response)) {
+      /*  Without the content-type check a missing endpoint answers 200 with
+       *  index.html and this reads as a successful save, so the movie would be
+       *  reported as scheduled when nothing was stored. */
+      throw new Error(result.error
+        || ('Could not save movie notification (' + response.status + ')'));
+    }
     return result;
   }
 
@@ -9273,8 +9311,11 @@ init();
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ endpoint: subscription.endpoint })
     });
-    if (!response.ok) return;
-    const { movies = [] } = await response.json();
+    /*  A 200 carrying index.html would make response.json() throw here, and this
+     *  runs from a bare setTimeout — an unhandled rejection that silently stops
+     *  the rest of the sync. Treated as "nothing to load" instead. */
+    if (!response.ok || servedSpaShell(response)) return;
+    const { movies = [] } = await response.json().catch(() => ({ movies: [] }));
     localStorage.setItem(NOTIFY_KEY, JSON.stringify(movies.map(movie => ({
       id: movie.movieId,
       title: movie.title,
