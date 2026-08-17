@@ -15,7 +15,6 @@ export default {
         const subscription = body.subscription || body;
         const endpoint = subscription.endpoint || 'unknown';
 
-        // KV mein save karo — key = endpoint, value = subscription JSON
         await env.PUSH_SUBS.put(endpoint, JSON.stringify({
           subscription: subscription,
           movieId: body.movieId || null,
