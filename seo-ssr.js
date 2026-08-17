@@ -45,6 +45,33 @@ const IMG_POSTER_LG = 'https://image.tmdb.org/t/p/w500';
 const IMG_BACKDROP = 'https://image.tmdb.org/t/p/w1280';
 const IMG_PROFILE = 'https://image.tmdb.org/t/p/w185';
 
+/*  Detail-page hero backdrop, sized per viewport.
+ *
+ *  The <img> alone always pulled w1280 (~116KB) even on phones, which is where
+ *  most of the traffic is. A <source media> branch is used rather than srcset +
+ *  sizes for the same reason documented on heroPreloadTag below: `sizes`
+ *  resolves against device pixels, so a DPR2 phone asks for ~820px and the
+ *  browser upgrades it to w1280 — exactly the download this is meant to avoid.
+ *  A media query is evaluated on CSS pixels, so the branch is predictable.
+ *
+ *  Breakpoints are kept byte-identical to MOBILE_MQ / WIDE_MQ so that if this
+ *  page ever gains a hero preload, the two resolve to the same URL.
+ */
+function heroBgPicture(backdropUrl) {
+  const m = /^(https:\/\/image\.tmdb\.org\/t\/p\/)w\d+(\/.+)$/.exec(backdropUrl);
+  const img = (url, w, h) => '<img class="hero-bg" src="' + esc(url) + '" alt=""'
+    + ' width="' + w + '" height="' + h + '" fetchpriority="high" decoding="async">';
+
+  if (!m) return img(backdropUrl, 1280, 720);
+
+  const base = m[1], path = m[2];
+  return '<picture class="hero-bg-pic">'
+    + '<source media="' + MOBILE_MQ + '" srcset="' + esc(base + 'w780' + path) + '">'
+    + '<source media="' + WIDE_MQ + '" srcset="' + esc(base + 'w1280' + path) + '">'
+    + img(base + 'w1280' + path, 1280, 720)
+    + '</picture>';
+}
+
 // Detail pages are cheap to regenerate and change rarely — let the CDN own them.
 const DETAIL_CACHE = 'public, max-age=1800, s-maxage=86400, stale-while-revalidate=604800';
 const CATEGORY_CACHE = 'public, max-age=900, s-maxage=21600, stale-while-revalidate=86400';
@@ -782,6 +809,7 @@ nav.top a:hover{color:#f5c518}
 .crumbs li::after{content:'/';margin-left:8px;color:rgba(255,255,255,.25)}
 .crumbs li:last-child::after{content:''}
 .hero{position:relative;border-radius:18px;overflow:hidden;margin:20px 0 0;background:#0b0b16}
+.hero-bg-pic{display:contents}
 .hero-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.32;filter:saturate(1.05)}
 .hero-veil{position:absolute;inset:0;background:linear-gradient(105deg,rgba(3,3,10,.96) 12%,rgba(3,3,10,.72) 52%,rgba(3,3,10,.42) 100%)}
 .hero-in{position:relative;display:flex;gap:28px;padding:30px;flex-wrap:wrap}
@@ -932,7 +960,7 @@ ${allSchemas.map((s) => '<script type="application/ld+json">' + jsonLdScript(s) 
 <a class="skip" href="#main">Skip to content</a>
 <header class="bar">
   <div class="wrap">
-    <a class="brand" href="/"><img src="/moviezone-logo.webp" alt="MovieZone" width="30" height="30" style="border-radius:7px"> MOVIE<span>ZONE</span></a>
+    <a class="brand" href="/"><img src="/moviezone-logo.webp" alt="MovieZone" width="30" height="30" decoding="async" style="border-radius:7px"> MOVIE<span>ZONE</span></a>
     <nav class="top" aria-label="Browse">
       <a href="/movies/trending">Trending</a>
       <a href="/movies/bollywood">Bollywood</a>
@@ -1376,7 +1404,7 @@ function renderDetailPage(item, kind) {
   const body = `
 <div class="wrap">
   <article class="hero">
-    ${backdrop ? '<img class="hero-bg" src="' + esc(backdrop) + '" alt="" width="1280" height="720" fetchpriority="high" decoding="async">' : ''}
+    ${backdrop ? heroBgPicture(backdrop) : ''}
     <div class="hero-veil"></div>
     <div class="hero-in">
       ${posterLg
