@@ -7,5 +7,11 @@
   "assets": {
     "directory": ".",
     "binding": "ASSETS"
-  }
+  },
+  "kv_namespaces": [
+    {
+      "binding": "TMDB_CACHE",
+      "id": "7afa38a8eae1409285fbbd368e6d0063"
+    }
+  ]
 }
