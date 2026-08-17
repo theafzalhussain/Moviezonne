@@ -564,6 +564,251 @@ async function decryptAsUserAgent(subscriber, body) {
   }));
   equal('a malformed JSON body -> 400, not a 500', malformed.status, 400);
 
+  // ── 10. edge batching ────────────────────────────────────────────────────
+  console.log('\n10. /api/tmdb/batch — the 26-request homepage in one round-trip');
+
+  const batchEnv = () => ({ ...baseEnv, TMDB_TOKEN: 'test-token', TMDB_CACHE: fakeKV() });
+  // What the client sends: the plan in a POST body.
+  const batchReq = (paths) => postJson('/api/tmdb/batch', { paths });
+  // The hand-inspection route, kept for curl.
+  const batchGet = (paths) =>
+    req('/api/tmdb/batch?r=' + encodeURIComponent(JSON.stringify(paths)));
+
+  const HOME_PLAN = [
+    '/movie/now_playing?language=en-US&page=1',
+    '/trending/movie/week?language=en-US&page=1',
+    '/movie/popular?language=en-US&page=1'
+  ];
+
+  let upstreamCalls = [];
+  const stubTmdb = (handler) => {
+    upstreamCalls = [];
+    globalThis.fetch = async (url, init) => {
+      upstreamCalls.push(String(url));
+      return handler(String(url), init);
+    };
+  };
+  const okPage = (title) => new Response(
+    JSON.stringify({ page: 1, results: [{ id: 1, title }] }),
+    { status: 200, headers: { 'content-type': 'application/json' } }
+  );
+
+  stubTmdb((url) => okPage('from ' + new URL(url).pathname));
+  const bEnv = batchEnv();
+  const bRes = await callApi(worker, bEnv, batchReq(HOME_PLAN));
+  equal('a valid batch -> 200', bRes.status, 200);
+  check('batch answers application/json', isJson(bRes));
+  const bBody = await bRes.json();
+  check('the response is an allSettled-shaped array',
+    Array.isArray(bBody.results) && bBody.results.length === 3, JSON.stringify(bBody).slice(0, 200));
+  check('every entry carries status + value',
+    bBody.results.every((r) => r.status === 'fulfilled' && r.value && r.value.results),
+    JSON.stringify(bBody.results).slice(0, 200));
+  equal('order is preserved, because callers index into it',
+    bBody.results[1].value.results[0].title, 'from /3/trending/movie/week');
+  equal('one client request fans out to every path', upstreamCalls.length, 3);
+  check('the Authorization header is applied by the Worker, never by the caller',
+    upstreamCalls.every((u) => u.startsWith('https://api.themoviedb.org/3/')),
+    upstreamCalls.join(', '));
+
+  // The scaling property: the second visitor must not re-run the fan-out.
+  stubTmdb(() => { throw new Error('upstream must not be touched on a cached batch'); });
+  const cachedRes = await callApi(worker, bEnv, batchReq(HOME_PLAN));
+  equal('an identical plan is served from cache -> 200', cachedRes.status, 200);
+  equal('a cached batch reports x-cache HIT', cachedRes.headers.get('x-cache'), 'HIT');
+  equal('a cached batch makes zero upstream calls', upstreamCalls.length, 0);
+  equal('the cached body is identical', JSON.stringify(await cachedRes.json()), JSON.stringify(bBody));
+
+  // Per-endpoint entries are shared with /api/tmdb/*, so a single fetch of the
+  // same path must not re-hit TMDB either.
+  stubTmdb(() => { throw new Error('should have been served from the per-endpoint cache'); });
+  const singleRes = await callApi(worker, bEnv,
+    req('/api/tmdb/movie/popular?language=en-US&page=1'));
+  equal('a single request reuses the entry the batch stored', singleRes.status, 200);
+  equal('and reports a cache HIT', singleRes.headers.get('x-cache'), 'HIT');
+
+  // A different plan must be a different cache entry.
+  stubTmdb((url) => okPage('from ' + new URL(url).pathname));
+  const otherPlan = await callApi(worker, bEnv, batchReq(['/movie/top_rated?page=1']));
+  equal('a different plan is a cache miss', otherPlan.headers.get('x-cache'), 'MISS');
+
+  // One dead source must not empty the whole first screen.
+  stubTmdb((url) => url.includes('now_playing')
+    ? new Response('upstream exploded', { status: 500 })
+    : okPage('ok'));
+  const partialEnv = batchEnv();
+  const partial = await callApi(worker, partialEnv, batchReq(HOME_PLAN));
+  equal('a partial failure still answers 200', partial.status, 200);
+  const partialBody = await partial.json();
+  equal('the failed source is reported as rejected', partialBody.results[0].status, 'rejected');
+  equal('the healthy sources still return data', partialBody.results[1].status, 'fulfilled');
+  equal('a partial batch reports that it was not stored',
+    partial.headers.get('x-batch-stored'), 'no');
+  equal('and nothing was written to KV, so one bad moment cannot persist',
+    [...partialEnv.TMDB_CACHE.data.keys()].filter((k) => k.startsWith('batch:')).length, 0);
+
+  stubTmdb((url) => okPage('recovered ' + new URL(url).pathname));
+  equal('the next request retries instead of serving the partial result',
+    (await callApi(worker, partialEnv, batchReq(HOME_PLAN))).headers.get('x-cache'), 'MISS');
+
+  // ── 11. the batch endpoint is not an open proxy ───────────────────────────
+  console.log('\n11. batch input validation');
+  const rejected = [
+    ['an absolute URL', 'https://evil.example/steal'],
+    ['a protocol-relative host', '//evil.example/steal'],
+    ['a path traversal', '/movie/../../admin'],
+    ['a double slash', '/movie//popular'],
+    ['a backslash', '/movie\\popular'],
+    ['an empty path', ''],
+    ['a non-string entry', 42]
+  ];
+  for (const [label, path] of rejected) {
+    const res = await callApi(worker, batchEnv(), batchReq([path]));
+    equal('rejects ' + label + ' -> 400', res.status, 400);
+  }
+  check('validBatchPath accepts a normal TMDB path with a query',
+    worker.validBatchPath('/discover/movie?with_original_language=ko&page=1'));
+
+  const tooMany = await callApi(worker, batchEnv(),
+    batchReq(Array(worker.MAX_BATCH_PATHS + 1).fill('/movie/popular?page=1')));
+  equal('a batch over the cap -> 400', tooMany.status, 400);
+  check('the cap leaves room for the 26-request homepage',
+    worker.MAX_BATCH_PATHS >= 26, 'cap is ' + worker.MAX_BATCH_PATHS);
+
+  equal('a missing plan -> 400', (await callApi(worker, batchEnv(), req('/api/tmdb/batch'))).status, 400);
+  equal('a malformed plan -> 400',
+    (await callApi(worker, batchEnv(), req('/api/tmdb/batch?r=notjson'))).status, 400);
+  equal('an empty plan -> 400', (await callApi(worker, batchEnv(), batchReq([]))).status, 400);
+
+  // "batch" must not be forwarded to TMDB as a resource path.
+  stubTmdb(() => { throw new Error('/api/tmdb/batch leaked into the generic proxy'); });
+  equal('the batch path is never proxied to TMDB as a resource',
+    (await callApi(worker, batchEnv(), req('/api/tmdb/batch'))).status, 400);
+
+  // ── 12. the client/worker seam ────────────────────────────────────────────
+  /*  The batch only helps if the Worker ACCEPTS what the client sends. If one
+   *  real path failed validBatchPath the endpoint would answer 400, tmdbBatch
+   *  would swallow it and fall back to 26 individual requests — the site would
+   *  work and simply never get faster, with nothing in the logs. So the actual
+   *  plan is rebuilt here, using a byte-copy of moviezone.js's _mzTmdbUrl, and
+   *  pushed through the real validator.
+   */
+  console.log('\n12. the real homepage plan survives the worker allowlist');
+
+  const BASE_PATH = '/api/tmdb';
+  const clientTmdbUrl = (endpoint, params) => {
+    params = params || {};
+    let qs = '';
+    if (Object.keys(params).length) {
+      qs = '?' + Object.entries(params).map(([k, v]) =>
+        encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&');
+    }
+    return BASE_PATH + endpoint + qs;
+  };
+
+  const day = (offset) => new Date(Date.now() - offset * 864e5).toISOString().slice(0, 10);
+  const datedWindow = (extra) => ({
+    sort_by: 'popularity.desc',
+    'primary_release_date.gte': day(35),
+    'primary_release_date.lte': day(0),
+    'vote_count.gte': '5',
+    page: '1',
+    language: 'en-US',
+    ...extra
+  });
+
+  // Mirrors loadCarousel() (10) + loadMovies('all') (16).
+  const REAL_PLAN = [
+    ['/trending/movie/week', { language: 'en-US', page: '1' }],
+    ['/trending/movie/day', { language: 'en-US', page: '1' }],
+    ['/movie/popular', { language: 'en-US', page: '1' }],
+    ['/movie/top_rated', { language: 'en-US', page: '1' }],
+    ['/movie/now_playing', { language: 'en-US', page: '1' }],
+    ['/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', language: 'en-US', page: '1' }],
+    ['/discover/movie', { with_original_language: 'ta', sort_by: 'popularity.desc', language: 'en-US', page: '1' }],
+    ['/discover/movie', { with_original_language: 'te', sort_by: 'popularity.desc', language: 'en-US', page: '1' }],
+    ['/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', language: 'en-US', page: '1' }],
+    ['/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', language: 'en-US', page: '1' }],
+    ['/discover/movie', datedWindow()],
+    ['/discover/movie', datedWindow({ 'vote_count.gte': '20' })],
+    ['/discover/movie', datedWindow({ with_origin_country: 'IN' })],
+    ['/discover/movie', datedWindow({ with_original_language: 'hi' })],
+    ['/discover/movie', { with_origin_country: 'IN', sort_by: 'popularity.desc', 'primary_release_date.lte': day(35), page: '1', language: 'en-US' }],
+    ['/discover/tv', { sort_by: 'popularity.desc', 'first_air_date.gte': day(35), 'first_air_date.lte': day(0), page: '1', language: 'en-US' }],
+    ['/discover/tv', { with_genres: '16', sort_by: 'popularity.desc', 'first_air_date.gte': day(35), page: '1', language: 'en-US' }],
+    ['/trending/tv/week', { language: 'en-US', page: '1' }],
+    // Comma and pipe lists are how TMDB takes multi-value filters; both survive
+    // encodeURIComponent as %2C / %7C and must survive the allowlist too.
+    ['/discover/tv', { with_networks: '213,1024,2739', without_genres: '99,10763', page: '1', language: 'en-US' }],
+    ['/discover/movie', { with_watch_providers: '8|119|122', watch_region: 'IN', page: '1', language: 'en-US' }]
+  ];
+
+  const realPaths = REAL_PLAN.map(([endpoint, params]) =>
+    clientTmdbUrl(endpoint, params).slice(BASE_PATH.length));
+
+  const refused = realPaths.filter((p) => !worker.validBatchPath(p));
+  check('every path the homepage builds is accepted by the worker',
+    refused.length === 0, 'refused:\n          ' + refused.join('\n          '));
+
+  check('the real plan fits under the batch cap',
+    realPaths.length <= worker.MAX_BATCH_PATHS,
+    realPaths.length + ' paths vs cap ' + worker.MAX_BATCH_PATHS);
+
+  stubTmdb((url) => okPage(new URL(url).pathname));
+  const realEnv = batchEnv();
+  const realRes = await callApi(worker, realEnv, batchReq(realPaths));
+  equal('the real plan is answered 200', realRes.status, 200);
+  const realBody = await realRes.json();
+  equal('one request returns one result per source', realBody.results.length, realPaths.length);
+  check('every source resolved', realBody.results.every((r) => r.status === 'fulfilled'),
+    JSON.stringify(realBody.results.filter((r) => r.status !== 'fulfilled')).slice(0, 300));
+  equal('the whole first screen cost the client exactly one request', upstreamCalls.length, realPaths.length);
+
+  stubTmdb(() => { throw new Error('the warmed plan must not re-hit TMDB'); });
+  equal('the next visitor is served entirely from KV',
+    (await callApi(worker, realEnv, batchReq(realPaths))).headers.get('x-cache'), 'HIT');
+
+  // ── 13. transport ─────────────────────────────────────────────────────────
+  /*  The plan travels in a POST body because it does not fit in a URL. Measured
+   *  on this 20-path plan, both query-string encodings clear the 2048-character
+   *  limit some intermediaries enforce — and a 414 would be swallowed by
+   *  tmdbBatch's fallback, quietly leaving the homepage on 26 requests. The
+   *  numbers are asserted so nobody "simplifies" this back to a GET.
+   */
+  console.log('\n13. the plan travels in a body, because it does not fit in a URL');
+
+  const asJsonQuery = '/api/tmdb/batch?r=' + encodeURIComponent(JSON.stringify(realPaths));
+  const asBase64Query = '/api/tmdb/batch?r=' + Buffer.from(realPaths.join('\n'))
+    .toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  check('a JSON query string would be too long', asJsonQuery.length > 2048,
+    asJsonQuery.length + ' chars');
+  check('base64url would be longer still — it inflates by a third',
+    asBase64Query.length > asJsonQuery.length,
+    'base64 ' + asBase64Query.length + ' vs json ' + asJsonQuery.length);
+
+  stubTmdb((url) => okPage(new URL(url).pathname));
+  const bodyEnv = batchEnv();
+  const viaBody = await callApi(worker, bodyEnv, batchReq(realPaths));
+  equal('the same plan in a POST body -> 200', viaBody.status, 200);
+  equal('and returns one result per path',
+    (await viaBody.json()).results.length, realPaths.length);
+
+  // The GET form must describe the same plan, or hand-debugging would warm a
+  // different cache entry than production uses.
+  stubTmdb(() => { throw new Error('GET and POST disagreed on the cache key'); });
+  equal('GET ?r= resolves to the identical cache entry',
+    (await callApi(worker, bodyEnv, batchGet(realPaths))).headers.get('x-cache'), 'HIT');
+
+  equal('a POST without a paths array -> 400',
+    (await callApi(worker, batchEnv(), postJson('/api/tmdb/batch', { nope: 1 }))).status, 400);
+  equal('a malformed POST body -> 400',
+    (await callApi(worker, batchEnv(), req('/api/tmdb/batch', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{oops'
+    }))).status, 400);
+  equal('DELETE on the batch endpoint -> 405',
+    (await callApi(worker, batchEnv(), req('/api/tmdb/batch', { method: 'DELETE' }))).status, 405);
+
   globalThis.fetch = realFetch;
 
   console.log('\n' + '-'.repeat(74));

@@ -845,8 +845,26 @@ const _mzSleep = (ms) => new Promise(r => setTimeout(r, ms));
  *  NOTE for the server side (deliberately not changed here): raising maxSockets,
  *  or giving discover responses a short s-maxage so the CDN absorbs the burst,
  *  would remove the queue at its source. That is a server decision.
+ *
+ *  ── UPDATE: THE ORIGIN THAT JUSTIFIED "4" NO LONGER EXISTS ──────────────────
+ *  Everything above describes Render: one Express process holding a single
+ *  https.Agent to TMDB with maxSockets: 12, shared across every visitor. That is
+ *  what made a fifth in-flight request actively harmful.
+ *
+ *  The site now runs on Cloudflare Workers. There is no shared socket pool to
+ *  overflow — each request is an isolate with its own fetch, and the KV cache in
+ *  front of TMDB absorbs the repeats. So "4" had stopped protecting anything and
+ *  was purely converting parallel work into ~7 sequential rounds on the cold
+ *  homepage. It was a migration leftover, the same class of bug as the push
+ *  endpoints that were never carried over.
+ *
+ *  8, not unlimited: the client rate budget below is still 30 per 10s, the hover
+ *  prefetcher and OTT verification can burst, and some lane discipline keeps the
+ *  first-screen requests ahead of background work. The cold homepage no longer
+ *  depends on this number anyway — see tmdbBatch(), which collapses its 26
+ *  requests into one.
  */
-const MZ_MAX_CONCURRENT_FETCHES = 4;
+const MZ_MAX_CONCURRENT_FETCHES = 8;
 
 /*  ── RATE LIMIT ──────────────────────────────────────────────────────────────
  *  TMDB allows roughly 40 requests per 10 seconds per key. The concurrency gate
@@ -1309,6 +1327,165 @@ async function _mzFetchWithRetry(urlStr, outerSignal, meta) {
   throw lastError || new Error('TMDB request abandoned');
 }
 
+/*  The exact URL tmdb() will request for an endpoint + params pair.
+ *
+ *  Extracted from tmdb() rather than copied, because tmdbBatch() has to decide
+ *  which URLs are already cached and it keys that decision on this string. If the
+ *  two ever built the URL differently, batching would silently stop matching the
+ *  cache and quietly re-download the whole first screen.
+ */
+function _mzTmdbUrl(endpoint, params) {
+  params = params || {};
+  let qs = '';
+  if (Object.keys(params).length) {
+    qs = '?' + Object.entries(params).map(([k,v]) => encodeURIComponent(k)+'='+encodeURIComponent(v)).join('&');
+  }
+  return BASE + endpoint + qs;
+}
+
+/** How long a localStorage copy counts as fresh enough to skip the network. */
+const MZ_TMDB_SWR_FRESH_MS = 12 * 60 * 60 * 1000;
+
+/*  ══════════════════════════════════════════════════════════════════════
+ *  EDGE BATCHING
+ *  ══════════════════════════════════════════════════════════════════════
+ *  A cold homepage needs 26 TMDB responses before the first card can paint:
+ *  loadCarousel() asks for 10, loadMovies('all') for 16. Sent as 26 separate
+ *  requests through the concurrency gate they became ~7 sequential rounds, and
+ *  on mobile each round costs a full radio round-trip on top of the ~136ms the
+ *  API itself takes. That is the mobile P50/P95 problem — not the posters, which
+ *  are already lazy with a real srcset.
+ *
+ *  This sends the whole plan to /api/tmdb/batch in ONE request. The Worker does
+ *  the fan-out at the edge, next to TMDB and its KV cache, and returns the
+ *  responses in order.
+ *
+ *  Three properties make this safe to drop in:
+ *
+ *    1. IT RETURNS Promise.allSettled's SHAPE, because it ends by actually
+ *       calling it. The batch response is only used to PRIME tmdbCache; the
+ *       per-URL calls that follow then hit memory and never touch the network.
+ *       So every caller's downstream code — including the index-sensitive
+ *       TV_SOURCE_FROM offset in loadMovies — is untouched.
+ *
+ *    2. IT FALLS BACK BY DOING NOTHING. If the batch request fails, or the
+ *       Worker predates this endpoint and answers 404, the priming step is
+ *       skipped and the final allSettled performs the 26 individual requests
+ *       exactly as before. Nothing to detect, nothing to configure — the site
+ *       works deployed or not.
+ *
+ *    3. IT SKIPS WHAT IS ALREADY CACHED. A returning visitor whose localStorage
+ *       is still fresh sends no batch at all, so this never trades a repeat
+ *       visitor's instant load for a first-time visitor's win.
+ */
+
+/** Below this, a batch costs more than it saves — just let tmdb() run. */
+const MZ_BATCH_MIN_REQUESTS = 3;
+
+/*  True when tmdb() can answer this URL without the network. Read-only: it
+ *  promotes a fresh localStorage copy into the memory cache, which is what
+ *  tmdb() would do a moment later anyway, so the parse is not wasted.
+ */
+function _mzTmdbAnsweredFromCache(urlStr) {
+  if (tmdbCache.has(urlStr)) return true;
+  try {
+    const raw = localStorage.getItem('mz_cache_' + urlStr);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.timestamp && (Date.now() - parsed.timestamp < MZ_TMDB_SWR_FRESH_MS)) {
+      tmdbCache.set(urlStr, parsed.data);
+      return true;
+    }
+  } catch (e) { /* unreadable cache entry — treat as a miss */ }
+  return false;
+}
+
+/**
+ * Fetches many TMDB endpoints in one round-trip.
+ *
+ * @param {Array<[string, object]>} plan endpoint + params pairs, in the order the
+ *        caller will read the results back in
+ * @returns {Promise<Array<{status:string, value?:object, reason?:any}>>}
+ *        exactly what Promise.allSettled(plan.map(tmdb)) returns
+ */
+async function tmdbBatch(plan) {
+  const run = () => Promise.allSettled(plan.map(([endpoint, params]) => tmdb(endpoint, params)));
+
+  try {
+    if (isLocalhost) return run(); // dev server has no batch endpoint
+
+    // Only ask for what no cache can answer. On a warm repeat visit this is
+    // usually empty and the batch is skipped entirely.
+    const cold = [];
+    for (const [endpoint, params] of plan) {
+      const urlStr = _mzTmdbUrl(endpoint, params);
+      if (!_mzTmdbAnsweredFromCache(urlStr)) cold.push(urlStr);
+    }
+    if (cold.length < MZ_BATCH_MIN_REQUESTS) return run();
+
+    // The Worker wants paths relative to /api/tmdb, which is what BASE is.
+    const paths = cold.map((urlStr) => urlStr.slice(BASE.length));
+
+    /*  POST, not a GET with the plan in the query string.
+     *
+     *  The 16-path ALL feed is ~1.9k of raw path text. Measured: as a JSON array
+     *  through encodeURIComponent that is a 2332-character URL, and base64url of
+     *  the same plan is 2520 — base64 inflates by a third. Both clear the
+     *  2048-character limit plenty of intermediaries still enforce, and a 414
+     *  would be caught below and silently leave this page on 26 requests
+     *  forever. A body has no length limit, so that failure mode is gone.
+     *
+     *  No HTTP caching is lost: the Worker is invoked for every /api/* request
+     *  anyway, the shared cache is a KV entry keyed on the plan, and the
+     *  per-endpoint responses are already held in memory and in localStorage
+     *  for 12h by tmdb() itself.
+     */
+    const response = await fetch(BASE + '/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths }),
+      credentials: 'same-origin'
+    });
+    if (!response.ok) throw new Error('batch responded ' + response.status);
+    if (!(response.headers.get('content-type') || '').includes('application/json')) {
+      // An /api path the Worker does not implement is answered with the SPA
+      // shell, so a 200 is not proof the endpoint exists.
+      throw new Error('batch did not return JSON');
+    }
+
+    const payload = await response.json();
+    const results = payload && payload.results;
+    if (!Array.isArray(results) || results.length !== paths.length) {
+      throw new Error('batch returned an unexpected shape');
+    }
+
+    /*  Prime the caches tmdb() reads. The memory cache is what makes the calls
+     *  below instant; the localStorage write is what makes the NEXT visit
+     *  instant, and it goes through the same deferred queue as tmdb() so it
+     *  cannot block the main thread during the first paint.
+     */
+    let primed = 0;
+    results.forEach((result, i) => {
+      if (!result || result.status !== 'fulfilled' || !result.value) return;
+      const urlStr = cold[i];
+      tmdbCache.set(urlStr, result.value);
+      _mzQueueCacheWrite('mz_cache_' + urlStr, result.value);
+      primed++;
+    });
+
+    console.debug('[MovieZone] edge batch primed ' + primed + '/' + paths.length
+      + ' endpoints in one request (' + (response.headers.get('x-cache') || '?') + ')');
+  } catch (err) {
+    /*  Never fatal. A failed batch just means the loop below does the work the
+     *  old way, which is the behaviour this replaced.
+     */
+    console.debug('[MovieZone] edge batch unavailable, falling back to individual requests:',
+      err && err.message);
+  }
+
+  return run();
+}
+
 async function tmdb(endpoint, params) {
   params = params || {};
 
@@ -1322,11 +1499,7 @@ async function tmdb(endpoint, params) {
     return _mzMissingResult();
   }
 
-  let qs = '';
-  if (Object.keys(params).length) {
-    qs = '?' + Object.entries(params).map(([k,v]) => encodeURIComponent(k)+'='+encodeURIComponent(v)).join('&');
-  }
-  const urlStr = BASE + endpoint + qs;
+  const urlStr = _mzTmdbUrl(endpoint, params);
 
   
   if (tmdbCache.has(urlStr)) return tmdbCache.get(urlStr); // Memory cache (instant)
@@ -1346,7 +1519,7 @@ async function tmdb(endpoint, params) {
       const parsed = JSON.parse(localDataStr);
       cachedData = parsed.data;
       // Agar data 12 ghante se naya hai, toh fresh manenge
-      if (parsed.timestamp && (Date.now() - parsed.timestamp < 12 * 60 * 60 * 1000)) {
+      if (parsed.timestamp && (Date.now() - parsed.timestamp < MZ_TMDB_SWR_FRESH_MS)) {
         // Promote into the in-memory cache before returning. Without this every
         // repeat call for the same URL paid another synchronous getItem plus a
         // JSON.parse of a 20-50 KB payload — and repeats are the normal case,
@@ -2374,18 +2547,21 @@ const MZ_CAROUSEL_MAX_RETRIES = 2;
 
 async function loadCarousel() {
   const _mzCarouselFailureMark = _mzFetchFailureCount;
-  // FETCH FROM ALL MAJOR CATEGORIES IN PARALLEL (Professional-grade discovery)
-  const results = await Promise.allSettled([
-    tmdb('/trending/movie/week', { language: 'en-US', page: '1' }),
-    tmdb('/trending/movie/day', { language: 'en-US', page: '1' }),
-    tmdb('/movie/popular', { language: 'en-US', page: '1' }),
-    tmdb('/movie/top_rated', { language: 'en-US', page: '1' }),
-    tmdb('/movie/now_playing', { language: 'en-US', page: '1' }),
-    tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', language: 'en-US', page: '1' }),
-    tmdb('/discover/movie', { with_original_language: 'ta', sort_by: 'popularity.desc', language: 'en-US', page: '1' }),
-    tmdb('/discover/movie', { with_original_language: 'te', sort_by: 'popularity.desc', language: 'en-US', page: '1' }),
-    tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', language: 'en-US', page: '1' }),
-    tmdb('/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', language: 'en-US', page: '1' })
+  // FETCH FROM ALL MAJOR CATEGORIES IN ONE ROUND-TRIP (Professional-grade discovery)
+  // tmdbBatch returns exactly what Promise.allSettled returned here before, and
+  // falls back to it if the edge endpoint is unavailable — so the indexed reads
+  // below and sourceNames stay valid either way.
+  const results = await tmdbBatch([
+    ['/trending/movie/week', { language: 'en-US', page: '1' }],
+    ['/trending/movie/day', { language: 'en-US', page: '1' }],
+    ['/movie/popular', { language: 'en-US', page: '1' }],
+    ['/movie/top_rated', { language: 'en-US', page: '1' }],
+    ['/movie/now_playing', { language: 'en-US', page: '1' }],
+    ['/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', language: 'en-US', page: '1' }],
+    ['/discover/movie', { with_original_language: 'ta', sort_by: 'popularity.desc', language: 'en-US', page: '1' }],
+    ['/discover/movie', { with_original_language: 'te', sort_by: 'popularity.desc', language: 'en-US', page: '1' }],
+    ['/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', language: 'en-US', page: '1' }],
+    ['/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', language: 'en-US', page: '1' }]
   ]);
 
   const sourceNames = ['trending_week','trending_day','popular','top_rated','now_playing','bollywood','south','tollywood','anime','korean'];
@@ -4201,23 +4377,23 @@ async function loadMovies(cat, isLoadMore = false) {
       //
       // Series and anime are also the only way TV reaches this feed at all —
       // before this it fetched movies exclusively.
-      const res = await Promise.allSettled([
-        tmdb('/movie/now_playing', { language: 'en-US', page: pageStr }),
-        tmdb('/trending/movie/week', { language: 'en-US', page: pageStr }),
-        tmdb('/trending/movie/day', { language: 'en-US', page: pageStr }),
-        tmdb('/movie/popular', { language: 'en-US', page: pageStr }),
-        tmdb('/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }),
-        tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }),
-        tmdb('/discover/movie', latestWindowQuery(pageStr)),
-        tmdb('/discover/movie', printUpgradeWindowQuery(pageStr)),
-        tmdb('/discover/movie', latestIndianWindowQuery(pageStr)),
-        tmdb('/discover/movie', latestBollywoodWindowQuery(pageStr)),
-        tmdb('/discover/movie', indianUpgradeWindowQuery(pageStr)),
-        tmdb('/discover/movie', indianCatalogueQuery(pageStr)),
-        tmdb('/trending/tv/week', { language: 'en-US', page: pageStr }),
-        tmdb('/discover/tv', latestSeriesWindowQuery(pageStr)),
-        tmdb('/discover/tv', seriesUpgradeWindowQuery(pageStr)),
-        tmdb('/discover/tv', latestAnimeWindowQuery(pageStr))
+      const res = await tmdbBatch([
+        ['/movie/now_playing', { language: 'en-US', page: pageStr }],
+        ['/trending/movie/week', { language: 'en-US', page: pageStr }],
+        ['/trending/movie/day', { language: 'en-US', page: pageStr }],
+        ['/movie/popular', { language: 'en-US', page: pageStr }],
+        ['/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }],
+        ['/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }],
+        ['/discover/movie', latestWindowQuery(pageStr)],
+        ['/discover/movie', printUpgradeWindowQuery(pageStr)],
+        ['/discover/movie', latestIndianWindowQuery(pageStr)],
+        ['/discover/movie', latestBollywoodWindowQuery(pageStr)],
+        ['/discover/movie', indianUpgradeWindowQuery(pageStr)],
+        ['/discover/movie', indianCatalogueQuery(pageStr)],
+        ['/trending/tv/week', { language: 'en-US', page: pageStr }],
+        ['/discover/tv', latestSeriesWindowQuery(pageStr)],
+        ['/discover/tv', seriesUpgradeWindowQuery(pageStr)],
+        ['/discover/tv', latestAnimeWindowQuery(pageStr)]
       ]);
       
       // /discover/tv results carry no media_type, so tag them here instead of

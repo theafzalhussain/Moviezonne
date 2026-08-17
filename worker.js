@@ -611,42 +611,206 @@ function cronAuthorised(request, env) {
   return supplied === env.CRON_SECRET;
 }
 
-async function handleTmdbProxy(request, env, ctx, url) {
-  const tmdbPath = url.pathname.replace('/api/tmdb/', '');
-  const targetUrl = `https://api.themoviedb.org/3/${tmdbPath}${url.search}`;
-  const cacheKey = url.pathname + url.search;
+/*  ── TMDB PROXY ─────────────────────────────────────────────────────────────
+ *  Fetches one TMDB path, KV-cached.
+ *
+ *  `path` is everything after /api/tmdb, query string included, e.g.
+ *  "/movie/popular?language=en-US&page=1". The cache key is deliberately the
+ *  full public path — "/api/tmdb" + path — so a title fetched individually and
+ *  the same title fetched inside a batch share one KV entry instead of storing
+ *  the response twice.
+ */
+async function fetchTmdbJson(path, env, ctx) {
+  const cacheKey = '/api/tmdb' + path;
 
   if (env.TMDB_CACHE) {
     const cached = await env.TMDB_CACHE.get(cacheKey);
-    if (cached) {
-      return new Response(cached, {
-        status: 200,
-        headers: {
-          'content-type': 'application/json',
-          'x-cache': 'HIT',
-          'cache-control': 'public, max-age=3600'
-        }
-      });
-    }
+    if (cached) return { status: 200, text: cached, cache: 'HIT' };
   }
 
   const headers = new Headers();
   headers.set('Authorization', `Bearer ${env.TMDB_TOKEN}`);
   headers.set('accept', 'application/json');
 
-  const response = await fetch(targetUrl, { headers, method: request.method });
-  const data = await response.text();
+  const response = await fetch(`https://api.themoviedb.org/3${path}`, { headers });
+  const text = await response.text();
 
   if (env.TMDB_CACHE && response.status === 200) {
-    ctx.waitUntil(env.TMDB_CACHE.put(cacheKey, data, { expirationTtl: 3600 }));
+    ctx.waitUntil(env.TMDB_CACHE.put(cacheKey, text, { expirationTtl: TMDB_CACHE_TTL }));
   }
 
-  return new Response(data, {
-    status: response.status,
+  return { status: response.status, text, cache: 'MISS' };
+}
+
+async function handleTmdbProxy(request, env, ctx, url) {
+  const path = url.pathname.replace('/api/tmdb', '') + url.search;
+  const result = await fetchTmdbJson(path, env, ctx);
+
+  return new Response(result.text, {
+    status: result.status,
+    headers: {
+      'content-type': 'application/json',
+      'x-cache': result.cache,
+      'cache-control': 'public, max-age=3600'
+    }
+  });
+}
+
+/*  ── BATCH ──────────────────────────────────────────────────────────────────
+ *  WHY THIS EXISTS
+ *  A cold homepage used to send 26 requests before the first card painted:
+ *  loadCarousel() 10 and loadMovies('all') 16. The client gates itself to a few
+ *  lanes, so those 26 became ~7 sequential rounds — and on mobile every round
+ *  pays the full radio round-trip, not just the 136ms the API takes. That is
+ *  where mobile P50 1.8s / P95 8.4s came from; it was never the images, which
+ *  have been lazy with a proper srcset for a while.
+ *
+ *  Here the fan-out happens at the edge instead. The Worker sits next to TMDB
+ *  and its KV cache, so the 26 fetches cost one client round-trip in total.
+ *
+ *  It also fixes the scaling shape, which matters more than the single-visitor
+ *  win. The plan is identical for every visitor on a given day — the date
+ *  windows in it are derived from today's date — so the assembled response is
+ *  cached under a hash of the plan. The first visitor of the hour pays the
+ *  fan-out; everyone after them is answered by ONE KV read. Traffic can grow
+ *  without TMDB seeing more requests.
+ *
+ *  SECURITY: this takes a caller-supplied list of paths, so it must not become
+ *  an open proxy. Paths are matched against a strict allowlist, the count is
+ *  capped, and the TMDB base URL and bearer token are always applied here —
+ *  never taken from input.
+ */
+const MAX_BATCH_PATHS = 40;
+const TMDB_CACHE_TTL = 3600;
+const BATCH_CACHE_TTL = 1800;
+
+/*  A relative TMDB path with an optional query string, and nothing else.
+ *  Rejects "http://…", "//host", "/../", backslashes and anything that could
+ *  steer the request off api.themoviedb.org.
+ */
+const SAFE_TMDB_PATH = /^\/[A-Za-z0-9][A-Za-z0-9._\-/]*(\?[A-Za-z0-9._~%\-=&+,|:]*)?$/;
+
+function validBatchPath(path) {
+  return typeof path === 'string'
+    && path.length <= 512
+    && SAFE_TMDB_PATH.test(path)
+    && !path.includes('..')
+    && !path.includes('//');
+}
+
+/*  Reads the request plan.
+ *
+ *  POST with {"paths": [...]} is what the client ships, for one reason: URL
+ *  length. The 16-path ALL feed is ~1.9k of raw path text. As a JSON array
+ *  through encodeURIComponent that measured 2332 characters, because every
+ *  quote, comma, "?" and "&" becomes a three-character escape; base64url of the
+ *  same plan measured 2520, since base64 inflates everything by a third. Both are
+ *  past the 2048-character limit plenty of intermediaries still enforce, and
+ *  blowing it means a 414 that tmdbBatch swallows — leaving the homepage
+ *  permanently back on 26 requests with nothing in the logs. A body has no such
+ *  limit, so the whole failure class disappears.
+ *
+ *  Losing GET costs no caching that matters here. run_worker_first sends every
+ *  /api/* request to this Worker regardless of the HTTP cache, so the thing that
+ *  actually makes this scale is the KV entry keyed on the plan hash below — and
+ *  that works identically for POST. On the client side the individual endpoints
+ *  are already held in memory and in a 12h localStorage copy, which is a better
+ *  cache than an HTTP-cached blob would be.
+ *
+ *  GET ?r=<json array> is kept so a live batch can still be inspected by hand.
+ */
+async function readBatchPlan(request, url) {
+  if (request.method === 'POST') {
+    const { value, error } = await readJsonBody(request);
+    if (error) throw new Error(error);
+    if (!Array.isArray(value.paths)) throw new Error('body must be {"paths": [...]}');
+    return value.paths;
+  }
+
+  const raw = url.searchParams.get('r');
+  if (!raw) throw new Error('r (request plan) is required');
+  const parsed = JSON.parse(raw);
+  if (!Array.isArray(parsed)) throw new Error('r must be a JSON array');
+  return parsed;
+}
+
+async function handleTmdbBatch(request, env, ctx, url) {
+  let paths;
+  try {
+    paths = await readBatchPlan(request, url);
+  } catch (e) {
+    return json({ error: 'invalid request plan: ' + e.message }, 400);
+  }
+
+  if (!Array.isArray(paths) || !paths.length) {
+    return json({ error: 'r must be a non-empty array' }, 400);
+  }
+  if (paths.length > MAX_BATCH_PATHS) {
+    return json({ error: `a batch may hold at most ${MAX_BATCH_PATHS} paths` }, 400);
+  }
+  const bad = paths.find((p) => !validBatchPath(p));
+  if (bad !== undefined) {
+    return json({ error: 'unsupported path in batch: ' + String(bad).slice(0, 120) }, 400);
+  }
+
+  // Order is part of the contract — the client indexes the response array — so
+  // the key is built from the plan as given, not from a sorted copy.
+  const planKey = 'batch:' + bytesToHex(
+    await crypto.subtle.digest('SHA-256', TE.encode(paths.join('\n')))
+  ).slice(0, 32);
+
+  if (env.TMDB_CACHE) {
+    const cached = await env.TMDB_CACHE.get(planKey);
+    if (cached) {
+      return new Response(cached, {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          'x-cache': 'HIT',
+          'x-batch-size': String(paths.length),
+          'cache-control': 'no-store'
+        }
+      });
+    }
+  }
+
+  const settled = await Promise.all(paths.map(async (path) => {
+    try {
+      const result = await fetchTmdbJson(path, env, ctx);
+      if (result.status !== 200) {
+        return { status: 'rejected', reason: `TMDB responded ${result.status}` };
+      }
+      return { status: 'fulfilled', value: JSON.parse(result.text) };
+    } catch (err) {
+      // One dead source must never fail the whole first screen. This mirrors the
+      // Promise.allSettled the client used to do itself, which is why the shape
+      // is preserved exactly.
+      return { status: 'rejected', reason: err.message };
+    }
+  }));
+
+  const body = JSON.stringify({ results: settled });
+
+  // Only cache a batch that actually worked. Caching a half-empty first screen
+  // for 30 minutes would turn one bad moment into a lasting one.
+  const allOk = settled.every((r) => r.status === 'fulfilled');
+  if (env.TMDB_CACHE && allOk) {
+    ctx.waitUntil(env.TMDB_CACHE.put(planKey, body, { expirationTtl: BATCH_CACHE_TTL }));
+  }
+
+  return new Response(body, {
+    status: 200,
     headers: {
       'content-type': 'application/json',
       'x-cache': 'MISS',
-      'cache-control': 'public, max-age=3600'
+      // Whether this plan was worth remembering. Surfaced because a batch that
+      // keeps reporting "no" means a source is persistently failing, and the
+      // symptom on the client — a slightly thin feed — is easy to miss.
+      'x-batch-stored': allOk ? 'yes' : 'no',
+      'x-batch-size': String(paths.length),
+      // The response is per-plan and served over POST; the KV entry above is the
+      // shared cache, so nothing downstream should hold a copy.
+      'cache-control': 'no-store'
     }
   });
 }
@@ -661,6 +825,15 @@ async function handleTmdbProxy(request, env, ctx, url) {
 async function routeApi(request, env, ctx, url) {
   const { pathname } = url;
   if (!pathname.startsWith('/api/')) return null;
+
+  // Checked before the /api/tmdb/ prefix below, or "batch" would be forwarded
+  // to TMDB as if it were a resource path.
+  if (pathname === '/api/tmdb/batch') {
+    if (request.method !== 'POST' && request.method !== 'GET') {
+      return json({ error: 'Method not allowed' }, 405);
+    }
+    return handleTmdbBatch(request, env, ctx, url);
+  }
 
   if (pathname.startsWith('/api/tmdb/')) {
     return handleTmdbProxy(request, env, ctx, url);
@@ -757,5 +930,7 @@ export {
   safeNotifyUrl,
   sendPushToSubscription,
   vapidAuthorization,
+  validBatchPath,
+  MAX_BATCH_PATHS,
   RECORD_SIZE
 };
