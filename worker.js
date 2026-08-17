@@ -8,59 +8,26 @@ export default {
       return Response.redirect(redirectUrl, 301);
     }
 
-    // ─── Push: Subscribe ───────────────────────────────────────
+    // ─── Push: Subscribe (Save to KV) ──────────────────────────
     if (url.pathname === '/api/push/subscribe' && request.method === 'POST') {
       try {
         const body = await request.json();
+        const subscription = body.subscription || body;
+        const endpoint = subscription.endpoint || 'unknown';
 
-        // Agar MongoDB Data API available hai to save karo
-        if (env.MONGODB_DATA_API_URL && env.MONGODB_DATA_API_KEY) {
-          const mongoRes = await fetch(`${env.MONGODB_DATA_API_URL}/action/insertOne`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'api-key': env.MONGODB_DATA_API_KEY
-            },
-            body: JSON.stringify({
-              collection: 'push_subscriptions',
-              database: 'moviezone',
-              dataSource: 'Cluster0',
-              document: {
-                subscription: body.subscription || body,
-                movieId: body.movieId || null,
-                movieTitle: body.movieTitle || null,
-                releaseDate: body.releaseDate || null,
-                createdAt: new Date().toISOString(),
-                notified: false
-              }
-            })
-          });
+        // KV mein save karo — key = endpoint, value = subscription JSON
+        await env.PUSH_SUBS.put(endpoint, JSON.stringify({
+          subscription: subscription,
+          movieId: body.movieId || null,
+          movieTitle: body.movieTitle || null,
+          releaseDate: body.releaseDate || null,
+          createdAt: new Date().toISOString(),
+          notified: false
+        }));
 
-          const mongoData = await mongoRes.json();
-
-          if (mongoData.insertedId) {
-            return new Response(JSON.stringify({
-              success: true,
-              message: 'Subscription saved! You will be notified.'
-            }), {
-              status: 200,
-              headers: { 'content-type': 'application/json' }
-            });
-          } else {
-            return new Response(JSON.stringify({
-              success: false,
-              error: 'Database error'
-            }), {
-              status: 500,
-              headers: { 'content-type': 'application/json' }
-            });
-          }
-        }
-
-        // Agar MongoDB Data API set nahi hai, sirf acknowledge karo
         return new Response(JSON.stringify({
           success: true,
-          message: 'Subscription received (MongoDB not configured)'
+          message: 'Subscription saved! You will be notified.'
         }), {
           status: 200,
           headers: { 'content-type': 'application/json' }
@@ -76,28 +43,13 @@ export default {
       }
     }
 
-    // ─── Push: Unsubscribe ─────────────────────────────────────
+    // ─── Push: Unsubscribe (Delete from KV) ────────────────────
     if (url.pathname === '/api/push/unsubscribe' && request.method === 'POST') {
       try {
         const body = await request.json();
+        const endpoint = body.endpoint || 'unknown';
 
-        if (env.MONGODB_DATA_API_URL && env.MONGODB_DATA_API_KEY) {
-          await fetch(`${env.MONGODB_DATA_API_URL}/action/deleteOne`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'api-key': env.MONGODB_DATA_API_KEY
-            },
-            body: JSON.stringify({
-              collection: 'push_subscriptions',
-              database: 'moviezone',
-              dataSource: 'Cluster0',
-              filter: {
-                'subscription.endpoint': body.endpoint
-              }
-            })
-          });
-        }
+        await env.PUSH_SUBS.delete(endpoint);
 
         return new Response(JSON.stringify({
           success: true,
@@ -124,7 +76,6 @@ export default {
 
       const cacheKey = url.pathname + url.search;
 
-      // 1. Pehle cache check karo
       if (env.TMDB_CACHE) {
         const cached = await env.TMDB_CACHE.get(cacheKey);
         if (cached) {
@@ -139,7 +90,6 @@ export default {
         }
       }
 
-      // 2. Cache miss — TMDB se fetch karo
       const headers = new Headers();
       headers.set('Authorization', `Bearer ${env.TMDB_TOKEN}`);
       headers.set('accept', 'application/json');
@@ -147,7 +97,6 @@ export default {
       const response = await fetch(targetUrl, { headers, method: request.method });
       const data = await response.text();
 
-      // 3. Response cache mein save karo (TTL = 1 hour = 3600 seconds)
       if (env.TMDB_CACHE && response.status === 200) {
         ctx.waitUntil(env.TMDB_CACHE.put(cacheKey, data, { expirationTtl: 3600 }));
       }
@@ -170,7 +119,6 @@ export default {
     newHeaders.set('X-Frame-Options', 'SAMEORIGIN');
     newHeaders.set('Referrer-Policy', 'strict-origin-when-cross-origin');
 
-    // HTML files ke liye cache-control
     if (url.pathname.endsWith('.html') || url.pathname === '/') {
       newHeaders.set('Cache-Control', 'public, max-age=3600');
     }
