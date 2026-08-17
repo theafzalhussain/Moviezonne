@@ -1,4 +1,3 @@
-
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "moviezonne",
@@ -7,7 +6,9 @@
   "observability": { "enabled": true },
   "assets": {
     "directory": ".",
-    "binding": "ASSETS"
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
   },
   "kv_namespaces": [
     {
@@ -16,4 +17,3 @@
     }
   ]
 }
-
