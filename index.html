@@ -13,9 +13,9 @@
 <link rel="preconnect" href="https://image.tmdb.org" crossorigin>
 <link rel="dns-prefetch" href="https://image.tmdb.org">
 
-<link rel="stylesheet" href="moviezone.min.css?v=6.3">
+<link rel="stylesheet" href="/moviezone.min.css?v=6.3">
 <!--MZ_PERF_HEAD-->
-<link rel="preload" href="moviezone.min.css?v=6.3" as="style" fetchpriority="high">
+<link rel="preload" href="/moviezone.min.css?v=6.3" as="style" fetchpriority="high">
 <link rel="preload" as="image" media="(max-width: 1024px)" href="https://image.tmdb.org/t/p/w780/qeQJx07rK2xm8SD2sJxFKhE7gs0.jpg" fetchpriority="high">
 <link rel="preload" as="image" media="(min-width: 1025px)" href="https://image.tmdb.org/t/p/w1280/qeQJx07rK2xm8SD2sJxFKhE7gs0.jpg" fetchpriority="high">
 <meta name="mz-hero-backdrop" content="/qeQJx07rK2xm8SD2sJxFKhE7gs0.jpg">
@@ -30,13 +30,14 @@
 
 
 
-<link rel="stylesheet" href="tv-mode.min.css?v=1.2" media="print" onload="this.media='all';this.onload=null">
+
+<link rel="stylesheet" href="/tv-mode.min.css?v=1.2" media="print" onload="this.media='all';this.onload=null">
 
 <link rel="preload" href="/moviezone-logo.webp" as="image" type="image/webp" fetchpriority="high">
 <link rel="preload" href="/fonts/outfit-latin-var.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/bebas-neue-latin-400.woff2" as="font" type="font/woff2" crossorigin>
 
-<link rel="preload" href="moviezone.min.js?v=9.6" as="script">
+<link rel="preload" href="/moviezone.min.js?v=9.6" as="script">
 
 
 <style id="mz-fonts">
@@ -1379,9 +1380,18 @@ html.mz-has-cw #continueWatchingGrid{min-height:236px}
 <!-- â”€â”€ TOAST â”€â”€ -->
 <div id="toast"></div>
 
-<script src="tv-mode.min.js?v=1.4" defer></script>
-<script src="search-engine.min.js?v=2.1" defer></script>
-<script src="moviezone.min.js?v=9.6" defer></script>
+<!--  Root-absolute, not relative.
+      These were "tv-mode.min.js?v=1.4" etc. That works on "/" and breaks on every
+      nested route: on /movie/1339713-obsession the browser resolved them against
+      the directory and asked for /movie/tv-mode.min.js, which does not exist, so
+      Cloudflare's single-page-application fallback answered with index.html. The
+      browser then tried to parse HTML as JavaScript and logged
+      "Uncaught SyntaxError: Unexpected token '<'" for all four bundles, and the
+      stylesheet failed the same way, which is why the detail pages rendered as
+      unstyled text. A leading slash is the whole fix. -->
+<script src="/tv-mode.min.js?v=1.4" defer></script>
+<script src="/search-engine.min.js?v=2.1" defer></script>
+<script src="/moviezone.min.js?v=9.6" defer></script>
 <script>
 /*  ── pwa-install.min.js is NOT loaded with the others ─────────────────────────
  *  It was a fourth `defer` script, so its 30 KB was parsed and executed inside
@@ -1405,7 +1415,7 @@ window.__mzLoadPwaInstall = function () {
   if (window.__mzPwaInstallLoading) return window.__mzPwaInstallLoading;
   window.__mzPwaInstallLoading = new Promise(function (resolve) {
     var s = document.createElement('script');
-    s.src = 'pwa-install.min.js?v=1.9';
+    s.src = '/pwa-install.min.js?v=1.9';
     s.async = true;
     // Resolve on error too: installPWA() has a fallback path and must not hang.
     s.onload = function () {
