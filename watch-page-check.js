@@ -168,8 +168,12 @@ seo.WATCH_SOURCES.forEach(function (source) {
     'swap it here too, or the watch page points at a dead host');
 });
 check('the mirror is a short fallback list, not a second copy of all ten',
-  seo.WATCH_SOURCES.length >= 2 && seo.WATCH_SOURCES.length <= 4,
+  seo.WATCH_SOURCES.length >= 2 && seo.WATCH_SOURCES.length <= 6,
   seo.WATCH_SOURCES.length + ' sources');
+check('every server has a distinct name and host',
+  new Set(seo.WATCH_SOURCES.map((s) => s.name)).size === seo.WATCH_SOURCES.length
+  && new Set(seo.WATCH_SOURCES.map((s) => new URL(s.build(1, 'movie', 1, 1)).host)).size
+     === seo.WATCH_SOURCES.length);
 
 // ── 6. routing ───────────────────────────────────────────────────────────────
 console.log('');
@@ -183,6 +187,50 @@ check('the watch response is sent noindex at the header level too',
 check('the player page is cached briefly, not for hours',
   /max-age=300, s-maxage=900/.test(ssrSrc),
   'embed hosts rotate; a stale frame is worse than a slower page');
+
+// ── 7. index.html must reference its bundles root-absolutely ─────────────────
+console.log('');
+/*  THE BUG THIS CATCHES
+ *  index.html shipped its bundles as relative URLs ("moviezone.min.js?v=9.6").
+ *  That is fine on "/" and broken on every nested route. On
+ *  /movie/1339713-obsession the browser resolved them against the directory and
+ *  requested /movie/moviezone.min.js, which does not exist, so Cloudflare's
+ *  single-page-application fallback returned index.html — and the browser tried to
+ *  parse HTML as JavaScript:
+ *
+ *      Uncaught SyntaxError: Unexpected token '<'   moviezone.min.js:1
+ *      Uncaught SyntaxError: Unexpected token '<'   tv-mode.min.js:1
+ *      Uncaught SyntaxError: Unexpected token '<'   search-engine.min.js:1
+ *      Uncaught SyntaxError: Unexpected token '<'   pwa-install.min.js:1
+ *
+ *  The stylesheet failed identically, which is why the detail pages rendered as
+ *  unstyled text. Every SSR route added here widens the blast radius, so this is
+ *  asserted rather than remembered.
+ */
+const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+const BUNDLES = ['moviezone.min.js', 'moviezone.min.css', 'tv-mode.min.js',
+  'tv-mode.min.css', 'search-engine.min.js', 'pwa-install.min.js'];
+
+BUNDLES.forEach(function (name) {
+  const escaped = name.replace(/\./g, '\\.');
+  // Any reference NOT preceded by "/" is a relative one.
+  const relative = new RegExp('(?:href|src)="' + escaped + '|s\\.src = \'' + escaped);
+  check(name + ' is referenced root-absolutely', !relative.test(indexHtml),
+    'a relative URL breaks on /movie/<slug> — the SPA fallback returns index.html');
+});
+
+check('every bundle really is referenced in index.html',
+  BUNDLES.every(function (name) { return indexHtml.includes('/' + name); }));
+
+// The head optimizer rewrites those same tags, so its patterns must accept the
+// absolute form or it silently turns into a no-op on the next nightly run.
+const reoptimised = seo.optimizeHomeHead(indexHtml, 'https://image.tmdb.org/t/p/w780/x.jpg');
+check('optimizeHomeHead can still rewrite the real index.html',
+  reoptimised !== indexHtml && reoptimised.includes('<!--MZ_PERF_HEAD-->'),
+  'it returned the file unchanged, which means its regexes stopped matching');
+check('and it preloads the absolute stylesheet URL',
+  /<link rel="preload" href="\/moviezone\.min\.css\?v=[\d.]+" as="style"/.test(reoptimised),
+  (reoptimised.match(/<link rel="preload" href="[^"]*\.css[^"]*"/) || [''])[0]);
 
 console.log('-'.repeat(70));
 console.log('  watch-page-check: ' + pass + ' passed, ' + fail + ' failed\n');

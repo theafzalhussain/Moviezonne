@@ -21,6 +21,23 @@
  *  is what worker-push.test.js exercises.
  */
 
+/*  ── WHY THE SSR LAYER ALSO LIVES HERE ──────────────────────────────────────
+ *  server.js calls registerSeoRoutes(app, …) from seo-ssr.js, which is what
+ *  renders /movies/prime-video, /movie/<id>-<slug> and their siblings on
+ *  localhost. The Cloudflare migration never brought those routes over, so on
+ *  moviezone.dev every one of them fell through to the asset handler and
+ *  not_found_handling: "single-page-application" answered 200 with index.html:
+ *  the URL stayed /movies/prime-video while the homepage rendered, and crawlers
+ *  saw the homepage <title> and canonical on every category and detail URL.
+ *
+ *  Express is not available here, so ssrResponse() below is the same routing
+ *  table expressed against Request/Response. The page renderers themselves are
+ *  imported from seo-ssr.js rather than reimplemented — they are pure
+ *  (data in, HTML string out), so both runtimes serve byte-identical markup and
+ *  seo-ssr.test.js keeps covering them.
+ */
+import seo from './seo-ssr.js';
+
 // ── Constants ───────────────────────────────────────────────────────────────
 
 /** RFC 8188 record size. One record is always enough for these payloads. */
@@ -871,8 +888,195 @@ async function routeApi(request, env, ctx, url) {
   return json({ error: `Unknown API endpoint: ${pathname}` }, 404);
 }
 
-// ── Worker entry points ─────────────────────────────────────────────────────
+/*  ── SERVER-RENDERED PAGES ──────────────────────────────────────────────────
+ *  One function per route family, mirroring seo-ssr.js's Express handlers.
+ *
+ *  Returning null means "not mine": the caller then falls through to the asset
+ *  handler, which is exactly what Express's next() did. So an unknown category
+ *  slug or a malformed id still lands on the SPA instead of an SSR 404.
+ */
 
+/** Cache-Control values, kept identical to the Express handlers. */
+const SSR_DETAIL_CACHE = 'public, max-age=1800, s-maxage=86400, stale-while-revalidate=604800';
+const SSR_CATEGORY_CACHE = 'public, max-age=900, s-maxage=21600, stale-while-revalidate=86400';
+// Shorter than the detail page: embed hosts rotate, and a stale player frame is
+// worse than a slightly slower page.
+const SSR_WATCH_CACHE = 'public, max-age=300, s-maxage=900';
+
+/** The append_to_response the detail template needs; same list as server.js. */
+const SSR_DETAIL_APPEND = 'credits,similar,recommendations,videos,watch/providers,'
+  + 'release_dates,content_ratings';
+
+/**
+ * Adapts the KV-cached TMDB proxy to the `tmdb(path, params)` contract the
+ * seo-ssr renderers were written against, including the `tmdbStatus` property
+ * their 404 handling looks for.
+ */
+function ssrTmdb(env, ctx) {
+  return async (apiPath, params) => {
+    const query = new URLSearchParams(params || {}).toString();
+    const result = await fetchTmdbJson(apiPath + (query ? '?' + query : ''), env, ctx);
+    if (result.status !== 200) {
+      const err = new Error('TMDB responded ' + result.status);
+      err.tmdbStatus = result.status;
+      throw err;
+    }
+    return JSON.parse(result.text);
+  };
+}
+
+function ssrHtml(html, cacheControl, robots) {
+  const headers = {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': cacheControl
+  };
+  if (robots) headers['x-robots-tag'] = robots;
+  return new Response(html, { status: 200, headers });
+}
+
+/** One canonical URL per title: a wrong or absent slug is redirected, not served. */
+function ssrRedirect(location, cacheControl) {
+  return new Response(null, {
+    status: 301,
+    headers: { location, 'cache-control': cacheControl }
+  });
+}
+
+/** TMDB titles are `title` on movies and `name` on TV. */
+function ssrTitleOf(item) {
+  return String((item && (item.title || item.name)) || '').trim();
+}
+
+async function ssrCategoryPage(family, rawSlug, url, env, ctx) {
+  const slug = rawSlug.toLowerCase();
+  const cat = seo.CATEGORIES[slug];
+  if (!cat || cat.family !== family) return null;
+
+  let page = parseInt(url.searchParams.get('page'), 10);
+  if (!Number.isFinite(page) || page < 1) page = 1;
+  page = Math.min(page, 25); // beyond this the data thins out and adds no SEO value
+
+  let results = [];
+  let totalPages = 1;
+  try {
+    const data = await ssrTmdb(env, ctx)(cat.endpoint, Object.assign(
+      { language: 'en-US', page: String(page) },
+      cat.params || {}
+    ));
+    results = ((data && data.results) || []).filter((r) => r && r.id && r.poster_path);
+    totalPages = Math.max(1, Math.min(parseInt(data && data.total_pages, 10) || 1, 25));
+  } catch (err) {
+    // Still render: the copy, schema and internal links are the SEO payload, and
+    // an empty grid beats a 500 for both users and crawlers.
+    console.warn('[ssr] category ' + slug + ' failed:', err && err.message);
+  }
+
+  return ssrHtml(
+    seo.renderCategoryPage(slug, cat, results, page, totalPages),
+    SSR_CATEGORY_CACHE,
+    'index, follow'
+  );
+}
+
+async function ssrDetailPage(kind, rawSlug, env, ctx) {
+  const parsed = seo.parseIdSlug(rawSlug);
+  if (!parsed) return null;
+
+  let item;
+  try {
+    item = await ssrTmdb(env, ctx)('/' + kind + '/' + parsed.id, {
+      language: 'en-US',
+      append_to_response: SSR_DETAIL_APPEND
+    });
+  } catch (err) {
+    if (err && err.tmdbStatus === 404) return null;
+    console.warn('[ssr] ' + kind + '/' + parsed.id + ' failed:', err && err.message);
+    return null;
+  }
+  if (!item || !item.id) return null;
+
+  const title = ssrTitleOf(item);
+  if (!title) return null;
+
+  const wantSlug = seo.slugify(title);
+  if (wantSlug && parsed.slug !== wantSlug) {
+    return ssrRedirect(seo.detailPath(kind, item), SSR_DETAIL_CACHE);
+  }
+
+  return ssrHtml(seo.renderDetailPage(item, kind), SSR_DETAIL_CACHE, 'index, follow');
+}
+
+async function ssrWatchPage(kind, rawSlug, url, env, ctx) {
+  const parsed = seo.parseIdSlug(rawSlug);
+  if (!parsed) return null;
+
+  let item;
+  try {
+    item = await ssrTmdb(env, ctx)('/' + kind + '/' + parsed.id, { language: 'en-US' });
+  } catch (err) {
+    if (err && err.tmdbStatus === 404) return null;
+    console.warn('[ssr] watch ' + kind + '/' + parsed.id + ' failed:', err && err.message);
+    return null;
+  }
+  if (!item || !item.id) return null;
+
+  const title = ssrTitleOf(item);
+  if (!title) return null;
+
+  const wantSlug = seo.slugify(title);
+  if (wantSlug && parsed.slug !== wantSlug) {
+    return ssrRedirect(
+      seo.detailPath(kind, item) + '/watch' + (url.search || ''),
+      SSR_DETAIL_CACHE
+    );
+  }
+
+  const html = seo.renderWatchPage(item, kind, {
+    source: url.searchParams.get('s'),
+    season: url.searchParams.get('season'),
+    episode: url.searchParams.get('episode')
+  });
+
+  // noindex at the header level too: the player page has no unique content of
+  // its own and must not compete with the detail page it belongs to.
+  return ssrHtml(html, SSR_WATCH_CACHE, 'noindex, follow');
+}
+
+/**
+ * The SSR routing table. Runs after /api/* and before the asset handler.
+ *
+ * @returns {Promise<Response|null>} null when no SSR route claims the URL
+ */
+async function ssrResponse(request, env, ctx, url) {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return null;
+
+  // Express matched /movies/action and /movies/action/ identically; keep that.
+  const pathname = url.pathname.length > 1 ? url.pathname.replace(/\/+$/, '') : url.pathname;
+  if (pathname === '/' || pathname === '') return null;
+
+  // Bare family URLs are useful entry points; send them to the best default.
+  if (pathname === '/movies') return ssrRedirect('/movies/popular', SSR_CATEGORY_CACHE);
+  if (pathname === '/series') return ssrRedirect('/series/web-series', SSR_CATEGORY_CACHE);
+
+  const category = /^\/(movies|series)\/([^/]+)$/.exec(pathname);
+  if (category) {
+    return ssrCategoryPage(category[1], decodeURIComponent(category[2]), url, env, ctx);
+  }
+
+  const watch = /^\/(movie|tv)\/([^/]+)\/watch$/.exec(pathname);
+  if (watch) {
+    return ssrWatchPage(watch[1], decodeURIComponent(watch[2]), url, env, ctx);
+  }
+
+  const detail = /^\/(movie|tv)\/([^/]+)$/.exec(pathname);
+  if (detail) {
+    return ssrDetailPage(detail[1], decodeURIComponent(detail[2]), env, ctx);
+  }
+
+  return null;
+}
+
+// ── Worker entry points ─────────────────────────────────────────────────────
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -884,6 +1088,21 @@ export default {
 
     const apiResponse = await routeApi(request, env, ctx, url);
     if (apiResponse) return apiResponse;
+
+    /*  Server-rendered pages come before the asset handler on purpose. The
+     *  fallback below answers 200 with index.html for anything that is not a
+     *  file, so a category or detail URL reaching it would render the homepage
+     *  under the right address instead of the page that was asked for.
+     */
+    let ssr = null;
+    try {
+      ssr = await ssrResponse(request, env, ctx, url);
+    } catch (err) {
+      // A renderer throwing must not take the URL down: fall through to the SPA,
+      // which can still fetch and render the same content client-side.
+      console.error('[ssr] ' + url.pathname + ' failed:', err && err.stack);
+    }
+    if (ssr) return ssr;
 
     // ─── Static Assets with SEO Headers ────────────────────────
     const assetResponse = await env.ASSETS.fetch(request);
@@ -927,10 +1146,24 @@ export {
   isCalendarDate,
   processDueNotifications,
   routeApi,
+  ssrResponse,
   safeNotifyUrl,
   sendPushToSubscription,
   vapidAuthorization,
   validBatchPath,
-  MAX_BATCH_PATHS,
-  RECORD_SIZE
+  pushLimits
 };
+
+/*  Named exports of a Worker entrypoint must be handlers or classes.
+ *
+ *  RECORD_SIZE and MAX_BATCH_PATHS used to be exported directly for
+ *  worker-push.test.js, and the runtime now refuses to start such a module:
+ *      Incorrect type for map entry 'MAX_BATCH_PATHS':
+ *      the provided value is not of type 'function or ExportedHandler'
+ *  The deployed copy predates that check, so the failure would only have
+ *  appeared on the next deploy — as a Worker that boots nowhere. Handing the two
+ *  numbers back from a function keeps the test honest and the module loadable.
+ */
+function pushLimits() {
+  return { RECORD_SIZE, MAX_BATCH_PATHS };
+}

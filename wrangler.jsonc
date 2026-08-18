@@ -17,7 +17,28 @@
     "directory": ".",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    /*  WHY THE SSR PATHS ARE LISTED HERE
+     *  not_found_handling "single-page-application" makes the asset router match
+     *  EVERY path — anything that is not a file is answered with index.html — and
+     *  the asset router runs before the Worker unless a path is named below. So
+     *  worker.js was never invoked for /movies/prime-video, /movie/<id>-<slug> or
+     *  their siblings: the SSR handlers could not run and the browser got the
+     *  homepage under the right URL (and crawlers got the homepage <title> and
+     *  canonical on every category and detail URL).
+     *
+     *  These patterns hand those paths to the Worker first. Anything it does not
+     *  claim still falls through to env.ASSETS.fetch(), so the SPA keeps serving
+     *  unknown slugs exactly as before.
+     */
+    "run_worker_first": [
+      "/api/*",
+      "/movies",
+      "/movies/*",
+      "/series",
+      "/series/*",
+      "/movie/*",
+      "/tv/*"
+    ]
   },
   "kv_namespaces": [
     {

@@ -155,8 +155,13 @@ check('the browser is not asked to parse more than it can afford', () => {
  *  set and defer the rest and it passes. It forbids the naive half of the change,
  *  which is the one that regresses.
  */
+/*  Every pattern below tolerates an optional leading slash.
+ *  index.html references its bundles root-absolutely ("/moviezone.min.js") so they
+ *  resolve on nested SSR routes; the relative form asked for
+ *  /movie/moviezone.min.js on a detail page, got the SPA fallback's index.html,
+ *  and every bundle failed with "Unexpected token '<'". */
 check('the main stylesheet is not deferred without inlined critical CSS', () => {
-  const linkTag = /<link rel="stylesheet" href="moviezone\.min\.css\?v=[\d.]+"([^>]*)>/.exec(htmlCode);
+  const linkTag = /<link rel="stylesheet" href="\/?moviezone\.min\.css\?v=[\d.]+"([^>]*)>/.exec(htmlCode);
   assert.ok(linkTag, 'moviezone.min.css is not linked as a stylesheet at all');
   const deferred = /media\s*=\s*"print"/.test(linkTag[1]);
   if (!deferred) return;
@@ -174,9 +179,9 @@ console.log('\n-- index.html references the built bundles ' + '-'.repeat(19));
 
 for (const name of SCRIPTS) {
   check(name + '.min.js is the script that ships', () => {
-    const tag = new RegExp('<script src="' + name + '\\.min\\.js\\?v=[\\d.]+" defer>');
+    const tag = new RegExp('<script src="/?' + name + '\\.min\\.js\\?v=[\\d.]+" defer>');
     assert.ok(tag.test(html), name + '.min.js is not the <script> src');
-    const bare = new RegExp('<script src="' + name + '\\.js\\?');
+    const bare = new RegExp('<script src="/?' + name + '\\.js\\?');
     assert.ok(!bare.test(html), 'unminified ' + name + '.js is still requested');
   });
 }
@@ -190,9 +195,9 @@ for (const name of LAZY_SCRIPTS) {
      *  index.html. The one thing that could not wait, capturing the one-shot
      *  beforeinstallprompt event, is done by the bootstrap in <head>.
      */
-    const tag = new RegExp('<script src="' + name + '\\.min\\.js\\?v=[\\d.]+" defer>');
+    const tag = new RegExp('<script src="/?' + name + '\\.min\\.js\\?v=[\\d.]+" defer>');
     assert.ok(!tag.test(html), name + '.min.js is back as a blocking <script defer> tag');
-    assert.ok(new RegExp("s\\.src = '" + name + "\\.min\\.js\\?v=[\\d.]+'").test(html),
+    assert.ok(new RegExp("s\\.src = '/?" + name + "\\.min\\.js\\?v=[\\d.]+'").test(html),
       'no runtime loader for ' + name + '.min.js — it would never load at all');
     assert.ok(/__mzLoadPwaInstall/.test(js),
       'installPWA() cannot pull the controller in on demand, so an early click is dropped');
@@ -209,9 +214,9 @@ for (const name of STYLES) {
      *  regression. What this check is actually for is unchanged: the minified
      *  file must be the one linked, with a version query, and the unminified
      *  source must not be linked at all. */
-    const tag = new RegExp('<link rel="stylesheet" href="' + name + '\\.min\\.css\\?v=[\\d.]+"[^>]*>');
+    const tag = new RegExp('<link rel="stylesheet" href="/?' + name + '\\.min\\.css\\?v=[\\d.]+"[^>]*>');
     assert.ok(tag.test(html), name + '.min.css is not linked');
-    const bare = new RegExp('href="' + name + '\\.css\\?');
+    const bare = new RegExp('href="/?' + name + '\\.css\\?');
     assert.ok(!bare.test(html), 'unminified ' + name + '.css is still linked');
   });
 }
@@ -239,7 +244,7 @@ check('every referenced asset exists on disk', () => {
 });
 
 check('no asset is referenced twice', () => {
-  ['rel="stylesheet" href="moviezone.min.css', 'preload" href="moviezone.min.js',
+  ['rel="stylesheet" href="/moviezone.min.css', 'preload" href="/moviezone.min.js',
    'preconnect" href="https://image.tmdb.org'].forEach((needle) => {
     const n = html.split(needle).length - 1;
     assert.strictEqual(n, 1, needle + ' appears ' + n + ' times — duplicate request');
@@ -253,7 +258,7 @@ console.log('\n-- how early the network can start ' + '-'.repeat(27));
  *  ~9 KB JSON-LD graph, leaving the network idle for 20 KB of parsing.
  */
 const OFFSET_BUDGET = 4096;
-[['main stylesheet', '<link rel="stylesheet" href="moviezone.min.css'],
+[['main stylesheet', '<link rel="stylesheet" href="/moviezone.min.css'],
  ['TMDB preconnect', '<link rel="preconnect" href="https://image.tmdb.org"']
 ].forEach(([label, needle]) => {
   const at = html.indexOf(needle);
@@ -447,7 +452,11 @@ check('sw.js precaches exactly the URLs index.html requests', () => {
   // it is injected at runtime now and is asserted separately.
   assert.ok(pageAssets.length >= 5, 'expected at least 5 versioned assets, found ' + pageAssets.length);
   pageAssets.forEach((a) => {
-    assert.ok(sw.includes("'/" + a + "'"),
+    /*  index.html now references these root-absolutely ("/moviezone.min.js"), so
+     *  the leading slash is stripped before rebuilding the precache form — without
+     *  this the comparison looks for '//moviezone.min.js' and never matches. */
+    const rel = a.replace(/^\//, '');
+    assert.ok(sw.includes("'/" + rel + "'"),
       a + ' is loaded by index.html but not precached by sw.js - offline clients would run stale code');
   });
 });

@@ -305,10 +305,13 @@ const swJs = readFile('sw.js');
 // this suite fail every time the build output changes, which is not what it is
 // meant to guard.
 check('index.html loads tv-mode.css', /<link[^>]+rel=["']stylesheet["'][^>]+tv-mode(\.min)?\.css/.test(indexHtml));
-check('index.html loads tv-mode.js', /<script[^>]+src=["']tv-mode(\.min)?\.js/.test(indexHtml));
+// The leading /? is required: index.html references its bundles root-absolutely so
+// they resolve on nested SSR routes like /movie/<slug>, where a relative URL got
+// the SPA fallback's index.html and every bundle failed to parse.
+check('index.html loads tv-mode.js', /<script[^>]+src=["']\/?tv-mode(\.min)?\.js/.test(indexHtml));
 
-const tvScriptAt = indexHtml.search(/src="tv-mode(\.min)?\.js/);
-const appScriptAt = indexHtml.search(/src="moviezone(\.min)?\.js/);
+const tvScriptAt = indexHtml.search(/src="\/?tv-mode(\.min)?\.js/);
+const appScriptAt = indexHtml.search(/src="\/?moviezone(\.min)?\.js/);
 check('tv-mode.js is loaded before moviezone.js', tvScriptAt > -1 && appScriptAt > -1 && tvScriptAt < appScriptAt,
   'tv-mode at ' + tvScriptAt + ', moviezone at ' + appScriptAt);
 

@@ -35,6 +35,19 @@
 const fs = require('fs');
 const path = require('path');
 
+/*  This module is loaded in two very different places.
+ *
+ *  Under server.js it runs in Node, where __dirname points at the repo and the
+ *  fs reads below (index.html, collections-catalog.json, sitemap-cache.json)
+ *  all succeed. worker.js also imports it, to render the same detail/category
+ *  pages on Cloudflare — and there __dirname does not exist, so evaluating
+ *  path.join(__dirname, …) at module level threw a ReferenceError before the
+ *  Worker could serve its first request. Every fs read is already wrapped in a
+ *  try/catch that falls back to the live-TMDB path, so the only thing needed is
+ *  a directory string that is safe to build a path from.
+ */
+const APP_DIR = typeof __dirname === 'string' ? __dirname : '.';
+
 // ── Site identity ────────────────────────────────────────────────────────
 const SITE_URL = (process.env.SITE_URL || 'https://moviezone.dev').replace(/\/+$/, '');
 const SITE_NAME = 'MovieZone';
@@ -93,7 +106,7 @@ const VOLATILE_CATEGORY_SLUGS = new Set([
 ]);
 
 // Where the nightly sitemap builder writes the full catalogue.
-const SITEMAP_CACHE_FILE = path.join(__dirname, 'sitemap-cache.json');
+const SITEMAP_CACHE_FILE = path.join(APP_DIR, 'sitemap-cache.json');
 /*  Sized so a boundary is never near the catalogue's working range.
  *
  *  At 5000 the movie count straddled the split point and the trailing shard
@@ -1889,7 +1902,7 @@ function renderBrowseLetterPage(letter, entries, page, totalPages) {
 //  injects a server-rendered link block into the static file before it ships.
 // ═══════════════════════════════════════════════════════════════════════════
 
-const HOME_FILE = path.join(__dirname, 'index.html');
+const HOME_FILE = path.join(APP_DIR, 'index.html');
 const HOME_ANCHOR = '<footer class="site-footer" role="contentinfo">';
 const HOME_MARK_START = '<!--MZ_SSR_LINKS_START-->';
 const HOME_MARK_END = '<!--MZ_SSR_LINKS_END-->';
@@ -2034,7 +2047,7 @@ function buildStaticSitemap() {
 /** Curated franchise ids ship with the repo, so they cost no API calls. */
 function collectionsCatalogIds() {
   try {
-    const file = path.join(__dirname, 'collections-catalog.json');
+    const file = path.join(APP_DIR, 'collections-catalog.json');
     if (!fs.existsSync(file)) return { movies: [], tv: [] };
     const data = JSON.parse(fs.readFileSync(file, 'utf8'));
     const movies = [];
@@ -2276,10 +2289,32 @@ const WATCH_SOURCES = [
     }
   },
   {
+    /*  The app calls this its all-rounder: 4K, multi-audio, movies and series.
+     *  The anime branch in moviezone.js needs an AniList id looked up at runtime,
+     *  which this page has no JavaScript to do, so only the TMDB form is mirrored
+     *  here — that is the branch the app itself uses for everything non-anime. */
+    name: 'OmniPlay 4K',
+    build: (id, type, s, e) => {
+      const opts = 'color=ffc107&autoplay=true&nextEpisode=true&episodeSelector=true'
+        + '&autoplayNextEpisode=true';
+      return type === 'tv'
+        ? 'https://player.videasy.net/tv/' + id + '/' + s + '/' + e + '?' + opts
+        : 'https://player.videasy.net/movie/' + id + '?' + opts;
+    }
+  },
+  {
     name: 'VidRock HD',
     build: (id, type, s, e) => (type === 'tv'
       ? 'https://vidrock.net/tv/' + id + '/' + s + '/' + e
       : 'https://vidrock.net/movie/' + id)
+  },
+  {
+    /*  Best for older / long-running anime and cartoons in the app. The alfa and
+     *  gama server hints are the same ones moviezone.js forces. */
+    name: 'AnimePahe HD',
+    build: (id, type, s, e) => (type === 'tv'
+      ? 'https://vidnest.fun/tv/' + id + '/' + s + '/' + e + '?server=alfa'
+      : 'https://vidnest.fun/movie/' + id + '?server=gama')
   },
   {
     name: 'Turbo Stream',
@@ -2820,15 +2855,24 @@ function optimizeHomeHead(shell, heroUrl) {
 
   // Restore anything a previous run rewrote, so this is a pure function of the
   // original file rather than a diff on top of itself.
+  /*  The optional leading slash matters.
+   *
+   *  index.html now references its bundles root-absolutely ("/moviezone.min.css"),
+   *  because the old relative form resolved against the directory on nested SSR
+   *  routes — /movie/<slug> asked for /movie/moviezone.min.js, got the SPA
+   *  fallback's index.html, and every bundle failed with "Unexpected token '<'".
+   *  These patterns have to match either form, or this function silently becomes a
+   *  no-op and the hero preload stops being refreshed.
+   */
   html = html.replace(
-    /<link rel="stylesheet" href="(tv-mode\.min\.css[^"]*)" media="print"[^>]*>/,
+    /<link rel="stylesheet" href="(\/?tv-mode\.min\.css[^"]*)" media="print"[^>]*>/,
     '<link rel="stylesheet" href="$1">'
   );
   html = html.replace(
-    /<link rel="preload" href="(moviezone\.min\.css[^"]*)" as="style"[^>]*>\n?/, ''
+    /<link rel="preload" href="(\/?moviezone\.min\.css[^"]*)" as="style"[^>]*>\n?/, ''
   );
 
-  const cssLink = html.match(/<link rel="stylesheet" href="(moviezone\.min\.css[^"]*)">/);
+  const cssLink = html.match(/<link rel="stylesheet" href="(\/?moviezone\.min\.css[^"]*)">/);
   if (!cssLink) return shell;   // unexpected shape — leave the file alone
 
   // 1. drop preloads for bundles that gate neither first paint nor LCP
@@ -2839,7 +2883,7 @@ function optimizeHomeHead(shell, heroUrl) {
 
   // 2. tv-mode stylesheet must not block first paint (JS enables TV mode later)
   html = html.replace(
-    /<link rel="stylesheet" href="(tv-mode\.min\.css[^"]*)">/,
+    /<link rel="stylesheet" href="(\/?tv-mode\.min\.css[^"]*)">/,
     '<link rel="stylesheet" href="$1" media="print" '
     + 'onload="this.media=\'all\';this.onload=null">'
   );

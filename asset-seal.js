@@ -41,13 +41,18 @@ function sha(file) {
 
 /*  The version an asset ships under. Most are a tag in index.html; pwa-install
  *  is injected at runtime so its version lives in the loader snippet instead.
+ *
+ *  The optional leading slash is required, not cosmetic: index.html references its
+ *  bundles root-absolutely so they resolve correctly on nested SSR routes like
+ *  /movie/<slug>. Without \/? here, versionOf() returns null and this check
+ *  reports "ships with no ?v= at all" for every bundle.
  */
 function versionOf(name) {
   const escaped = name.replace(/\./g, '\\.');
   const patterns = [
-    new RegExp('href="' + escaped + '\\?v=([\\d.]+)"'),
-    new RegExp('src="' + escaped + '\\?v=([\\d.]+)"'),
-    new RegExp("s\\.src = '" + escaped + "\\?v=([\\d.]+)'")
+    new RegExp('href="/?' + escaped + '\\?v=([\\d.]+)"'),
+    new RegExp('src="/?' + escaped + '\\?v=([\\d.]+)"'),
+    new RegExp("s\\.src = '/?" + escaped + "\\?v=([\\d.]+)'")
   ];
   for (const re of patterns) {
     const m = re.exec(html);

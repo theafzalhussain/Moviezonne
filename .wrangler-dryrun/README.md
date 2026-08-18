@@ -1,0 +1,1 @@
+This folder contains the built output assets for the worker "moviezonne" generated at 2026-08-18T05:12:01.666Z.

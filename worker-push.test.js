@@ -34,6 +34,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { pathToFileURL } = require('url');
 
 const WORKER_FILE = path.join(__dirname, 'worker.js');
 const TE = new TextEncoder();
@@ -196,10 +197,21 @@ async function decryptAsUserAgent(subscriber, body) {
   console.log('\nWorker push layer — VAPID, aes128gcm and the /api routes the client calls');
   console.log('-'.repeat(74));
 
-  const source = fs.readFileSync(WORKER_FILE, 'utf8');
+  /*  worker.js now imports the SSR renderers from ./seo-ssr.js. A data: URL has
+   *  no base to resolve a relative specifier against, so the specifier is
+   *  rewritten to an absolute file: URL before the module is evaluated. The code
+   *  under test is otherwise untouched, and the import it gets is the real file.
+   */
+  const source = fs.readFileSync(WORKER_FILE, 'utf8')
+    .replace(/from '\.\/([\w.-]+)'/g,
+      (_m, file) => "from '" + pathToFileURL(path.join(__dirname, file)).href + "'");
   const worker = await import(
     'data:text/javascript;base64,' + Buffer.from(source).toString('base64')
   );
+  /*  RECORD_SIZE and MAX_BATCH_PATHS come back from a function now: a Worker
+   *  entrypoint may only export handlers and classes, and the runtime refuses to
+   *  start a module that exports plain numbers. */
+  const limits = worker.pushLimits();
 
   const vapid = await makeVapidKeys();
   const baseEnv = {
@@ -275,7 +287,7 @@ async function decryptAsUserAgent(subscriber, body) {
 
   const opened = await decryptAsUserAgent(subscriber, encrypted);
   equal('a user agent decrypts the payload byte-for-byte', opened.plaintext, payload);
-  equal('record size field matches RECORD_SIZE', opened.recordSize, worker.RECORD_SIZE);
+  equal('record size field matches RECORD_SIZE', opened.recordSize, limits.RECORD_SIZE);
   equal('single record is terminated with the 0x02 delimiter', opened.delimiter, 0x02);
 
   const second = await worker.encryptPushPayload(
@@ -670,10 +682,10 @@ async function decryptAsUserAgent(subscriber, body) {
     worker.validBatchPath('/discover/movie?with_original_language=ko&page=1'));
 
   const tooMany = await callApi(worker, batchEnv(),
-    batchReq(Array(worker.MAX_BATCH_PATHS + 1).fill('/movie/popular?page=1')));
+    batchReq(Array(limits.MAX_BATCH_PATHS + 1).fill('/movie/popular?page=1')));
   equal('a batch over the cap -> 400', tooMany.status, 400);
   check('the cap leaves room for the 26-request homepage',
-    worker.MAX_BATCH_PATHS >= 26, 'cap is ' + worker.MAX_BATCH_PATHS);
+    limits.MAX_BATCH_PATHS >= 26, 'cap is ' + limits.MAX_BATCH_PATHS);
 
   equal('a missing plan -> 400', (await callApi(worker, batchEnv(), req('/api/tmdb/batch'))).status, 400);
   equal('a malformed plan -> 400',
@@ -751,8 +763,8 @@ async function decryptAsUserAgent(subscriber, body) {
     refused.length === 0, 'refused:\n          ' + refused.join('\n          '));
 
   check('the real plan fits under the batch cap',
-    realPaths.length <= worker.MAX_BATCH_PATHS,
-    realPaths.length + ' paths vs cap ' + worker.MAX_BATCH_PATHS);
+    realPaths.length <= limits.MAX_BATCH_PATHS,
+    realPaths.length + ' paths vs cap ' + limits.MAX_BATCH_PATHS);
 
   stubTmdb((url) => okPage(new URL(url).pathname));
   const realEnv = batchEnv();
