@@ -92,8 +92,8 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes — nothing to commit."
           else
+            git pull --rebase origin main
             COUNT=$(node -p "const c=require('./sitemap-cache.json');c.movie.length+c.tv.length")
             git commit -m "chore(seo): refresh sitemap cache (${COUNT} titles) + homepage links"
-            git pull --rebase origin main
             git push
           fi
