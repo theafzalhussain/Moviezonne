@@ -191,91 +191,25 @@ function getResponsiveBackdrop(path) {
  */
 
 // Weak device detect karke class lagana
-// -- PREMIUM CURSOR GLOW & CLICK SPARKS --
+/*  -- CLICK SPARKS --
+ *
+ *  The premium custom cursor that used to live here is gone. It was a 700x700
+ *  radial glow, a trailing ring and a dot, all repositioned from a
+ *  requestAnimationFrame loop that a mousemove listener kept alive, with
+ *  `cursor: none !important` on every interactive element so the real pointer was
+ *  hidden. Deleted rather than tuned, because tuning cannot win here: a
+ *  JS-drawn pointer is redrawn at frame rate by the main thread, so it lags
+ *  behind the hand whenever anything else is running, while the native pointer is
+ *  drawn by the compositor at pointer rate and cannot lag at all. Removing it
+ *  also frees the per-frame task, the mousemove handler and the delegated
+ *  mouseover/mouseout pair that toggled `body.cursor-hover` on every card,
+ *  button and link the pointer crossed.
+ *
+ *  Click sparks stay: they are one-shot, only on an actual click, and are cleaned
+ *  up after 600ms.
+ */
 // Disable on TV, Touch, and Mobile to save CPU/battery and ensure smooth performance
 if (!isMzTV() && !isTouchOnly && !isMobile) {
-  const cursorGlow = document.getElementById('cursor-glow');
-  const cursorRing = document.getElementById('cursor-ring');
-  const cursorDot = document.getElementById('cursor-dot');
-  
-  let mouseX = window.innerWidth / 2;
-  let mouseY = window.innerHeight / 2;
-  let ringX = mouseX;
-  let ringY = mouseY;
-  
-  let cursorIdleTimer;
-  let isCursorMoving = true;
-  let cursorRafId = 0;
-
-  /*  INP — the mousemove handler used to write cursorGlow.style.transform and
-   *  cursorDot.style.transform directly. Every pointer move (and a mouse emits
-   *  them far faster than 60 Hz) therefore dirtied style inside the input task,
-   *  so any interaction that landed in the same frame queued behind that work.
-   *
-   *  The handler now only records coordinates - the writes happen once per frame
-   *  in animateCursorRing, which already existed and already ran on rAF. Same
-   *  pixels, one style write per frame instead of one per event.
-   */
-  window.addEventListener('mousemove', (e) => {
-    mouseX = e.clientX;
-    mouseY = e.clientY;
-    isCursorMoving = true;
-    clearTimeout(cursorIdleTimer);
-    cursorIdleTimer = setTimeout(() => { isCursorMoving = false; }, 150);
-    startCursorLoop();
-  }, { passive: true });
-
-  // Smooth 3D Trailing Animation for the Ring
-  /*  This loop used to call requestAnimationFrame unconditionally, forever: on
-   *  every desktop visit the browser ran a main-thread task every frame for the
-   *  whole session, even with the mouse parked. It now parks itself once the ring
-   *  has caught up with the pointer, and mousemove restarts it. Idle desktop
-   *  sessions go from 60 tasks/second to zero, which is main-thread budget that
-   *  interactions get to use instead.
-   */
-  function animateCursorRing() {
-    const settled = !isCursorMoving &&
-      Math.abs(mouseX - ringX) <= 0.1 && Math.abs(mouseY - ringY) <= 0.1;
-
-    if (!settled) {
-      // Super Fast Cursor Speed (0.45 is 2.5x faster than 0.18)
-      ringX += (mouseX - ringX) * 0.45;
-      ringY += (mouseY - ringY) * 0.45;
-
-      if (cursorRing) {
-        const velX = mouseX - ringX;
-        const velY = mouseY - ringY;
-        const rotateX = -velY * 0.8;
-        const rotateY = velX * 0.8;
-
-        // Use pure hardware-accelerated transform instead of top/left
-        cursorRing.style.transform = `translate3d(${ringX}px, ${ringY}px, 0) translate(-50%, -50%) perspective(500px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateZ(5px)`;
-      }
-    }
-
-    // Batched pointer-follow writes, moved here out of the mousemove handler.
-    const follow = `translate3d(${mouseX}px, ${mouseY}px, 0) translate(-50%, -50%)`;
-    if (cursorGlow) cursorGlow.style.transform = follow;
-    if (cursorDot) cursorDot.style.transform = follow;
-
-    if (settled) { cursorRafId = 0; return; }
-    cursorRafId = requestAnimationFrame(animateCursorRing);
-  }
-
-  function startCursorLoop() {
-    if (!cursorRafId) cursorRafId = requestAnimationFrame(animateCursorRing);
-  }
-  startCursorLoop();
-
-  // Interactive Hover Glow Effects
-  const interactiveElements = 'a, button, .movie-card, .upcoming-card, .thumb, .cat-tab, input, select, .player-chip, .nav-logo';
-  document.body.addEventListener('mouseover', (e) => {
-    if (e.target.closest(interactiveElements)) document.body.classList.add('cursor-hover');
-  });
-  document.body.addEventListener('mouseout', (e) => {
-    if (e.target.closest(interactiveElements)) document.body.classList.remove('cursor-hover');
-  });
-
   // -- CLICK SPARKS (3D Particles) --
   window.addEventListener('click', (e) => {
     const numSparks = 12; // Ek baar me kitne sparks nikalne hain
@@ -1708,51 +1642,15 @@ async function init() {
     if (loader) loader.classList.add('loader-hidden');
   }
 
-  // Luxury Ambient Particles (Jugnu) — decorative only, so it runs when the
-  // main thread is idle rather than at the end of init().
-  scheduleIdleWork([() => {
-    if (isMzTV() || isMobile || document.querySelector('.ambient-particles')) return;
-    const pContainer = document.createElement('div');
-    pContainer.className = 'ambient-particles';
-    document.body.appendChild(pContainer);
-
-    // Optimized: 18 Fireflies for desktop (was 35 - less GPU load)
-    const particleCount = isLowEnd ? 8 : 18;
-    for (let i = 0; i < particleCount; i++) {
-      const p = document.createElement('div');
-      p.className = 'particle';
-      
-      let size = Math.random() * 3.5 + 1.5; // Size between 1.5px to 5px
-      const isGold = Math.random() > 0.5;
-
-      // Randomly assign gold or accent colors
-      if (isGold) {
-        // Minor size boost for golden fireflies ONLY on large screens
-        if (!isMobile) {
-          size = size * 1.5 + 1;
-        }
-        
-        p.style.setProperty('--p-color', 'var(--gold)');
-        p.style.setProperty('--p-glow1', 'var(--gold)');
-        p.style.setProperty('--p-glow2', 'var(--gold2)');
-        p.style.setProperty('--p-glow3', 'var(--gold3)');
-      } else {
-        p.style.setProperty('--p-color', 'var(--accent)');
-        p.style.setProperty('--p-glow1', 'var(--accent)');
-        p.style.setProperty('--p-glow2', 'var(--accent2)');
-        p.style.setProperty('--p-glow3', 'var(--accent3)');
-      }
-
-      p.style.width = size + 'px';
-      p.style.height = size + 'px';
-      p.style.left = Math.random() * 100 + 'vw';
-      p.style.setProperty('--duration', (Math.random() * 18 + 12) + 's'); // Float speed (12s to 30s)
-      p.style.setProperty('--drift', (Math.random() * 160 - 80) + 'px'); // Left/Right sway (-80px to 80px)
-      p.style.animationDelay = '-' + (Math.random() * 25) + 's'; // Start instantly at different heights
-
-      pContainer.appendChild(p);
-    }
-  }]);
+  /*  Luxury Ambient Particles (Jugnu) — REMOVED.
+   *
+   *  This built a fixed full-screen layer with 18 glowing divs (8 on low-end) and
+   *  left them floating up the viewport on an infinite 12–30s loop. Decorative,
+   *  but not free: the keyframes animated box-shadow alongside transform, and
+   *  box-shadow cannot be composited, so all 18 forced a repaint every frame for
+   *  as long as the tab stayed open — competing with scrolling and with poster
+   *  decode. The .ambient-particles / .particle CSS and @keyframes floatParticle3D
+   *  are gone from moviezone.css too. */
 
   setupInfiniteScroll();
   setupUpcomingInfiniteScroll();
@@ -4918,9 +4816,11 @@ let _mzHoverPrefetchCount = 0;
  *  tv-mode.js's synthesised el.click() on Enter keeps working), and prefetch
  *  still fires on hover, touch and keyboard focus.
  *
- *  The hover LIFT moved to CSS entirely — see the @media (hover: hover) rule on
- *  .movie-card in moviezone.css. It was two listeners and four inline style
- *  writes per hover to do what one CSS rule does on the compositor.
+ *  The hover LIFT is gone altogether. It first lived here as two listeners plus
+ *  four inline style writes per card, then moved to a CSS @media (hover: hover)
+ *  rule, and is now deleted: lifting a card that carries a 100px-blur shadow
+ *  repaints the card, its shadow and its poster on every pointer enter and leave.
+ *  Hover feedback on a card is border-color only.
  */
 let _mzGridDelegated = false;
 
@@ -9441,8 +9341,6 @@ scheduleIdleWork([extractTopKeywords], 5000);
       if (mem.usedJSHeapSize > mem.jsHeapSizeLimit * 0.85) {
         // Memory critical - disable heavy features
         document.documentElement.classList.add('low-end-mode');
-        const particles = document.querySelector('.ambient-particles');
-        if (particles) particles.remove();
       }
     }, 10000);
   }
@@ -9464,8 +9362,6 @@ scheduleIdleWork([extractTopKeywords], 5000);
       lowFPSCount++;
       if (lowFPSCount > 3 && !document.documentElement.classList.contains('low-end-mode')) {
         document.documentElement.classList.add('low-end-mode');
-        const particles = document.querySelector('.ambient-particles');
-        if (particles) particles.remove();
         return;
       }
     } else {
@@ -10829,12 +10725,9 @@ html[data-mz-tv="true"] .ch-hero-mosaic-veil {
   filter: none !important;
 }
 
-/* ── FIX E: TV pe mouse nahi hota, to custom cursor ke 3 elements bekaar
-   compositing layers hain. */
-html[data-mz-tv="true"] #cursor-glow,
-html[data-mz-tv="true"] #cursor-ring,
-html[data-mz-tv="true"] #cursor-dot,
-html[data-mz-tv="true"] .ambient-particles,
+/* ── FIX E: ambient firefly layer aur custom cursor ke 3 elements ab site se
+   hi hata diye gaye hain (perf). Sirf collection-hero ka particle canvas bacha
+   hai, wo TV pe band. */
 html[data-mz-tv="true"] .ch-particle-canvas {
   display: none !important;
 }

@@ -129,20 +129,23 @@ footer,
   font-display: swap;
 }
 
-/* 1. Prevent Layout Thrashing (Buttery Smooth 3D Tilt via Pure CSS) */
+/*  1. Cards are static — the hover lift is gone on purpose.
+ *
+ *  The lift moved a card that carries a 48px-blur box-shadow, so the browser
+ *  could not composite it: every hover re-rasterised the shadow, the poster and
+ *  the whole card body, and moving the mouse across a row of 6 cards queued six
+ *  of those repaints back to back.
+ *
+ *  `will-change: transform` is gone with it. It promoted every card to its own
+ *  GPU layer for the entire session — 24 layers on first paint and one more for
+ *  every card infinite scroll appends — which is GPU memory spent on a state the
+ *  page no longer enters.
+ *
+ *  Hover feedback is now border-color only (see .movie-card:hover further down);
+ *  a 1px border repaint is the cheapest visible acknowledgement there is. */
 .movie-card,
 .upcoming-card {
   transform: perspective(1000px) translateZ(0);
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
-  will-change: transform;
-}
-
-/* Lift + scale kept small enough that the growth stays inside the grid gap
-   (1.4rem / 22.4px) on every side — a bigger scale here was pushing the
-   hovered card's edges into the neighboring cards above and to the side. */
-.movie-card:hover,
-.upcoming-card:hover {
-  transform: perspective(1000px) translateY(-8px)translateZ(0);
 }
 
 .movie-card img,
@@ -314,38 +317,8 @@ body {
   }
 }
 
-/* ✨ 3D LUXURY JUGNU (FIREFLIES) ANIMATION */
-@keyframes floatParticle3D {
-  0% {
-    transform: translateY(0) translateX(0) translateZ(0) scale(0.5);
-    opacity: 0;
-  }
-
-  10% {
-    opacity: 1;
-  }
-
-  40% {
-    transform: translateY(-40vh) translateX(var(--drift)) translateZ(30px) scale(1.3);
-    box-shadow: 0 0 15px var(--p-glow1), 0 0 30px var(--p-glow2);
-    opacity: 1;
-  }
-
-  70% {
-    transform: translateY(-80vh) translateX(calc(var(--drift) * -0.8)) translateZ(60px) scale(0.9);
-    box-shadow: 0 0 8px var(--p-glow1), 0 0 16px var(--p-glow2);
-    opacity: 0.8;
-  }
-
-  90% {
-    opacity: 1;
-  }
-
-  100% {
-    transform: translateY(-120vh) translateX(var(--drift)) translateZ(100px) scale(0.3);
-    opacity: 0;
-  }
-}
+/* ✨ 3D LUXURY JUGNU (FIREFLIES) ANIMATION — removed with .particle; see the
+   note where .ambient-particles used to be defined. */
 
 /* ═══════════════════════════════════════════════════════════════
    ULTRA PREMIUM ENHANCEMENTS (Loader, Glow, Reveal)
@@ -415,97 +388,24 @@ body {
   text-transform: uppercase;
 }
 
-#cursor-glow {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 700px;
-  height: 700px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(124, 58, 237, 0.06), rgba(245, 197, 24, 0.02) 35%, transparent 70%);
-  pointer-events: none;
-  z-index: 99998;
-  display: none;
-  will-change: transform;
-  transform: translate3d(-50%, -50%, 0);
-}
-
-#cursor-ring {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 36px;
-  height: 36px;
-  border: 2px solid rgba(245, 197, 24, 0.6);
-  border-radius: 50%;
-  pointer-events: none;
-  z-index: 99999;
-  display: none;
-  box-shadow: 0 0 15px rgba(245, 197, 24, 0.2), inset 0 0 10px rgba(245, 197, 24, 0.1);
-  transition: width 0.2s ease-out, height 0.2s ease-out, border-color 0.2s ease-out, background 0.2s ease-out;
-  will-change: transform;
-  transform: translate3d(-50%, -50%, 0);
-}
-
-#cursor-dot {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 6px;
-  height: 6px;
-  background: var(--gold);
-  border-radius: 50%;
-  pointer-events: none;
-  z-index: 100000;
-  box-shadow: 0 0 10px var(--gold), 0 0 20px var(--gold);
-  display: none;
-  transition: width 0.2s ease-out, height 0.2s ease-out, background 0.2s ease-out;
-  will-change: transform;
-  transform: translate3d(-50%, -50%, 0);
-}
-
-body.cursor-hover #cursor-ring {
-  width: 55px;
-  height: 55px;
-  border-color: var(--accent);
-  background: rgba(124, 58, 237, 0.15);
-  box-shadow: 0 0 30px rgba(124, 58, 237, 0.4), inset 0 0 20px rgba(124, 58, 237, 0.3);
-}
-
-body.cursor-hover #cursor-dot {
-  width: 10px;
-  height: 10px;
-  background: var(--accent);
-  box-shadow: 0 0 15px var(--accent), 0 0 30px var(--gold);
-}
-
-@media (min-width: 1024px) {
-
-  #cursor-glow,
-  #cursor-ring,
-  #cursor-dot {
-    display: block;
-  }
-
-  /* Premium Custom Cursor: Puraane boring pointer ko hide karein */
-  body,
-  a,
-  button,
-  .movie-card,
-  .upcoming-card,
-  .thumb,
-  .cat-tab,
-  .player-chip {
-    cursor: none !important;
-  }
-
-  input,
-  select {
-    cursor: text !important;
-  }
-
-  /* Typing ke liye standard beam rahne dein */
-}
+/*  CUSTOM CURSOR REMOVED (perf + input latency)
+ *
+ *  There used to be three fixed elements here — a 700x700 radial glow, a 36px
+ *  trailing ring and a dot — driven by a rAF loop, plus `cursor: none !important`
+ *  on every interactive element so the native pointer was hidden.
+ *
+ *  Two costs, both paid on every desktop visit:
+ *   1. A 700x700 blurred gradient repositioned every frame is one of the largest
+ *      composited surfaces on the page, and the ring wrote a fresh matrix (with
+ *      perspective + two rotations) every frame the pointer moved.
+ *   2. `cursor: none` means the pointer position is drawn by JavaScript at frame
+ *      rate instead of by the compositor/OS at pointer rate. Any long task made
+ *      the cursor itself visibly lag — the native cursor cannot lag, because the
+ *      main thread never draws it.
+ *
+ *  Removing it is strictly faster than tuning it: the native pointer is free.
+ *  The #cursor-glow/#cursor-ring/#cursor-dot divs are gone from index.html and
+ *  the rAF loop and its mousemove/mouseover listeners are gone from moviezone.js. */
 
 .reveal-up {
   opacity: 0;
@@ -529,28 +429,21 @@ body.cursor-hover #cursor-dot {
   animation: sparkExplode 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
 }
 
-/* ── Ambient Particles ── */
-.ambient-particles {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 99;
-  overflow: hidden;
-}
-
-.particle {
-  position: absolute;
-  bottom: -20px;
-  background: var(--p-color);
-  /* Dynamic color for particle */
-  border-radius: 50%;
-  box-shadow: 0 0 10px var(--p-glow1), 0 0 20px var(--p-glow2), 0 0 30px var(--p-glow3);
-  /* Dynamic glow */
-  will-change: transform, opacity;
-  pointer-events: none;
-  /* Custom 3D Animation injected via JS variables */
-  animation: floatParticle3D var(--duration) ease-in-out infinite;
-}
+/*  ── Ambient Particles (Jugnu / fireflies) — REMOVED ──
+ *
+ *  18 fixed divs floated 120vh up the viewport on an infinite 12–30s loop. Each
+ *  one carried three stacked box-shadows as its glow, and the keyframes animated
+ *  transform *and* box-shadow together — box-shadow is not a compositor-only
+ *  property, so all 18 forced a paint on every single frame, forever, on top of
+ *  a full-screen fixed layer sitting at z-index 99 above the whole grid.
+ *
+ *  That is a permanent per-frame paint cost for pure decoration, and it competed
+ *  with scrolling and with poster decode during load. The @keyframes
+ *  floatParticle3D block and the JS that built the container are gone too.
+ *
+ *  The mobile/low-end/reduced-motion blocks near the end of this file used to
+ *  `display: none` this layer; those rules are gone as well since there is
+ *  nothing left to hide. */
 
 /* ── Mobile Nav Overlay ── */
 .mobile-nav-overlay {
@@ -2818,10 +2711,10 @@ html[data-mz-tv="true"] .cat-group-menu {
   overflow: hidden;
   cursor: pointer;
   border: 1px solid rgba(255, 255, 255, 0.065);
-  transition:
-    transform 0.4s var(--ease-spring),
-    box-shadow 0.4s var(--ease-smooth),
-    border-color 0.4s var(--ease-smooth);
+  /* Only border-color changes on hover now, so that is all this transitions.
+     It used to list transform and box-shadow as well, both of which no longer
+     have a hover state to animate. */
+  transition: border-color 0.25s var(--ease-smooth);
   transform-style: preserve-3d;
   position: relative;
   content-visibility: auto;
@@ -2837,16 +2730,10 @@ html[data-mz-tv="true"] .cat-group-menu {
   margin-top: 22px;
 }
 
-.movie-card::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, rgba(245, 197, 24, 0.06), rgba(124, 58, 237, 0.04));
-  opacity: 0;
-  transition: opacity 0.4s ease;
-  pointer-events: none;
-  z-index: 1;
-}
+/*  .movie-card::before was a gold/purple wash that only ever became visible on
+ *  hover (opacity 0 -> 1). With the hover state gone it was a full-card extra
+ *  layer that could never be seen, so the rule is deleted rather than left at
+ *  opacity 0. The ::after vignette below IS visible at rest, so it stays. */
 
 .movie-card::after {
   content: '';
@@ -2865,35 +2752,13 @@ html[data-mz-tv="true"] .cat-group-menu {
 .movie-card:hover,
 .movie-card:focus-visible {
   border-color: rgba(245, 197, 24, 0.3);
-  z-index: 10;
-  box-shadow: 0 45px 100px rgba(0, 0, 0, 0.7), 0 0 40px rgba(245, 197, 24, 0.1);
 }
 
-/*  PREMIUM HOVER LIFT — was two JS listeners and four inline style writes on
- *  every card (mouseenter set transition + transform + boxShadow, mouseleave
- *  cleared them). At 24 cards that is 48 listeners; infinite scroll took it past
- *  400. All of it to express one state change that the compositor can do alone.
- *
- *  Gated on (hover: hover) and (pointer: fine) so it only applies to real mouse
- *  pointers — the same set the old `!isMobile` check was approximating — and
- *  excluded on TV, which navigates by focus and runs on a weak GPU.
- *
- *  An earlier version tilted the card in 3D via rotateX/rotateY from the mouse
- *  position. That swings the corners outward unevenly and, combined with the
- *  scale, spilled into whichever neighbouring card sat in that direction. A flat
- *  lift cannot: the card's footprint never changes shape, so it cannot reach
- *  past its own grid cell.
- */
-@media (hover: hover) and (pointer: fine) {
-  html:not([data-mz-tv="true"]) .movie-card:hover {
-    transform: perspective(1000px) translateY(-10px);
-    box-shadow: 0 30px 70px rgba(0, 0, 0, 0.6), 0 0 20px rgba(245, 197, 24, 0.1);
-  }
-}
-
-.movie-card:hover::before {
-  opacity: 1;
-}
+/*  The premium hover lift lived here (and, before that, a 3D mouse-position tilt
+ *  driven by two JS listeners per card). Both are gone: transform + box-shadow on
+ *  hover meant the card, its 100px-blur shadow and its poster were re-rasterised
+ *  on every pointer enter/leave, and a fast mouse across one row triggered six of
+ *  those in a few frames. Border-color above is the whole hover state now. */
 
 .card-poster {
   position: relative;
@@ -2929,51 +2794,28 @@ html[data-mz-tv="true"] .cat-group-menu {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: transform 0.75s ease, filter 0.55s ease;
   filter: saturate(1.02) contrast(1.04) brightness(0.97);
   background:
     linear-gradient(150deg, rgba(255, 255, 255, 0.055) 0%, rgba(255, 255, 255, 0.015) 45%, rgba(0, 0, 0, 0.12) 100%),
     var(--card2, #13131f);
 }
 
-.movie-card:hover .card-poster img,
-.movie-card:focus-visible .card-poster img {
-  transform: scale(1.1);
-  transform: scale(1.03);
-  filter: saturate(1.15) contrast(1.07) brightness(1);
-}
-
-/* Premium Shine Sweep on Hover */
-.card-poster::after,
-.upcoming-poster::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -150%;
-  width: 50%;
-  height: 100%;
-  background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.18), transparent);
-  transform: skewX(-25deg);
-  z-index: 4;
-  pointer-events: none;
-}
-
-.movie-card:hover .card-poster::after,
-.movie-card:focus-visible .card-poster::after,
-.upcoming-card:hover .upcoming-poster::after,
-.upcoming-card:focus-visible .upcoming-poster::after {
-  animation: shineSweep 0.8s ease-in-out;
-}
-
-@keyframes shineSweep {
-  0% {
-    left: -150%;
-  }
-
-  100% {
-    left: 200%;
-  }
-}
+/*  POSTER ZOOM + SHINE SWEEP REMOVED (perf)
+ *
+ *  Two of the most expensive things a hover can do, both on the largest element
+ *  in the card:
+ *
+ *   - scale(1.03) on the poster plus a `filter` change. A filter transition is not
+ *     compositor-only: the browser re-applies saturate/contrast/brightness to the
+ *     full decoded poster bitmap on every frame of the 0.55s transition.
+ *
+ *   - the shine sweep animated `left` from -150% to 200%. Animating a box-offset
+ *     property runs layout on the poster's stacking context every frame for 0.8s —
+ *     the single worst way to move something across the screen — and it needed an
+ *     extra full-height pseudo element on every card just to exist.
+ *
+ *  @keyframes shineSweep went with them, and .upcoming-poster's copies of both are
+ *  removed in the upcoming-card section below. */
 
 .card-quality {
   position: absolute;
@@ -3154,6 +2996,15 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 }
 
+/*  The overlay reveal is the one hover state kept, because it is not decoration:
+ *  the play button that starts the trailer lives inside it and has no other entry
+ *  point on desktop. It is safe to keep — opacity is compositor-only, so showing
+ *  it costs no layout and no paint.
+ *
+ *  `backdrop-filter: blur(2px)` was removed from it though. That made the reveal
+ *  snapshot the region behind the overlay (the full poster) and blur it on the GPU
+ *  every frame of the fade — by far the most expensive part of the old hover, and
+ *  invisible anyway under a gradient this opaque. */
 .card-overlay {
   position: absolute;
   inset: 0;
@@ -3166,8 +3017,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   justify-content: center;
   padding: 0.75rem;
   opacity: 0;
-  transition: opacity 0.38s ease;
-  backdrop-filter: blur(2px);
+  transition: opacity 0.22s ease;
   z-index: 2;
 }
 
@@ -3176,6 +3026,10 @@ html[data-mz-tv="true"] .cat-group-menu {
   opacity: 1;
 }
 
+/*  The button is static now — it used to fly in with
+ *  `translateY(30px) scale(0.6) rotate(-15deg)` -> identity on a 0.5s spring, and
+ *  `transition: all` meant that spring also re-animated its three box-shadows.
+ *  It now simply fades in with the overlay it sits in. */
 .card-play-btn {
   width: 52px;
   height: 52px;
@@ -3192,28 +3046,8 @@ html[data-mz-tv="true"] .cat-group-menu {
   box-shadow:
     0 12px 32px rgba(230, 57, 70, 0.38),
     0 0 0 8px rgba(245, 197, 24, 0.08);
-  transform: translateY(30px) scale(0.6) rotate(-15deg);
-  transition: all 0.5s var(--ease-spring);
   position: absolute;
   bottom: 1.2rem;
-}
-
-.movie-card:hover .card-play-btn,
-.movie-card:focus-visible .card-play-btn {
-  transform: translateY(0) scale(1) rotate(0deg);
-  box-shadow:
-    0 14px 36px rgba(230, 57, 70, 0.45),
-    0 0 0 8px rgba(245, 197, 24, 0.12),
-    0 0 24px rgba(245, 197, 24, 0.25);
-}
-
-.movie-card .card-play-btn:hover {
-  transform: scale(1.18) translateY(-4px);
-  box-shadow:
-    0 22px 50px rgba(230, 57, 70, 0.65),
-    0 0 0 12px rgba(245, 197, 24, 0.2),
-    0 0 45px rgba(245, 197, 24, 0.5);
-  border-color: #fff;
 }
 
 .card-info {
@@ -3354,7 +3188,10 @@ html[data-mz-tv="true"] .cat-group-menu {
   overflow: hidden;
   cursor: pointer;
   transform-style: preserve-3d;
-  transition: all 0.4s var(--ease-spring);
+  /* Was `transition: all 0.4s`, which animated every property the removed hover
+     state used to change (transform, three box-shadows, border). Border-color is
+     all that is left. */
+  transition: border-color 0.25s var(--ease-spring);
   display: flex;
   flex-direction: column;
   content-visibility: auto;
@@ -3369,12 +3206,6 @@ html[data-mz-tv="true"] .cat-group-menu {
 .upcoming-card:hover,
 .upcoming-card:focus-visible {
   border-color: rgba(245, 197, 24, 0.32);
-  transform: translateY(-6px) scale(1.01);
-  box-shadow:
-    0 24px 60px rgba(0, 0, 0, 0.55),
-    0 0 0 1px rgba(245, 197, 24, 0.12),
-    0 0 24px rgba(245, 197, 24, 0.07);
-  z-index: 10;
 }
 
 .upcoming-poster {
@@ -3388,16 +3219,11 @@ html[data-mz-tv="true"] .cat-group-menu {
   height: 100%;
   aspect-ratio: 16 / 9;
   object-fit: cover;
-  transition: transform 0.6s ease, filter 0.4s ease;
   filter: saturate(1.05);
 }
 
-.upcoming-card:hover .upcoming-poster img,
-.upcoming-card:focus-visible .upcoming-poster img {
-  transform: scale(1.08);
-  transform: scale(1.02);
-  filter: saturate(1.15);
-}
+/* Zoom + saturate-on-hover removed here for the same reason as .card-poster img:
+   a filter transition repaints the whole decoded image every frame. */
 
 .upcoming-poster-overlay {
   position: absolute;
@@ -7640,10 +7466,6 @@ html[data-mz-tv="true"] .cat-group-menu {
   display: none !important;
 }
 
-.large-screen-mode .ambient-particles .particle:nth-child(n+10) {
-  display: none !important;
-}
-
 .large-screen-mode .movie-card::before,
 .large-screen-mode .movie-card::after {
   display: none !important;
@@ -7660,10 +7482,8 @@ html[data-mz-tv="true"] .cat-group-menu {
   content-visibility: auto;
 }
 
-.large-screen-mode .movie-card:hover {
-  transform: translateY(-6px) !important;
-  transition: transform 0.2s ease !important;
-}
+/* .large-screen-mode .movie-card:hover re-added a translateY lift with an
+   !important override; removed along with the base lift. */
 
 
 /* ═══════════════════════════════════════════════════════════════
@@ -11627,11 +11447,10 @@ img { content-visibility: auto; }
     transition-duration: 0s !important;
   }
 
-  /* Remove ALL hover effects on mobile */
-  .movie-card:hover, .upcoming-card:hover { transform: none !important; box-shadow: none !important; }
+  /* Card hover effects are gone globally now, not just on mobile — the rule that
+     used to reset transform/box-shadow here has nothing left to reset. */
 
   /* Kill GPU-heavy effects entirely */
-  .ambient-particles { display: none !important; }
   #hero::before, #hero::after { display: none !important; }
   .click-spark { display: none !important; }
 
@@ -11667,8 +11486,6 @@ img { content-visibility: auto; }
 
 /* === TABLET (768px - 1024px) === */
 @media (min-width: 769px) and (max-width: 1024px) {
-  .movie-card:hover { transform: translateY(-4px) !important; }
-  .ambient-particles .particle:nth-child(n+12) { display: none !important; }
   .movie-card::before, .upcoming-card::before { display: none !important; }
   #navbar { backdrop-filter: blur(20px) !important; -webkit-backdrop-filter: blur(20px) !important; }
 }
@@ -11676,7 +11493,6 @@ img { content-visibility: auto; }
 /* === TV / LARGE SCREEN OPTIMIZATION === */
 @media (min-width: 1920px), (hover: none) and (min-width: 960px) {
   .movie-grid { contain: layout style paint; }
-  .ambient-particles .particle:nth-child(n+15) { display: none !important; }
   .movie-card, .upcoming-card, .cat-tab, button { min-height: 48px; }
   /* Reduce repaints on large screens */
   .movie-card, .upcoming-card { will-change: auto; transform: translateZ(0); }
@@ -11712,7 +11528,6 @@ img { content-visibility: auto; }
 .low-end-mode .cat-group-chevron {
   transition-duration: 0s !important;
 }
-.low-end-mode .ambient-particles { display: none !important; }
 .low-end-mode #hero::before, .low-end-mode #hero::after { display: none !important; }
 .low-end-mode .click-spark { display: none !important; }
 .low-end-mode .movie-card::before, .low-end-mode .movie-card::after { display: none !important; }
@@ -11730,7 +11545,6 @@ img { content-visibility: auto; }
     animation: none !important;
     transition-duration: 0.01ms !important;
   }
-  .ambient-particles { display: none !important; }
 }
 
 /* ── Search dropdown v2: match highlight, clear button, suggestion skeleton ── */

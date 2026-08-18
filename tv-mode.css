@@ -53,18 +53,15 @@ html[data-mz-tv="true"] #navbar {
   background: linear-gradient(180deg, rgb(15, 15, 25) 0%, rgb(5, 5, 10) 100%) !important;
 }
 
-/* No pointer exists, so the custom cursor layers are pure overhead. */
-html[data-mz-tv="true"] #cursor-glow,
-html[data-mz-tv="true"] #cursor-ring,
-html[data-mz-tv="true"] #cursor-dot {
-  display: none !important;
-}
+/* The custom cursor layers (#cursor-glow / #cursor-ring / #cursor-dot) were
+   deleted from the site entirely for performance, so there is nothing left to
+   hide here. The native pointer is still suppressed below: a TV has no mouse,
+   and a stray arrow parked over the UI looks broken on a 10-foot screen. */
 html[data-mz-tv="true"] * { cursor: none !important; }
 
 /* Ambient canvases run an endless requestAnimationFrame loop that repaints a
-   full-screen surface. moviezone.js already skips them on TV; this makes sure
-   nothing is left painting if that path ever changes. */
-html[data-mz-tv="true"] .ambient-particles,
+   full-screen surface. The ambient firefly layer is gone site-wide now; the
+   collection-hero canvas below still exists. */
 html[data-mz-tv="true"] .ch-particle-canvas {
   display: none !important;
 }
