@@ -2800,22 +2800,28 @@ html[data-mz-tv="true"] .cat-group-menu {
     var(--card2, #13131f);
 }
 
-/*  POSTER ZOOM + SHINE SWEEP REMOVED (perf)
+/*  POSTER ZOOM — kept deliberately small and transform-only.
  *
- *  Two of the most expensive things a hover can do, both on the largest element
- *  in the card:
+ *  The old version paired scale(1.03) with a `filter` change
+ *  (saturate/contrast/brightness). The scale is cheap — a transform on an already
+ *  composited image is handled by the compositor without repainting — but the
+ *  filter was not: it re-applied to the full decoded poster bitmap on every frame
+ *  of the transition. So the zoom is back and the filter change is not.
  *
- *   - scale(1.03) on the poster plus a `filter` change. A filter transition is not
- *     compositor-only: the browser re-applies saturate/contrast/brightness to the
- *     full decoded poster bitmap on every frame of the 0.55s transition.
+ *  Gated on (hover: hover) and (pointer: fine) so phones and touch panels never
+ *  match it, and off on TV, which navigates by focus on a weak GPU.
  *
- *   - the shine sweep animated `left` from -150% to 200%. Animating a box-offset
- *     property runs layout on the poster's stacking context every frame for 0.8s —
- *     the single worst way to move something across the screen — and it needed an
- *     extra full-height pseudo element on every card just to exist.
- *
- *  @keyframes shineSweep went with them, and .upcoming-poster's copies of both are
- *  removed in the upcoming-card section below. */
+ *  SHINE SWEEP stays deleted — it animated `left`, which runs layout every frame.
+ */
+@media (hover: hover) and (pointer: fine) {
+  html:not([data-mz-tv="true"]) .card-poster img {
+    transition: transform 0.28s ease-out;
+  }
+
+  html:not([data-mz-tv="true"]) .movie-card:hover .card-poster img {
+    transform: scale(1.045);
+  }
+}
 
 .card-quality {
   position: absolute;
