@@ -62,7 +62,15 @@ const extracted = [
   block('function ottISTDate('),
   block('function buildOttModeQueries('),
   line('const _ottVerifyCache ='),
+  /*  The batch-priming helpers. They exist purely to collapse the OTT section's
+      request waves into one round trip each, and they no-op in this sandbox
+      because `typeof tmdbBatch !== 'function'` here — so the functions below are
+      exercised on exactly the code path they had before batching existed. They
+      are extracted rather than stubbed so a change to them cannot slip past. */
+  block('async function _ottPrimeBatch('),
+  block('async function _ottPrimeProviders('),
   block('async function ottIsOnPlatform('),
+  block('function ottTrendingWants('),
   block('async function ottVerifiedTrending('),
   line('const OTT_SAMPLE_SIZE ='),
   line('const OTT_SAMPLE_MIN_PASS ='),

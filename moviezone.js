@@ -3206,6 +3206,85 @@ function buildOttModeQueries(key, mode, page) {
  */
 const _ottVerifyCache = new Map();
 
+/*  ══════════════════════════════════════════════════════════════════════
+ *  WHY THE OTT SECTIONS USED TO ARRIVE LATE
+ *  ══════════════════════════════════════════════════════════════════════
+ *  Opening Netflix / Prime / JioHotstar needed roughly 35 separate TMDB
+ *  requests before the first card could paint, and — worse — they arrived in
+ *  three DEPENDENT waves, because each wave's URLs are only known once the
+ *  previous one has answered:
+ *
+ *    wave 1  6-7 provider-gated /discover pages + 2 global /trending lists
+ *    wave 2  up to 20 /watch/providers lookups (verifying the trending titles)
+ *    wave 3  10 /watch/providers lookups (the accuracy spot-check on the head)
+ *
+ *  Sent one by one through the 8-lane concurrency gate that is ~6 sequential
+ *  rounds, each one a full network round trip, and 35 requests also eats the
+ *  entire 30-per-10s client rate budget — so a user who opened two platforms in
+ *  a row hit _mzRateDelayMs() and waited on a sleep, not on the network.
+ *
+ *  Meanwhile the homepage had already solved this: tmdbBatch() posts the whole
+ *  plan to the Worker's /api/tmdb/batch, which fans out at the edge next to
+ *  TMDB and its KV cache, and returns everything in one response. The OTT path
+ *  simply never used it.
+ *
+ *  It does now, and that is the entire fix — one batch per wave, so 35 requests
+ *  in ~6 rounds becomes 3 requests in 3 rounds. Nothing about WHICH endpoints
+ *  are called, or how results are scored, filtered or ordered, changes: the
+ *  batch only PRIMES tmdbCache, and the existing code below then runs exactly as
+ *  it did, reading memory instead of the network. Same grid, same order.
+ */
+
+/*  Warms tmdbCache for a whole list of endpoints in one request.
+ *
+ *  Deliberately tolerant, because this is an optimisation and never a
+ *  requirement:
+ *    - `typeof tmdbBatch` is guarded rather than assumed. The OTT functions are
+ *      extracted and run in a bare VM sandbox by ott-sections-check.js, where no
+ *      batching exists; there they fall through to the per-endpoint requests
+ *      that this replaced.
+ *    - tmdbBatch() itself already falls back to individual requests when the
+ *      Worker is absent (localhost, old deploy, 404), so there is nothing to
+ *      detect or configure.
+ *    - a throw here must never lose the section, hence the swallow.
+ *
+ *  Chunked at 40 because the Worker rejects a larger batch (MAX_BATCH_PATHS),
+ *  and the chunks go out together — chunking sequentially would rebuild the
+ *  very wave structure this exists to remove.
+ */
+async function _ottPrimeBatch(pairs) {
+  if (typeof tmdbBatch !== 'function') return;
+  if (!pairs || pairs.length < 2) return;      // one URL is not worth a batch
+  const CHUNK = 40;
+  const chunks = [];
+  for (let i = 0; i < pairs.length; i += CHUNK) chunks.push(pairs.slice(i, i + CHUNK));
+  try {
+    await Promise.all(chunks.map(c => tmdbBatch(c)));
+  } catch (e) {
+    /* batching is best-effort; the callers' own requests still run */
+  }
+}
+
+/*  Warms the /watch/providers records for a set of titles.
+ *
+ *  Titles already in _ottVerifyCache are skipped: that cache holds the in-flight
+ *  or settled promise, so asking for them again would put URLs in the batch that
+ *  nobody is waiting on. This is why the accuracy spot-check usually costs
+ *  nothing — the trending pass has already verified most of the head.
+ */
+async function _ottPrimeProviders(key, items) {
+  const seen = new Set();
+  const pairs = [];
+  (items || []).forEach(m => {
+    if (!m || !m.media_type || !m.id) return;
+    const cacheKey = key + ':' + m.media_type + ':' + m.id;
+    if (_ottVerifyCache.has(cacheKey) || seen.has(cacheKey)) return;
+    seen.add(cacheKey);
+    pairs.push(['/' + m.media_type + '/' + m.id + '/watch/providers', {}]);
+  });
+  await _ottPrimeBatch(pairs);
+}
+
 /*  Returns true / false / null.
  *
  *  The null is the important part. An earlier version returned false when the
@@ -3251,12 +3330,21 @@ async function ottIsOnPlatform(key, type, id) {
   return p;
 }
 
-/** Global trending, filtered down to titles verified on this platform. */
-async function ottVerifiedTrending(key, mode, page) {
-  const pg = String(page);
+/*  Which global trending lists ottVerifiedTrending() reads for this mode.
+ *  Shared with the prefetch in fetchOttMovies so the two cannot drift — if they
+ *  disagreed the batch would warm URLs nobody asks for while the real requests
+ *  still went out one at a time, which is the bug this whole path just fixed. */
+function ottTrendingWants(mode) {
   const wants = [];
   if (mode !== 'movies') wants.push({ endpoint: '/trending/tv/week', type: 'tv' });
   if (mode !== 'webseries') wants.push({ endpoint: '/trending/movie/week', type: 'movie' });
+  return wants;
+}
+
+/** Global trending, filtered down to titles verified on this platform. */
+async function ottVerifiedTrending(key, mode, page) {
+  const pg = String(page);
+  const wants = ottTrendingWants(mode);
 
   const res = await Promise.allSettled(
     wants.map(w => tmdb(w.endpoint, { language: 'en-US', page: pg }))
@@ -3273,6 +3361,10 @@ async function ottVerifiedTrending(key, mode, page) {
       candidates.push(item);
     });
   });
+
+  // One request for every provider record this pass needs, before asking for
+  // the verdicts — otherwise these are up to 20 individual round trips.
+  await _ottPrimeProviders(key, candidates);
 
   const verdicts = await Promise.all(
     candidates.map(c => ottIsOnPlatform(key, c.media_type, c.id))
@@ -3298,6 +3390,7 @@ async function ottEnforceAccuracy(key, items) {
   if (items.length < 4) return items;
 
   const sample = items.slice(0, OTT_SAMPLE_SIZE);
+  await _ottPrimeProviders(key, sample);
   const sampleVerdicts = await Promise.all(
     sample.map(m => ottIsOnPlatform(key, m.media_type, m.id).catch(() => null))
   );
@@ -3311,6 +3404,7 @@ async function ottEnforceAccuracy(key, items) {
 
   // Sample was dirty: verify for real and keep only confirmed titles.
   const head = items.slice(0, OTT_DEEP_VERIFY_CAP);
+  await _ottPrimeProviders(key, head);
   const verdicts = await Promise.all(
     head.map(m => ottIsOnPlatform(key, m.media_type, m.id).catch(() => null))
   );
@@ -3328,6 +3422,14 @@ async function ottEnforceAccuracy(key, items) {
 async function fetchOttMovies(key, mode, page) {
   const plan = buildOttModeQueries(key, mode, page);
   if (!plan.length) return [];
+
+  /*  Everything the first render needs, in ONE request: the provider-gated
+   *  catalogue pages and the two global trending lists the overlay reads. Only
+   *  primes the cache — the calls below are unchanged and now hit memory. */
+  await _ottPrimeBatch([].concat(
+    plan.map(p => [p.endpoint, p.params]),
+    ottTrendingWants(mode).map(w => [w.endpoint, { language: 'en-US', page: String(page) }])
+  ));
 
   // Provider-gated catalogue and the verified-trending overlay, in parallel.
   const [res, verifiedTrending] = await Promise.all([
