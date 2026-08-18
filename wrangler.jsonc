@@ -37,7 +37,11 @@
       "/series",
       "/series/*",
       "/movie/*",
-      "/tv/*"
+      "/tv/*",
+      "/browse",
+      "/browse/*",
+      "/sitemap.xml",
+      "/sitemap-*"
     ]
   },
   "kv_namespaces": [

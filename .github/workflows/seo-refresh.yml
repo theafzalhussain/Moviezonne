@@ -55,8 +55,34 @@ jobs:
           TMDB_TOKEN: ${{ secrets.TMDB_TOKEN }}
         run: node scripts/inject-home-links.js
 
+      # Hand the SAME catalogue to the Cloudflare Worker.
+      #
+      # worker.js cannot read sitemap-cache.json: it has no filesystem, and the
+      # file is in .assetsignore precisely so 500 KB of internal data is not
+      # published. So it reads the catalogue from KV instead, under the key
+      # "sitemap:catalog". Without this step the Worker still serves valid
+      # sitemaps and /browse hubs, but from a bounded live TMDB build — a few
+      # hundred titles per kind instead of the full ~7,800.
+      #
+      # Inert until both secrets exist, so adding this changed nothing for an
+      # existing checkout. The API token needs only "Workers KV Storage: Edit".
+      - name: Publish the catalogue to the Worker's KV namespace
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID are not set — skipping the KV upload."
+            echo "The Worker will keep serving its bounded live-built sitemaps."
+            exit 0
+          fi
+          npx --yes wrangler@4 kv key put sitemap:catalog \
+            --path sitemap-cache.json --binding TMDB_CACHE --remote
+
       - name: Sanity-check the SEO layer before committing
-        run: node seo-ssr.test.js
+        run: |
+          node seo-ssr.test.js
+          node worker-seo.test.js
 
       - name: Commit if anything changed
         run: |

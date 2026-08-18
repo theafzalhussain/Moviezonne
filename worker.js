@@ -1,3 +1,4 @@
+
 /*  MovieZone — Cloudflare Worker
  *
  *  WHY THE PUSH LAYER LIVES HERE
@@ -668,10 +669,11 @@ async function handleTmdbProxy(request, env, ctx, url) {
     headers: {
       'content-type': 'application/json',
       'x-cache': result.cache,
-      'cache-control': 'public, max-age=3600'
+      'cache-control': 'public, max-age=21600'    // ← 3600 se 21600 kar do
     }
   });
 }
+
 
 /*  ── BATCH ──────────────────────────────────────────────────────────────────
  *  WHY THIS EXISTS
@@ -698,8 +700,9 @@ async function handleTmdbProxy(request, env, ctx, url) {
  *  never taken from input.
  */
 const MAX_BATCH_PATHS = 40;
-const TMDB_CACHE_TTL = 3600;
-const BATCH_CACHE_TTL = 1800;
+const TMDB_CACHE_TTL = 21600;   // 6 hours (pehle 3600 tha)
+const BATCH_CACHE_TTL = 7200;   // 2 hours (pehle 1800 tha)
+
 
 /*  A relative TMDB path with an optional query string, and nothing else.
  *  Rejects "http://…", "//host", "/../", backslashes and anything that could
@@ -1042,6 +1045,294 @@ async function ssrWatchPage(kind, rawSlug, url, env, ctx) {
   return ssrHtml(html, SSR_WATCH_CACHE, 'noindex, follow');
 }
 
+/** One day. Long enough that a live build is rare, short enough to stay fresh. */
+const SITEMAP_KV_TTL = 86400;
+
+/*  MUST equal SITEMAP_CHUNK_SIZE in seo-ssr.js. Sharding here and sharding
+ *  there have to agree, or the two runtimes advertise different shard sets for
+ *  the same catalogue. worker-seo.test.js asserts they match. */
+const SITEMAP_CHUNK = 2000;
+
+/** Pages pulled per endpoint when there is no catalogue to read. */
+const SITEMAP_LIVE_PAGES = 8;
+
+const SITEMAP_CATALOG_KV_KEY = 'sitemap:catalog';
+const sitemapItemsKvKey = (kind) => 'sitemap:items:' + kind;
+
+// Same values the Express handlers set, so both runtimes cache identically.
+const SITEMAP_CACHE = 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800';
+const SSR_BROWSE_CACHE = 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800';
+
+/*  Parsing a 500 KB catalogue on every sitemap and browse request is wasted CPU
+ *  on a route the CDN holds for a day anyway, so a live isolate keeps the parsed
+ *  list. Short-lived on purpose: an isolate can survive for hours, and a
+ *  refreshed catalogue should not have to wait for one to be recycled.
+ *
+ *  Keyed on `env` rather than on the kind alone. env is a single stable object
+ *  per isolate in production, so the effect is the same there — but it also means
+ *  two different environments (which is what every test case is) can never read
+ *  each other's memo. */
+const SITEMAP_MEMO_MS = 300000;
+const sitemapMemo = new WeakMap();
+
+function sitemapMemoFor(env) {
+  if (!env || typeof env !== 'object') return null;
+  let byKind = sitemapMemo.get(env);
+  if (!byKind) { byKind = new Map(); sitemapMemo.set(env, byKind); }
+  return byKind;
+}
+
+function seoStore(env) {
+  // A dedicated namespace if one is ever bound; otherwise the general cache.
+  return (env && (env.SEO_CACHE || env.TMDB_CACHE)) || null;
+}
+
+function xmlResponse(xml, cacheControl) {
+  return new Response(xml, {
+    status: 200,
+    headers: {
+      'content-type': 'application/xml; charset=utf-8',
+      'cache-control': cacheControl || SITEMAP_CACHE
+    }
+  });
+}
+
+/** Reads a published asset as JSON. Returns null rather than throwing. */
+async function assetJson(pathname, env) {
+  if (!env || !env.ASSETS || typeof env.ASSETS.fetch !== 'function') return null;
+  try {
+    const res = await env.ASSETS.fetch(new Request(seo.SITE_URL + pathname));
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    return null;
+  }
+}
+
+/*  Curated franchise ids. seo-ssr.js reads these with fs; collections-catalog.json
+ *  is published (the browser loads it), so here it comes from the asset binding
+ *  and the live fallback keeps the same floor of titles it has under Express. */
+async function collectionsCatalogItems(kind, env) {
+  const data = await assetJson('/collections-catalog.json', env);
+  const universes = (data && data.universes) || {};
+  const out = [];
+  for (const key of Object.keys(universes)) {
+    const universe = universes[key] || {};
+    const list = (kind === 'tv' ? universe.tv : universe.movies) || [];
+    for (const item of list) if (item && item.id) out.push(item);
+  }
+  return out;
+}
+
+/**
+ * The catalogue for one kind, with the date to stamp the sitemap index with.
+ *
+ * @returns {Promise<{items: object[], generated: string, source: string}>}
+ */
+async function getSitemapItems(kind, env, ctx) {
+  const wanted = kind === 'tv' ? 'tv' : 'movie';
+  const memoStore = sitemapMemoFor(env);
+  const memo = memoStore && memoStore.get(wanted);
+  if (memo && memo.expires > Date.now()) return memo.value;
+
+  const store = seoStore(env);
+  let result = null;
+
+  // 1. the full nightly catalogue, if it has been uploaded
+  if (store) {
+    try {
+      const raw = await store.get(SITEMAP_CATALOG_KV_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      const items = parsed && Array.isArray(parsed[wanted]) ? parsed[wanted] : null;
+      if (items && items.length) {
+        const generated = String((parsed && parsed.generated) || '').slice(0, 10);
+        result = {
+          items,
+          generated: /^\d{4}-\d{2}-\d{2}$/.test(generated) ? generated : seo.SITEMAP_FALLBACK_DATE,
+          source: 'kv-catalog'
+        };
+      }
+    } catch (err) {
+      console.warn('[ssr] sitemap catalogue unreadable:', err && err.message);
+    }
+  }
+
+  // 2. a previous live build
+  if (!result && store) {
+    try {
+      const raw = await store.get(sitemapItemsKvKey(wanted));
+      const items = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(items) && items.length) {
+        result = { items, generated: seo.SITEMAP_FALLBACK_DATE, source: 'kv-live' };
+      }
+    } catch (err) {
+      console.warn('[ssr] sitemap live cache unreadable:', err && err.message);
+    }
+  }
+
+  // 3. build one now, bounded, and keep it for a day
+  if (!result) {
+    let items = [];
+    try {
+      items = await seo.collectSitemapItems(ssrTmdb(env, ctx), wanted, SITEMAP_LIVE_PAGES);
+    } catch (err) {
+      console.warn('[ssr] sitemap ' + wanted + ' live build failed:', err && err.message);
+    }
+
+    // collectSitemapItems() reaches for the franchise catalogue with fs and gets
+    // nothing here, so it is merged in explicitly. De-duped by id: the popular
+    // and trending feeds already carry most of these.
+    const seen = new Set(items.map((item) => String(item && item.id)));
+    for (const item of await collectionsCatalogItems(wanted, env)) {
+      if (!seen.has(String(item.id))) { seen.add(String(item.id)); items.push(item); }
+    }
+
+    result = { items, generated: seo.SITEMAP_FALLBACK_DATE, source: 'live' };
+
+    if (store && items.length && ctx && typeof ctx.waitUntil === 'function') {
+      ctx.waitUntil(store.put(
+        sitemapItemsKvKey(wanted),
+        JSON.stringify(items),
+        { expirationTtl: SITEMAP_KV_TTL }
+      ));
+    }
+  }
+
+  if (memoStore) {
+    memoStore.set(wanted, { expires: Date.now() + SITEMAP_MEMO_MS, value: result });
+  }
+  return result;
+}
+
+/**
+ * The shard paths for a catalogue of `count` titles.
+ *
+ * Mirrors sitemapChunkPaths() in seo-ssr.js, including the part that matters
+ * most: shard 1 keeps the original /sitemap-movies.xml name, because that URL is
+ * already submitted in Search Console.
+ */
+function sitemapShardPaths(kind, count) {
+  const plural = kind === 'tv' ? 'tv' : 'movies';
+  const first = '/sitemap-' + plural + '.xml';
+  if (!count) return [first];
+  const shards = Math.ceil(count / SITEMAP_CHUNK);
+  const out = [first];
+  for (let i = 2; i <= shards; i++) out.push('/sitemap-' + plural + '-' + i + '.xml');
+  return out;
+}
+
+/*  The sitemap index, built from the counts this Worker will actually serve.
+ *
+ *  seo.buildSitemapIndex() is not used: it calls readSitemapCache(), which is an
+ *  fs read that always fails here, so it would advertise one shard per kind
+ *  while /sitemap-movies-2.xml and -3.xml sit unlisted — 4,000 of the 4,593
+ *  movie URLs never submitted.
+ */
+async function buildSitemapIndexXml(env, ctx) {
+  const [movie, tv] = await Promise.all([
+    getSitemapItems('movie', env, ctx),
+    getSitemapItems('tv', env, ctx)
+  ]);
+
+  const lastmod = movie.generated || tv.generated || seo.SITEMAP_FALLBACK_DATE;
+  const children = ['/sitemap-static.xml', '/sitemap-browse.xml']
+    .concat(sitemapShardPaths('movie', movie.items.length))
+    .concat(sitemapShardPaths('tv', tv.items.length));
+
+  return '<?xml version="1.0" encoding="UTF-8"?>\n'
+    + '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+    + children.map((child) => '<sitemap><loc>' + seo.escXml(seo.SITE_URL + child) + '</loc>'
+      + '<lastmod>' + seo.escXml(lastmod) + '</lastmod></sitemap>').join('\n')
+    + '\n</sitemapindex>\n';
+}
+
+/**
+ * One media shard. `chunkStr` is the "2" in /sitemap-movies-2.xml, or undefined.
+ */
+async function serveMediaSitemap(kind, chunkStr, env, ctx) {
+  const { items } = await getSitemapItems(kind, env, ctx);
+
+  /*  No catalogue and no live data. 503 rather than an empty <urlset>: sitemap.xsd
+   *  requires at least one <url>, so an empty file is invalid XML and reported as
+   *  a worse error than a fetch failure — that exact substitution was tried and
+   *  reverted on the Express side. Returning null is not an option either; the
+   *  SPA fallback would answer 200 with index.html for a .xml URL. */
+  if (!items.length) {
+    return new Response(null, {
+      status: 503,
+      headers: { 'retry-after': '3600', 'cache-control': 'no-store' }
+    });
+  }
+
+  const shards = Math.max(1, Math.ceil(items.length / SITEMAP_CHUNK));
+  const index = chunkStr === undefined || chunkStr === null || chunkStr === ''
+    ? 1
+    : parseInt(chunkStr, 10);
+
+  // 404 is how a shard is retired, and the only URLs that reach it are ones the
+  // index never advertised.
+  if (!Number.isFinite(index) || index < 1 || index > shards) {
+    return new Response(null, { status: 404, headers: { 'cache-control': 'no-store' } });
+  }
+
+  const slice = shards > 1
+    ? items.slice((index - 1) * SITEMAP_CHUNK, index * SITEMAP_CHUNK)
+    : items;
+
+  return xmlResponse(seo.buildMediaSitemap(slice, kind));
+}
+
+/** Every catalogue entry, tagged with the kind its detail URL needs. */
+async function browseEntries(env, ctx) {
+  const [movie, tv] = await Promise.all([
+    getSitemapItems('movie', env, ctx),
+    getSitemapItems('tv', env, ctx)
+  ]);
+  return movie.items.map((m) => Object.assign({ media_type: 'movie' }, m))
+    .concat(tv.items.map((t) => Object.assign({ media_type: 'tv' }, t)));
+}
+
+function browseHtml(html) {
+  return ssrHtml(html, SSR_BROWSE_CACHE, 'index, follow');
+}
+
+async function serveBrowseIndex(env, ctx) {
+  const all = await browseEntries(env, ctx);
+  // Express answered next() here; the equivalent is falling through to the SPA
+  // rather than publishing an A-Z hub with no letters behind it.
+  if (!all.length) return null;
+
+  const counts = {};
+  for (const entry of all) {
+    const letter = seo.browseLetterOf(ssrTitleOf(entry));
+    counts[letter] = (counts[letter] || 0) + 1;
+  }
+
+  return browseHtml(seo.renderBrowseIndexPage(counts));
+}
+
+async function serveBrowseLetter(letter, url, env, ctx) {
+  if (seo.BROWSE_LETTERS.indexOf(letter) === -1) return null;
+
+  const all = await browseEntries(env, ctx);
+  if (!all.length) return null;
+
+  const entries = all
+    .filter((entry) => seo.browseLetterOf(ssrTitleOf(entry)) === letter)
+    .sort((a, b) => ssrTitleOf(a).localeCompare(ssrTitleOf(b), 'en'));
+
+  const perPage = seo.BROWSE_PER_PAGE;
+  const totalPages = Math.max(1, Math.ceil(entries.length / perPage));
+
+  let page = parseInt(url.searchParams.get('page'), 10);
+  if (!Number.isFinite(page) || page < 1) page = 1;
+  // One URL per page that exists: ?page=99 must not become a thin duplicate.
+  if (page > totalPages) return ssrRedirect('/browse/' + letter, SSR_BROWSE_CACHE);
+
+  const slice = entries.slice((page - 1) * perPage, page * perPage);
+  return browseHtml(seo.renderBrowseLetterPage(letter, slice, page, totalPages));
+}
+
 /**
  * The SSR routing table. Runs after /api/* and before the asset handler.
  *
@@ -1057,6 +1348,32 @@ async function ssrResponse(request, env, ctx, url) {
   // Bare family URLs are useful entry points; send them to the best default.
   if (pathname === '/movies') return ssrRedirect('/movies/popular', SSR_CATEGORY_CACHE);
   if (pathname === '/series') return ssrRedirect('/series/web-series', SSR_CATEGORY_CACHE);
+
+  /*  Sitemaps. Matched before the page routes because they are exact paths and
+   *  cheap to rule out, and because /sitemap.xml also exists as a stale static
+   *  file in the repo root — whichever answer this Worker gives has to win. */
+  if (pathname === '/sitemap.xml') {
+    return xmlResponse(await buildSitemapIndexXml(env, ctx));
+  }
+  if (pathname === '/sitemap-static.xml') return xmlResponse(seo.buildStaticSitemap());
+  if (pathname === '/sitemap-browse.xml') return xmlResponse(seo.buildBrowseSitemap());
+
+  // /sitemap-movies.xml, /sitemap-tv.xml and their numbered shards.
+  const mediaSitemap = /^\/sitemap-(movies|tv)(?:-(\d+))?\.xml$/.exec(pathname);
+  if (mediaSitemap) {
+    return serveMediaSitemap(
+      mediaSitemap[1] === 'tv' ? 'tv' : 'movie', mediaSitemap[2], env, ctx
+    );
+  }
+
+  // A-Z browse hubs.
+  if (pathname === '/browse') return serveBrowseIndex(env, ctx);
+  const browseLetter = /^\/browse\/([^/]+)$/.exec(pathname);
+  if (browseLetter) {
+    return serveBrowseLetter(
+      decodeURIComponent(browseLetter[1]).toLowerCase(), url, env, ctx
+    );
+  }
 
   const category = /^\/(movies|series)\/([^/]+)$/.exec(pathname);
   if (category) {
@@ -1138,19 +1455,27 @@ export default {
 export {
   b64urlToBytes,
   bytesToB64url,
+  buildSitemapIndexXml,
   concatBytes,
   encryptPushPayload,
   endpointId,
+  getSitemapItems,
   hkdf,
   importVapidSigningKey,
   isCalendarDate,
   processDueNotifications,
   routeApi,
+  seoLimits,
+  serveBrowseIndex,
+  serveBrowseLetter,
+  serveMediaSitemap,
+  sitemapShardPaths,
   ssrResponse,
   safeNotifyUrl,
   sendPushToSubscription,
   vapidAuthorization,
   validBatchPath,
+  xmlResponse,
   pushLimits
 };
 
@@ -1166,4 +1491,12 @@ export {
  */
 function pushLimits() {
   return { RECORD_SIZE, MAX_BATCH_PATHS };
+}
+
+/*  Same reason as pushLimits(): SITEMAP_CHUNK has to be readable by
+ *  worker-seo.test.js — it must equal SITEMAP_CHUNK_SIZE in seo-ssr.js or the two
+ *  runtimes advertise different shard sets — and a named number export makes the
+ *  module unloadable. */
+function seoLimits() {
+  return { SITEMAP_CHUNK, SITEMAP_KV_TTL, SITEMAP_LIVE_PAGES };
 }

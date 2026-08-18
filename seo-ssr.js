@@ -3017,6 +3017,7 @@ module.exports = {
   buildFaq,
   BROWSE_LETTERS,
   BROWSE_PER_PAGE,
+  SITEMAP_CHUNK_SIZE,
   SITEMAP_FALLBACK_DATE,
   SITEMAP_MIN_LASTMOD,
   isCalendarDate,
