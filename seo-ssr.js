@@ -850,6 +850,20 @@ nav.top a:hover{color:#f5c518}
 .srv a:hover{border-color:rgba(245,197,24,.45);background:rgba(245,197,24,.12);color:#fff}
 .srv span{border-color:#f5c518;background:rgba(245,197,24,.16);color:#f5c518}
 .watch-note{color:#a9a9bb;font-size:.86rem;margin:12px 0 0;line-height:1.6}
+/* ── Ad slot ──
+   min-height is reserved up front for the same reason the SPA reserves it: the
+   widget is written in by a third-party script seconds later, and an unreserved
+   insert of that size would shove everything below it down while someone is
+   reading. Collapsed to nothing for visitors the gate turns ads off for.
+   The 30px top margin is not cosmetic — it keeps the banner off the server
+   pills and the episode form. An ad touching a control farms misclicks, which
+   reads as revenue for a week and then costs CPM. */
+.ad-slot{margin:30px 0 0;min-height:300px}
+.ad-label{display:block;font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;opacity:0;height:18px;line-height:18px;color:#8b8b9c}
+.ad-slot.is-filled .ad-label{opacity:1}
+@media (max-width:1024px){.ad-slot{min-height:360px}}
+@media (max-width:640px){.ad-slot{min-height:440px}}
+html.mz-no-ads .ad-slot{display:none}
 .ep-form{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin:14px 0 0;color:#c9c9d6;font-size:.86rem}
 .ep-form input{width:74px;padding:7px 10px;border-radius:9px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.05);color:#fff;font:inherit}
 .ep-form button{padding:8px 16px;border-radius:999px;border:1px solid rgba(245,197,24,.5);background:rgba(245,197,24,.16);color:#f5c518;font-weight:700;cursor:pointer;font:inherit}
@@ -931,10 +945,125 @@ footer.foot h3{font-size:.74rem;letter-spacing:1.4px;text-transform:uppercase;co
 `.replace(/\n\s*/g, '');
 
 /** Header + breadcrumb + footer are identical on every SSR page. */
+/*  ══════════════════════════════════════════════════════════════════════
+ *  SERVER-RENDERED AD LAYER  (opt-in per page, via renderShell({ ads: true }))
+ *  ══════════════════════════════════════════════════════════════════════
+ *  WHICH UNITS, AND WHY NOT ALL OF THEM
+ *
+ *  • Native Banner — yes. On a watch page this is the best slot on the site:
+ *    the visitor is parked here for two hours, so a banner under the player is
+ *    seen without ever being in the way.
+ *
+ *  • Popunder — yes, but capped. It shares mz_ad_pop_at with the SPA, so a
+ *    visitor who already got one while browsing does NOT get a second one when
+ *    they hit play. That single decision is the difference between a site people
+ *    return to and one they do not: the first popunder earns, the third is why
+ *    someone installs an ad blocker.
+ *
+ *  • Social Bar — deliberately NOT here. It is a floating widget, and this is the
+ *    one page where the visitor is watching something full-screen-ish. A bar
+ *    hovering over the video is the definition of the irritation we are avoiding.
+ *    It stays on the SPA, where there is nothing to cover.
+ *
+ *  The page still needs zero JavaScript to play: the iframe, the server links and
+ *  the episode form are all plain HTML. This layer is purely additive, and
+ *  watch-page-check.js asserts exactly that rather than "no scripts at all".
+ *
+ *  Hosts here must also be in AD_HOSTS in sw.js, and the two regexes must match
+ *  index.html's copies byte-for-byte — ad-gate-check.js enforces both.
+ *  ══════════════════════════════════════════════════════════════════════ */
+const AD_NATIVE_CONTAINER = 'container-6c53da276868df37c1f0c6fc771e2d97';
+const AD_NATIVE_SRC = 'https://pl30971625.profitableratecpmnetwork.com/6c53da276868df37c1f0c6fc771e2d97/invoke.js';
+const AD_POPUNDER_SRC = 'https://pl30971623.profitableratecpmnetwork.com/c7/2e/b8/c72eb8605ed50b20e9de4938ed2680fe.js';
+const AD_POP_CAP_KEY = 'mz_ad_pop_at';
+const AD_POP_CAP_MS = 30 * 60 * 1000;
+
+/** The inline slot the native widget renders into. Placed by the page. */
+function adSlot() {
+  return '<aside class="ad-slot" aria-label="Advertisement">'
+    + '<span class="ad-label">Sponsored</span>'
+    + '<div id="' + AD_NATIVE_CONTAINER + '"></div>'
+    + '</aside>';
+}
+
+/** Head loader. String.raw so the regex backslashes survive verbatim. */
+function adLoaderScript() {
+  return '<script data-mz-ads="1">' + String.raw`
+(function(){
+  var ua = navigator.userAgent || '', host = location.hostname, d = document;
+  var CRAWLER_RE = /googlebot|bingbot|yandex(?:bot|images)|duckduckbot|baiduspider|applebot|facebookexternalhit|twitterbot|linkedinbot|slackbot|telegrambot|ahrefsbot|semrushbot|mj12bot|dotbot|petalbot|bytespider|uptimerobot|pingdom|statuscake/i;
+  var TV_UA_RE = /\b(?:smart-?tv|smarttv|googletv|android\s*tv|appletv|tvos|crkey|roku|web0?s|tizen|vidaa|hbbtv|netcast|viera|bravia|aquos)\b|\bAFT[A-Z0-9]/i;
+  var local = /^(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)$/.test(host)
+    || /^(?:192\.168\.|10\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(host);
+  var enabled = !local && !CRAWLER_RE.test(ua) && !TV_UA_RE.test(ua);
+  window.__mzAds = { enabled: enabled, injected: [], blocked: [], capped: [] };
+  if (!enabled) { d.documentElement.className += ' mz-no-ads'; return; }
+
+  function add(src, cfasync, name) {
+    var s = d.createElement('script');
+    s.src = src; s.async = true;
+    if (cfasync === false) s.setAttribute('data-cfasync', 'false');
+    s.onerror = function () { window.__mzAds.blocked.push(name); };
+    (d.body || d.head).appendChild(s);
+    window.__mzAds.injected.push(name);
+  }
+
+  // Native banner: only once its slot is close, so the impression is one a
+  // human could actually see.
+  function watch() {
+    var slot = d.querySelector('.ad-slot');
+    if (!slot) return;
+    var box = d.getElementById('${AD_NATIVE_CONTAINER}');
+    var fill = function () {
+      add('${AD_NATIVE_SRC}', false, 'native');
+      if (!box) return;
+      if (box.childElementCount > 0) { slot.className += ' is-filled'; return; }
+      if (!window.MutationObserver) return;
+      var mo = new MutationObserver(function () {
+        if (box.childElementCount > 0) { mo.disconnect(); slot.className += ' is-filled'; }
+      });
+      mo.observe(box, { childList: true });
+    };
+    if (!('IntersectionObserver' in window)) { fill(); return; }
+    var io = new IntersectionObserver(function (e) {
+      for (var i = 0; i < e.length; i++) {
+        if (e[i].isIntersecting) { io.disconnect(); fill(); return; }
+      }
+    }, { rootMargin: '400px' });
+    io.observe(slot);
+  }
+  if (d.readyState === 'loading') d.addEventListener('DOMContentLoaded', watch, { once: true });
+  else watch();
+
+  // Popunder: once per visit, shared with the SPA. Fails open if storage throws
+  // (Safari private mode) — storage must never decide whether an ad loads.
+  var popDone = false;
+  function pop() {
+    if (popDone) return;
+    popDone = true;
+    try {
+      var at = Number(localStorage.getItem('${AD_POP_CAP_KEY}') || 0);
+      if (at > 0 && (Date.now() - at) < ${AD_POP_CAP_MS}) {
+        window.__mzAds.capped.push('popunder');
+        return;
+      }
+      localStorage.setItem('${AD_POP_CAP_KEY}', String(Date.now()));
+    } catch (e) {}
+    add('${AD_POPUNDER_SRC}', undefined, 'popunder');
+  }
+  var EV = ['pointerdown', 'keydown', 'touchstart'];
+  function once() { EV.forEach(function (t) { window.removeEventListener(t, once, true); }); pop(); }
+  EV.forEach(function (t) { window.addEventListener(t, once, { capture: true, passive: true, once: true }); });
+  setTimeout(pop, 3000);
+})();
+` + '</script>';
+}
+
 function renderShell(opts) {
   const {
     title, description, canonicalPath, ogImage, ogType = 'website',
-    schemas = [], breadcrumbs = [], body, robots = 'index, follow, max-image-preview:large'
+    schemas = [], breadcrumbs = [], body, robots = 'index, follow, max-image-preview:large',
+    ads = false
   } = opts;
 
   const canonical = SITE_URL + canonicalPath;
@@ -992,6 +1121,7 @@ function renderShell(opts) {
 <link rel="preconnect" href="https://image.tmdb.org" crossorigin>
 <link rel="dns-prefetch" href="https://image.tmdb.org">
 <style>${BASE_CSS}</style>
+${ads ? adLoaderScript() : ''}
 ${allSchemas.map((s) => '<script type="application/ld+json">' + jsonLdScript(s) + '</script>').join('\n')}
 </head>
 <body>
@@ -2383,6 +2513,16 @@ function renderWatchPage(item, kind, opts) {
     <p class="watch-note">If the player stays blank or says the video is unavailable, pick a
       different server above — availability differs by network and region. Audio language and
       quality are chosen inside the player.</p>
+
+    <!-- Ad slot: BELOW the player and below the server switcher, never above and
+         never between them. Above the player it would delay the one thing the
+         visitor came for; wedged between the player and the server pills it would
+         collect the taps of everyone whose stream did not start. Down here it is
+         seen by someone who is already watching, and misses nobody's controls.
+         Its height is reserved in BASE_CSS, so it cannot shove the back-link and
+         footer around when it arrives. -->
+    ${adSlot()}
+
     <p class="watch-note"><a href="${esc(detail)}">&larr; Back to ${esc(title)} details</a></p>
   </section>
 </div>`;
@@ -2393,6 +2533,7 @@ function renderWatchPage(item, kind, opts) {
     canonicalPath: detail,          // the detail page is the canonical surface
     ogImage: item.poster_path ? IMG_POSTER_LG + item.poster_path : '',
     robots: 'noindex, follow',
+    ads: true,
     breadcrumbs: [
       { name: 'Home', path: '/' },
       { name: isTv ? 'Web Series' : 'Movies', path: isTv ? '/series/web-series' : '/movies/popular' },
@@ -3002,6 +3143,10 @@ module.exports = {
   registerHomeSsr,
   renderBrowseIndexPage,
   renderWatchPage,
+  // Exposed for ad-gate-check.js: the container id invoke.js looks up, so the
+  // test asserts against the real value instead of a copy of it.
+  AD_NATIVE_CONTAINER,
+  adSlot,
   WATCH_SOURCES,
   renderBrowseLetterPage,
   renderHomeLinkBlock,

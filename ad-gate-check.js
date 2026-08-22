@@ -45,8 +45,8 @@ function equal(actual, expected, msg) {
 /*  ── load the real gate ──
  *  The block is identified by the UNITS declaration rather than by position, so
  *  moving it inside <head> does not break the extraction. */
-const start = html.indexOf('  var UNITS = [');
-assert(start > 0, 'the ad UNITS array was not found in index.html');
+const start = html.indexOf('  var POP_CAP_KEY = ');
+assert(start > 0, 'the ad block was not found in index.html');
 const end = html.indexOf('</script>', start);
 assert(end > start, 'the ad block is not closed');
 // Stop before the IIFE's own closing `})();` — the body is re-wrapped below.
@@ -57,16 +57,22 @@ const block = html.slice(start, close);
 /** A fresh sandbox per run, so no state leaks between branches.
  *  Models just enough DOM to observe what the loader actually does: what it
  *  appended, what it observed, and what class it put on <html>. */
-function run(ua, host, tvAttr) {
+function run(ua, host, tvAttr, store) {
   const appended = [];
   const observed = [];
   const domReady = [];
   const el = { className: '', childElementCount: 0, children: [] };
   const slot = { className: 'mz-ad-slot' };
+  const bag = store || {};
 
   const sandbox = {
     navigator: { userAgent: ua },
     location: { hostname: host },
+    localStorage: {
+      getItem: (k) => (k in bag ? bag[k] : null),
+      setItem: (k, v) => { bag[k] = String(v); },
+      removeItem: (k) => { delete bag[k]; }
+    },
     document: {
       readyState: 'loading',
       documentElement: {
@@ -112,6 +118,7 @@ function run(ua, host, tvAttr) {
     mo,
     slot,
     container: el,
+    store: bag,
     htmlClass: () => sandbox.document.documentElement.className,
     /** Fire DOMContentLoaded, which is when inline slots start being watched. */
     ready() { sandbox.document.readyState = 'interactive'; domReady.forEach((fn) => fn()); return this; },
@@ -481,11 +488,212 @@ check('the crawler and TV regexes have not drifted from the RUM gate', () => {
   equal(tv[0], tv[1], 'the ad gate and the RUM gate no longer agree on what a TV is');
 });
 
-check('the SSR pages were left alone', () => {
+/*  ── the popunder cap: the one thing standing between "monetised" and "hostile" ── */
+console.log('');
+
+check('the popunder is capped, and the cap is a shared key', () => {
+  assert(/cap:\s*POP_CAP_KEY/.test(block), 'the popunder unit declares no cap');
+  const key = (block.match(/var POP_CAP_KEY = '([^']+)'/) || [])[1];
+  assert(key, 'no cap key is defined');
+  equal(key, 'mz_ad_pop_at', 'the cap key changed; the watch page reads this exact key');
+});
+
+check('only the popunder is capped — the inline units are not', () => {
+  const caps = (block.match(/cap:\s*POP_CAP_KEY/g) || []).length;
+  equal(caps, 1, 'more than one unit is capped; only the popunder costs the visitor a tab');
+});
+
+check('a fresh visitor gets the popunder', () => {
+  const r = run(CHROME, 'moviezone.dev', false, {});
+  r.ads.load();
+  assert(r.ads.state.injected.indexOf('popunder') !== -1, 'the first popunder was suppressed — that is the one that earns');
+  assert(r.store['mz_ad_pop_at'], 'the cap was never recorded, so the next page would pop again');
+});
+
+check('a visitor who just had one does NOT get a second', () => {
+  const store = { mz_ad_pop_at: String(Date.now() - 60 * 1000) };
+  const r = run(CHROME, 'moviezone.dev', false, store);
+  r.ads.load();
+  equal(r.ads.state.injected.indexOf('popunder'), -1,
+    'a second popunder inside the window — this is exactly what makes people install an ad blocker');
+  assert(r.ads.state.capped.indexOf('popunder') !== -1, 'the suppression was not recorded');
+});
+
+check('the cap expires, so a later visit can earn again', () => {
+  const store = { mz_ad_pop_at: String(Date.now() - 60 * 60 * 1000) };
+  const r = run(CHROME, 'moviezone.dev', false, store);
+  r.ads.load();
+  assert(r.ads.state.injected.indexOf('popunder') !== -1, 'the cap never expires, so a returning visitor never earns again');
+});
+
+check('the cap never suppresses Social Bar or the banner', () => {
+  const store = { mz_ad_pop_at: String(Date.now()) };
+  const r = run(CHROME, 'moviezone.dev', false, store);
+  r.ads.load();
+  assert(r.ads.state.injected.indexOf('socialbar') !== -1, 'Social Bar was caught by the popunder cap');
+  r.ready().intersect();
+  assert(r.appended.some((el) => /invoke\.js/.test(el.src)), 'the banner was caught by the popunder cap');
+});
+
+/*  ══ THE SERVER-RENDERED WATCH PAGE ══
+ *  Same questions again, against the real rendered HTML this time. */
+console.log('');
+
+const seo = require('./seo-ssr.js');
+const watchHtml = seo.renderWatchPage(
+  { id: 550, title: 'Fight Club', release_date: '1999-10-15', poster_path: '/x.jpg' }, 'movie', {});
+
+const SSR_OPEN = '<script data-mz-ads="1">';
+const ssrStart = watchHtml.indexOf(SSR_OPEN);
+const ssrBlock = ssrStart < 0 ? '' : watchHtml.slice(ssrStart + SSR_OPEN.length, watchHtml.indexOf('</script>', ssrStart));
+
+/** Run the SSR loader exactly as the browser would. */
+function runSsr(ua, host, store) {
+  const appended = [];
+  const domReady = [];
+  const el = { childElementCount: 0 };
+  const slot = { className: 'ad-slot' };
+  const bag = store || {};
+  const io = { cb: null, opts: null, targets: [], disconnected: false };
+  const timers = [];
+
+  const sandbox = {
+    navigator: { userAgent: ua },
+    location: { hostname: host },
+    localStorage: {
+      getItem: (k) => (k in bag ? bag[k] : null),
+      setItem: (k, v) => { bag[k] = String(v); }
+    },
+    document: {
+      readyState: 'loading',
+      documentElement: { className: '' },
+      body: { appendChild: (e) => appended.push(e) },
+      head: { appendChild: (e) => appended.push(e) },
+      createElement: () => ({ setAttribute(k, v) { this[k] = v; } }),
+      querySelector: () => slot,
+      getElementById: () => el,
+      addEventListener: (t, fn) => { if (t === 'DOMContentLoaded') domReady.push(fn); }
+    },
+    window: { addEventListener: () => {}, removeEventListener: () => {} },
+    setTimeout: (fn) => { timers.push(fn); return 0; }
+  };
+  sandbox.IntersectionObserver = function (cb, opts) {
+    io.opts = opts;
+    return { observe: (t) => { io.targets.push(t); io.cb = cb; }, disconnect: () => { io.disconnected = true; } };
+  };
+  sandbox.MutationObserver = function () { return { observe: () => {}, disconnect: () => {} }; };
+  sandbox.window.IntersectionObserver = sandbox.IntersectionObserver;
+  sandbox.window.MutationObserver = sandbox.MutationObserver;
+
+  vm.createContext(sandbox);
+  vm.runInContext(ssrBlock, sandbox);
+
+  return {
+    ads: sandbox.window.__mzAds,
+    appended, io, slot, store: bag,
+    htmlClass: () => sandbox.document.documentElement.className,
+    ready() { domReady.forEach((fn) => fn()); return this; },
+    /** Fire the deferred popunder timer. */
+    tick() { timers.forEach((fn) => fn()); return this; },
+    intersect() { if (io.cb) io.cb([{ isIntersecting: true }]); return this; }
+  };
+}
+
+check('the watch page carries the ad loader', () => {
+  assert(ssrStart > 0, 'no data-mz-ads script on the watch page');
+  assert(ssrBlock.length > 200, 'the loader body looks truncated');
+});
+
+check('the watch page renders the native slot', () => {
+  assert(watchHtml.includes('<aside class="ad-slot"'), 'no ad slot in the watch page markup');
+  assert(watchHtml.includes('<div id="' + seo.AD_NATIVE_CONTAINER + '"></div>'),
+    'the container invoke.js looks up is missing, so the widget would render nowhere');
+});
+
+check('the slot is below the player AND below the server switcher', () => {
+  const player = watchHtml.indexOf('<div class="player-shell">');
+  const servers = watchHtml.indexOf('class="srv"');
+  const slot = watchHtml.indexOf('<aside class="ad-slot"');
+  assert(slot > player, 'the ad is above the player — that delays the one thing the visitor came for');
+  assert(slot > servers, 'the ad sits between the player and the server pills, where it would catch '
+    + 'the taps of everyone whose stream did not start');
+});
+
+check('Social Bar is deliberately NOT on the watch page', () => {
+  assert(!/cf\/b1\/0b/.test(watchHtml),
+    'the Social Bar unit reached the watch page; a floating widget over a video is the irritation we are avoiding');
+});
+
+check('the watch page gate matches the SPA gate byte-for-byte', () => {
+  const spaCrawler = (block.match(/\/googlebot\|bingbot\|[^\n]*?\/i/) || [])[0];
+  const ssrCrawler = (ssrBlock.match(/\/googlebot\|bingbot\|[^\n]*?\/i/) || [])[0];
+  equal(ssrCrawler, spaCrawler, 'the watch page and the SPA disagree on what a crawler is');
+
+  const spaTv = (block.match(/\/\\b\(\?:smart-\?tv\|[^\n]*?\/i/) || [])[0];
+  const ssrTv = (ssrBlock.match(/\/\\b\(\?:smart-\?tv\|[^\n]*?\/i/) || [])[0];
+  equal(ssrTv, spaTv, 'the watch page and the SPA disagree on what a TV is');
+});
+
+check('the watch page shares the SPA popunder cap key', () => {
+  assert(ssrBlock.includes("'mz_ad_pop_at'"),
+    'the watch page uses a different cap key, so a visitor would get one popunder per surface');
+});
+
+check('a real visitor on the watch page gets the banner on approach', () => {
+  const r = runSsr(CHROME, 'moviezone.dev', {}).ready();
+  equal(r.ads.enabled, true, 'gated out in production');
+  assert(!r.appended.some((el) => /invoke\.js/.test(el.src)), 'invoke.js loaded before the slot was near');
+  r.intersect();
+  const native = r.appended.filter((el) => /invoke\.js/.test(el.src));
+  equal(native.length, 1, 'the banner never loaded');
+  equal(native[0]['data-cfasync'], 'false', 'data-cfasync="false" is missing behind Cloudflare');
+});
+
+check('the watch page popunder respects a cap already spent on the SPA', () => {
+  const r = runSsr(CHROME, 'moviezone.dev', { mz_ad_pop_at: String(Date.now() - 5000) }).tick();
+  assert(r.ads.capped.indexOf('popunder') !== -1,
+    'someone who already got a popunder while browsing gets a second one on pressing play');
+  assert(!r.appended.some((el) => /c72eb8605ed50b20e9de4938ed2680fe/.test(el.src)), 'the popunder was injected anyway');
+});
+
+check('the watch page popunder still fires for a visitor who landed directly', () => {
+  const r = runSsr(CHROME, 'moviezone.dev', {}).tick();
+  assert(r.appended.some((el) => /c72eb8605ed50b20e9de4938ed2680fe/.test(el.src)),
+    'a visitor arriving straight from Google earns nothing');
+});
+
+check('the watch page serves no ads on dev, crawlers or TV', () => {
+  [[CHROME, 'localhost'], [GOOGLEBOT, 'moviezone.dev'], [TIZEN, 'moviezone.dev']].forEach(([ua, host]) => {
+    const r = runSsr(ua, host, {}).ready();
+    equal(r.ads.enabled, false, 'ads were enabled for ' + host + ' / ' + ua.slice(0, 30));
+    equal(r.appended.length, 0, 'a script was injected anyway');
+    assert(/mz-no-ads/.test(r.htmlClass()), 'the reserved slot was not collapsed, leaving a permanent hole');
+  });
+});
+
+check('the watch page slot reserves its height too', () => {
   const ssr = fs.readFileSync(path.join(__dirname, 'seo-ssr.js'), 'utf8');
-  assert(!/profitablerate/i.test(ssr),
-    'an ad script reached seo-ssr.js; its detail pages assert that the only <script> tags are JSON-LD, '
-    + 'and the watch page asserts it ships no script of its own');
+  assert(/\.ad-slot\{[^}]*min-height:\d+px/.test(ssr), 'no reservation — the banner would shove the footer down');
+  assert(/html\.mz-no-ads \.ad-slot\{display:none\}/.test(ssr), 'no collapse rule for gated-off visitors');
+  assert(/\.ad-slot\{margin:30px 0 0/.test(ssr), 'no separation from the controls above it');
+});
+
+check('every SSR ad host is bypassed by sw.js as well', () => {
+  const listed = [...sw.match(/const AD_HOSTS = \[([^\]]*)\]/)[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
+  [...ssrBlock.matchAll(/https:\/\/([^/'"]+)/g)].map((m) => m[1]).forEach((h) => {
+    assert(listed.some((l) => h === l || h.endsWith('.' + l)), h + ' is not in AD_HOSTS');
+  });
+});
+
+check('ads stay opt-in — the indexed SSR pages are untouched', () => {
+  /*  Only the watch page opts in. Detail and category pages are the indexed,
+   *  organic-search surfaces, and seo-ssr.test.js asserts their only script tags
+   *  are the JSON-LD blocks — so an ad layer that defaulted to on inside
+   *  renderShell would break them. */
+  const ssr = fs.readFileSync(path.join(__dirname, 'seo-ssr.js'), 'utf8');
+  assert(/ads = false/.test(ssr), 'the ad layer is no longer opt-in; every SSR page would carry it');
+  equal((ssr.match(/^\s*ads: true,$/gm) || []).length, 1,
+    'a second SSR page opted into ads; only the watch page was agreed');
 });
 
 console.log('-'.repeat(70));

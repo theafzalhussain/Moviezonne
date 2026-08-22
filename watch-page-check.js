@@ -102,9 +102,39 @@ check('it is allowed to go fullscreen and autoplay',
   && /allowfullscreen/.test(movieHtml));
 check('the frame holds a 16:9 box so the page does not jump',
   /\.player-frame\{[^}]*aspect-ratio:16\/9/.test(ssrSrc));
-check('the page ships no script tag of its own',
-  !/<script(?![^>]*application\/ld\+json)/.test(movieHtml),
-  'the whole point is that it needs no JS');
+/*  This used to assert the page shipped NO script at all. That was a proxy for
+ *  the property that actually matters — playback must not depend on JavaScript —
+ *  and it stopped being usable once the page carried an ad loader.
+ *
+ *  So the real property is asserted directly instead, and more strictly than
+ *  before: the player, the server switcher and the episode form must contain no
+ *  script, no event handler and no JS URL, and every script on the page must be
+ *  either JSON-LD or the ad loader. Kill JavaScript and the film still plays. */
+check('playback needs no JavaScript',
+  !/<script/.test(movieHtml.slice(
+    movieHtml.indexOf('<div class="player-shell">'),
+    movieHtml.indexOf('<aside class="ad-slot"')))
+  && !/\son(?:click|load|error|submit)=/i.test(movieHtml)
+  && !/href="javascript:/i.test(movieHtml),
+  'the player region grew a script or an inline handler — the page must work with JS off');
+
+check('the only scripts on the page are JSON-LD and the ad loader',
+  (function () {
+    const tags = movieHtml.match(/<script[^>]*>/g) || [];
+    const loaders = tags.filter((t) => /data-mz-ads/.test(t));
+    const other = tags.filter((t) => !/data-mz-ads/.test(t) && !/application\/ld\+json/.test(t));
+    return loaders.length === 1 && other.length === 0;
+  })(),
+  'an unexpected script tag appeared on the watch page: '
+    + JSON.stringify((movieHtml.match(/<script[^>]*>/g) || [])));
+
+check('the ad loader cannot block the player',
+  !/<script\s+src="https?:/.test(movieHtml),
+  'a cross-origin script tag is in the markup; ad units must be injected at runtime');
+
+check('the ad loader cannot block the player',
+  !/<script\s+src="https?:/.test(movieHtml),
+  'a cross-origin script tag is in the markup; ad units must be injected at runtime');
 
 check('every alternate server is offered as a link',
   (movieHtml.match(/class="srv"/g) || []).length === 1

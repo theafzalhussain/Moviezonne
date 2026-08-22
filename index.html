@@ -785,9 +785,21 @@ html.mz-no-ads .mz-ad-slot{display:none}
    *
    *  cfasync:false reproduces Adsterra's own data-cfasync="false" — this site is
    *  behind Cloudflare, and it is what tells Rocket Loader to leave the tag alone.
+   *
+   *  cap / capMs: a popunder is the only format here that costs the visitor
+   *  something — it takes over a tab. Adsterra's own advice is one per page, but
+   *  this is a SPA plus server-rendered /watch pages, so "per page" would mean a
+   *  fresh popunder every time someone navigates. Capped to once per visit
+   *  (shared with the watch page through the same localStorage key), which keeps
+   *  the impression that actually earns and drops the ones that only cost
+   *  goodwill: the second and third popunder are what makes people leave and
+   *  never come back.
    */
+  var POP_CAP_KEY = 'mz_ad_pop_at';
+  var POP_CAP_MS = 30 * 60 * 1000;
+
   var UNITS = [
-    { name: 'popunder', trigger: 'idle',
+    { name: 'popunder', trigger: 'idle', cap: POP_CAP_KEY, capMs: POP_CAP_MS,
       src: 'https://pl30971623.profitableratecpmnetwork.com/c7/2e/b8/c72eb8605ed50b20e9de4938ed2680fe.js' },
     { name: 'socialbar', trigger: 'idle',
       src: 'https://pl30971624.profitableratecpmnetwork.com/cf/b1/0b/cfb10bc21fd62d40b8a3e0fbe59427b3.js' },
@@ -829,7 +841,7 @@ html.mz-no-ads .mz-ad-slot{display:none}
     };
   }
 
-  var state = { units: UNITS.map(function (u) { return u.name; }), injected: [], blocked: [], profile: null };
+  var state = { units: UNITS.map(function (u) { return u.name; }), injected: [], blocked: [], capped: [], profile: null };
   window.__mzAds = { decide: decide, state: state, load: load };
 
   /*  Decided here, before the first paint, and not only because it is cheap
@@ -844,11 +856,28 @@ html.mz-no-ads .mz-ad-slot{display:none}
     document.documentElement.className += ' mz-no-ads';
   }
 
+  /*  Has this capped unit already fired inside the cap window? Wrapped because
+   *  localStorage throws in Safari private mode — and a storage failure must
+   *  never be the reason an ad does or does not load, so it fails open. */
+  function capSpent(unit) {
+    if (!unit.cap) return false;
+    try {
+      var at = Number(localStorage.getItem(unit.cap) || 0);
+      return at > 0 && (Date.now() - at) < unit.capMs;
+    } catch (e) { return false; }
+  }
+  function markCap(unit) {
+    if (!unit.cap) return;
+    try { localStorage.setItem(unit.cap, String(Date.now())); } catch (e) {}
+  }
+
   function inject(unit) {
     if (unit._injected) return;
     // Re-check TV: tv-mode.js has run by now and is the authority.
     if (document.documentElement.getAttribute('data-mz-tv') === 'true') return;
+    if (capSpent(unit)) { state.capped.push(unit.name); return; }
     unit._injected = true;
+    markCap(unit);
 
     var s = document.createElement('script');
     s.src = unit.src;
