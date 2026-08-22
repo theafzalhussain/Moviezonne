@@ -4075,6 +4075,33 @@ html[data-mz-tv="true"] .cat-group-menu {
   contain: layout style;
 }
 
+/*  READABILITY SCRIM
+ *  .modal-gradient is anchored to .modal-top and only turns fully opaque in its
+ *  last 6%, but .modal-top grows with the meta column (badges + genres + tagline
+ *  + crew + cast + production), so on a tall info block the text ended up over
+ *  the bright middle of the backdrop. This scrim is anchored to the info column
+ *  itself, so however tall the content gets it always has a dark base under it.
+ *  Full-bleed (100vw) because .modal-info is capped at 1400px and centered —
+ *  a scrim limited to that box would leave lit picture on both sides. */
+.modal-info::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 100vw;
+  transform: translateX(-50%);
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(to bottom,
+      rgba(7, 7, 15, 0) 0%,
+      rgba(7, 7, 15, 0.45) 10%,
+      rgba(7, 7, 15, 0.78) 22%,
+      rgba(7, 7, 15, 0.92) 40%,
+      rgba(7, 7, 15, 0.97) 62%,
+      var(--bg2) 82%);
+}
+
 .modal-title {
   font-family: 'Bebas Neue', sans-serif;
   font-size: 3.2rem;
@@ -4132,7 +4159,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   flex-direction: column;
   gap: 14px;
   margin-bottom: 1.2rem;
-  max-height: 380px;
+  max-height: 450px;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(245, 197, 24, 0.2) transparent;
@@ -4148,10 +4175,15 @@ html[data-mz-tv="true"] .cat-group-menu {
    *
    *  The floor is the cap on purpose: a released title always comes back with
    *  rating, year, runtime, genres, a tagline and a cast row, which overflows
-   *  380px on every viewport measured — so "reserve the cap" is the same thing
+   *  the cap on every viewport measured — so "reserve the cap" is the same thing
    *  as "reserve what it will actually be", and it is the only value that is
-   *  exact rather than approximate. */
-  min-height: 380px;
+   *  exact rather than approximate. Floor and cap must move together or the
+   *  reservation stops being exact.
+   *
+   *  450 rather than 380 because the crew / cast / production panels have their
+   *  own padding again (they used to be flattened by the .modal-meta>div reset);
+   *  at 380 the production row was sliced in half by the scroll cap. */
+  min-height: 450px;
 }
 
 .modal-meta.meta-hidden {
@@ -4177,7 +4209,13 @@ html[data-mz-tv="true"] .cat-group-menu {
   border-radius: 4px;
 }
 
-.modal-meta>div,
+/*  Base reset for the meta column: badges / genres / tagline are meant to sit
+ *  directly on the backdrop with no surface of their own.
+ *  The :not() chain is load-bearing — this selector is more specific than the
+ *  panel classes below (0,1,1 vs 0,1,0), so without the exclusions it silently
+ *  stripped the crew / cast / production panels of their background, blur,
+ *  border and padding, leaving that text unreadable on a bright backdrop. */
+.modal-meta>div:not(.modal-crew-row):not(.modal-cast-section):not(.modal-production-row),
 .modal-meta>span {
   background: transparent;
   backdrop-filter: none;
@@ -4333,10 +4371,10 @@ html[data-mz-tv="true"] .cat-group-menu {
   flex-wrap: wrap;
   gap: 12px;
   padding: 10px 16px;
-  background: linear-gradient(135deg, rgba(15, 15, 25, 0.5), rgba(25, 25, 40, 0.3));
+  background: linear-gradient(135deg, rgba(10, 10, 20, 0.82), rgba(20, 20, 34, 0.68));
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 12px;
 }
 
@@ -4365,12 +4403,12 @@ html[data-mz-tv="true"] .cat-group-menu {
 .modal-cast-section {
   margin-top: 6px;
   padding: 14px 16px;
-  background: linear-gradient(135deg, rgba(15, 15, 25, 0.6), rgba(25, 25, 40, 0.35));
+  background: linear-gradient(135deg, rgba(10, 10, 20, 0.88), rgba(20, 20, 34, 0.74));
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 14px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
 }
 
 .modal-cast-label {
@@ -4420,8 +4458,8 @@ html[data-mz-tv="true"] .cat-group-menu {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.045));
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 12px;
   padding: 8px 14px 8px 8px;
   flex-shrink: 0;
@@ -4489,7 +4527,7 @@ html[data-mz-tv="true"] .cat-group-menu {
 
 .modal-cast-char {
   font-size: 0.62rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgba(255, 255, 255, 0.62);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4505,14 +4543,16 @@ html[data-mz-tv="true"] .cat-group-menu {
   align-items: center;
   margin-top: 4px;
   padding: 10px 14px;
-  background: linear-gradient(135deg, rgba(15, 15, 25, 0.4), rgba(25, 25, 40, 0.2));
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: linear-gradient(135deg, rgba(10, 10, 20, 0.78), rgba(20, 20, 34, 0.6));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
 }
 
 .modal-prod-chip {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 10px;
   padding: 8px 14px;
   display: flex;
@@ -4522,17 +4562,20 @@ html[data-mz-tv="true"] .cat-group-menu {
 }
 
 .modal-prod-chip:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.22);
   transform: translateY(-1px);
 }
 
+/*  Studio logos ship in their own colours — a lot of them are solid black on a
+ *  transparent PNG, which is invisible on this panel. Flatten every logo to
+ *  white so they all read at the same weight. */
 .modal-prod-chip img {
   height: 22px;
   max-width: 90px;
   object-fit: contain;
   filter: brightness(0) invert(1);
-  opacity: 0.75;
+  opacity: 0.92;
   transition: opacity 0.2s ease;
 }
 

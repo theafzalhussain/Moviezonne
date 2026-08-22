@@ -2369,6 +2369,162 @@ function latestAnimeWindowQuery(page) {
   };
 }
 
+/*  ══════════════════════════════════════════════════════════════════════
+ *  UPCOMING RELEASE SOURCES  (one per industry)
+ *  ══════════════════════════════════════════════════════════════════════
+ *  The Upcoming section used to ask TMDB two questions: English releases and
+ *  Hindi releases. In practice it rendered as a Hollywood-only section, for the
+ *  same reason the ALL feed's latest group did (see latestIndianWindowQuery):
+ *  `sort_by=popularity.desc` on a shared pool is always won by Hollywood, and
+ *  the two Hindi requests carried `region: IN`, which drops any Indian title
+ *  whose IN release date TMDB does not carry yet — i.e. exactly the not-yet-
+ *  released titles this section exists for.
+ *
+ *  So each industry now gets asked its own question, the same shape the home
+ *  feed uses: Hollywood, all Indian industries together (one request covers
+ *  Bollywood, Tollywood, Tamil, Malayalam, Kannada, Bengali…), then Bollywood,
+ *  Tollywood and Tamil individually so a big release week in one cannot push
+ *  the others off their shared first page, plus anime and Korean.
+ *
+ *  Hollywood and the shared Indian window take two TMDB pages each because they
+ *  are by far the deepest catalogues; the dedicated per-language sources take
+ *  one, which keeps the whole section at nine requests — and tmdbBatch() folds
+ *  those into a single round-trip.
+ *
+ *  Built here, in one place, because loadUpcoming() and prefetchUpcomingPage()
+ *  must send byte-identical params: tmdb() caches by full URL, so one reordered
+ *  key would turn every prefetch into a wasted request.
+ */
+const UPCOMING_WINDOW_MONTHS = 3;
+
+/** The release window: yesterday (so a title releasing today is never missed to
+ *  a timezone) through three months out. Kept short on purpose — a wider window
+ *  lets far-future blockbusters win the popularity sort and crowd genuine
+ *  next-few-weeks releases out of page one. */
+function upcomingWindowDates() {
+  const from = new Date();
+  from.setDate(from.getDate() - 1);
+  const gte = from.toISOString().split('T')[0];
+  from.setMonth(from.getMonth() + UPCOMING_WINDOW_MONTHS);
+  return { gte: gte, lte: from.toISOString().split('T')[0] };
+}
+
+function upcomingQuery(page, extra) {
+  const w = upcomingWindowDates();
+  return Object.assign({
+    language: 'en-US',
+    page: String(page),
+    sort_by: 'popularity.desc',
+    'primary_release_date.gte': w.gte,
+    'primary_release_date.lte': w.lte
+  }, extra || {});
+}
+
+const UPCOMING_SOURCES = [
+  { key: 'hollywood', deep: true,  params: { with_original_language: 'en' } },
+  { key: 'indian',    deep: true,  params: { with_origin_country: INDIAN_ORIGIN_COUNTRY } },
+  { key: 'bollywood', deep: false, params: { with_original_language: BOLLYWOOD_LANGUAGE } },
+  { key: 'tollywood', deep: false, params: { with_original_language: 'te' } },
+  { key: 'tamil',     deep: false, params: { with_original_language: 'ta' } },
+  { key: 'anime',     deep: false, params: { with_genres: '16', with_original_language: 'ja' } },
+  { key: 'korean',    deep: false, params: { with_original_language: 'ko' } }
+];
+
+/** The full tmdbBatch plan for one Upcoming page. */
+function upcomingPagePlan(pageNum) {
+  const plan = [];
+  UPCOMING_SOURCES.forEach(src => {
+    if (src.deep) {
+      plan.push(['/discover/movie', upcomingQuery(pageNum * 2 - 1, src.params)]);
+      plan.push(['/discover/movie', upcomingQuery(pageNum * 2, src.params)]);
+    } else {
+      plan.push(['/discover/movie', upcomingQuery(pageNum, src.params)]);
+    }
+  });
+  return plan;
+}
+
+/*  ── INDUSTRY INTERLEAVE ──
+ *  Upcoming is ordered by release date, which is the only order that makes
+ *  sense for it. But date order alone does not fix the section: Hollywood
+ *  releases something almost every Friday, so the twelve cards shown before
+ *  "load more" could still be twelve Hollywood titles while the first Bollywood
+ *  or anime release sits three weeks out, off screen.
+ *
+ *  So the merge stays chronological but caps how many titles one industry may
+ *  place back-to-back. Every industry present in the pool reaches the first
+ *  screen, and nothing is reordered by more than a few positions.
+ */
+const UPCOMING_MAX_RUN = 3;
+
+const UPCOMING_INDUSTRY_BY_LANG = {
+  en: 'hollywood', hi: 'bollywood', te: 'tollywood', ta: 'tamil',
+  ml: 'malayalam', kn: 'kannada', mr: 'marathi', bn: 'bengali',
+  pa: 'punjabi', gu: 'gujarati', ko: 'korean', zh: 'chinese', cn: 'chinese'
+};
+
+function upcomingIndustryOf(movie) {
+  const lang = (movie && movie.original_language) || 'en';
+  // Japanese animation is the Anime category; live-action Japanese is not.
+  if (lang === 'ja') {
+    return (movie.genre_ids || []).indexOf(16) !== -1 ? 'anime' : 'japanese';
+  }
+  return UPCOMING_INDUSTRY_BY_LANG[lang] || 'world';
+}
+
+/** Chronological merge with a per-industry run cap. `list` must already be
+ *  sorted by release date ascending. */
+function interleaveUpcomingByIndustry(list) {
+  if (!Array.isArray(list) || list.length < 3) return Array.isArray(list) ? list.slice() : [];
+
+  const buckets = new Map();
+  const order = [];                       // first-seen industry order, so the merge is deterministic
+  for (const movie of list) {
+    const key = upcomingIndustryOf(movie);
+    if (!buckets.has(key)) { buckets.set(key, []); order.push(key); }
+    buckets.get(key).push(movie);
+  }
+  if (order.length < 2) return list.slice();
+
+  const out = [];
+  let remaining = list.length;
+  let lastKey = null;
+  let run = 0;
+  const picked = new Map();               // industry → how many it has placed so far
+  order.forEach(k => picked.set(k, 0));
+
+  while (remaining > 0) {
+    let pickKey = null;
+    let pickDate = null;
+    for (const key of order) {
+      const queue = buckets.get(key);
+      if (!queue.length) continue;
+      if (key === lastKey && run >= UPCOMING_MAX_RUN) continue;   // run cap
+      const date = queue[0].release_date || '9999-12-31';
+      if (pickDate === null || date < pickDate) { pickDate = date; pickKey = key; continue; }
+      /*  Same-day tie-break: whoever has placed fewer cards so far wins. Without
+       *  this, a day with eight releases is handed to whichever industry happens
+       *  to sit earliest in `order`, and on a busy Friday that alone can fill the
+       *  first screen — which is the problem this function exists to solve. */
+      if (date === pickDate && picked.get(key) < picked.get(pickKey)) pickKey = key;
+    }
+    if (pickKey === null) {
+      // Everything left belongs to the industry that just hit its run cap —
+      // release the cap rather than dropping the tail. remaining > 0 guarantees
+      // some bucket is non-empty, so this cannot spin.
+      lastKey = null;
+      run = 0;
+      continue;
+    }
+    out.push(buckets.get(pickKey).shift());
+    picked.set(pickKey, picked.get(pickKey) + 1);
+    remaining--;
+    run = (pickKey === lastKey) ? run + 1 : 1;
+    lastKey = pickKey;
+  }
+  return out;
+}
+
 // -- CAROUSEL (PROFESSIONAL DISCOVERY ALGORITHM)
 // Netflix/Hotstar-grade weighted scoring: fetches from ALL categories and ranks by composite score
 // Score = (rating_weight) + (popularity_weight) + (recency_boost) + (trending_velocity) + (vote_confidence) + (quality_upgrade_boost)
@@ -3636,14 +3792,10 @@ function prefetchMoviesPage(cat, pageNum) {
 }
  
 function prefetchUpcomingPage(pageNum) {
-  const p1 = String(pageNum * 2 - 1);
-  const p2 = String(pageNum * 2);
-  const d = new Date(); d.setDate(d.getDate() - 1); const today = d.toISOString().split('T')[0];
-  d.setMonth(d.getMonth() + 3); const future = d.toISOString().split('T')[0];
-  tmdb('/discover/movie', { language: 'en-US', page: p1, sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'en' });
-  tmdb('/discover/movie', { language: 'en-US', page: p2, sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'en' });
-  tmdb('/discover/movie', { language: 'en-US', page: p1, sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'hi', region: 'IN' });
-  tmdb('/discover/movie', { language: 'en-US', page: p2, sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'hi', region: 'IN' });
+  /*  Same plan builder loadUpcoming() uses, so the params — and therefore the
+   *  cache keys — are byte-identical and this prefetch actually answers the next
+   *  "Load More" instead of warming a URL nobody asks for. */
+  tmdbBatch(upcomingPagePlan(pageNum));   // never rejects; fire and forget
 }
  
 // -- LOAD MOVIES
@@ -5696,32 +5848,27 @@ async function loadUpcoming(isLoadMore = false) {
     const btn = document.getElementById('loadMoreUpcomingBtn');
     if (btn) btn.innerHTML = 'Loading...';
   }
- 
-  const p1 = String(currentUpcomingPage * 2 - 1);
-  const p2 = String(currentUpcomingPage * 2);
- 
+
   try {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
-    const today = d.toISOString().split('T')[0];
-    d.setMonth(d.getMonth() + 3);
-    const future = d.toISOString().split('T')[0];
- 
-    const res = await Promise.all([
-      tmdb('/discover/movie', { language: 'en-US', page: p1, sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'en' }),
-      tmdb('/discover/movie', { language: 'en-US', page: p2, sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'en' }),
-      tmdb('/discover/movie', { language: 'en-US', page: p1, sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'hi', region: 'IN' }),
-      tmdb('/discover/movie', { language: 'en-US', page: p2, sort_by: 'popularity.desc', 'primary_release_date.gte': today, 'primary_release_date.lte': future, with_original_language: 'hi', region: 'IN' })
-    ]);
+    /*  Every industry, one round-trip — see UPCOMING_SOURCES. This replaced two
+     *  English + two `region: IN` Hindi requests, which is why the section only
+     *  ever showed Hollywood. */
+    const res = await tmdbBatch(upcomingPagePlan(currentUpcomingPage));
     let movies = [];
-    res.forEach(r => { movies = movies.concat(r.results||[]); });
+    res.forEach(r => {
+      if (r.status === 'fulfilled' && r.value && r.value.results) movies = movies.concat(r.value.results);
+    });
     
     const realToday = new Date().toISOString().split('T')[0];
-    movies = movies.filter(m => m.poster_path && m.release_date && m.release_date >= realToday); // Removed backdrop requirement for upcoming
+    movies = movies.filter(m => m && m.poster_path && m.release_date && m.release_date >= realToday); // Removed backdrop requirement for upcoming
     
     const existingIds = new Set(allUpcoming.map(m => m.id));
-    const newMovies = movies.filter(m => { if(existingIds.has(m.id)) return false; existingIds.add(m.id); return true; });
+    let newMovies = movies.filter(m => { if(existingIds.has(m.id)) return false; existingIds.add(m.id); return true; });
     newMovies.sort((a, b) => a.release_date.localeCompare(b.release_date));
+    /*  Chronological, but no single industry may take more than a few cards in
+     *  a row — otherwise the twelve cards on the first screen are still all
+     *  Hollywood simply because it releases something every week. */
+    newMovies = interleaveUpcomingByIndustry(newMovies);
     
     allUpcoming = allUpcoming.concat(newMovies);
  
