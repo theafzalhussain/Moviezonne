@@ -1631,6 +1631,14 @@ function renderDetailPage(item, kind) {
     </ul>
   </section>` : ''}
 
+  <!-- Ad slot: after the content the visitor came for (facts, synopsis, cast) and
+       before "More like this". A search visitor reads down to here, so it is seen
+       without pushing anything they wanted further down. Deliberately NOT next to
+       the related-titles grid's links or the Play CTA — an ad against a control
+       harvests misclicks, which costs CPM once the advertiser sees the bounce.
+       Height is reserved in BASE_CSS, so it cannot shift the grid below it. -->
+  ${adSlot()}
+
   ${related.length ? `<section>
     <h2>More like ${esc(title)}</h2>
     <p class="lede">Titles that share a genre, cast or tone with ${esc(title)} — each one opens its own page with full details.</p>
@@ -1654,6 +1662,7 @@ function renderDetailPage(item, kind) {
     canonicalPath,
     ogImage: posterLg || (backdrop || LOGO_URL),
     ogType: 'video.movie',
+    ads: true,
     schemas: faqSchema ? [schema, faqSchema] : [schema],
     breadcrumbs,
     body
@@ -2571,7 +2580,14 @@ function registerSeoRoutes(app, deps) {
       try {
         item = await tmdb('/' + kind + '/' + parsed.id, {
           language: 'en-US',
-          append_to_response: 'credits,similar,recommendations,videos,watch/providers,release_dates,content_ratings'
+          append_to_response: 'credits,similar,recommendations,videos,watch/providers,release_dates,content_ratings',
+          /*  Without this, TMDB applies `language` to the appended videos too and
+           *  returns only English-tagged ones — so trailerOf() found nothing for
+           *  Hindi, Tamil or Telugu titles and the trailer link silently vanished
+           *  on exactly the pages that most need it. Same list moviezone.js uses;
+           *  `null` covers videos with no language tag, which is what regional
+           *  distributors usually upload. */
+          include_video_language: 'en,hi,ta,te,ml,kn,mr,bn,pa,ja,ko,null'
         });
       } catch (err) {
         const status = err && (err.tmdbStatus || err.status);

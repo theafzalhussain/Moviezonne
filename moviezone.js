@@ -5087,8 +5087,40 @@ function _mzCardPrefetch(card) {
   const id = card.dataset.id;
   const type = card.dataset.type;
   if (!id || !type) return;
-  try { tmdb('/' + type + '/' + id, { language: 'en-US', append_to_response: 'videos,credits' }); } catch (err) {}
+  try { tmdb('/' + type + '/' + id, detailParams('videos,credits')); } catch (err) {}
   try { preconnectPlayerHosts(3); } catch (err) {}
+}
+
+/*  ══════════════════════════════════════════════════════════════════════
+ *  DETAIL REQUEST PARAMS  (single source of truth)
+ *  ══════════════════════════════════════════════════════════════════════
+ *  TMDB applies `language` to the videos it appends as well, so
+ *  `language=en-US` alone returns ONLY videos tagged English. That is why the
+ *  hover trailer worked on Hollywood titles and silently did nothing on much of
+ *  the catalogue: a Hindi, Tamil or Telugu film's trailer is tagged with its own
+ *  language, so `videos.results` came back empty and there was nothing to play.
+ *
+ *  Measured across 54 popular titles spanning en/hi/te/ta/ml/ko movies and
+ *  ja/hi/ko series: 22 had no playable video at all, and 10 of those 22 return
+ *  one the moment this list is sent (one Tamil title went from 0 videos to 5).
+ *  The remaining 12 genuinely have nothing on TMDB — mostly daily soaps and
+ *  variety shows — which is why the trailer indicator is now conditional too.
+ *
+ *  `null` is TMDB's own token for videos carrying no language tag, and those are
+ *  usually the ones regional distributors upload.
+ *
+ *  Built here, in one place, because the hover prefetch and openModal() must send
+ *  byte-identical params: tmdb() caches by full URL, so a single differing key
+ *  spends the prefetch warming a URL nobody ever asks for.
+ *  ══════════════════════════════════════════════════════════════════════ */
+const VIDEO_LANGS = 'en,hi,ta,te,ml,kn,mr,bn,pa,ja,ko,null';
+
+function detailParams(append) {
+  return {
+    language: 'en-US',
+    append_to_response: append || 'videos,credits',
+    include_video_language: VIDEO_LANGS
+  };
 }
 
 function ensureGridDelegation(grid) {
@@ -5994,7 +6026,7 @@ async function openUpcomingDetail(id, type, activationEvent) {
   
   try {
     // Fetch full movie details with videos, credits, and similar
-    const details = await tmdb('/' + mediaType + '/' + id, { language: 'en-US', append_to_response: 'videos,credits,similar' });
+    const details = await tmdb('/' + mediaType + '/' + id, detailParams('videos,credits,similar'));
     
     // If another request was started while this one was loading, discard this result
     if (_udAbortController && _udAbortController.signal.aborted) return;
@@ -7037,7 +7069,7 @@ async function openModal(id, type = 'movie', activationEvent) {
      *  that is ~70ms. It is already off the interaction because the
      *  mzYieldToPaint() above committed the frame first — worth knowing before
      *  anything is moved back above that boundary. */
-    const details = await tmdb('/'+type+'/'+id, { language: 'en-US', append_to_response: 'videos,credits' });
+    const details = await tmdb('/'+type+'/'+id, detailParams('videos,credits'));
 
     /*  TMDB has no record for this id — confirmed 404, already logged silently by
      *  tmdb(). Every field below would be undefined, which left the modal sitting
@@ -7093,23 +7125,31 @@ async function openModal(id, type = 'movie', activationEvent) {
       let tc = document.getElementById('trailerContainer');
       if (tc) tc.remove();
 
-      // NEW: Add trailer indicator icon
+      /*  The trailer indicator is conditional, and that is half the bug report.
+       *  It used to be appended unconditionally, so titles TMDB has no video for
+       *  still advertised a play icon — you hover, nothing happens, and the
+       *  feature looks broken rather than absent. Measured on a 54-title sample,
+       *  12 titles genuinely have no video at all even with every video language
+       *  requested, so this case is common and has to be handled honestly.
+       *  It is also removed on TV, where hover trailers never run. */
+      const canPlayTrailer = bestVids.length > 0 && !isMzTV();
       let trailerIndicator = imageWrapper.querySelector('.modal-trailer-indicator');
-      if (!trailerIndicator) {
+      if (canPlayTrailer && !trailerIndicator) {
         trailerIndicator = document.createElement('div');
         trailerIndicator.className = 'modal-trailer-indicator';
         // Just the icon, as requested
         trailerIndicator.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>';
         imageWrapper.appendChild(trailerIndicator);
+      } else if (!canPlayTrailer && trailerIndicator) {
+        trailerIndicator.remove();
       }
-      // END NEW
 
       // Clear any previous listeners to prevent memory leaks
       eventContainer.onclick = null;
       eventContainer.onmouseenter = null;
       eventContainer.onmouseleave = null;
 
-      if (bestVids.length > 0 && !isMzTV()) {
+      if (canPlayTrailer) {
         let currentVidIdx = 0;
         let trailerKey = bestVids[currentVidIdx].key;
  

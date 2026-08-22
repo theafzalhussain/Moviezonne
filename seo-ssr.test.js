@@ -495,8 +495,15 @@ test('JSON-LD escapes angle brackets so payload text stays inert', () => {
 });
 
 test('the only <script> tags in the document are the JSON-LD blocks we emitted', () => {
+  /*  The point of this test is injection, not inventory: hostile TMDB content must
+   *  never be able to produce a script tag. The page now also carries exactly one
+   *  ad loader (<script data-mz-ads="1">, emitted by renderShell for ads:true
+   *  pages), so that one tag is allowed by identity — and only once. Anything else
+   *  still fails, which is the property that matters. */
   const scripts = hostileHtml.match(/<script\b[^>]*>/gi) || [];
-  scripts.forEach((tag) => {
+  const loaders = scripts.filter((t) => t === '<script data-mz-ads="1">');
+  assert.ok(loaders.length <= 1, 'more than one ad loader was emitted: ' + loaders.length);
+  scripts.filter((t) => t !== '<script data-mz-ads="1">').forEach((tag) => {
     assert.strictEqual(tag, '<script type="application/ld+json">',
       'unexpected script tag rendered: ' + tag);
   });
@@ -511,8 +518,12 @@ test('hostile cast values are escaped', () => {
 });
 
 test('no JSON-LD block is terminated early by hostile content', () => {
-  // Count opening and closing script tags: a breakout produces a mismatch.
-  const opens = (hostileHtml.match(/<script type="application\/ld\+json">/g) || []).length;
+  /*  Count opening and closing script tags: a breakout produces a mismatch.
+   *  The ad loader contributes one open and one close, so it is counted on both
+   *  sides rather than excluded — dropping it from only one side would have made
+   *  this assertion pass for the wrong reason. */
+  const opens = (hostileHtml.match(/<script type="application\/ld\+json">/g) || []).length
+    + (hostileHtml.match(/<script data-mz-ads="1">/g) || []).length;
   const closes = (hostileHtml.match(/<\/script>/g) || []).length;
   assert.strictEqual(opens, closes, 'script tag imbalance implies a JSON-LD breakout');
 });

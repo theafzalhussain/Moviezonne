@@ -1,28 +1,4 @@
-/* ═══════════════════════════════════════════════════════════════════════════
-   ad-gate-check.js — the Adsterra ad layer in index.html.
 
-   WHAT IS UNDER TEST
-   Ads are revenue, so the failure modes here are expensive in both directions:
-   a unit that never loads earns nothing, and a unit that loads for the wrong
-   visitor is invalid traffic — which is how a publisher account gets flagged.
-
-     • the gate's branches: dev, crawler, TV, no-units, and the allow branch
-     • the snippet is never parser-blocking (Adsterra ships a synchronous
-       <script src> and tells you to paste it before </head>; pasted literally it
-       sits in front of the stylesheet, the fonts and all three bundles)
-     • it is not loaded during the first paint
-     • every ad host is bypassed by sw.js, so an ad-blocked request cannot turn
-       into service-worker noise on every navigation
-     • the crawler/TV regexes have not drifted from the RUM gate's copies
-
-   WHY A SOURCE-LEVEL TEST
-   window.__mzAds.decide is a pure function of an env object, so every branch can
-   be exercised in a vm — no browser, no network, no ad impressions. The parts
-   that genuinely need a browser (does the page throw?) are already covered:
-   rum-gate.browser.test.js asserts no uncaught error on the real index.html.
-
-   Run: node ad-gate-check.js
-   ═══════════════════════════════════════════════════════════════════════════ */
 'use strict';
 
 const fs = require('fs');
@@ -699,15 +675,54 @@ check('every SSR ad host reaches the network unimpeded', () => {
   });
 });
 
-check('ads stay opt-in — the indexed SSR pages are untouched', () => {
-  /*  Only the watch page opts in. Detail and category pages are the indexed,
-   *  organic-search surfaces, and seo-ssr.test.js asserts their only script tags
-   *  are the JSON-LD blocks — so an ad layer that defaulted to on inside
-   *  renderShell would break them. */
+check('ads stay opt-in, and only on the two agreed pages', () => {
+  /*  Watch and detail pages opt in. Category/browse pages do NOT: they are thin
+   *  index surfaces, and an ad on a page that is only a grid of links is the worst
+   *  ratio of irritation to revenue on the site. */
   const ssr = fs.readFileSync(path.join(__dirname, 'seo-ssr.js'), 'utf8');
   assert(/ads = false/.test(ssr), 'the ad layer is no longer opt-in; every SSR page would carry it');
-  equal((ssr.match(/^\s*ads: true,$/gm) || []).length, 1,
-    'a second SSR page opted into ads; only the watch page was agreed');
+  equal((ssr.match(/^\s*ads: true,$/gm) || []).length, 2,
+    'the number of SSR pages opting into ads changed; watch + detail were agreed');
+});
+
+const detailHtml = seo.renderDetailPage({
+  id: 550, title: 'Fight Club', release_date: '1999-10-15', poster_path: '/p.jpg',
+  backdrop_path: '/b.jpg', overview: 'A man starts a club.', vote_average: 8.4, vote_count: 200,
+  genres: [{ id: 18, name: 'Drama' }], runtime: 139,
+  credits: { cast: [{ name: 'Edward Norton', character: 'Narrator' }], crew: [] },
+  videos: { results: [] }
+}, 'movie');
+
+check('the detail page carries the ad layer and a slot', () => {
+  assert(detailHtml.includes('<script data-mz-ads="1">'), 'no ad loader on the detail page');
+  assert(detailHtml.includes('<aside class="ad-slot"'), 'no ad slot on the detail page');
+  equal((detailHtml.match(/<aside class="ad-slot"/g) || []).length, 1,
+    'more than one slot on the page — invoke.js writes into one container id');
+});
+
+check('the detail slot sits after the content and before "More like"', () => {
+  const slot = detailHtml.indexOf('<aside class="ad-slot"');
+  const h1 = detailHtml.indexOf('<h1');
+  const related = detailHtml.indexOf('<h2>More like');
+  assert(slot > h1, 'the ad is above the title — the visitor came for that first');
+  if (related > 0) {
+    assert(slot < related, 'the ad is below the related grid, where fewer people reach it');
+  }
+});
+
+check('category and browse pages stay ad-free', () => {
+  /*  Read from source rather than rendering: the category renderer takes a
+   *  paginated TMDB payload and this only needs to know whether it opts in. */
+  const ssr = fs.readFileSync(path.join(__dirname, 'seo-ssr.js'), 'utf8');
+  ['renderCategoryPage', 'renderBrowseIndex', 'renderBrowseLetter'].forEach((fn) => {
+    const at = ssr.indexOf('function ' + fn + '(');
+    if (at < 0) return;                       // renderer does not exist in this build
+    const next = ssr.indexOf('\nfunction ', at + 1);
+    const bodySrc = ssr.slice(at, next > 0 ? next : ssr.length);
+    assert(!/ads:\s*true/.test(bodySrc),
+      fn + ' opts into ads; a page that is only a grid of links is the worst irritation-to-revenue '
+      + 'ratio on the site');
+  });
 });
 
 console.log('-'.repeat(70));
