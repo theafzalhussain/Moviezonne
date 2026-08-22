@@ -533,6 +533,26 @@ html.mz-has-cw #continueWatchingGrid{min-height:236px}
    #movies-section is deliberately NOT here: it sits directly under the hero, so it
    is never actually off-screen, and skipping it cost 0.209 CLS. */
 #upcoming{contain-intrinsic-size:auto 700px;content-visibility:auto}
+
+/* AD SLOT — space reserved before first paint, for the same reason Continue
+   Watching is: the native banner is written into it by a third-party script
+   seconds later, and an un-reserved insert of that size drags the whole Upcoming
+   section and the footer down under the reader.
+   The heights are per breakpoint because the 4:1 widget reflows to fewer columns
+   and gets taller as it narrows. They are a reservation, not a guarantee — tune
+   them against the real rendered height, they only need to be close.
+   No border, background or min-width: when the request is blocked (a large share
+   of visitors) the slot must look like empty page, not like something broken. */
+.mz-ad-slot{max-width:1140px;margin:0 auto;padding:0 20px;min-height:300px}
+.mz-ad-label{display:block;font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;
+  opacity:0;height:18px;line-height:18px;color:rgba(255,255,255,.38)}
+.mz-ad-slot.is-filled .mz-ad-label{opacity:1}
+@media (max-width:1024px){.mz-ad-slot{min-height:360px}}
+@media (max-width:640px){.mz-ad-slot{min-height:440px;padding:0 14px}}
+/* Ads gated off for this visitor (TV, crawler, dev) — collapse the reservation.
+   The class is set by the monetisation gate in <head>, i.e. before first paint,
+   so this is never a shift. */
+html.mz-no-ads .mz-ad-slot{display:none}
 </style>
 
 <!-- ════════════════════════════════════════════════════════════════════
@@ -698,6 +718,211 @@ html.mz-has-cw #continueWatchingGrid{min-height:236px}
       }
     });
   });
+})();
+</script>
+
+<!-- ════════════════════════════════════════════════════════════════════
+     MONETISATION — Adsterra ad units, behind a gate, injected late.
+
+     Adsterra's dashboard hands over a plain synchronous <script src> per unit
+     and tells you to paste it right before </head>. Pasted literally that would
+     be a cross-origin, PARSER-BLOCKING request sitting in front of the
+     stylesheet, the fonts and all three bundles — the exact mistake the RUM
+     loader above was rewritten to fix, and asset-perf-check.js now fails the
+     build on any parser-blocking third-party script. So the snippet lives here,
+     at the end of <head> where Adsterra wants it, but as a gated async inject.
+
+     WHEN IT LOADS
+     A popunder only ever fires on a user click, so it does not need to exist
+     during the first paint — loading it there costs LCP and earns nothing. It is
+     injected on whichever comes first: the visitor's first interaction, or a 3s
+     timer. By 3s the hero image and the first TMDB round trip are done and the
+     connection is idle. (3s, not the 6s pwa-install uses, so the two pieces of
+     background work do not land on the same task.)
+
+     THE GATE (each branch is a fact, not a preference)
+
+     • A dev machine serves no ads. Impressions from localhost are invalid
+       traffic, and invalid traffic is how a publisher account gets flagged.
+
+     • Real crawlers get no ads. Same reasoning as RUM: a bot is not a user, and
+       a click-triggered format cannot earn from one. Lighthouse/PageSpeed are
+       deliberately NOT gated out, for the same reason as RUM — an audit has to
+       see what a user sees.
+
+     • TV serves no ads. A popunder opens a second window and a D-pad cannot
+       reach or close it, so the remote is stranded and the session is over.
+       tv-mode.js sets data-mz-tv, and the UA is tested too because this gate can
+       run before that bundle does.
+
+     window.__mzAds.decide() is a pure function of its input, so every branch is
+     assertable without a browser; .profile records what was decided for this
+     visit and .injected what actually reached the DOM. ad-gate-check.js asserts
+     the branches, that no ad host is missing from sw.js, and that the two
+     regexes below have not drifted from the RUM gate's copies.
+     ════════════════════════════════════════════════════════════════════ -->
+<script>
+(function () {
+  /*  ── AD UNITS ──
+   *  One entry per Adsterra unit. The src IS the configuration — zone, format
+   *  and payout rules all live behind that hash — so this array is the only
+   *  place a unit is declared or retired.
+   *
+   *  Adding a unit on a NEW host also means adding that host to AD_HOSTS in
+   *  sw.js; ad-gate-check.js fails if the two lists drift apart.
+   *
+   *  trigger:
+   *    'idle'     — global, click-activated formats. Nothing renders on the page,
+   *                 so there is no placement and no space to reserve: load them
+   *                 once, late. (Adsterra says popunder before </head> and Social
+   *                 Bar before </body>; for a runtime-injected script both mean
+   *                 the same thing — "not in the critical path".)
+   *    'viewport' — inline formats. They write into `container`, which must
+   *                 already exist in the markup, so the script is not injected
+   *                 until `slot` comes near the viewport. That is both better for
+   *                 CWV and better for the advertiser: an impression counted
+   *                 800px below the fold is one nobody saw.
+   *
+   *  cfasync:false reproduces Adsterra's own data-cfasync="false" — this site is
+   *  behind Cloudflare, and it is what tells Rocket Loader to leave the tag alone.
+   */
+  var UNITS = [
+    { name: 'popunder', trigger: 'idle',
+      src: 'https://pl30971623.profitableratecpmnetwork.com/c7/2e/b8/c72eb8605ed50b20e9de4938ed2680fe.js' },
+    { name: 'socialbar', trigger: 'idle',
+      src: 'https://pl30971624.profitableratecpmnetwork.com/cf/b1/0b/cfb10bc21fd62d40b8a3e0fbe59427b3.js' },
+    { name: 'native', trigger: 'viewport', cfasync: false,
+      src: 'https://pl30971625.profitableratecpmnetwork.com/6c53da276868df37c1f0c6fc771e2d97/invoke.js',
+      slot: '#mz-ad-native', container: 'container-6c53da276868df37c1f0c6fc771e2d97' }
+  ];
+
+  /*  Mirrors of the two regexes in the RUM gate above. Duplicated on purpose:
+   *  each block has to stay a self-contained IIFE that still behaves correctly
+   *  if the other is removed, and a shared global would make load order matter
+   *  inside <head>. ad-gate-check.js compares the two copies byte-for-byte, so
+   *  they cannot silently drift. */
+  var CRAWLER_RE = /googlebot|bingbot|yandex(?:bot|images)|duckduckbot|baiduspider|applebot|facebookexternalhit|twitterbot|linkedinbot|slackbot|telegrambot|ahrefsbot|semrushbot|mj12bot|dotbot|petalbot|bytespider|uptimerobot|pingdom|statuscake/i;
+  var TV_UA_RE = /\b(?:smart-?tv|smarttv|googletv|android\s*tv|appletv|tvos|crkey|roku|web0?s|tizen|vidaa|hbbtv|netcast|viera|bravia|aquos)\b|\bAFT[A-Z0-9]/i;
+
+  /** Pure: the whole gate, so every branch is testable without a browser. */
+  function decide(env) {
+    if (!env.units) return { enabled: false, reason: 'no-units' };
+    if (env.local) return { enabled: false, reason: 'dev' };
+    if (env.crawler) return { enabled: false, reason: 'crawler' };
+    if (env.tv) return { enabled: false, reason: 'tv' };
+    return { enabled: true, reason: 'ok' };
+  }
+
+  function readEnv() {
+    var ua = navigator.userAgent || '';
+    var host = location.hostname;
+    return {
+      units: UNITS.length > 0,
+      local: /^(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)$/.test(host)
+        || /^(?:192\.168\.|10\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(host),
+      crawler: CRAWLER_RE.test(ua),
+      /*  data-mz-tv is set by tv-mode.js, which is deferred and has therefore not
+       *  run yet while <head> is parsing. The UA test is what catches a TV this
+       *  early; the attribute is still read because it is the authority once it
+       *  exists, and it is re-read on every injection. */
+      tv: document.documentElement.getAttribute('data-mz-tv') === 'true' || TV_UA_RE.test(ua)
+    };
+  }
+
+  var state = { units: UNITS.map(function (u) { return u.name; }), injected: [], blocked: [], profile: null };
+  window.__mzAds = { decide: decide, state: state, load: load };
+
+  /*  Decided here, before the first paint, and not only because it is cheap
+   *  (four regexes on a string). The inline slot reserves ~300px of height so the
+   *  banner cannot shift the page when it arrives; if ads will never load — a TV,
+   *  a crawler, a dev machine — that reservation would be a permanent hole. The
+   *  class collapses it before anything is painted, so there is no shift either
+   *  way. A TV we only recognise later keeps the empty gap rather than collapsing
+   *  it mid-scroll, which is the cheaper of the two mistakes. */
+  state.profile = decide(readEnv());
+  if (!state.profile.enabled) {
+    document.documentElement.className += ' mz-no-ads';
+  }
+
+  function inject(unit) {
+    if (unit._injected) return;
+    // Re-check TV: tv-mode.js has run by now and is the authority.
+    if (document.documentElement.getAttribute('data-mz-tv') === 'true') return;
+    unit._injected = true;
+
+    var s = document.createElement('script');
+    s.src = unit.src;
+    s.async = true;
+    if (unit.cfasync === false) s.setAttribute('data-cfasync', 'false');
+    /*  An ad blocker aborts this request. That is a normal outcome for a large
+     *  share of visitors, not an error: it is recorded and ignored, never
+     *  retried and never surfaced, so it cannot spam the RUM error feed. */
+    s.onerror = function () { state.blocked.push(unit.name); };
+    (document.body || document.head).appendChild(s);
+    state.injected.push(unit.name);
+  }
+
+  /*  Reveal the "Sponsored" label only once the widget has actually rendered
+   *  something. The label lives inside the already-reserved height, so this
+   *  cannot shift anything — and a label with no ad under it would be worse than
+   *  no label at all. */
+  function markWhenFilled(slot, containerId) {
+    var box = document.getElementById(containerId);
+    if (!box) return;
+    if (box.childElementCount > 0) { slot.className += ' is-filled'; return; }
+    if (!window.MutationObserver) return;
+    var mo = new MutationObserver(function () {
+      if (box.childElementCount > 0) { mo.disconnect(); slot.className += ' is-filled'; }
+    });
+    mo.observe(box, { childList: true });
+  }
+
+  var idleDone = false;
+  function load() {
+    if (idleDone) return;
+    idleDone = true;
+    if (!state.profile.enabled) return;
+    UNITS.forEach(function (u) { if (u.trigger !== 'viewport') inject(u); });
+  }
+
+  /** Inline units: injected when their slot approaches the viewport. */
+  function watchSlots() {
+    if (!state.profile.enabled) return;
+    UNITS.forEach(function (unit) {
+      if (unit.trigger !== 'viewport') return;
+      var slot = document.querySelector(unit.slot);
+      if (!slot) return;
+
+      var fill = function () { inject(unit); markWhenFilled(slot, unit.container); };
+      if (!('IntersectionObserver' in window)) { fill(); return; }
+
+      var io = new IntersectionObserver(function (entries) {
+        for (var i = 0; i < entries.length; i++) {
+          if (entries[i].isIntersecting) { io.disconnect(); fill(); return; }
+        }
+      }, { rootMargin: '400px' });
+      io.observe(slot);
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', watchSlots, { once: true });
+  } else {
+    watchSlots();
+  }
+
+  /*  First interaction wins — an engaged visitor gets the unit as early as it is
+   *  worth having, and their own tap already interrupted the render. Otherwise a
+   *  3s timer, by which point the first paint is finished. */
+  var EVENTS = ['pointerdown', 'keydown', 'touchstart'];
+  function onFirstInteraction() {
+    EVENTS.forEach(function (t) { window.removeEventListener(t, onFirstInteraction, true); });
+    load();
+  }
+  EVENTS.forEach(function (t) {
+    window.addEventListener(t, onFirstInteraction, { capture: true, passive: true, once: true });
+  });
+  setTimeout(load, 3000);
 })();
 </script>
 </head>
@@ -919,6 +1144,26 @@ html.mz-has-cw #continueWatchingGrid{min-height:236px}
 <div id="feedPager"></div>
 
 <div class="section-sep"></div>
+
+<!-- NATIVE BANNER SLOT
+     Placed here on purpose: below .section-sep, so it reads as its own break
+     between "the movie feed ended" and "upcoming releases", and NOT next to
+     #feedPager. An ad sitting against a pagination control harvests misclicks —
+     which looks like revenue for a week and then costs you CPM, because the
+     advertiser sees the bounce.
+
+     The container id is fixed by Adsterra: invoke.js looks up exactly this
+     element, so it has to exist in the markup before that script runs. It does —
+     the script is only injected when this slot approaches the viewport.
+
+     "Sponsored" is not decoration. This widget is styled to look like the movie
+     cards around it, and an unlabelled native ad on a content grid is simply
+     deceptive. The label reveals itself only once the slot fills, and it sits
+     inside the already-reserved height, so revealing it shifts nothing. -->
+<aside id="mz-ad-native" class="mz-ad-slot" aria-label="Advertisement">
+  <span class="mz-ad-label">Sponsored</span>
+  <div id="container-6c53da276868df37c1f0c6fc771e2d97"></div>
+</aside>
 
 <!-- â”€â”€ UPCOMING â”€â”€ -->
 <section id="upcoming">

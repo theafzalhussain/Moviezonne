@@ -12,7 +12,13 @@
 //     Now 7.6 on both sides.
 //   * Versioned same-origin assets became CACHE-FIRST (see below).
 //   * TMDB images get their own stale-while-revalidate cache.
-const CACHE_NAME = 'moviezone-v87';
+const CACHE_NAME = 'moviezone-v88';
+
+/*  Hosts serving the Adsterra units declared in index.html. Keep in step with
+ *  the UNITS array there — ad-gate-check.js fails if a unit's host is missing
+ *  from this list. Subdomains are matched too, because the delivery hostname
+ *  carries a per-publisher prefix. */
+const AD_HOSTS = ['profitableratecpmnetwork.com'];
 
 // Separate cache for TMDB posters/backdrops. Kept apart from the shell so the
 // activate handler can wipe an old shell without throwing away hundreds of
@@ -119,6 +125,17 @@ self.addEventListener('fetch', event => {
   // TMDB data proxy — never cached here. Freshness is owned by the in-page SWR
   // layer in moviezone.js, which has the domain knowledge to decide TTLs.
   if (url.pathname.startsWith('/api/')) return;
+
+  /*  Ad delivery — straight to the network, never through here.
+   *
+   *  Without this they fall into the network-first branch below, which is wrong
+   *  for them in both directions: an ad script is single-use and must never be
+   *  served from a cache, and when an ad blocker aborts the request (a normal
+   *  outcome for a large share of visitors) the catch path runs three cache
+   *  lookups that can never match and then throws — turning a routine block into
+   *  service-worker noise on every navigation.
+   */
+  if (AD_HOSTS.some(h => url.hostname === h || url.hostname.endsWith('.' + h))) return;
 
   /*  ── TMDB IMAGES: stale-while-revalidate ────────────────────────────────
    *  These were previously not cached at all. The generic branch below only
