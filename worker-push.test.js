@@ -77,13 +77,18 @@ async function hkdfBytes(ikm, salt, info, length) {
   ));
 }
 
-/** A KV namespace with just enough behaviour: get/put/delete plus prefix list. */
+/** A KV namespace with just enough behaviour: get/put/delete plus prefix list.
+ *  `writes` counts put() calls — KV writes are the metered, rate-limited
+ *  operation (1,000/day on the free plan), so "did this path write?" is a thing
+ *  the tests need to be able to ask. */
 function fakeKV(seed = {}) {
   const data = new Map(Object.entries(seed));
+  const counters = { writes: 0 };
   return {
     data,
+    counters,
     async get(key) { return data.has(key) ? data.get(key) : null; },
-    async put(key, value) { data.set(key, String(value)); },
+    async put(key, value) { counters.writes++; data.set(key, String(value)); },
     async delete(key) { data.delete(key); },
     async list({ prefix = '', cursor } = {}) {
       const names = [...data.keys()].filter((k) => k.startsWith(prefix)).sort();
@@ -393,11 +398,49 @@ async function decryptAsUserAgent(subscriber, body) {
   equal('stored record keeps p256dh', storedSub.keys.p256dh, subscriber.subscription.keys.p256dh);
 
   const createdAt = storedSub.createdAt;
+  const writesBefore = store.counters.writes;
   await callApi(worker, env, postJson('/api/push/subscribe', subscriber.subscription));
   equal('re-subscribing preserves createdAt instead of duplicating the row',
     JSON.parse(store.data.get('sub:' + storedId)).createdAt, createdAt);
   equal('re-subscribing does not add a second subscription',
     [...store.data.keys()].filter((k) => k.startsWith('sub:')).length, 1);
+
+  /*  THE QUOTA BUG. The client re-POSTs its subscription on every page load, and
+   *  this used to write to KV every time — 1,000 writes/day on the free plan, so
+   *  the endpoint eventually started answering 500 because put() throws once the
+   *  quota is gone. An unchanged re-subscribe must cost zero writes. */
+  equal('an unchanged re-subscribe performs NO KV write',
+    store.counters.writes, writesBefore);
+
+  const unchangedRes = await callApi(worker, env,
+    postJson('/api/push/subscribe', subscriber.subscription));
+  equal('and still reports success', unchangedRes.status, 200);
+  equal('and says so, so the caller can tell', (await unchangedRes.json()).unchanged, true);
+
+  /*  The flip side: a rotated endpoint or rotated keys MUST still be written, or
+   *  the optimisation would silently stop push from working. */
+  const rotated = JSON.parse(JSON.stringify(subscriber.subscription));
+  rotated.keys.auth = 'cm90YXRlZC1hdXRoLWtleQ';
+  const rotatedWrites = store.counters.writes;
+  const rotatedRes = await callApi(worker, env, postJson('/api/push/subscribe', rotated));
+  equal('a changed subscription is still written', store.counters.writes, rotatedWrites + 1);
+  equal('and answers 200', rotatedRes.status, 200);
+  equal('the new key replaced the old one',
+    JSON.parse(store.data.get('sub:' + storedId)).keys.auth, rotated.keys.auth);
+  equal('createdAt survives the rotation',
+    JSON.parse(store.data.get('sub:' + storedId)).createdAt, createdAt);
+
+  /*  And when the store genuinely cannot accept the write — quota spent, or KV
+   *  having a moment — the answer must be a 503 the client can read, not the
+   *  bare 500 that made this impossible to diagnose in production. */
+  const brokenStore = fakeKV();
+  brokenStore.put = async () => { throw new Error('KV PUT failed: limit exceeded'); };
+  const brokenRes = await callApi(worker, { ...env, PUSH_SUBS: brokenStore },
+    postJson('/api/push/subscribe', subscriber.subscription));
+  equal('a KV write failure answers 503, not 500', brokenRes.status, 503);
+  check('and answers JSON the client can read',
+    (brokenRes.headers.get('content-type') || '').includes('application/json'),
+    brokenRes.headers.get('content-type'));
 
   // 5d. notify-movies save
   const noSubSave = await callApi(worker, env, postJson('/api/notify-movies', {

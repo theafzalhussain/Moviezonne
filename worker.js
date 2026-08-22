@@ -436,16 +436,46 @@ async function handleSubscribe(request, env) {
 
   const id = await endpointId(subscription.endpoint);
   const existing = await readJson(store, subKey(id));
+
+  /*  No write when nothing changed.
+   *
+   *  The client re-POSTs its subscription on every page load, and it is right to:
+   *  a browser can rotate or drop an endpoint at any time and only the server can
+   *  notice. But writing unconditionally turned every single page view by every
+   *  subscribed visitor into a KV write, and Cloudflare's KV free plan allows
+   *  1,000 writes per day. That is exactly how this endpoint started answering
+   *  500 in production: once the daily quota is spent, put() throws, and nothing
+   *  here caught it. A no-op re-subscribe now costs one read and zero writes.
+   */
+  const unchanged = existing && existing.active === true
+    && existing.endpoint === subscription.endpoint
+    && existing.keys
+    && existing.keys.p256dh === keys.p256dh
+    && existing.keys.auth === keys.auth;
+  if (unchanged) {
+    return json({ success: true, endpoint: subscription.endpoint, unchanged: true });
+  }
+
   const now = new Date().toISOString();
 
-  await store.put(subKey(id), JSON.stringify({
-    endpoint: subscription.endpoint,
-    expirationTime: subscription.expirationTime || null,
-    keys: { p256dh: keys.p256dh, auth: keys.auth },
-    active: true,
-    createdAt: (existing && existing.createdAt) || now,
-    updatedAt: now
-  }));
+  /*  A storage failure is not a bad request, so it must not be a 500. 503 is what
+   *  it is — the store is temporarily unable to accept the write (quota spent, or
+   *  KV having a moment) — and the client already treats a non-OK response as
+   *  "push is unavailable here" and carries on. The cause is logged so
+   *  observability still shows it instead of it vanishing into a generic 500. */
+  try {
+    await store.put(subKey(id), JSON.stringify({
+      endpoint: subscription.endpoint,
+      expirationTime: subscription.expirationTime || null,
+      keys: { p256dh: keys.p256dh, auth: keys.auth },
+      active: true,
+      createdAt: (existing && existing.createdAt) || now,
+      updatedAt: now
+    }));
+  } catch (err) {
+    console.error('[push] could not store subscription:', (err && err.message) || err);
+    return json({ error: 'Subscription storage is temporarily unavailable' }, 503);
+  }
 
   return json({ success: true, endpoint: subscription.endpoint });
 }

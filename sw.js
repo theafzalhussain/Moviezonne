@@ -12,13 +12,7 @@
 //     Now 7.6 on both sides.
 //   * Versioned same-origin assets became CACHE-FIRST (see below).
 //   * TMDB images get their own stale-while-revalidate cache.
-const CACHE_NAME = 'moviezone-v88';
-
-/*  Hosts serving the Adsterra units declared in index.html. Keep in step with
- *  the UNITS array there — ad-gate-check.js fails if a unit's host is missing
- *  from this list. Subdomains are matched too, because the delivery hostname
- *  carries a per-publisher prefix. */
-const AD_HOSTS = ['profitableratecpmnetwork.com'];
+const CACHE_NAME = 'moviezone-v89';
 
 // Separate cache for TMDB posters/backdrops. Kept apart from the shell so the
 // activate handler can wipe an old shell without throwing away hundreds of
@@ -126,17 +120,6 @@ self.addEventListener('fetch', event => {
   // layer in moviezone.js, which has the domain knowledge to decide TTLs.
   if (url.pathname.startsWith('/api/')) return;
 
-  /*  Ad delivery — straight to the network, never through here.
-   *
-   *  Without this they fall into the network-first branch below, which is wrong
-   *  for them in both directions: an ad script is single-use and must never be
-   *  served from a cache, and when an ad blocker aborts the request (a normal
-   *  outcome for a large share of visitors) the catch path runs three cache
-   *  lookups that can never match and then throws — turning a routine block into
-   *  service-worker noise on every navigation.
-   */
-  if (AD_HOSTS.some(h => url.hostname === h || url.hostname.endsWith('.' + h))) return;
-
   /*  ── TMDB IMAGES: stale-while-revalidate ────────────────────────────────
    *  These were previously not cached at all. The generic branch below only
    *  stored `response.type === 'basic'` (same-origin) responses, and a TMDB
@@ -172,6 +155,23 @@ self.addEventListener('fetch', event => {
     );
     return;
   }
+
+  /*  ── EVERYTHING ELSE CROSS-ORIGIN: straight to the network ──────────────
+   *  Deliberately placed AFTER the TMDB image branch above, which is the one
+   *  cross-origin thing worth caching — putting this first silently disabled the
+   *  poster cache and the LCP backdrop, so ad-gate-check.js asserts the order.
+   *
+   *  This began as a named allowlist of ad hosts, which was the wrong shape: an
+   *  ad script immediately pulls from further domains of its own
+   *  (spendsdetachment.com and friends), so a list could never be complete. The
+   *  general rule is also just the correct one — every caching branch below stores
+   *  `response.type === 'basic'`, i.e. same-origin only, so for anything
+   *  cross-origin this service worker can add nothing but latency and a failure
+   *  path: when such a request is blocked or answered 403, the network-first catch
+   *  runs three cache lookups that can never match and then throws, on every
+   *  navigation.
+   *  ──────────────────────────────────────────────────────────────────────── */
+  if (url.origin !== self.location.origin) return;
 
   /*  ── VERSIONED SAME-ORIGIN ASSETS: cache-first ──────────────────────────
    *  Scripts and styles used to be network-first. That meant every repeat visit

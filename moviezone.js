@@ -9875,6 +9875,26 @@ init();
         });
       }
 
+      /*  Do not re-tell the server something it already knows.
+       *
+       *  This used to POST the subscription on every single page load. The server
+       *  wrote it to KV every time, and on Cloudflare's KV free plan (1,000
+       *  writes/day) that is what made /api/push/subscribe start answering 500 —
+       *  the quota was being spent on writes that changed nothing.
+       *
+       *  The endpoint is still re-sent whenever it actually changes (browsers do
+       *  rotate them), and re-sent anyway once a week so a subscription cannot be
+       *  orphaned forever if the server side ever loses the row. */
+      const PUSH_SYNC_KEY = 'mz_push_synced';
+      const PUSH_RESYNC_MS = 7 * 24 * 60 * 60 * 1000;
+      const fingerprint = JSON.stringify(subscription);
+      let lastSync = null;
+      try { lastSync = JSON.parse(localStorage.getItem(PUSH_SYNC_KEY) || 'null'); } catch (e) {}
+      if (lastSync && lastSync.fp === fingerprint
+          && (Date.now() - Number(lastSync.at || 0)) < PUSH_RESYNC_MS) {
+        return subscription;
+      }
+
       const saveResponse = await fetch('/api/push/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -9887,6 +9907,10 @@ init();
         throw new Error(error.error
           || ('Could not save push subscription (' + saveResponse.status + ')'));
       }
+
+      try {
+        localStorage.setItem(PUSH_SYNC_KEY, JSON.stringify({ fp: fingerprint, at: Date.now() }));
+      } catch (e) {}
 
       console.log('[MovieZone] Push subscription synced to server.');
       return subscription;

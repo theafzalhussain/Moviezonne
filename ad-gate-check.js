@@ -453,29 +453,39 @@ check('every ad unit declares an https host', () => {
   hosts.forEach((h) => assert(/^[\w.-]+$/.test(h), 'suspicious host: ' + h));
 });
 
-check('sw.js bypasses every ad host', () => {
-  const m = sw.match(/const AD_HOSTS = \[([^\]]*)\]/);
-  assert(m, 'AD_HOSTS is missing from sw.js');
-  const listed = [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
+check('sw.js sends every ad host straight to the network', () => {
+  assert(/if \(url\.origin !== self\.location\.origin\) return;/.test(sw),
+    'no cross-origin bypass in the fetch handler; a blocked or 403 ad request would run three dead '
+    + 'cache lookups and then throw, on every navigation');
   hosts.forEach((h) => {
-    assert(listed.some((l) => h === l || h.endsWith('.' + l)),
-      h + ' is served an ad script but is not in AD_HOSTS — every blocked request would run three dead cache lookups');
+    assert(!new RegExp(h.replace(/\./g, '\\.')).test(sw),
+      h + ' is named in sw.js; the bypass is meant to be general — an ad script pulls from further '
+      + 'domains of its own, so a host list can never be complete');
   });
 });
 
 check('the bypass runs before the caching branches', () => {
   const fetchStart = sw.indexOf("addEventListener('fetch'");
-  const bypass = sw.indexOf('AD_HOSTS.some', fetchStart);
+  const bypass = sw.indexOf('url.origin !== self.location.origin', fetchStart);
   const networkFirst = sw.indexOf('const networkFirst', fetchStart);
-  assert(bypass > fetchStart, 'the fetch handler never consults AD_HOSTS');
+  assert(bypass > fetchStart, 'the fetch handler never checks the origin');
   assert(bypass < networkFirst, 'the bypass sits after the network-first branch, so it never runs');
+});
+
+check('TMDB images are still cached — the bypass must not catch them', () => {
+  const fetchStart = sw.indexOf("addEventListener('fetch'");
+  const tmdb = sw.indexOf('isTmdbImage(url)', fetchStart);
+  const bypass = sw.indexOf('url.origin !== self.location.origin', fetchStart);
+  assert(tmdb > 0 && tmdb < bypass,
+    'the cross-origin bypass now swallows image.tmdb.org, so every poster and the LCP backdrop '
+    + 'would be re-downloaded on every visit');
 });
 
 check('the shell cache was bumped, so installed clients get the new HTML', () => {
   const m = sw.match(/const CACHE_NAME = 'moviezone-v(\d+)'/);
   assert(m, 'CACHE_NAME not found');
-  assert(Number(m[1]) >= 88,
-    'CACHE_NAME is v' + m[1] + '; the precached /index.html fallback still has no ad loader in it');
+  assert(Number(m[1]) >= 89,
+    'CACHE_NAME is v' + m[1] + '; the precached /index.html fallback is older than the ad layer');
 });
 
 check('the crawler and TV regexes have not drifted from the RUM gate', () => {
@@ -678,10 +688,14 @@ check('the watch page slot reserves its height too', () => {
   assert(/\.ad-slot\{margin:30px 0 0/.test(ssr), 'no separation from the controls above it');
 });
 
-check('every SSR ad host is bypassed by sw.js as well', () => {
-  const listed = [...sw.match(/const AD_HOSTS = \[([^\]]*)\]/)[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
-  [...ssrBlock.matchAll(/https:\/\/([^/'"]+)/g)].map((m) => m[1]).forEach((h) => {
-    assert(listed.some((l) => h === l || h.endsWith('.' + l)), h + ' is not in AD_HOSTS');
+check('every SSR ad host reaches the network unimpeded', () => {
+  assert(/if \(url\.origin !== self\.location\.origin\) return;/.test(sw),
+    'the cross-origin bypass is gone, so the watch page ad requests would go through the '
+    + 'service worker cache branches for no benefit');
+  const ssrHosts = [...ssrBlock.matchAll(/https:\/\/([^/'"]+)/g)].map((m) => m[1]);
+  assert(ssrHosts.length > 0, 'no ad hosts parsed out of the watch page loader');
+  ssrHosts.forEach((h) => {
+    assert(h !== 'moviezone.dev' && !h.startsWith('/'), 'unexpected host in the loader: ' + h);
   });
 });
 
