@@ -73,6 +73,12 @@ const IMG = 'https://image.tmdb.org/t/p/w342'; // Optimized: w500 is too heavy f
  */
 const HERO_WIDE_MQ = '(min-width: 1025px)';
 
+/*  The other half of the same split, kept as its own constant so the <picture>
+ *  the carousel renders can carry the SAME two queries the <head> preload does.
+ *  Must stay identical to MOBILE_MQ in seo-ssr.js and to the media= on the two
+ *  hero preload links in index.html. */
+const HERO_MOBILE_MQ = '(max-width: 1024px)';
+
 /*  Size for slide 0 only.
  *
  *  getResponsiveBackdrop() branches on a UA test (isMobile), which a
@@ -2834,7 +2840,8 @@ function buildCarousel() {
     const genres = (m.genre_ids||[]).slice(0,3).map(id => '<span class="genre-tag">'+escapeHTML(GENRE_MAP[id]||'Movie')+'</span>').join('');
     const slide = document.createElement('div');
     slide.className = 'carousel-slide' + (i === 0 ? ' active' : '');
-    const bgUrl = m.backdrop_path
+    const isBackdrop = !!m.backdrop_path;
+    const bgUrl = isBackdrop
       ? (i === 0 ? getHeroBackdrop(m.backdrop_path) : getResponsiveBackdrop(m.backdrop_path))
       : `https://image.tmdb.org/t/p/w780${m.poster_path}`;
 
@@ -2859,12 +2866,10 @@ function buildCarousel() {
      *  brightness grade are unchanged (see .slide-bg-img in index.html).
      *
      *  Slides 1..n keep data-bg and stay lazy via ensureSlideBg(); only slide 0
-     *  is on the critical path.
+     *  is on the critical path. See slideBackdropMarkup() for why the size
+     *  branch is a <picture media> and not srcset + sizes.
      */
-    const heroImg = i === 0
-      ? '<img class="slide-bg-img" src="' + bgUrl
-        + '" alt="" width="1280" height="720" style="aspect-ratio:16/9;object-fit:cover;" fetchpriority="high" decoding="async" draggable="false">'
-      : '';
+    const heroImg = i === 0 ? slideBackdropMarkup(bgUrl, true, isBackdrop) : '';
 
     if (i === 0) {
       // Remember the URL so the NEXT visit can start this exact request from the
@@ -2876,7 +2881,12 @@ function buildCarousel() {
     }
 
     slide.innerHTML =
-      '<div class="slide-bg"' + (i === 0 ? '' : ' data-bg="' + bgUrl + '"') + '>' + heroImg + '</div>' +
+      '<div class="slide-bg"' + (i === 0 ? '' : ' data-bg="' + bgUrl + '"'
+        // A poster stand-in for a title with no backdrop. Flagged so
+        // ensureSlideBg() does not offer it the backdrop width ladder: posters
+        // are 2:3, so the same w1280 that is 98 KB of backdrop is 257 KB of
+        // poster for a box that shows 780px of it.
+        + (isBackdrop ? '' : ' data-bg-fixed="1"')) + '>' + heroImg + '</div>' +
       '<div class="slide-gradient"></div>' +
       '<div class="slide-content">' +
         '<div class="slide-badge">'+(m._badge || '🔥 TRENDING NOW')+'</div>' +
@@ -2984,16 +2994,95 @@ function buildCarousel() {
  
   startAutoSlide();
 }
- 
-// Sets the background-image of a slide only once it's about to be shown (lazy loading)
+
+/*  ── SLIDE BACKDROP MARKUP ───────────────────────────────────────────────────
+ *  One place that turns a backdrop URL into the element the carousel paints, so
+ *  slide 0 (the LCP element) and the lazily-materialised slides cannot drift.
+ *
+ *  WHY <picture media> AND NOT srcset + sizes
+ *  `sizes` resolves against DEVICE pixels: a DPR2 phone asking for a 100vw box
+ *  computes ~820 CSS px -> ~1640 device px and the browser picks w1280, which is
+ *  the download this whole path exists to avoid on the connections least able to
+ *  afford it. A media query is evaluated on CSS pixels, so the branch is
+ *  predictable — and it is byte-identical to the media= on the two hero preload
+ *  links in <head>, so the preload and the request can never resolve to two
+ *  different URLs. getHeroBackdrop() answers the same question through
+ *  matchMedia, but that read happens later: a window rotated or resized between
+ *  <head> being parsed and this bundle running would disagree with the preload
+ *  and pull the LCP image twice. <picture> removes that class of miss entirely.
+ *
+ *  WHY THERE IS NO type="image/webp" OR AVIF SOURCE
+ *  image.tmdb.org already content-negotiates on Accept. The same .jpg URL answers
+ *  image/webp to every browser that advertises it — measured 171 KB -> 98 KB at
+ *  w1280 and 90 KB -> 41 KB at w780, i.e. the ~45% saving is already live on
+ *  every request, including the CSS background path. It does not serve AVIF at
+ *  all: an Accept of image/avif alone still comes back image/jpeg. So a
+ *  <source type="image/webp"> aimed at the same URL would save nothing, and an
+ *  AVIF source would be a guaranteed miss-then-fallback.
+ */
+function slideBgImg(url, isHero) {
+  /*  Slide 0: eager + high, because it is the LCP element and every millisecond
+   *  it spends behind another request is on the metric.
+   *  Slides 1..n: low priority. They are only built when one is about to be
+   *  shown (see ensureSlideBg), which is a stricter gate than loading="lazy" —
+   *  a translateX carousel puts slide 1 only one viewport-width away, well
+   *  inside Chrome's ~1250px lazy threshold, so the attribute would fetch three
+   *  backdrops during the load window instead of none.
+   */
+  return isHero
+    ? '<img class="slide-bg-img" fetchpriority="high" loading="eager" src="' + url
+      + '" alt="" width="1280" height="720" style="aspect-ratio:16/9;object-fit:cover;" decoding="async" draggable="false">'
+    : '<img class="slide-bg-img" fetchpriority="low" loading="eager" src="' + url
+      + '" alt="" width="1280" height="720" style="aspect-ratio:16/9;object-fit:cover;" decoding="async" draggable="false">';
+}
+
+function slideBackdropMarkup(bgUrl, isHero, resizable) {
+  if (!bgUrl) return '';
+
+  const m = /^(https:\/\/image\.tmdb\.org\/t\/p\/)w(\d+)(\/.+)$/.exec(bgUrl);
+
+  /*  Three cases stay a plain <img>:
+   *    - `resizable` false: a poster standing in for a missing backdrop. TMDB
+   *      will happily serve /t/p/w1280/<poster>, but a 2:3 image at that width is
+   *      1280x1920 and measured 257 KB against the 96 KB of w780 — for a box that
+   *      only ever shows ~780px of it.
+   *    - anything not shaped like a sized TMDB path, which there is no safe way
+   *      to re-point at another width;
+   *    - the w500 ceiling getHeroBackdrop/getResponsiveBackdrop hand back on
+   *      save-data and 2G/3G. Honouring an explicit request to spend less data
+   *      outranks the sharper asset, so <source> must not upgrade it.
+   */
+  if (resizable === false || !m || m[2] === '500') return slideBgImg(bgUrl, isHero);
+
+  const base = m[1], path = m[3];
+  return '<picture>'
+    + '<source media="' + HERO_MOBILE_MQ + '" srcset="' + base + 'w780' + path + '">'
+    + '<source media="' + HERO_WIDE_MQ + '" srcset="' + base + 'w1280' + path + '">'
+    // Fallback for browsers with no <picture>: the desktop asset, which is the
+    // one that is always correct if only one can be chosen.
+    + slideBgImg(base + 'w1280' + path, isHero)
+    + '</picture>';
+}
+
+/*  Materialises a slide's backdrop only once it is about to be shown.
+ *
+ *  Was `bg.style.backgroundImage = url(...)`. Now it inserts the same <picture>
+ *  slide 0 uses, for two reasons: a background-image is stuck with whatever width
+ *  getResponsiveBackdrop() picked when the deck was built (a window resized across
+ *  1024px afterwards kept the wrong asset), and an <img> can carry
+ *  fetchpriority="low" so warming slide 1 cannot outbid anything on screen.
+ *  The lazy gate itself is unchanged — this function is still only called for the
+ *  current slide and the next one.
+ */
 function ensureSlideBg(idx) {
   const slides = document.querySelectorAll('.carousel-slide');
   const slide = slides[idx];
   if (!slide) return;
   const bg = slide.querySelector('.slide-bg');
-  if (bg && bg.dataset.bg && !bg.style.backgroundImage) {
-    bg.style.backgroundImage = "url('" + bg.dataset.bg + "')";
-  }
+  if (!bg || !bg.dataset.bg) return;
+  if (bg.querySelector('.slide-bg-img')) return;   // already materialised
+  const markup = slideBackdropMarkup(bg.dataset.bg, false, !bg.dataset.bgFixed);
+  if (markup) bg.insertAdjacentHTML('afterbegin', markup);
 }
  
 function goToSlide(n) {

@@ -243,9 +243,18 @@
       var box = hero.getBoundingClientRect();
       ok('the hero image fills the slide', box.width > 300 && box.height > 300,
         Math.round(box.width) + 'x' + Math.round(box.height));
+      /*  The transform lives on .slide-bg, not on the img's immediate parent:
+       *  slide 0 is now wrapped in a <picture> so the w780/w1280 branch can be a
+       *  media query instead of a JS matchMedia read. The wrapper is
+       *  display:contents, so .slide-bg is still the img's containing block and
+       *  still transforms the whole subtree — but parentElement is the <picture>,
+       *  which by definition has no box and reports transform:none. Asserting on
+       *  .slide-bg keeps the invariant (the Ken-Burns zoom reaches the LCP image)
+       *  without depending on how many wrappers sit in between. */
+      var kenBurns = hero.closest('.slide-bg');
       ok('the Ken-Burns parent still drives the transform',
-        win.getComputedStyle(hero.parentElement).transform !== 'none',
-        win.getComputedStyle(hero.parentElement).transform);
+        !!kenBurns && win.getComputedStyle(kenBurns).transform !== 'none',
+        kenBurns ? win.getComputedStyle(kenBurns).transform : 'no .slide-bg ancestor');
     }
     ok('slide 0 no longer carries an inline background-image',
       (function () {

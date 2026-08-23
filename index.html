@@ -13,9 +13,9 @@
 <link rel="preconnect" href="https://image.tmdb.org" crossorigin>
 <link rel="dns-prefetch" href="https://image.tmdb.org">
 
-<link rel="stylesheet" href="/moviezone.min.css?v=6.6">
+<link rel="stylesheet" href="/moviezone.min.css?v=6.7">
 <!--MZ_PERF_HEAD-->
-<link rel="preload" href="/moviezone.min.css?v=6.6" as="style" fetchpriority="high">
+<link rel="preload" href="/moviezone.min.css?v=6.7" as="style" fetchpriority="high">
 <link rel="preload" as="image" media="(max-width: 1024px)" href="https://image.tmdb.org/t/p/w780/qeQJx07rK2xm8SD2sJxFKhE7gs0.jpg" fetchpriority="high">
 <link rel="preload" as="image" media="(min-width: 1025px)" href="https://image.tmdb.org/t/p/w1280/qeQJx07rK2xm8SD2sJxFKhE7gs0.jpg" fetchpriority="high">
 <meta name="mz-hero-backdrop" content="/qeQJx07rK2xm8SD2sJxFKhE7gs0.jpg">
@@ -37,7 +37,7 @@
 <link rel="preload" href="/fonts/outfit-latin-var.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/bebas-neue-latin-400.woff2" as="font" type="font/woff2" crossorigin>
 
-<link rel="preload" href="/moviezone.min.js?v=9.8" as="script">
+<link rel="preload" href="/moviezone.min.js?v=9.9" as="script">
 
 
 <style id="mz-fonts">
@@ -584,9 +584,24 @@ html.mz-no-ads .mz-ad-slot{display:none}
     if (c.saveData || /^[23]g/.test(c.effectiveType || '')) return;
     var h = JSON.parse(localStorage.getItem('mz_hero_lcp') || 'null');
     if (h && h.u && Date.now() - h.t < 216e5 && /^https:\/\/image\.tmdb\.org\//.test(h.u)) {
-      var l = document.createElement('link');
-      l.rel = 'preload'; l.as = 'image'; l.href = h.u; l.fetchPriority = 'high';
-      document.head.appendChild(l);
+      //    Two media-scoped links, not one bare href. The stored URL was resolved
+      //    at LAST visit's viewport width, so preloading it unconditionally means
+      //    a phone that was a desktop window yesterday (or a tablet that has since
+      //    been rotated) hints w1280 and then <picture> requests w780 — the LCP
+      //    image downloaded twice. Re-deriving both sizes here puts the hint on
+      //    exactly the two queries slideBackdropMarkup() branches on, so one of
+      //    them always lands and the other is never fetched.
+      var m = /^(https:\/\/image\.tmdb\.org\/t\/p\/)w\d+(\/.+)$/.exec(h.u);
+      var want = m
+        ? [['(max-width: 1024px)', m[1] + 'w780' + m[2]],
+           ['(min-width: 1025px)', m[1] + 'w1280' + m[2]]]
+        : [['', h.u]];
+      for (var i = 0; i < want.length; i++) {
+        var l = document.createElement('link');
+        l.rel = 'preload'; l.as = 'image'; l.href = want[i][1]; l.fetchPriority = 'high';
+        if (want[i][0]) l.media = want[i][0];
+        document.head.appendChild(l);
+      }
     }
   } catch (e) {}
 })();
@@ -1667,7 +1682,7 @@ html.mz-no-ads .mz-ad-slot{display:none}
       unstyled text. A leading slash is the whole fix. -->
 <script src="/tv-mode.min.js?v=1.4" defer></script>
 <script src="/search-engine.min.js?v=2.1" defer></script>
-<script src="/moviezone.min.js?v=9.8" defer></script>
+<script src="/moviezone.min.js?v=9.9" defer></script>
 <script>
 /*  ── pwa-install.min.js is NOT loaded with the others ─────────────────────────
  *  It was a fourth `defer` script, so its 30 KB was parsed and executed inside

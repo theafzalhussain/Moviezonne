@@ -369,7 +369,8 @@ function subsStore(env) {
 }
 
 async function readJson(store, key) {
-  const raw = await store.get(key);
+  const raw = await store.get(key, { cacheTtl: 300 });
+
   if (!raw) return null;
   try { return JSON.parse(raw); } catch (e) { return null; }
 }
@@ -514,18 +515,24 @@ async function handleNotifyMovieSave(request, env) {
   const notifyUrl = safeNotifyUrl(url);
   const safeTitle = String(title).slice(0, 200);
 
-  await store.put(notifyKey(id, movieId), JSON.stringify({
-    endpoint: subscription.endpoint,
-    endpointId: id,
-    movieId,
-    title: safeTitle,
-    releaseDate,
-    url: notifyUrl,
-    active: true,
-    notifiedAt: null,
-    createdAt: (existing && existing.createdAt) || now,
-    updatedAt: now
-  }));
+  // ✅ FIX: try/catch wrapped — 500 → 503
+  try {
+    await store.put(notifyKey(id, movieId), JSON.stringify({
+      endpoint: subscription.endpoint,
+      endpointId: id,
+      movieId,
+      title: safeTitle,
+      releaseDate,
+      url: notifyUrl,
+      active: true,
+      notifiedAt: null,
+      createdAt: (existing && existing.createdAt) || now,
+      updatedAt: now
+    }));
+  } catch (err) {
+    console.error('[push] could not store movie notification:', (err && err.message) || err);
+    return json({ error: 'Could not save movie notification' }, 503);
+  }
 
   let confirmationSent = false;
   if (confirm !== false) {
@@ -542,10 +549,9 @@ async function handleNotifyMovieSave(request, env) {
     if (confirmation.expired) await dropSubscription(store, id);
   }
 
-  // 201 and { saved } are what the old Express route returned; the client reads
-  // confirmationSent to choose its toast copy.
   return json({ success: true, saved: true, confirmationSent }, 201);
 }
+
 
 async function handleNotifyMovieRemove(request, env) {
   const store = subsStore(env);
@@ -561,7 +567,7 @@ async function handleNotifyMovieRemove(request, env) {
 
   const id = await endpointId(value.endpoint);
   const key = notifyKey(id, movieId);
-  const existed = Boolean(await store.get(key));
+  const existed = Boolean(await store.get(key, { cacheTtl: 300 }));
   if (existed) await store.delete(key);
 
   return json({ success: true, removed: existed });
@@ -672,7 +678,7 @@ async function fetchTmdbJson(path, env, ctx) {
   const cacheKey = '/api/tmdb' + path;
 
   if (env.TMDB_CACHE) {
-    const cached = await env.TMDB_CACHE.get(cacheKey);
+    const cached = await env.TMDB_CACHE.get(cacheKey, { cacheTtl: 300 });
     if (cached) return { status: 200, text: cached, cache: 'HIT' };
   }
 
@@ -810,7 +816,7 @@ async function handleTmdbBatch(request, env, ctx, url) {
   ).slice(0, 32);
 
   if (env.TMDB_CACHE) {
-    const cached = await env.TMDB_CACHE.get(planKey);
+    const cached = await env.TMDB_CACHE.get(planKey, { cacheTtl: 300 });
     if (cached) {
       return new Response(cached, {
         status: 200,
@@ -1459,7 +1465,12 @@ export default {
     newHeaders.set('X-Frame-Options', 'SAMEORIGIN');
     newHeaders.set('Referrer-Policy', 'strict-origin-when-cross-origin');
 
+    if (url.pathname.match(/\.(js|css|woff2|woff|png|jpg|jpeg|webp|avif|svg|ico)$/)) {
+      newHeaders.set('Cache-Control', 'public, max-age=2592000, immutable');
+    }
+
     if (url.pathname.endsWith('.html') || url.pathname === '/') {
+
       newHeaders.set('Cache-Control', 'public, max-age=3600');
     }
 

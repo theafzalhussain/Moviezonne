@@ -1642,8 +1642,17 @@ body {
  *  properties just reproduce what background-size:cover +
  *  background-position:center top were doing.
  *
- *  Slides 1..n still use the background-image path via ensureSlideBg().
+ *  Slides 1..n render the same <img> (inside the same <picture>), but only once
+ *  ensureSlideBg() materialises them, and at fetchpriority="low".
  */
+.slide-bg > picture {
+  /* <picture> is an inline wrapper. The <img> inside is absolutely positioned, so
+     the wrapper contributes nothing but a stray line box; display:contents takes
+     it out of layout entirely and leaves .slide-bg as the img's containing block,
+     exactly as it was when the img was a direct child. */
+  display: contents;
+}
+
 .slide-bg-img {
   position: absolute;
   inset: 0;
