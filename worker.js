@@ -515,9 +515,15 @@ async function handleNotifyMovieSave(request, env) {
   const notifyUrl = safeNotifyUrl(url);
   const safeTitle = String(title).slice(0, 200);
 
-  // ✅ FIX: try/catch wrapped — 500 → 503
+  // ✅ Skip write if already saved — saves KV write quota
+  if (existing && existing.active === true && existing.movieId === movieId
+      && existing.endpoint === subscription.endpoint) {
+    return json({ success: true, saved: true, confirmationSent: false, unchanged: true }, 200);
+  }
+
   try {
     await store.put(notifyKey(id, movieId), JSON.stringify({
+
       endpoint: subscription.endpoint,
       endpointId: id,
       movieId,
@@ -638,11 +644,10 @@ async function processDueNotifications(env) {
 
     if (result.sent) {
       sent++;
-      const now = new Date().toISOString();
-      await store.put(key, JSON.stringify({
-        ...record, active: false, notifiedAt: now, updatedAt: now
-      }));
+      // ✅ Delete instead of write-back — saves a KV write
+      await store.delete(key);
     } else {
+
       failed++;
       if (result.expired) await dropSubscription(store, id);
     }
@@ -686,7 +691,10 @@ async function fetchTmdbJson(path, env, ctx) {
   headers.set('Authorization', `Bearer ${env.TMDB_TOKEN}`);
   headers.set('accept', 'application/json');
 
-  const response = await fetch(`https://api.themoviedb.org/3${path}`, { headers });
+  const response = await fetch(`https://api.themoviedb.org/3${path}`, {
+    headers,
+    cf: { cacheEverything: true, cacheTtl: 300 }
+  });
   const text = await response.text();
 
   if (env.TMDB_CACHE && response.status === 200) {
@@ -736,8 +744,9 @@ async function handleTmdbProxy(request, env, ctx, url) {
  *  never taken from input.
  */
 const MAX_BATCH_PATHS = 40;
-const TMDB_CACHE_TTL = 21600;   // 6 hours (pehle 3600 tha)
-const BATCH_CACHE_TTL = 7200;   // 2 hours (pehle 1800 tha)
+const TMDB_CACHE_TTL = 604800;  // 7 days — movie data rarely changes
+const BATCH_CACHE_TTL = 86400;  // 24 hours — homepage plan same all day
+
 
 
 /*  A relative TMDB path with an optional query string, and nothing else.
@@ -1439,23 +1448,37 @@ export default {
       return Response.redirect(`https://moviezone.dev${url.pathname}${url.search}`, 301);
     }
 
-    const apiResponse = await routeApi(request, env, ctx, url);
-    if (apiResponse) return apiResponse;
+    // ✅ Edge Cache: check before any expensive work (FREE, no KV quota)
+    const edgeCache = caches.default;
+    if (request.method === 'GET') {
+      const cached = await edgeCache.match(request);
+      if (cached) return cached;
+    }
 
-    /*  Server-rendered pages come before the asset handler on purpose. The
-     *  fallback below answers 200 with index.html for anything that is not a
-     *  file, so a category or detail URL reaching it would render the homepage
-     *  under the right address instead of the page that was asked for.
-     */
+    const apiResponse = await routeApi(request, env, ctx, url);
+    if (apiResponse) {
+      // ✅ Cache TMDB proxy GET responses only (not batch, not push endpoints)
+      if (request.method === 'GET' && apiResponse.status === 200
+          && url.pathname.startsWith('/api/tmdb/')
+          && !url.pathname.includes('/batch')) {
+        ctx.waitUntil(edgeCache.put(request, apiResponse.clone()));
+      }
+      return apiResponse;
+    }
+
     let ssr = null;
     try {
       ssr = await ssrResponse(request, env, ctx, url);
     } catch (err) {
-      // A renderer throwing must not take the URL down: fall through to the SPA,
-      // which can still fetch and render the same content client-side.
       console.error('[ssr] ' + url.pathname + ' failed:', err && err.stack);
     }
-    if (ssr) return ssr;
+    if (ssr) {
+      // ✅ Cache SSR pages (200 only)
+      if (ssr.status === 200) {
+        ctx.waitUntil(edgeCache.put(request, ssr.clone()));
+      }
+      return ssr;
+    }
 
     // ─── Static Assets with SEO Headers ────────────────────────
     const assetResponse = await env.ASSETS.fetch(request);
@@ -1470,16 +1493,23 @@ export default {
     }
 
     if (url.pathname.endsWith('.html') || url.pathname === '/') {
-
       newHeaders.set('Cache-Control', 'public, max-age=3600');
     }
 
-    return new Response(assetResponse.body, {
+    const finalResponse = new Response(assetResponse.body, {
       status: assetResponse.status,
       statusText: assetResponse.statusText,
       headers: newHeaders
     });
+
+    // ✅ Cache static assets (200 only)
+    if (request.method === 'GET' && finalResponse.status === 200) {
+      ctx.waitUntil(edgeCache.put(request, finalResponse.clone()));
+    }
+
+    return finalResponse;
   },
+
 
   async scheduled(event, env, ctx) {
     ctx.waitUntil(processDueNotifications(env).then(
