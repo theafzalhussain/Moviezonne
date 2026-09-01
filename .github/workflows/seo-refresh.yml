@@ -39,6 +39,7 @@ jobs:
         run: |
           if [ -z "$TMDB_TOKEN" ]; then
             echo "::error::Repository secret TMDB_TOKEN is not set."
+            echo "::error::TMDB_TOKEN is required to rebuild sitemap-cache.json for the SEO refresh workflow."
             echo "Add it at: Settings > Secrets and variables > Actions > New repository secret"
             echo "Name it TMDB_TOKEN and use the same value server.js already uses."
             exit 1
@@ -76,8 +77,47 @@ jobs:
             echo "The Worker will keep serving its bounded live-built sitemaps."
             exit 0
           fi
-          npx --yes wrangler@4 kv key put sitemap:catalog \
-            --path sitemap-cache.json --binding TMDB_CACHE --remote
+          max_attempts=5
+          attempt=1
+          delay_seconds=5
+          upload_status=1
+          last_error_code=""
+
+          while [ "$attempt" -le "$max_attempts" ]; do
+            echo "Uploading sitemap-cache.json to Cloudflare KV (attempt ${attempt}/${max_attempts})..."
+            set +e
+            wrangler_output=$(npx --yes wrangler@4 kv key put sitemap:catalog \
+              --path sitemap-cache.json --binding TMDB_CACHE --remote 2>&1)
+            upload_status=$?
+            set -e
+            echo "$wrangler_output"
+
+            if [ "$upload_status" -eq 0 ]; then
+              echo "Cloudflare KV upload succeeded."
+              break
+            fi
+
+            last_error_code=$(echo "$wrangler_output" | sed -n 's/.*\[code: \([0-9][0-9]*\)\].*/\1/p' | tail -n 1)
+            if [ -n "$last_error_code" ]; then
+              echo "Cloudflare error code detected: ${last_error_code}"
+            fi
+
+            if [ "$attempt" -lt "$max_attempts" ]; then
+              echo "Cloudflare KV upload failed on attempt ${attempt}/${max_attempts}; retrying in ${delay_seconds}s..."
+              sleep "$delay_seconds"
+              delay_seconds=$((delay_seconds * 2))
+            fi
+
+            attempt=$((attempt + 1))
+          done
+
+          if [ "$upload_status" -ne 0 ]; then
+            echo "::warning::Cloudflare KV upload failed after ${max_attempts} attempts. Continuing without failing this workflow run."
+            if [ -n "$last_error_code" ]; then
+              echo "::warning::Last Cloudflare error code: ${last_error_code}"
+            fi
+            echo "::warning::See Cloudflare KV limits: https://developers.cloudflare.com/kv/platform/limits/"
+          fi
 
       - name: Sanity-check the SEO layer before committing
         run: |
