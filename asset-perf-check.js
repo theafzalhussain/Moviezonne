@@ -658,9 +658,16 @@ check('TMDB cache writes are deferred, not synchronous', () => {
 });
 
 check('a fresh localStorage hit is promoted into the memory cache', () => {
-  const idx = js.indexOf('Agar data 12 ghante se naya hai');
-  assert.ok(idx !== -1, 'freshness branch not found');
-  const branch = js.slice(idx, idx + 900);
+  /*  Anchored on CODE, not on a comment. This used to search for the Hinglish
+   *  note that sat above the branch, and it broke the moment that note was
+   *  rewritten — a green-to-red flip with no behaviour change behind it. The
+   *  getItem line is the actual start of the SWR read and cannot be reworded. */
+  const idx = js.indexOf('const localDataStr = localStorage.getItem(cacheKey);');
+  assert.ok(idx !== -1, 'the SWR read of the localStorage copy was not found');
+  const branch = js.slice(idx, idx + 1200);
+  assert.ok(/_mzTmdbFreshMs\(urlStr\)/.test(branch),
+    'the freshness window is no longer resolved per endpoint — a discovery list '
+    + 'held for 12h means new releases do not reach the hero until tomorrow');
   assert.ok(/tmdbCache\.set\(urlStr, cachedData\)/.test(branch),
     'fresh cache hits still re-parse from localStorage on every repeat call');
 });

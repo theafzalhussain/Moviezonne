@@ -1328,6 +1328,45 @@ function _mzTmdbUrl(endpoint, params) {
 const MZ_TMDB_SWR_FRESH_MS = 12 * 60 * 60 * 1000;
 
 /*  ══════════════════════════════════════════════════════════════════════
+ *  AUTO-UPDATE: FRESHNESS IS PER ENDPOINT, NOT ONE NUMBER
+ *  ══════════════════════════════════════════════════════════════════════
+ *  A single 12h window is right for a title's own record - Interstellar's runtime
+ *  and cast do not change - and wrong for the lists the home page is built from.
+ *  /trending/movie/week, /movie/now_playing and every /discover query are the
+ *  answer to "what is out right now", and holding that answer for twelve hours is
+ *  precisely how a release that landed this morning fails to appear until
+ *  tonight. A returning visitor would keep being served the same hero all day.
+ *
+ *  So the discovery endpoints get a 3h window and everything else keeps 12h. The
+ *  effect is that the carousel and the feeds re-ask TMDB up to eight times a day
+ *  and a new release surfaces on the first visit after it enters TMDB's own
+ *  rankings, while the per-title requests - by far the larger number of calls -
+ *  are not made any more often than before.
+ *
+ *  Note this is only ONE of the three caches in the path. The other two are in
+ *  worker.js (KV, per-path TTL and the batch entry) and both were narrowed for
+ *  the same reason; a short window here would achieve nothing on its own if the
+ *  edge still answered with a week-old body.
+ *
+ *  The date-windowed queries have a second, independent freshness mechanism worth
+ *  knowing about: carouselIndustryQuery() and friends build
+ *  primary_release_date.gte/lte from istDateStr(), so their URL - and therefore
+ *  every cache key derived from it - changes at IST midnight on its own. The
+ *  window slides forward daily whether or not anything else is tuned.
+ */
+const MZ_TMDB_VOLATILE_FRESH_MS = 3 * 60 * 60 * 1000;
+
+/*  Endpoint families whose answer changes as titles release. Matched on the URL
+ *  because that is what both cache readers already hold. /movie/top_rated is
+ *  deliberately absent - it is an all-time list and barely moves. */
+const MZ_TMDB_VOLATILE_RE = /\/(?:trending|discover)\/|\/movie\/(?:popular|now_playing|upcoming)|\/tv\/(?:popular|airing_today|on_the_air)/;
+
+/** How long a cached copy of this URL may be served without revalidating. */
+function _mzTmdbFreshMs(urlStr) {
+  return MZ_TMDB_VOLATILE_RE.test(urlStr) ? MZ_TMDB_VOLATILE_FRESH_MS : MZ_TMDB_SWR_FRESH_MS;
+}
+
+/*  ══════════════════════════════════════════════════════════════════════
  *  EDGE BATCHING
  *  ══════════════════════════════════════════════════════════════════════
  *  A cold homepage needs 26 TMDB responses before the first card can paint:
@@ -1373,7 +1412,8 @@ function _mzTmdbAnsweredFromCache(urlStr) {
     const raw = localStorage.getItem('mz_cache_' + urlStr);
     if (!raw) return false;
     const parsed = JSON.parse(raw);
-    if (parsed && parsed.timestamp && (Date.now() - parsed.timestamp < MZ_TMDB_SWR_FRESH_MS)) {
+    if (parsed && parsed.timestamp
+        && (Date.now() - parsed.timestamp < _mzTmdbFreshMs(urlStr))) {
       tmdbCache.set(urlStr, parsed.data);
       return true;
     }
@@ -1499,8 +1539,9 @@ async function tmdb(endpoint, params) {
     try {
       const parsed = JSON.parse(localDataStr);
       cachedData = parsed.data;
-      // Agar data 12 ghante se naya hai, toh fresh manenge
-      if (parsed.timestamp && (Date.now() - parsed.timestamp < MZ_TMDB_SWR_FRESH_MS)) {
+      // Fresh enough to skip the network: 3h for the discovery endpoints, 12h
+      // for everything else. See _mzTmdbFreshMs.
+      if (parsed.timestamp && (Date.now() - parsed.timestamp < _mzTmdbFreshMs(urlStr))) {
         // Promote into the in-memory cache before returning. Without this every
         // repeat call for the same URL paid another synchronous getItem plus a
         // JSON.parse of a 20-50 KB payload — and repeats are the normal case,
@@ -2862,27 +2903,63 @@ const MZ_CAROUSEL_MAX_RETRIES = 2;
  */
 const CAROUSEL_SLOTS = 10;
 
+/*  ── THE FIXED TEN (Sep 2026) ──
+ *
+ *  The slots are now spoken for exactly, and min === max for all six named
+ *  categories, so a normal day produces this line-up and nothing else:
+ *
+ *      4  Hollywood movies
+ *      2  Bollywood movies
+ *      1  Tollywood (Telugu) movie
+ *      1  Hindi web series
+ *      1  English web series
+ *      1  Anime
+ *     ──
+ *     10
+ *
+ *  Two changes from the previous table, both deliberate.
+ *
+ *  1. `webseries` is SPLIT into webseries_hi and webseries_en. One bucket could
+ *     not deliver one of each: the pool is score-sorted and English series carry
+ *     an order of magnitude more TMDB votes than Hindi ones, so both slots went
+ *     to English every time. Two buckets are two reserved seats, and each gets
+ *     its own TMDB source in loadCarousel() so neither has to out-compete the
+ *     other merely to exist.
+ *
+ *  2. Tollywood goes 2 -> 1 and Bollywood's max 3 -> 2. The second web-series
+ *     seat has to come from somewhere, and this is the requested shape. max ===
+ *     min also means no category can quietly take a neighbour's slot on a strong
+ *     week — which is what "fixed" has to mean to be worth stating.
+ *
+ *  THREE LIMITS, NOT TWO. min and max behave exactly as before. `hard` is read
+ *  only by the final emergency sweep, and only when the pools came back so thin
+ *  that the hero would otherwise ship with visible gaps: one slide over quota is
+ *  a far smaller failure than a missing slide. On a normal day it is never
+ *  reached, so it cannot dilute the line-up above.
+ */
 const CAROUSEL_CATEGORY_QUOTA = {
   /*  max equals min for Hollywood on purpose. It owns the highest-scoring titles
    *  in the pool, so if its max were higher it would win every leftover slot the
    *  moment another category underfilled - which is how it took five here. Capped
-   *  at its share, the slack flows to Bollywood, Tollywood, South or Korean
-   *  instead, which is the point of having quotas at all. */
-  hollywood: { min: 4, max: 4 },
-  bollywood: { min: 2, max: 3 },
-  tollywood: { min: 2, max: 3 },
-  anime:     { min: 1, max: 2 },
-  webseries: { min: 1, max: 2 },
-  /*  South and Korean carry min 0 on purpose, and it is worth being explicit
-   *  about the consequence: the five mins above already sum to all ten slots, so
-   *  on a normal day neither appears in the hero at all. They are not removed
-   *  though - a max of 1 keeps them as the first thing that absorbs a slot when
-   *  another category cannot fill its min, which is far better than a gap or a
-   *  fifth Hollywood title. Same for world, which catches every language none
-   *  of the named categories claims. */
-  south:     { min: 0, max: 1 },
-  korean:    { min: 0, max: 1 },
-  world:     { min: 0, max: 1 }
+   *  at its share, the slack flows to Bollywood, Tollywood, the web series or
+   *  anime instead, which is the point of having quotas at all. */
+  hollywood:       { min: 4, max: 4, hard: 5 },
+  bollywood:       { min: 2, max: 2, hard: 3 },
+  tollywood:       { min: 1, max: 1, hard: 2 },
+  anime:           { min: 1, max: 1, hard: 2 },
+  webseries_hi:    { min: 1, max: 1, hard: 2 },
+  webseries_en:    { min: 1, max: 1, hard: 2 },
+  /*  South, Korean, non-Hindi/English series and world carry min 0 on purpose,
+   *  and it is worth being explicit about the consequence: the six mins above
+   *  already sum to all ten slots, so on a normal day none of these appears in
+   *  the hero at all. They are not removed though - a max of 1 keeps them as the
+   *  first thing that absorbs a slot when a named category cannot fill its min,
+   *  which is far better than a gap or a fifth Hollywood title. `world` catches
+   *  every language none of the named categories claims. */
+  south:           { min: 0, max: 1, hard: 2 },
+  korean:          { min: 0, max: 1, hard: 2 },
+  webseries_world: { min: 0, max: 1, hard: 2 },
+  world:           { min: 0, max: 1, hard: 1 }
 };
 
 /*  THE BAR: high rating AND real demand AND traction.
@@ -2898,30 +2975,66 @@ const CAROUSEL_CATEGORY_QUOTA = {
  *  series, anime). REGIONAL covers the industries that do not. Both ask for the
  *  same three things, at the scale their own audience actually produces.
  */
-/*  AGE CEILING - "trending", not "greatest of all time".
+/*  ══════════════════════════════════════════════════════════════════════
+ *  THE WINDOW: THIS CALENDAR YEAR ONLY
+ *  ══════════════════════════════════════════════════════════════════════
+ *  The ceiling used to be a rolling 550 days, which on any date in 2026 also
+ *  admitted most of 2025 - and it showed: the Tollywood slot was filling with a
+ *  March 2025 release and the series slots with shows that premiered in 2019 and
+ *  1999. Every slide in the hero is now required to be a title from the CURRENT
+ *  year. That is a stricter promise than "recent", and it is the one the hero
+ *  makes to a visitor: everything on this screen is new.
  *
- *  /movie/top_rated is an ALL-TIME list, so it was feeding the hero things like
- *  Dilwale Dulhania Le Jayenge (1995) on the strength of an 8.5 that it has held
- *  for thirty years. It cleared every bar above - high rating, huge vote count,
- *  healthy popularity - because none of those bars know what year it is.
+ *  WHY IT IS NOT LITERALLY `>= YYYY-01-01`. That expression is correct for 11
+ *  months of the year and catastrophic in the twelfth: at 00:01 on 1 January the
+ *  eligible pool is every film released in the last one minute, i.e. nothing, and
+ *  the hero would degrade to its emergency passes for weeks. So the boundary is
+ *  1 January of the current IST year OR 240 days ago, whichever is EARLIER.
  *
- *  MOVIES therefore get a hard ceiling on release date. 18 months is chosen so
- *  that a hero slot can still go to last year's big release during a thin week,
- *  without the carousel turning into a classics rail.
+ *  Worked through, with today as the reference point:
+ *    5 Sep 2026  -> Jan 1 2026 vs 8 Jan 2026  -> Jan 1 2026   (exactly this year)
+ *    20 Dec 2026 -> Jan 1 2026 vs 24 Apr 2026 -> Jan 1 2026   (exactly this year)
+ *    2 Jan 2027  -> Jan 1 2027 vs 7 May 2026  -> 7 May 2026   (H2 2026 allowed)
+ *    5 Sep 2027  -> Jan 1 2027 vs 8 Jan 2027  -> Jan 1 2027   (exactly this year)
+ *  So for roughly ten months of every year the rule IS "this year only", and in
+ *  the January-to-April shoulder it widens just far enough to stay full, then
+ *  tightens again on its own. Nothing to maintain and no date to come back and
+ *  edit - which is the whole requirement.
  *
- *  SERIES are deliberately NOT date-gated, and this is not an oversight:
- *  first_air_date is the date a show STARTED. One Piece reads as 1999 while
- *  airing a new episode this week, and Breaking Bad reads as 2008 whether or not
- *  anyone is watching it. Neither number says anything about whether a show is
- *  current, so a ceiling on it would drop exactly the ongoing series a viewer
- *  wants and keep nothing useful. Series recency is enforced at the QUERY
- *  instead - both /discover/tv calls carry air_date.gte, so TMDB only returns
- *  shows with a recent episode, and /trending/tv/week is a live demand signal by
- *  definition.
+ *  SERIES ARE HELD TO THE SAME YEAR, with a documented fallback. The old note
+ *  here argued series must never be date-gated because first_air_date is when a
+ *  show STARTED - One Piece reads 1999 while airing an episode this week. That
+ *  reasoning is sound and it produced One Piece and a 2019 season of The Family
+ *  Man in the hero, which is not what "latest" means to anyone looking at it. So
+ *  the strict pass now requires a series to have PREMIERED inside the window
+ *  too, and isCarouselRecent - which still exempts series - is kept as the pass
+ *  that runs only when the strict one came up short. A currently-airing older
+ *  show is a much better slide than an empty one; it is simply not the first
+ *  choice any more.
  */
-const CAROUSEL_MAX_MOVIE_AGE_DAYS = 550;
+const CAROUSEL_YEAR_WINDOW_MIN_DAYS = 240;
 const CAROUSEL_INDUSTRY_MIN_VOTES = 20;
 const CAROUSEL_TV_AIRED_WITHIN_DAYS = 120;
+
+/** Earliest release / premiere date a hero slide may carry, as YYYY-MM-DD.
+ *  See the note above for why this is not simply 1 January. */
+function carouselWindowStartStr() {
+  const istNow = new Date(Date.now() + (5.5 * 60 * 60 * 1000));
+  const jan1 = istNow.toISOString().slice(0, 4) + '-01-01';
+  const floor = istDateStr(CAROUSEL_YEAR_WINDOW_MIN_DAYS);
+  return floor < jan1 ? floor : jan1;
+}
+
+/*  Hindi series get a much wider air window than the global one, for the same
+ *  reason the industry movie sources needed their own vote floor: release cadence
+ *  is not comparable. The global streaming pool has something new every week, so
+ *  120 days is generous there. Indian originals run on seasons that are a year or
+ *  more apart - Panchayat, Paatal Lok, Mirzapur, Farzi, Kota Factory - so a
+ *  120-day window returns an empty page most of the year, and the reserved Hindi
+ *  slot would then be silently handed to whatever else was queued. 400 days keeps
+ *  a real season in range at all times while TMDB's popularity sort still decides
+ *  WHICH of them is the one trending right now, so the slot stays current. */
+const CAROUSEL_TV_HI_AIRED_WITHIN_DAYS = 400;
 
 /*  The industry sources have to be DATE-WINDOWED, or the age ceiling starves
  *  them. Each was sort_by=popularity.desc with no window, which on a shared
@@ -2938,7 +3051,7 @@ function carouselIndustryQuery(lang) {
   return {
     with_original_language: lang,
     sort_by: 'popularity.desc',
-    'primary_release_date.gte': istDateStr(CAROUSEL_MAX_MOVIE_AGE_DAYS),
+    'primary_release_date.gte': carouselWindowStartStr(),
     'primary_release_date.lte': istDateStr(0),
     /*  The vote floor belongs HERE, not only in the bar downstream. Without it
      *  page 1 was over half 2-to-6-vote entries, and those are not merely weak
@@ -2948,35 +3061,43 @@ function carouselIndustryQuery(lang) {
      *  outranks the one everybody has. Correct shrinkage, wrong pool. Excluding
      *  them at the source is the fix; nothing downstream has to fight the score.
      *
-     *  20 and not higher: measured over a 550-day window this leaves Telugu 9
-     *  usable titles, Hindi 20, Tamil 20 and Korean 20. At 40 Telugu drops to 3
-     *  and Tamil to 6, which is too thin to fill a two-slot quota on a bad week. */
+     *  20 and not higher, and it matters more now that the window is one year
+     *  rather than 550 days. Measured over 2026 to date: at a 20-vote floor Hindi
+     *  fields 11 titles and Telugu 3; at 40 Hindi drops to 5 and Telugu to 1,
+     *  which cannot fill a two-slot quota on a bad week. */
     'vote_count.gte': String(CAROUSEL_INDUSTRY_MIN_VOTES),
     language: 'en-US',
     page: '1'
   };
 }
 
-/** Age in days from release / first air date, or null when unusable. */
-function carouselAgeDays(item, nowMs) {
+/** Released or premiered inside the current-year window — the strict test, and
+ *  the one that decides what a normal day looks like. Applies to series as well
+ *  as films: a 2026 slide means a 2026 title, not a 1999 show with a 2026
+ *  episode.
+ *
+ *  Compared as YYYY-MM-DD strings rather than by converting to days. TMDB emits
+ *  exactly that format, lexicographic order on it IS chronological order, and it
+ *  sidesteps the timezone drift that day-arithmetic introduces around midnight. */
+function isCarouselInYear(item) {
   const dateStr = item.release_date || item.first_air_date;
-  if (!dateStr) return null;
-  const ms = new Date(dateStr).getTime();
-  if (!isFinite(ms)) return null;
-  return ((nowMs || Date.now()) - ms) / DAY_MS;
-}
-
-/** Recent enough for a hero slot. See the note above for why TV is exempt. */
-function isCarouselRecent(item, nowMs) {
-  if (mediaTypeOf(item) === 'tv') return true;
-  const age = carouselAgeDays(item, nowMs);
   /*  An unusable date fails. The pool filter upstream lets a dateless title
    *  through on vote_count alone, which is fine for "has it been released" but
-   *  cannot answer "is it recent" - and unverifiable is not good enough for the
-   *  one slot every visitor sees. Such titles remain reachable through the
-   *  last-resort pass below, so this can never empty the hero. */
-  if (age == null) return false;
-  return age <= CAROUSEL_MAX_MOVIE_AGE_DAYS;
+   *  cannot answer "is it from this year" - and unverifiable is not good enough
+   *  for the one slot every visitor sees. Such titles remain reachable through
+   *  the last-resort pass below, so this can never empty the hero. */
+  if (!dateStr) return false;
+  return dateStr >= carouselWindowStartStr();
+}
+
+/** The relaxed test, used only by the passes that run when the strict one could
+ *  not fill the hero: films still have to be from this year, series do not.
+ *  first_air_date is when a show STARTED, so a currently-airing older series is
+ *  genuinely current content even though its date is old — a worse slide than a
+ *  2026 premiere, a far better one than a gap. */
+function isCarouselRecent(item, nowMs) {
+  if (mediaTypeOf(item) === 'tv') return true;
+  return isCarouselInYear(item);
 }
 
 const CAROUSEL_BAR_GLOBAL   = { rating: 6.4, votes: 200, popularity: 25 };
@@ -2997,24 +3118,93 @@ const CAROUSEL_BAR_REGIONAL = { rating: 6.0, votes: 25,  popularity: 2 };
  *  floor is, so that "latest" can only ever choose among titles that are also
  *  well rated.
  *
- *  6.0 was checked against every industry over the 550-day window before being
- *  picked, not guessed at:
- *    Telugu  Court 7.6/34v, HIT 6.7/61v, Bahubali: The Epic 6.4/42v   -> fills 2
- *    Hindi   Dhurandhar 7.3/352v, The Revenge 7.3/159v, +4 more       -> fills 2
- *    Tamil   Blast 7.8/67v, Made in Korea 7.3/42v, Youth 6.9/22v      -> ample
- *    Korean  Hope 8.3/26v, Colony 8.1/687v, No Other Choice 7.5/1263v -> ample
- *  Telugu is the binding constraint at three eligible titles, which is why this
- *  is 6.0 and not 6.5 - one bad week there and a 6.5 floor cannot field two. */
-const CAROUSEL_REGIONAL_CATEGORIES = ['bollywood', 'south', 'tollywood', 'korean', 'world'];
+ *  6.0 was re-checked against every industry INSIDE the current-year window,
+ *  which is the number that matters now that the window is a year rather than
+ *  550 days. 2026 to date:
+ *    Hindi    Dhurandhar 7.3/159v, Mardaani 3 7.6/44v, Border 2 7.6/35v,
+ *             Kartavya 7.0/32v, Tu Yaa Main 6.4/60v, Toaster 6.0/36v -> fills 2
+ *    Kannada  Toxic 7.9/68v                                          -> fills 1
+ *    Telugu   Mana ShankaraVaraPrasad Garu 6.2/22v                   -> thin
+ *    Anime    Chainsmoker Cat 8.6/59v, Smoking Behind the Supermarket
+ *             9.0/44v, You and I Are Polar Opposites 8.7/90v         -> ample
+ *  Telugu is the binding constraint and is now genuinely thin at one eligible
+ *  title, which is exactly why the South Indian seat carries an editorial pin
+ *  (see CAROUSEL_EDITORIAL_PINS) instead of a higher floor: raising the bar
+ *  would empty that slot rather than improve it. */
+/*  webseries_hi belongs on the REGIONAL side of the bar and this is not a
+ *  judgement about quality. A Hindi original that the whole country is watching
+ *  lands somewhere around 60-400 TMDB votes and a popularity of 8-30; the global
+ *  bar asks for 200 votes AND popularity 25, which no Hindi series clears
+ *  reliably. Held to the global bar the reserved Hindi slot would simply never
+ *  fill. webseries_world is regional for the same reason - a Spanish or Japanese
+ *  live-action series is not measured on an English scale either. webseries_en
+ *  stays on the global bar, because English series are exactly the population
+ *  that bar was measured against. */
+/*  ANIME IS ON THE REGIONAL SIDE TOO, and this one is a measured correction
+ *  rather than a preference. Held to the global 200-vote floor, the anime slot
+ *  could only ever be filled by a long-running institution - One Piece 5,523
+ *  votes, Bleach 2,258, Frieren 949 - because a series that premiered this year
+ *  has not had time to collect 200 votes. Every 2026 anime premiere sits between
+ *  27 and 90 votes, so the global bar and a current-year window are mutually
+ *  exclusive: one of them had to move, and the vote floor is the one that is
+ *  wrong. Ratings are not the problem at all - the 2026 cohort runs 8.0 to 9.0. */
+const CAROUSEL_REGIONAL_CATEGORIES = ['bollywood', 'south', 'tollywood', 'korean',
+  'anime', 'webseries_hi', 'webseries_world', 'world'];
+
+/*  ══════════════════════════════════════════════════════════════════════
+ *  EDITORIAL PIN — a default for one slot, never an override
+ *  ══════════════════════════════════════════════════════════════════════
+ *  A pin names one title and the slot it should occupy. It exists because the
+ *  score cannot always see what a person can: Toxic is the biggest South Indian
+ *  release of the year by a wide margin (7.9 from 68 votes at popularity 207,
+ *  against a best available Telugu title of 6.2 from 22 votes at popularity 2),
+ *  and it should hold the South/Tollywood slot right now.
+ *
+ *  Two properties make this safe to leave in the file unattended, which is the
+ *  point - it is not a hardcoded slide that has to be remembered and removed:
+ *
+ *    1. IT LOSES TO ANYTHING BETTER. The pin is only placed if it is the
+ *       HIGHEST-SCORING eligible title for its category in today's pool. The
+ *       moment a Telugu or Kannada release outscores it, the normal sweeps place
+ *       that title and the pin is silently skipped. No edit needed.
+ *    2. IT CANNOT SHOW SOMETHING STALE. It goes through the same bar and the same
+ *       current-year window as everything else, so when Toxic falls out of the
+ *       window at the end of the year the pin stops matching and disappears.
+ *
+ *  `category` is stated explicitly and deliberately differs from what
+ *  carouselCategoryOf() would return. Toxic is Kannada, so the language rules
+ *  would file it under `south` - a min-0 bucket that only picks up slack, i.e.
+ *  it would usually not appear at all. Pinning it to `tollywood` puts it in the
+ *  reserved South Indian seat, which is where a viewer expects to find it.
+ */
+const CAROUSEL_EDITORIAL_PINS = [
+  { id: 1213243, category: 'tollywood', title: 'Toxic: A Fairy Tale for Grown-ups' }
+];
 
 /** Which quota bucket a title belongs to. Checked in specificity order: anime
  *  before web series (an anime series is both), and media type before language
- *  (an English series is web series, not Hollywood). */
+ *  (an English series is web series, not Hollywood).
+ *
+ *  MEDIA TYPE IS CHECKED BEFORE LANGUAGE AND STAYS THAT WAY. It is what keeps
+ *  the movie buckets pure: without it a Hindi series would be filed as
+ *  `bollywood` and could take one of the two Bollywood movie slots, so the hero
+ *  would show two shows and one film while the table still claimed otherwise.
+ *  Every series therefore lands in a webseries_* bucket, or in `korean` where the
+ *  K-drama allowance already lives — never in bollywood, tollywood or hollywood.
+ */
 function carouselCategoryOf(item) {
   const lang = item.original_language || 'en';
   const isAnimation = (item.genre_ids || []).indexOf(16) !== -1;
   if (isAnimation && lang === 'ja') return 'anime';
-  if (mediaTypeOf(item) === 'tv') return 'webseries';
+  if (mediaTypeOf(item) === 'tv') {
+    if (lang === 'hi') return 'webseries_hi';
+    if (lang === 'en') return 'webseries_en';
+    /*  Korean series join the Korean allowance rather than the series overflow:
+     *  that bucket exists to represent Korea in the hero, and for Korea the thing
+     *  people actually watch is the drama, not the film. */
+    if (lang === 'ko') return 'korean';
+    return 'webseries_world';
+  }
   if (lang === 'hi') return 'bollywood';
   if (lang === 'te') return 'tollywood';
   if (lang === 'ta' || lang === 'ml' || lang === 'kn') return 'south';
@@ -3059,6 +3249,28 @@ function fillCarouselByQuota(pool, out, usedIds, taken) {
     taken[category] = (taken[category] || 0) + 1;
   };
 
+  /*  Pins run before every sweep, and each one is resolved by walking the
+   *  score-sorted pool from the top. The first title that is eligible for the
+   *  pinned category decides the question: if it IS the pin, the pin is placed;
+   *  if it is anything else, the pin has been outscored and nothing happens -
+   *  sweep 1 will place that better title a moment later. This is what makes the
+   *  pin self-retiring rather than a slide someone has to come back and delete. */
+  const placePins = () => {
+    for (const pin of CAROUSEL_EDITORIAL_PINS) {
+      const quota = CAROUSEL_CATEGORY_QUOTA[pin.category];
+      if (!quota || (taken[pin.category] || 0) >= quota.min) continue;
+      for (const item of pool) {
+        if (usedIds.has(item.id)) continue;
+        const isPin = item.id === pin.id;
+        const category = isPin ? pin.category : carouselCategoryOf(item);
+        if (category !== pin.category) continue;
+        if (!clearsCarouselBar(item, pin.category)) continue;
+        if (isPin) place(item, pin.category);
+        break;
+      }
+    }
+  };
+
   const sweep = (requireBar, limitKey) => {
     for (const item of pool) {
       if (out.length >= CAROUSEL_SLOTS) return;
@@ -3066,15 +3278,26 @@ function fillCarouselByQuota(pool, out, usedIds, taken) {
       const category = carouselCategoryOf(item);
       const quota = CAROUSEL_CATEGORY_QUOTA[category];
       if (!quota) continue;
-      if ((taken[category] || 0) >= quota[limitKey]) continue;
+      /*  A missing limit must mean "no room", not "no limit". Read straight into
+       *  the comparison, an absent key compares against undefined, which is false
+       *  for every count - so one typo'd or forgotten limit would let a single
+       *  category take the entire hero. */
+      const limit = quota[limitKey];
+      if (typeof limit !== 'number') continue;
+      if ((taken[category] || 0) >= limit) continue;
       if (requireBar && !clearsCarouselBar(item, category)) continue;
       place(item, category);
     }
   };
 
+  placePins();           // 0. the editorial default, if nothing beats it
   sweep(true, 'min');    // 1. quality picks, one category share each
   sweep(false, 'min');   // 2. representation over polish
   sweep(false, 'max');   // 3. best of the rest
+  /*  4. Gaps are worse than one slide over quota. Only reachable when passes 1-3
+   *  together could not find ten eligible titles, i.e. several sources failed or
+   *  returned nothing inside their windows. See `hard` in the quota table. */
+  if (out.length < CAROUSEL_SLOTS) sweep(false, 'hard');
   return out;
 }
 async function loadCarousel() {
@@ -3093,51 +3316,107 @@ async function loadCarousel() {
      *  supplies the trending pool, and the only thing lost is the TRENDING TODAY
      *  badge variant. Its badge branch below is kept, so restoring this line is
      *  the only change needed to bring it back. */    ['/movie/popular', { language: 'en-US', page: '1' }],
-    ['/movie/top_rated', { language: 'en-US', page: '1' }],
+    /*  /movie/top_rated used to sit here and was removed to pay for the Kannada
+     *  source below - the first screen is at exactly MZ_RATE_LIMIT requests, so
+     *  one had to go. It is the right one: top_rated is an ALL-TIME ranking, and
+     *  under a current-year window every single row it returns now fails the date
+     *  gate. It was contributing nothing to the line-up, only to the emergency
+     *  pass that fires when the hero would otherwise be half empty - and
+     *  /trending, /popular and /now_playing already cover that between them. */
     ['/movie/now_playing', { language: 'en-US', page: '1' }],
     ['/discover/movie', carouselIndustryQuery('hi')],
     ['/discover/movie', carouselIndustryQuery('ta')],
     ['/discover/movie', carouselIndustryQuery('te')],
+    /*  Kannada. Added for the pinned South Indian slot: Toxic is a Kannada
+     *  production, and with no kn source in the plan it reached the pool only if
+     *  it happened to surface in global /trending or /popular - which for a South
+     *  Indian release is luck, not a guarantee. This asks the question directly.
+     *  It doubles as the Kannada industry's own feed into the `south` bucket. */
+    ['/discover/movie', carouselIndustryQuery('kn')],
     ['/discover/movie', Object.assign(carouselIndustryQuery('ja'), { with_genres: '16' })],
-    ['/discover/movie', carouselIndustryQuery('ko')],
-    /*  The three /tv sources. Everything above this line is a /movie endpoint,
+    /*  carouselIndustryQuery('ko') used to sit here and was removed to pay for the
+     *  Hindi series source below, because the first screen is at exactly
+     *  MZ_RATE_LIMIT requests and the next one added anywhere gets parked for a
+     *  full 10s window. Korean was the right thing to give up: it holds min 0 in
+     *  the quota table, so it can only ever win a slot another category failed to
+     *  fill, and Korea's own headline titles are dramas rather than films - those
+     *  still arrive through /trending/tv/week and are filed under `korean` by
+     *  carouselCategoryOf(). Restoring this line means dropping another source. */
+    /*  The four /tv sources. Everything above this line is a /movie endpoint,
      *  which is why no web series or anime series could ever reach the hero.
      *
      *  trending/tv/week is the demand signal - whatever the world is actually
-     *  watching this week, in any language. The two /discover/tv calls are the
+     *  watching this week, in any language. The three /discover/tv calls are the
      *  quality signal, asking TMDB itself to pre-filter on rating and vote count
      *  so the bar is applied at the source rather than after the fact: one over
-     *  the streaming networks (excluding linear channels, or the pool fills with
-     *  daily soaps that air a new episode every evening), one over anime, which
-     *  is not on the network list and has to be matched by genre + language. */
+     *  English streaming originals, one over Hindi streaming originals, one over
+     *  anime, which is not on the network list and has to be matched by genre +
+     *  language. All three exclude the linear channels, or the pool fills with
+     *  daily soaps that air a new episode every evening.
+     *
+     *  ONE SOURCE PER RESERVED SLOT is the point of the English/Hindi split. A
+     *  single popularity-sorted query over all languages returns page after page
+     *  of English titles, so webseries_hi would sit empty and its slot would leak
+     *  to the overflow buckets. Asking TMDB the Hindi question separately is the
+     *  only way the reserved seat is actually fillable. */
     ['/trending/tv/week', { language: 'en-US', page: '1' }],
     ['/discover/tv', {
+      with_original_language: 'en',
       with_networks: STREAMING_NETWORK_IDS,
       without_networks: LINEAR_TV_EXCLUDE_IDS,
       sort_by: 'popularity.desc',
       'vote_count.gte': String(CAROUSEL_BAR_GLOBAL.votes),
       'vote_average.gte': String(CAROUSEL_BAR_GLOBAL.rating),
-      'air_date.gte': istDateStr(CAROUSEL_TV_AIRED_WITHIN_DAYS),
+      /*  first_air_date, not air_date, and this is the one query where that is
+       *  clearly right. Asked with air_date.gte the page came back as Reacher,
+       *  Silo, Lioness, Ted Lasso, Criminal Minds - all airing, none of them new -
+       *  with exactly ONE 2026 premiere on it, so the reserved English slot had a
+       *  single candidate and a bad week would empty it. Asked this way the page is
+       *  2026 premieres only and there are fourteen of them, Off Campus 8.9/833v
+       *  and Dutton Ranch 9.2/562v among them. The ongoing-series fallback is not
+       *  lost - /trending/tv/week supplies those, and by definition supplies the
+       *  ones people are actually watching. */
+      'first_air_date.gte': carouselWindowStartStr(),
       language: 'en-US', page: '1'
     }],
+    /*  Hindi originals. Rating and vote floors are the REGIONAL ones - see
+     *  CAROUSEL_REGIONAL_CATEGORIES for why a Hindi series cannot be asked for 200
+     *  votes - and the window is CAROUSEL_TV_HI_AIRED_WITHIN_DAYS rather than the
+     *  global 120 days, for the season-cadence reason documented there. */
+    ['/discover/tv', {
+      with_original_language: 'hi',
+      with_networks: STREAMING_NETWORK_IDS,
+      without_networks: LINEAR_TV_EXCLUDE_IDS,
+      sort_by: 'popularity.desc',
+      'vote_count.gte': String(CAROUSEL_BAR_REGIONAL.votes),
+      'vote_average.gte': String(CAROUSEL_BAR_REGIONAL.rating),
+      'air_date.gte': istDateStr(CAROUSEL_TV_HI_AIRED_WITHIN_DAYS),
+      language: 'en-US', page: '1'
+    }],
+    /*  Anime. REGIONAL floors, for the reason set out at
+     *  CAROUSEL_REGIONAL_CATEGORIES: at 200 votes this query returns Doraemon,
+     *  Bleach and One Piece and not one series that premiered this year. air_date
+     *  rather than first_air_date is kept here on purpose - it returns both the
+     *  2026 premieres the strict pass wants and the long-runners the fallback pass
+     *  needs, so one request serves both tiers. */
     ['/discover/tv', {
       with_genres: '16',
       with_original_language: 'ja',
       sort_by: 'popularity.desc',
-      'vote_count.gte': String(CAROUSEL_BAR_GLOBAL.votes),
-      'vote_average.gte': String(CAROUSEL_BAR_GLOBAL.rating),
+      'vote_count.gte': String(CAROUSEL_BAR_REGIONAL.votes),
+      'vote_average.gte': String(CAROUSEL_BAR_REGIONAL.rating),
       'air_date.gte': istDateStr(CAROUSEL_TV_AIRED_WITHIN_DAYS),
       language: 'en-US', page: '1'
     }]
   ]);
 
-  const sourceNames = ['trending_week','popular','top_rated','now_playing','bollywood','south','tollywood','anime','korean','trending_tv','webseries','anime_tv'];
+  const sourceNames = ['trending_week','popular','now_playing','bollywood','south','tollywood','kannada','anime','trending_tv','webseries_en','webseries_hi','anime_tv'];
 
   /*  /discover/tv results carry no media_type at all, and /trending/tv/week only
    *  sometimes does. Without a tag mediaTypeOf() would fall back to guessing from
    *  the presence of 	itle, and carouselCategoryOf() would file a series under
    *  Hollywood. Tag at the source instead, where the answer is known. */
-  const CAROUSEL_TV_SOURCES = ['trending_tv', 'webseries', 'anime_tv'];
+  const CAROUSEL_TV_SOURCES = ['trending_tv', 'webseries_en', 'webseries_hi', 'anime_tv'];
 
   // Combine all results into a master pool with source tags (safely handle null/undefined)
   const masterPool = [];
@@ -3232,10 +3511,25 @@ async function loadCarousel() {
    *  condition, the third (max) sweep would relax it again and the classics would
    *  walk straight back in - which is the whole thing being fixed. */
   const mzNow = Date.now();
+  /*  Four ordered attempts, and the ORDER is the feature. The first two ask for
+   *  titles from this year and nothing else - that is what a normal day uses, and
+   *  it is what makes every slide a current release. Only if those cannot fill
+   *  ten slots do the last two relax the year gate for SERIES alone
+   *  (isCarouselRecent exempts them), which is how an ongoing show gets in when
+   *  no premiere this year cleared the bar. Films are never relaxed here; the only
+   *  path by which an older film can appear is the emergency pass below. */
+  const inYearCandidates = candidates.filter(isCarouselInYear);
+  const inYearReleased = allReleased.filter(isCarouselInYear);
   const recentCandidates = candidates.filter(m => isCarouselRecent(m, mzNow));
   const recentReleased = allReleased.filter(m => isCarouselRecent(m, mzNow));
 
-  fillCarouselByQuota(recentCandidates, diverseCarousel, usedIds, takenByCategory);
+  fillCarouselByQuota(inYearCandidates, diverseCarousel, usedIds, takenByCategory);
+  if (diverseCarousel.length < CAROUSEL_SLOTS) {
+    fillCarouselByQuota(inYearReleased, diverseCarousel, usedIds, takenByCategory);
+  }
+  if (diverseCarousel.length < CAROUSEL_SLOTS) {
+    fillCarouselByQuota(recentCandidates, diverseCarousel, usedIds, takenByCategory);
+  }
   if (diverseCarousel.length < CAROUSEL_SLOTS) {
     fillCarouselByQuota(recentReleased, diverseCarousel, usedIds, takenByCategory);
   }
@@ -3270,7 +3564,14 @@ async function loadCarousel() {
       m._badge = '🎬 NOW IN THEATERS';
     } else if (category === 'anime') {
       m._badge = '\u{1F38C} ANIME TRENDING';
-    } else if (category === 'webseries') {
+    } else if (category === 'webseries_hi') {
+      /*  Named explicitly rather than left to the generic series branch: a Hindi
+       *  original sharing the hero with an English one is the whole point of the
+       *  two reserved seats, and an identical WEB SERIES ribbon on both hides
+       *  that from the viewer. */
+      m._badge = m.vote_average >= 8.0 ? '\u{1F3C6} TOP HINDI SERIES'
+        : '\u{1F1EE}\u{1F1F3} HINDI WEB SERIES';
+    } else if (category === 'webseries_en' || category === 'webseries_world') {
       /*  Series never reached this list before, so there was no branch for them
        *  and they would have fallen through to POPULAR NOW. */
       m._badge = m.vote_average >= 8.0 ? '\u{1F3C6} TOP WEB SERIES'
@@ -3280,10 +3581,14 @@ async function loadCarousel() {
       m._badge = '🎬 BOLLYWOOD HIT';
     } else if (lang === 'hi') {
       m._badge = '🎬 BOLLYWOOD TRENDING';
-    } else if (lang === 'ta') {
-      m._badge = '🔥 SOUTH BLOCKBUSTER';
-    } else if (lang === 'te') {
+    } else if (category === 'tollywood') {
+      /*  Category, not language. A pinned title is placed into the bucket the pin
+       *  names rather than the one its language implies, so reading `lang` here
+       *  gave Toxic - Kannada, in the Tollywood slot - a generic POPULAR NOW
+       *  ribbon while every other slide was labelled with its industry. */
       m._badge = '🔥 TOLLYWOOD HIT';
+    } else if (category === 'south' || lang === 'ta') {
+      m._badge = '🔥 SOUTH BLOCKBUSTER';
     } else if (lang === 'ko') {
       m._badge = '🇰🇷 KOREAN TRENDING';
     } else if (lang === 'ja') {
@@ -3294,8 +3599,6 @@ async function loadCarousel() {
       m._badge = '🔥 TRENDING NOW';
     } else if (m.vote_average >= 8.0) {
       m._badge = '⭐ CRITICALLY ACCLAIMED';
-    } else if (m._source === 'top_rated') {
-      m._badge = '🏆 TOP RATED';
     } else {
       m._badge = '🔥 POPULAR NOW';
     }
