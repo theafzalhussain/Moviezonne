@@ -1,4 +1,4 @@
-/* ═══════════════════════════════════════════════════════════════
+﻿/* ═══════════════════════════════════════════════════════════════
    MOVIEZONE — ULTRA PREMIUM LUXURY EDITION
    Complete design system with cinematic animations
    ═══════════════════════════════════════════════════════════════ */
@@ -1688,9 +1688,16 @@ body {
   }
 }
 
+/*  Sits at 19% from the bottom, not 13%.
+    At 13% the block was tucked into the bottom edge with the dots and the
+    progress bar crowding it, and the top two thirds of a 95vh hero carried
+    nothing at all. Lifting it reads as composed rather than bottom-anchored and
+    gives the backdrop room to be the image it is. Checked against the tallest
+    case the layout can produce - an xlong two-line title plus a three-line
+    description - so the buttons still clear #hero's bottom edge. */
 .slide-content {
   position: absolute;
-  bottom: 13%;
+  bottom: 19%;
   left: 5.5%;
   max-width: 680px;
   transform: translateY(40px);
@@ -1715,21 +1722,35 @@ body {
 .slide-badge {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
-  background: linear-gradient(135deg, rgba(24, 19, 8, 0.9), rgba(9, 8, 5, 0.85));
-  border: 1px solid rgba(245, 197, 24, 0.42);
-  color: #f5d78a;
-  padding: 0.38rem 1rem;
+  gap: 0.5rem;
+  background: linear-gradient(135deg, rgba(58, 44, 16, 0.95) 0%, rgba(20, 15, 6, 0.92) 45%, rgba(8, 7, 4, 0.9) 100%);
+  border: 1px solid rgba(245, 197, 24, 0.5);
+  color: #ffdc94;
+  padding: 0.42rem 1.05rem;
   border-radius: 50px;
   font-size: 0.7rem;
   font-weight: 800;
   letter-spacing: 1.6px;
   text-transform: uppercase;
-  margin-bottom: 1.15rem;
+  margin-bottom: 1.2rem;
+  letter-spacing: 1.9px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
   box-shadow:
-    0 6px 20px rgba(0, 0, 0, 0.5),
-    0 0 0 1px rgba(0, 0, 0, 0.35),
-    inset 0 1px 0 rgba(255, 219, 138, 0.16);
+    0 8px 24px rgba(0, 0, 0, 0.55),
+    0 0 22px rgba(245, 197, 24, 0.13),
+    inset 0 1px 0 rgba(255, 226, 158, 0.28),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.4);
+}
+
+/*  The gold mark that replaced the emoji the badge text used to carry.
+    The emoji were authored in the _badge strings and rendered as "??" the moment
+    anything re-encoded the bundle - and they were platform-drawn cartoons sitting
+    next to gold letterforms, which is not what luxury looks like. One crisp
+    four-point star, same gold as the border, is drawn per slide instead. */
+.slide-badge-mark {
+  flex: 0 0 auto;
+  color: var(--gold);
+  filter: drop-shadow(0 0 5px rgba(245, 197, 24, 0.6));
 }
 
 
@@ -1765,6 +1786,72 @@ body {
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-wrap: balance;
+  /*  Both of these are declared EXPLICITLY, not left to inherit.
+
+      The sheen rule below clips a gradient to this text, which requires
+      transparent fill. Its guard (html:not(.low-end-mode)) does correctly stop
+      the rule from matching on weak devices - verified by walking the matched
+      rules in a real browser - and yet the computed fill still came back
+      transparent there, inherited down the ancestor chain. A title that is
+      transparent with no gradient behind it is an invisible title, i.e. a blank
+      hero on exactly the devices least able to recover from it.
+
+      So the readable state is stated outright and the sheen overrides it by
+      specificity, rather than the readable state being "whatever is left when
+      the sheen rule is absent". Cheap insurance against an unpaintable hero. */
+  color: #fff;
+  -webkit-text-fill-color: #fff;
+}
+
+/*  ── TITLE SHEEN ──
+    A gold highlight sweeps across the movie name once, each time a slide becomes
+    the active one.
+
+    Why a sweep and not a gold gradient fill. An earlier pass DID tint the whole
+    title white-to-gold permanently, and it had to come out: over a warm-lit
+    backdrop the gold half of the letterforms sank into the image. A moving
+    highlight gives the same expensive look without ever leaving the text less
+    readable than solid white - the gold band is only over a third of the word at
+    any instant, and when the animation finishes the title is plain white again.
+
+    One-shot, not infinite. goToSlide() adds and removes .active, so the animation
+    restarts on every slide change for free. An infinite loop would repaint the
+    largest text on the page forever for a decoration nobody is looking at after
+    the first second.
+
+    Both guards matter and neither is optional:
+      - html:not(.low-end-mode) keeps background-clip: text away from weak devices
+        entirely. .low-end-mode * forces animation: none, and a clipped title
+        with no animation would be a transparent title.
+      - prefers-reduced-motion is a sweep across the biggest element on screen. */
+@media (prefers-reduced-motion: no-preference) {
+  html:not(.low-end-mode) .carousel-slide.active .slide-title-text {
+    background: linear-gradient(100deg,
+      #fff 0%, #fff 34%,
+      #ffe6a8 46%, #fff5d6 50%, #ffe6a8 54%,
+      #fff 66%, #fff 100%);
+    background-size: 260% 100%;
+    background-position: 130% 0;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    /*  text-shadow is painted from the glyph alpha and survives the clip, but it
+        reads muddy under transparent fill - drop-shadow on the box is cleaner. */
+    filter: drop-shadow(0 5px 20px rgba(0, 0, 0, 0.9));
+    animation: titleSheen 2.4s cubic-bezier(0.22, 0.61, 0.36, 1) 0.45s 1 forwards;
+  }
+
+  html:not(.low-end-mode) .carousel-slide.active .slide-title {
+    /*  The sweep carries its own shadow; keeping the h2's as well double-darkened
+        the glyph edges for the duration of the animation. */
+    text-shadow: none;
+  }
+}
+
+@keyframes titleSheen {
+  from { background-position: 130% 0; }
+  to   { background-position: -30% 0; }
 }
 
 /*  Long-title size steps. Set from JS by character count (see buildOne) because
@@ -6408,6 +6495,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   .slide-content {
     left: 5%;
     max-width: 680px;
+    bottom: 18%;
   }
 }
 
@@ -6524,7 +6612,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   .slide-content {
     left: 4%;
     right: 4%;
-    bottom: 12%;
+    bottom: 17%;
     max-width: none;
   }
 
@@ -6549,6 +6637,7 @@ html[data-mz-tv="true"] .cat-group-menu {
     line-height: 1.4;
     -webkit-line-clamp: 2;
     margin-bottom: 1.2rem;
+    
   }
 
   .slide-actions {
@@ -6750,7 +6839,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 
   .slide-content {
-    bottom: 11%;
+    bottom: 15%;
   }
 
   .slide-badge {
