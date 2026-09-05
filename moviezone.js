@@ -119,7 +119,48 @@ function pinPreloadedHero(list, pool) {
       return list;
     }
     const fromPool = (pool || []).find(m => m && m.backdrop_path === want);
-    if (fromPool) return [fromPool].concat(list).slice(0, 10);
+    if (!fromPool) return list;
+
+    /*  The preloaded title is not in the line-up, so pinning it to slide 0 means
+     *  taking a slot from somebody. This used to be
+     *
+     *      return [fromPool].concat(list).slice(0, 10);
+     *
+     *  which quietly spent the LAST slot. Measured against the category quotas:
+     *  Hollywood came out at five instead of four and Tollywood lost its second
+     *  pick - the tail of the list is exactly where the smaller categories sit,
+     *  so the slice always billed them.
+     *
+     *  Swap for the weakest member of the pinned title's OWN category instead,
+     *  scanning from the end because placement order runs strongest-first within
+     *  a category. The tally is then unchanged by construction.
+     *
+     *  Two refusals, and neither is a silent nicety:
+     *    - an over-age title is never pinned. The age ceiling has to stay
+     *      authoritative or this becomes the one path a 1995 release can still
+     *      reach slide 0 through.
+     *    - if its category holds no slot at all there is nothing to trade, so the
+     *      pin is declined.
+     *  Declining costs a preload that goes unconsumed and a one-frame swap
+     *  between the SSR hero and slide 0 (see heroPreloadTag in seo-ssr.js). That
+     *  is a real cost, which is why it is last resort rather than the default -
+     *  but the SSR hero is movie/popular[0], i.e. Hollywood, and Hollywood always
+     *  holds four slots, so in practice the swap above is what runs.
+     */
+    if (!isCarouselRecent(fromPool)) return list;
+    const pinCategory = carouselCategoryOf(fromPool);
+    let victim = -1;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const item = list[i];
+      if (!item) continue;
+      const itemCategory = item._carouselCategory || carouselCategoryOf(item);
+      if (itemCategory === pinCategory) { victim = i; break; }
+    }
+    if (victim === -1) return list;
+    fromPool._carouselCategory = pinCategory;
+    list.splice(victim, 1);
+    list.unshift(fromPool);
+    return list;
   } catch (e) { /* preload stays a miss — never break the carousel over it */ }
   return list;
 }
@@ -2822,13 +2863,25 @@ const MZ_CAROUSEL_MAX_RETRIES = 2;
 const CAROUSEL_SLOTS = 10;
 
 const CAROUSEL_CATEGORY_QUOTA = {
-  hollywood: { min: 3, max: 4 },
+  /*  max equals min for Hollywood on purpose. It owns the highest-scoring titles
+   *  in the pool, so if its max were higher it would win every leftover slot the
+   *  moment another category underfilled - which is how it took five here. Capped
+   *  at its share, the slack flows to Bollywood, Tollywood, South or Korean
+   *  instead, which is the point of having quotas at all. */
+  hollywood: { min: 4, max: 4 },
   bollywood: { min: 2, max: 3 },
-  webseries: { min: 1, max: 2 },
+  tollywood: { min: 2, max: 3 },
   anime:     { min: 1, max: 2 },
-  south:     { min: 1, max: 2 },
-  tollywood: { min: 1, max: 2 },
-  korean:    { min: 1, max: 1 },
+  webseries: { min: 1, max: 2 },
+  /*  South and Korean carry min 0 on purpose, and it is worth being explicit
+   *  about the consequence: the five mins above already sum to all ten slots, so
+   *  on a normal day neither appears in the hero at all. They are not removed
+   *  though - a max of 1 keeps them as the first thing that absorbs a slot when
+   *  another category cannot fill its min, which is far better than a gap or a
+   *  fifth Hollywood title. Same for world, which catches every language none
+   *  of the named categories claims. */
+  south:     { min: 0, max: 1 },
+  korean:    { min: 0, max: 1 },
   world:     { min: 0, max: 1 }
 };
 
@@ -2867,7 +2920,42 @@ const CAROUSEL_CATEGORY_QUOTA = {
  *  definition.
  */
 const CAROUSEL_MAX_MOVIE_AGE_DAYS = 550;
+const CAROUSEL_INDUSTRY_MIN_VOTES = 20;
 const CAROUSEL_TV_AIRED_WITHIN_DAYS = 120;
+
+/*  The industry sources have to be DATE-WINDOWED, or the age ceiling starves
+ *  them. Each was sort_by=popularity.desc with no window, which on a shared
+ *  all-time pool returns the biggest titles ever made in that language - RRR,
+ *  Baahubali, Pushpa - and the ceiling then deletes every one of them. Measured:
+ *  Tollywood could field exactly one eligible title, a 6.9 with eighteen votes
+ *  that only got in through the representation sweep.
+ *
+ *  With the window applied TMDB does the work instead: page 1 becomes the most
+ *  popular titles RELEASED INSIDE the ceiling, which is precisely the pool the
+ *  quota wants. Same reasoning as latestIndianWindowQuery in the ALL feed.
+ */
+function carouselIndustryQuery(lang) {
+  return {
+    with_original_language: lang,
+    sort_by: 'popularity.desc',
+    'primary_release_date.gte': istDateStr(CAROUSEL_MAX_MOVIE_AGE_DAYS),
+    'primary_release_date.lte': istDateStr(0),
+    /*  The vote floor belongs HERE, not only in the bar downstream. Without it
+     *  page 1 was over half 2-to-6-vote entries, and those are not merely weak
+     *  picks - calculateMovieScore() actively prefers them. Its rating term is
+     *  Bayesian-shrunk towards 6.2 with a 50-vote prior, so a 2-vote 8.0 shrinks
+     *  to 6.27 while a 69-vote 5.8 shrinks to 5.96: the title nobody has seen
+     *  outranks the one everybody has. Correct shrinkage, wrong pool. Excluding
+     *  them at the source is the fix; nothing downstream has to fight the score.
+     *
+     *  20 and not higher: measured over a 550-day window this leaves Telugu 9
+     *  usable titles, Hindi 20, Tamil 20 and Korean 20. At 40 Telugu drops to 3
+     *  and Tamil to 6, which is too thin to fill a two-slot quota on a bad week. */
+    'vote_count.gte': String(CAROUSEL_INDUSTRY_MIN_VOTES),
+    language: 'en-US',
+    page: '1'
+  };
+}
 
 /** Age in days from release / first air date, or null when unusable. */
 function carouselAgeDays(item, nowMs) {
@@ -2892,7 +2980,31 @@ function isCarouselRecent(item, nowMs) {
 }
 
 const CAROUSEL_BAR_GLOBAL   = { rating: 6.4, votes: 200, popularity: 25 };
-const CAROUSEL_BAR_REGIONAL = { rating: 5.8, votes: 30,  popularity: 12 };
+/*  Regional leans on VOTES for "in demand" and keeps popularity as a token
+ *  liveness floor only. Measured across every recent Telugu and Tamil release:
+ *  their TMDB popularity sits at 3-15 while a Hollywood release of the same week
+ *  is at 800. Asking regional titles for popularity 12 was therefore the same
+ *  mistake as asking them for 200 votes - it let exactly one Telugu title
+ *  through, so the representation sweep then filled the slot with an 8.0 that had
+ *  TWO votes. Votes are the honest demand signal here; popularity is not
+ *  comparable across industries and is only used to exclude dead catalogue rows. */
+const CAROUSEL_BAR_REGIONAL = { rating: 6.0, votes: 25,  popularity: 2 };
+
+/*  Why 6.0 and not lower. At 5.5 the bar was admitting titles that are new but
+ *  simply not good - a 5.8 with 29 votes took a Bollywood slot off a 7.3 with 352
+ *  votes, because calculateMovieScore()'s recency boost (up to 80 points) beats
+ *  the ~18-point rating gap between them. The score is not being changed; the
+ *  floor is, so that "latest" can only ever choose among titles that are also
+ *  well rated.
+ *
+ *  6.0 was checked against every industry over the 550-day window before being
+ *  picked, not guessed at:
+ *    Telugu  Court 7.6/34v, HIT 6.7/61v, Bahubali: The Epic 6.4/42v   -> fills 2
+ *    Hindi   Dhurandhar 7.3/352v, The Revenge 7.3/159v, +4 more       -> fills 2
+ *    Tamil   Blast 7.8/67v, Made in Korea 7.3/42v, Youth 6.9/22v      -> ample
+ *    Korean  Hope 8.3/26v, Colony 8.1/687v, No Other Choice 7.5/1263v -> ample
+ *  Telugu is the binding constraint at three eligible titles, which is why this
+ *  is 6.0 and not 6.5 - one bad week there and a 6.5 floor cannot field two. */
 const CAROUSEL_REGIONAL_CATEGORIES = ['bollywood', 'south', 'tollywood', 'korean', 'world'];
 
 /** Which quota bucket a title belongs to. Checked in specificity order: anime
@@ -2983,11 +3095,11 @@ async function loadCarousel() {
      *  the only change needed to bring it back. */    ['/movie/popular', { language: 'en-US', page: '1' }],
     ['/movie/top_rated', { language: 'en-US', page: '1' }],
     ['/movie/now_playing', { language: 'en-US', page: '1' }],
-    ['/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', language: 'en-US', page: '1' }],
-    ['/discover/movie', { with_original_language: 'ta', sort_by: 'popularity.desc', language: 'en-US', page: '1' }],
-    ['/discover/movie', { with_original_language: 'te', sort_by: 'popularity.desc', language: 'en-US', page: '1' }],
-    ['/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', language: 'en-US', page: '1' }],
-    ['/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', language: 'en-US', page: '1' }],
+    ['/discover/movie', carouselIndustryQuery('hi')],
+    ['/discover/movie', carouselIndustryQuery('ta')],
+    ['/discover/movie', carouselIndustryQuery('te')],
+    ['/discover/movie', Object.assign(carouselIndustryQuery('ja'), { with_genres: '16' })],
+    ['/discover/movie', carouselIndustryQuery('ko')],
     /*  The three /tv sources. Everything above this line is a /movie endpoint,
      *  which is why no web series or anime series could ever reach the hero.
      *
