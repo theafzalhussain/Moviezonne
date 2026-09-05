@@ -1,4 +1,4 @@
-﻿// Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
+// Improved Localhost Detection: Includes local IPs (192.168.x.x) often used in testing
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.');
 // TV detection is handled by tv-mode.js which sets html[data-mz-tv="true"].
 // This getter reads the data attribute set by the isolated TV module.
@@ -58,17 +58,17 @@ const IMG = 'https://image.tmdb.org/t/p/w342'; // Optimized: w500 is too heavy f
 // Serves high-quality images on fast networks and lighter ones on slow links.
 //
 // The desktop branch used to request `original`, which is TMDB's untouched
-// upload — measured across four trending titles it averages 885 KB per
+// upload â€” measured across four trending titles it averages 885 KB per
 // backdrop and peaked at 1.7 MB. This is the hero carousel image, i.e. the LCP
 // element, so that single request was setting the page's Largest Contentful
 // Paint. w1280 averages 116 KB for the same images: an 87% cut.
 //
 // Nothing visible is lost. The backdrop sits behind .slide-gradient with the
 // title and buttons over it, and it is never displayed above 1280 logical px
-// of detail — w1280 is also the largest size TMDB offers below `original`, so
+// of detail â€” w1280 is also the largest size TMDB offers below `original`, so
 // there is no middle option being skipped here.
 /*  The breakpoint the hero preload in <head> is scoped to. Must stay identical
- *  to WIDE_MQ in seo-ssr.js — if the two drift, <head> preloads one size, the
+ *  to WIDE_MQ in seo-ssr.js â€” if the two drift, <head> preloads one size, the
  *  carousel requests another, and the LCP image is downloaded twice.
  */
 const HERO_WIDE_MQ = '(min-width: 1025px)';
@@ -82,7 +82,7 @@ const HERO_MOBILE_MQ = '(max-width: 1024px)';
 /*  Size for slide 0 only.
  *
  *  getResponsiveBackdrop() branches on a UA test (isMobile), which a
- *  <link media> query cannot express — a narrow desktop window would be
+ *  <link media> query cannot express â€” a narrow desktop window would be
  *  preloaded w780 and then request w1280, the exact double-download this is
  *  meant to remove. Deciding on viewport width instead puts both sides on the
  *  same axis, and a 1024px-wide window genuinely does not need the 1280 asset.
@@ -120,7 +120,7 @@ function pinPreloadedHero(list, pool) {
     }
     const fromPool = (pool || []).find(m => m && m.backdrop_path === want);
     if (fromPool) return [fromPool].concat(list).slice(0, 10);
-  } catch (e) { /* preload stays a miss — never break the carousel over it */ }
+  } catch (e) { /* preload stays a miss â€” never break the carousel over it */ }
   return list;
 }
 
@@ -138,7 +138,7 @@ function getResponsiveBackdrop(path) {
 // isMzTV() reads that attribute for conditional behavior.
 
 /*  low-end-mode is the stylesheet's fast path: it switches off the effects that
- *  cost the most per frame — all 76 backdrop-filters, the blur filters, the
+ *  cost the most per frame â€” all 76 backdrop-filters, the blur filters, the
  *  heavy box-shadows, the Ken-Burns hero zoom, the card entrance animations and
  *  the shine sweeps.
  *
@@ -149,7 +149,7 @@ function getResponsiveBackdrop(path) {
  *
  *  Users who have asked their OS for less motion get it too. The CSS already
  *  honours prefers-reduced-motion for transitions, but the expensive paint work
- *  is a separate axis — someone on that setting is usually on a machine or in a
+ *  is a separate axis â€” someone on that setting is usually on a machine or in a
  *  context where the GPU effects are unwelcome as well.
  */
 (function applyPerfMode() {
@@ -171,7 +171,7 @@ function getResponsiveBackdrop(path) {
 //
 // The width test is a media query, not window.innerWidth. Reading innerWidth here
 // is the document's FIRST geometry read, so it forces a full style+layout flush of
-// a page with a 179KB stylesheet — before first paint, on every device. Profiled
+// a page with a 179KB stylesheet â€” before first paint, on every device. Profiled
 // on a 4x-throttled phone it cost 109ms for one comparison that is always false
 // there. matchMedia answers the same question from the viewport without flushing
 // layout at all.
@@ -252,10 +252,10 @@ if (!isMzTV() && !isTouchOnly && !isMobile) {
 // openModal() already preconnectPlayerHosts(4) call karta hai.
 //
 // The host list is no longer written out here. It was a copy of the provider
-// list that had gone stale in both directions — it warmed cinextream.net (dead
+// list that had gone stale in both directions â€” it warmed cinextream.net (dead
 // domain, DNS record gone), 2embed.stream, vidsrc.sbs and multiembed.mov, none
 // of which the player uses any more, while vidfast.pro, flicky.host,
-// 111movies.com, vidrock.net, vidlink.pro and vidsrc.pm — all live servers —
+// 111movies.com, vidrock.net, vidlink.pro and vidsrc.pm â€” all live servers â€”
 // stayed cold. Now it reads playerHostOrigins(), which is derived from
 // playerSources itself, so the two can never disagree again.
 //
@@ -279,7 +279,7 @@ if (!isMzTV() && !isTouchOnly && !isMobile) {
   const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
   if (conn && (conn.saveData || ['slow-2g', '2g'].indexOf(conn.effectiveType) !== -1)) return;
 
-  // Expensive: full TLS handshake — only for the two most-used providers, and
+  // Expensive: full TLS handshake â€” only for the two most-used providers, and
   // only once the browser is idle (i.e. after the first paint is done).
   const warm = () => {
     try { playerHostOrigins().slice(0, 2).forEach(url => addHint('preconnect', url, true)); } catch (e) {}
@@ -367,7 +367,7 @@ function scheduleIdleWork(tasks, timeout = 3000) {
 }
 /*  The watchlist is a finite, local list, so infinite scroll must not run while
  *  it is on screen. This used to be inferred by checking whether the active
- *  .cat-tab's onclick contained "showWatchlist" — that broke the moment the
+ *  .cat-tab's onclick contained "showWatchlist" â€” that broke the moment the
  *  Watchlist pill was removed from the strip, because with no matching tab the
  *  guard silently stopped firing and paged "all" movies into the watchlist grid.
  *  An explicit flag cannot be defeated by markup changes. */
@@ -408,7 +408,7 @@ function isMzTVMode() {
 
 // The strict TV launch guard below is a SEPARATE decision from "are we on a TV".
 // It disarms activation until a fresh key release proves intent, which protects
-// against a TV launcher's carried-over OK key auto-opening a title — but it also
+// against a TV launcher's carried-over OK key auto-opening a title â€” but it also
 // made the first OK press on a card a no-op, because resetTVLaunchActivation()
 // runs on every DOMContentLoaded/pageshow. TVs behave like keyboard devices, so
 // activation follows the laptop path and this stays off until it can be tested
@@ -495,7 +495,7 @@ document.addEventListener('keyup', (event) => {
 /*  Is there actually a restored watch surface to clean up?
  *
  *  resetRestoredWatchSurface() runs on DOMContentLoaded AND on every pageshow, so
- *  it runs on every single visit — and its writes are expensive ones:
+ *  it runs on every single visit â€” and its writes are expensive ones:
  *  overlay.scrollTop, embed.innerHTML, body.style.overflow and
  *  history.replaceState each dirty style or force layout on a document whose
  *  stylesheet is 179KB. Profiled on a 4x-throttled phone that was 237ms of main
@@ -523,7 +523,7 @@ function watchSurfaceNeedsReset() {
 }
 
 function resetRestoredWatchSurface() {
-  /*  The activation guard is JS state and must always be reset — a relaunch has
+  /*  The activation guard is JS state and must always be reset â€” a relaunch has
    *  to start disarmed whether or not a modal was open. */
   if (!watchSurfaceNeedsReset()) { resetTVLaunchActivation(); return; }
 
@@ -617,19 +617,19 @@ const tmdbCache = new Map();
 const inFlightRequests = new Map(); 
 let abortControllers = new Map(); // Track controllers to cancel stale requests
 
-/*  ══════════════════════════════════════════════════════════════════════
+/*  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  DEFERRED CACHE WRITES
- *  ══════════════════════════════════════════════════════════════════════
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  localStorage is synchronous: setItem blocks the main thread until the
  *  write lands. The SWR cache below used to call it inline in every response
- *  handler, and a cold homepage fires 15-20 TMDB requests at once — so the
+ *  handler, and a cold homepage fires 15-20 TMDB requests at once â€” so the
  *  browser was doing 15-20 JSON.stringify calls over 20-50 KB payloads plus
  *  15-20 blocking disk writes at exactly the moment it should have been
  *  rendering the grid. That is jank you can feel on a mid-range phone.
  *
  *  Writes are now batched and flushed when the main thread is idle. The cache
  *  is a speed optimisation for the NEXT visit, so nothing needs it to be
- *  durable this instant — but pagehide flushes synchronously so closing the
+ *  durable this instant â€” but pagehide flushes synchronously so closing the
  *  tab does not throw the session's cache away.
  */
 const _mzCacheWriteQueue = new Map();
@@ -641,7 +641,7 @@ const _mzOnIdle = (typeof requestIdleCallback === 'function')
 
 /*  Quota is ~5 MB and this cache has no natural bound, so a long-lived
  *  session will eventually fill it. On overflow we drop a batch of entries and
- *  move on. Which entries go is not important — every one of them is a
+ *  move on. Which entries go is not important â€” every one of them is a
  *  re-fetchable copy of a TMDB response, and picking "the oldest" would mean
  *  parsing every record's timestamp, which is the very cost being avoided.
  */
@@ -664,7 +664,7 @@ function _mzFlushCacheWrites() {
     try {
       localStorage.setItem(cacheKey, JSON.stringify({ timestamp: Date.now(), data }));
     } catch (err) {
-      // Out of quota — free some room and abandon the rest of this batch
+      // Out of quota â€” free some room and abandon the rest of this batch
       // rather than throwing repeatedly for every remaining entry.
       if (!_mzEvictCacheEntries(30)) return;
       try {
@@ -687,9 +687,9 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') _mzFlushCacheWrites();
 });
 
-/*  ══════════════════════════════════════════════════════════════════════
+/*  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  NETWORK RESILIENCE
- *  ══════════════════════════════════════════════════════════════════════
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  Datadog RUM was reporting ~91 "TypeError: Failed to fetch" per day, all
  *  from tmdb() <- loadMovies(). Hardly any of them were a broken API. Three
  *  real causes, biggest first:
@@ -697,7 +697,7 @@ document.addEventListener('visibilitychange', () => {
  *  1. RETRY STORM. loadMovies() re-ran itself every 3 s, FOREVER, whenever it
  *     finished with an empty list. Each run fans out to 15 parallel tmdb()
  *     calls, so one user on a dead connection generated ~300 failed requests
- *     a minute, every one of them logging console.error — which is exactly
+ *     a minute, every one of them logging console.error â€” which is exactly
  *     what RUM collects. A handful of such sessions explains the whole daily
  *     count. That loop is now bounded (see loadMovies).
  *  2. NO REQUEST-LEVEL RETRY. A single dropped packet on a mobile network
@@ -711,7 +711,7 @@ document.addEventListener('visibilitychange', () => {
  *  Also new: a hard per-attempt timeout. Before this, a connection that
  *  opened and then stalled (captive portals and carrier-grade NAT do this)
  *  left the request pending indefinitely, so the section it fed never
- *  resolved and never errored either — it just stayed on the skeleton.
+ *  resolved and never errored either â€” it just stayed on the skeleton.
  *
  *  None of this changes the API contract. Same BASE, same endpoints, same
  *  params, same response handling. Only how long the client waits, how often
@@ -748,23 +748,23 @@ window.addEventListener('beforeunload', () => { _mzPageHiding = true; });
 
 // Monotonic count of requests that failed for network reasons. loadMovies reads
 // it before and after gathering, which is how it distinguishes "the network
-// broke" from "TMDB genuinely has nothing for this category" — the two used to
+// broke" from "TMDB genuinely has nothing for this category" â€” the two used to
 // be indistinguishable, and treating the second as the first is what armed the
 // infinite retry.
 let _mzFetchFailureCount = 0;
 
 const _mzSleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-/*  ══════════════════════════════════════════════════════════════════════
+/*  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  REQUEST CONCURRENCY GATE
- *  ══════════════════════════════════════════════════════════════════════
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  Datadog flagged 30 slow /api/tmdb/discover/movie and 14 slow
- *  /api/tmdb/discover/tv requests — "slow" meaning over a second. They were not
+ *  /api/tmdb/discover/tv requests â€” "slow" meaning over a second. They were not
  *  slow because TMDB is slow. They were slow because they were queueing.
  *
  *  A cold homepage fires ~25 API calls in two ticks: loadCarousel() sends 10 and
  *  loadMovies('all') sends 15, all inside Promise.allSettled. Meanwhile the
- *  origin holds ONE https.Agent to TMDB with maxSockets: 12 — and that pool is
+ *  origin holds ONE https.Agent to TMDB with maxSockets: 12 â€” and that pool is
  *  global, shared across every concurrent visitor. So a single visitor already
  *  overflows it by half, and three visitors loading at once put 75 requests
  *  behind 12 sockets.
@@ -772,27 +772,27 @@ const _mzSleep = (ms) => new Promise(r => setTimeout(r, ms));
  *  Firing all 25 at once buys nothing, because the server cannot forward more
  *  than 12 anyway. All it does is convert server-side queue time into
  *  client-visible request duration: the request is "in flight" from the browser's
- *  point of view — and from Datadog's — while it actually sits in a socket queue.
+ *  point of view â€” and from Datadog's â€” while it actually sits in a socket queue.
  *
  *  Six is chosen so one client never occupies more than half the origin's
  *  upstream pool, leaving room for other visitors. It is also what the browser
  *  itself would have enforced over HTTP/1.1.
  *
  *  This does not change WHICH requests are made, only how many are in flight at
- *  once. Order is preserved, so the carousel — which feeds the LCP element and
- *  calls first — still gets the first slots.
+ *  once. Order is preserved, so the carousel â€” which feeds the LCP element and
+ *  calls first â€” still gets the first slots.
  *
  *  NOTE for the server side (deliberately not changed here): raising maxSockets,
  *  or giving discover responses a short s-maxage so the CDN absorbs the burst,
  *  would remove the queue at its source. That is a server decision.
  *
- *  ── UPDATE: THE ORIGIN THAT JUSTIFIED "4" NO LONGER EXISTS ──────────────────
+ *  â”€â”€ UPDATE: THE ORIGIN THAT JUSTIFIED "4" NO LONGER EXISTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *  Everything above describes Render: one Express process holding a single
  *  https.Agent to TMDB with maxSockets: 12, shared across every visitor. That is
  *  what made a fifth in-flight request actively harmful.
  *
  *  The site now runs on Cloudflare Workers. There is no shared socket pool to
- *  overflow — each request is an isolate with its own fetch, and the KV cache in
+ *  overflow â€” each request is an isolate with its own fetch, and the KV cache in
  *  front of TMDB absorbs the repeats. So "4" had stopped protecting anything and
  *  was purely converting parallel work into ~7 sequential rounds on the cold
  *  homepage. It was a migration leftover, the same class of bug as the push
@@ -801,14 +801,14 @@ const _mzSleep = (ms) => new Promise(r => setTimeout(r, ms));
  *  8, not unlimited: the client rate budget below is still 30 per 10s, the hover
  *  prefetcher and OTT verification can burst, and some lane discipline keeps the
  *  first-screen requests ahead of background work. The cold homepage no longer
- *  depends on this number anyway — see tmdbBatch(), which collapses its 26
+ *  depends on this number anyway â€” see tmdbBatch(), which collapses its 26
  *  requests into one.
  */
 const MZ_MAX_CONCURRENT_FETCHES = 8;
 
-/*  ── RATE LIMIT ──────────────────────────────────────────────────────────────
+/*  â”€â”€ RATE LIMIT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *  TMDB allows roughly 40 requests per 10 seconds per key. The concurrency gate
- *  above caps how many are in flight, but not how many are sent over time — and
+ *  above caps how many are in flight, but not how many are sent over time â€” and
  *  those are different things. Four lanes at 200ms each is 200 requests in 10
  *  seconds, five times over the limit. Infinite scroll plus the hover prefetcher
  *  plus the OTT provider verification can genuinely reach that.
@@ -874,7 +874,7 @@ window.addEventListener('pagehide', () => {
 
 /*  Shared by every loader that retries (loadMovies, loadCarousel). Declared here
  *  rather than next to loadMovies because loadCarousel sits ~1600 lines earlier
- *  and reads them too — keeping them at the point of first use avoids relying on
+ *  and reads them too â€” keeping them at the point of first use avoids relying on
  *  const hoisting order.
  *
  *  1.5s, 3s, 6s. Deliberately not the old flat 3s: a flat interval retried a
@@ -896,7 +896,7 @@ function _mzWhenOnline(fn) {
 /*  0 means "no response at all" (network-level). Retrying a 4xx is pointless: a
  *  bad request stays bad. 408/425/429 and 5xx are the ones that heal.
  *
- *  499 is the odd one and it belongs here. It is not a TMDB status — it is what the
+ *  499 is the odd one and it belongs here. It is not a TMDB status â€” it is what the
  *  hosting platform returns when the client closed the connection before the
  *  function answered, i.e. a cut connection, which is exactly the retryable class.
  *  It was previously treated as a plain 4xx, so it failed instantly with no retry
@@ -908,8 +908,8 @@ function _mzIsTransientStatus(status) {
 }
 
 /*  Statuses that mean "this request was cut short", as opposed to "the server is
- *  broken". We cause most of these ourselves — the per-attempt timeout aborting,
- *  the stale-request abort, or the user navigating away mid-flight — so they are
+ *  broken". We cause most of these ourselves â€” the per-attempt timeout aborting,
+ *  the stale-request abort, or the user navigating away mid-flight â€” so they are
  *  retried but never reported. Reporting a failure you deliberately caused just
  *  buries the ones you did not.
  */
@@ -917,9 +917,9 @@ function _mzIsSelfInflictedStatus(status) {
   return status === 499 || status === 408;
 }
 
-/*  ── MISSING RESOURCES ARE NOT FAULTS ────────────────────────────────────────
+/*  â”€â”€ MISSING RESOURCES ARE NOT FAULTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *  Probed against the live proxy: every one of these returns a clean 404 with
- *  {"error":"TMDB API error","detail":"Not Found"} —
+ *  {"error":"TMDB API error","detail":"Not Found"} â€”
  *    /movie/999999999   a title TMDB does not have (or has since removed)
  *    /tv/{id}/watch/providers  for a title with no provider record
  *    /tv/1399/season/99 a season that does not exist
@@ -937,7 +937,7 @@ function _mzIsSelfInflictedStatus(status) {
  *
  *  Now they are silent: empty result, nothing reported, nothing counted.
  *
- *  401 stays loud on purpose — it means the TMDB read token is missing, wrong or
+ *  401 stays loud on purpose â€” it means the TMDB read token is missing, wrong or
  *  expired, which is a real outage and must be visible immediately. 403 used to
  *  be lumped in with it; see the FORBIDDEN section below for why it is not.
  */
@@ -945,16 +945,16 @@ function _mzIsMissingStatus(status) {
   return status === 404 || status === 410;
 }
 
-/*  ── 403 IS NOT AUTOMATICALLY AN OUTAGE ──────────────────────────────────────
+/*  â”€â”€ 403 IS NOT AUTOMATICALLY AN OUTAGE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *  The assumption behind treating 403 like 401 was that both mean "your token is
  *  no good". Only 401 means that. A 403 arrives with a perfectly valid, active
  *  key for reasons that are specific to one request, not to the account:
  *
- *    • the endpoint needs a permission the key does not carry — some
+ *    â€¢ the endpoint needs a permission the key does not carry â€” some
  *      watch/providers and certification data behaves this way per region
- *    • TMDB's edge (Cloudflare) rejects a burst as abuse rather than answering
+ *    â€¢ TMDB's edge (Cloudflare) rejects a burst as abuse rather than answering
  *      429, which is why the homepage's ~25-call fan-out can produce one
- *    • a region/language combination the account is not entitled to
+ *    â€¢ a region/language combination the account is not entitled to
  *
  *  Symptom of getting this wrong: intermittent 403s on a handful of endpoints
  *  were counted as network failures (arming the feed retry budget) and reported
@@ -965,8 +965,8 @@ function _mzIsMissingStatus(status) {
  *  it, do not report it, and do not ask the same URL again for a while.
  *
  *  What is NOT given up: a token that really has been revoked or downgraded
- *  produces 403 on EVERYTHING, not on one endpoint. That case is still reported —
- *  once — by _mzNoteForbidden below, which watches for 403s spreading across
+ *  produces 403 on EVERYTHING, not on one endpoint. That case is still reported â€”
+ *  once â€” by _mzNoteForbidden below, which watches for 403s spreading across
  *  unrelated endpoint families. So a genuine outage is still visible, without
  *  paying one error per request for the benign case.
  */
@@ -998,10 +998,10 @@ function _mzIsKnownForbidden(urlStr) {
   return false;
 }
 
-/*  ── TELLING A BAD ENDPOINT FROM A BAD TOKEN ─────────────────────────────────
+/*  â”€â”€ TELLING A BAD ENDPOINT FROM A BAD TOKEN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *  Counting raw 403s would not work: a single dead endpoint called by six rails
  *  produces six 403s and looks identical to an outage. So what is counted is
- *  distinct endpoint FAMILIES — /movie/550 and /movie/680 are one family,
+ *  distinct endpoint FAMILIES â€” /movie/550 and /movie/680 are one family,
  *  /discover/tv and /trending/all are two more. Ids are collapsed because the
  *  interesting question is "how many different kinds of request are refused".
  *
@@ -1067,7 +1067,7 @@ function _mzIsKnownMissing(urlStr) {
  *  Continue Watching and the Watchlist are localStorage lists of ids, so they
  *  outlive the TMDB records they point at. Without pruning, a title that TMDB
  *  removed sits in the rail forever: it renders (the poster path is cached in the
- *  list entry), the user taps it, it 404s, nothing opens — every single session.
+ *  list entry), the user taps it, it 404s, nothing opens â€” every single session.
  *  Dropping the entry the first time a 404 is confirmed makes the problem
  *  self-healing instead of permanent.
  */
@@ -1095,20 +1095,20 @@ function _mzForgetDeadTitle(id, type) {
   console.debug('[MovieZone] pruned dead title', type + '/' + id, 'from saved lists');
 }
 
-/*  ── REJECT IMPOSSIBLE IDs BEFORE THEY BECOME REQUESTS ───────────────────────
+/*  â”€â”€ REJECT IMPOSSIBLE IDs BEFORE THEY BECOME REQUESTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *  /movie/undefined and /movie/NaN are what you get when an id arrives as
- *  undefined or fails parseInt — a card rendered from a TMDB item with no id, or
+ *  undefined or fails parseInt â€” a card rendered from a TMDB item with no id, or
  *  a corrupt localStorage entry. They cannot succeed, so sending them only burns
  *  a request and produces a 404 to explain away.
  *
  *  The test is deliberately narrow: reject the literal broken forms and any
  *  non-positive number, and let everything else through. A whitelist of valid
- *  named endpoints (/movie/popular, /tv/airing_today, /movie/latest …) would have
+ *  named endpoints (/movie/popular, /tv/airing_today, /movie/latest â€¦) would have
  *  to be kept in step with TMDB forever and would eventually reject something
  *  legitimate. TMDB is the authority on whether an id exists; this only catches
  *  the cases that are wrong on their face.
  *
- *  Note /tv/{id}/season/0 is valid — season 0 is the specials season — so the
+ *  Note /tv/{id}/season/0 is valid â€” season 0 is the specials season â€” so the
  *  check only applies to the id segment straight after a resource name.
  */
 const MZ_ID_RESOURCES = { movie: 1, tv: 1, collection: 1, person: 1, company: 1, network: 1, keyword: 1 };
@@ -1141,9 +1141,9 @@ function _mzShouldRetryStatus(status, attempt) {
 
 /*  A failure is "benign" when it was caused by something other than the network
  *  being broken, and reporting it would be noise:
- *    • the page is unloading  — the browser cancels in-flight requests
- *    • the device is offline  — already surfaced to the user by the OS
- *    • the request was aborted — either by our own stale-request logic or by
+ *    â€¢ the page is unloading  â€” the browser cancels in-flight requests
+ *    â€¢ the device is offline  â€” already surfaced to the user by the OS
+ *    â€¢ the request was aborted â€” either by our own stale-request logic or by
  *      the timeout, both of which are deliberate
  */
 function _mzIsBenignFailure(err) {
@@ -1156,7 +1156,7 @@ function _mzIsBenignFailure(err) {
 
 /*  The value returned for anything that does not exist: an invalid id, a
  *  confirmed 404, a title with no provider record. Shaped like an empty TMDB
- *  response so every existing caller keeps working — `r.results || []` yields [],
+ *  response so every existing caller keeps working â€” `r.results || []` yields [],
  *  and the watch/providers consumer's `Object.keys(results).length` yields 0,
  *  which it already treats as "no data".
  *
@@ -1184,7 +1184,7 @@ function _mzReportFetchError(err, meta) {
 
 /*  One attempt, with a hard timeout, cancellable from the caller's controller.
  *  A fresh controller per attempt is required because an AbortController is
- *  single-use — reusing the outer one would make attempt 2 abort instantly.
+ *  single-use â€” reusing the outer one would make attempt 2 abort instantly.
  */
 async function _mzFetchAttempt(urlStr, outerSignal) {
   // Gate is acquired per attempt, so a retry queues behind current traffic
@@ -1227,7 +1227,7 @@ async function _mzFetchWithRetry(urlStr, outerSignal, meta) {
     if (outerSignal.aborted || _mzPageHiding) break;
 
     // Retrying while the OS says there is no link just burns battery. Wait for
-    // the connection to come back, but not longer than one backoff window —
+    // the connection to come back, but not longer than one backoff window â€”
     // the caller has its own retry, so blocking here indefinitely would hang it.
     if (navigator.onLine === false && attempt > 0) break;
 
@@ -1253,7 +1253,7 @@ async function _mzFetchWithRetry(urlStr, outerSignal, meta) {
       continue;
     } catch (err) {
       lastError = err;
-      // Deliberate cancellation and teardown are final — never retry them.
+      // Deliberate cancellation and teardown are final â€” never retry them.
       if (err.name === 'AbortError' || _mzPageHiding) throw err;
       if (err.name === 'HttpError' && !_mzShouldRetryStatus(err.status, attempt)) throw err;
       if (attempt === MZ_FETCH_MAX_RETRIES) throw err;
@@ -1286,14 +1286,14 @@ function _mzTmdbUrl(endpoint, params) {
 /** How long a localStorage copy counts as fresh enough to skip the network. */
 const MZ_TMDB_SWR_FRESH_MS = 12 * 60 * 60 * 1000;
 
-/*  ══════════════════════════════════════════════════════════════════════
+/*  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  EDGE BATCHING
- *  ══════════════════════════════════════════════════════════════════════
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  A cold homepage needs 26 TMDB responses before the first card can paint:
  *  loadCarousel() asks for 10, loadMovies('all') for 16. Sent as 26 separate
  *  requests through the concurrency gate they became ~7 sequential rounds, and
  *  on mobile each round costs a full radio round-trip on top of the ~136ms the
- *  API itself takes. That is the mobile P50/P95 problem — not the posters, which
+ *  API itself takes. That is the mobile P50/P95 problem â€” not the posters, which
  *  are already lazy with a real srcset.
  *
  *  This sends the whole plan to /api/tmdb/batch in ONE request. The Worker does
@@ -1305,13 +1305,13 @@ const MZ_TMDB_SWR_FRESH_MS = 12 * 60 * 60 * 1000;
  *    1. IT RETURNS Promise.allSettled's SHAPE, because it ends by actually
  *       calling it. The batch response is only used to PRIME tmdbCache; the
  *       per-URL calls that follow then hit memory and never touch the network.
- *       So every caller's downstream code — including the index-sensitive
- *       TV_SOURCE_FROM offset in loadMovies — is untouched.
+ *       So every caller's downstream code â€” including the index-sensitive
+ *       TV_SOURCE_FROM offset in loadMovies â€” is untouched.
  *
  *    2. IT FALLS BACK BY DOING NOTHING. If the batch request fails, or the
  *       Worker predates this endpoint and answers 404, the priming step is
  *       skipped and the final allSettled performs the 26 individual requests
- *       exactly as before. Nothing to detect, nothing to configure — the site
+ *       exactly as before. Nothing to detect, nothing to configure â€” the site
  *       works deployed or not.
  *
  *    3. IT SKIPS WHAT IS ALREADY CACHED. A returning visitor whose localStorage
@@ -1319,7 +1319,7 @@ const MZ_TMDB_SWR_FRESH_MS = 12 * 60 * 60 * 1000;
  *       visitor's instant load for a first-time visitor's win.
  */
 
-/** Below this, a batch costs more than it saves — just let tmdb() run. */
+/** Below this, a batch costs more than it saves â€” just let tmdb() run. */
 const MZ_BATCH_MIN_REQUESTS = 3;
 
 /*  True when tmdb() can answer this URL without the network. Read-only: it
@@ -1336,7 +1336,7 @@ function _mzTmdbAnsweredFromCache(urlStr) {
       tmdbCache.set(urlStr, parsed.data);
       return true;
     }
-  } catch (e) { /* unreadable cache entry — treat as a miss */ }
+  } catch (e) { /* unreadable cache entry â€” treat as a miss */ }
   return false;
 }
 
@@ -1370,7 +1370,7 @@ async function tmdbBatch(plan) {
      *
      *  The 16-path ALL feed is ~1.9k of raw path text. Measured: as a JSON array
      *  through encodeURIComponent that is a 2332-character URL, and base64url of
-     *  the same plan is 2520 — base64 inflates by a third. Both clear the
+     *  the same plan is 2520 â€” base64 inflates by a third. Both clear the
      *  2048-character limit plenty of intermediaries still enforce, and a 414
      *  would be caught below and silently leave this page on 26 requests
      *  forever. A body has no length limit, so that failure mode is gone.
@@ -1444,7 +1444,7 @@ async function tmdb(endpoint, params) {
   
   if (tmdbCache.has(urlStr)) return tmdbCache.get(urlStr); // Memory cache (instant)
 
-  // Already confirmed missing this session — do not ask again. Hovering the same
+  // Already confirmed missing this session â€” do not ask again. Hovering the same
   // dead card repeatedly used to fire a request every time.
   if (_mzIsKnownMissing(urlStr)) return _mzMissingResult();
   
@@ -1462,7 +1462,7 @@ async function tmdb(endpoint, params) {
       if (parsed.timestamp && (Date.now() - parsed.timestamp < MZ_TMDB_SWR_FRESH_MS)) {
         // Promote into the in-memory cache before returning. Without this every
         // repeat call for the same URL paid another synchronous getItem plus a
-        // JSON.parse of a 20-50 KB payload — and repeats are the normal case,
+        // JSON.parse of a 20-50 KB payload â€” and repeats are the normal case,
         // because the background prefetcher warms the exact URLs the loaders
         // then ask for. The memory map makes the second call a lookup.
         tmdbCache.set(urlStr, cachedData);
@@ -1472,7 +1472,7 @@ async function tmdb(endpoint, params) {
   }
  
   /*  A URL TMDB refused moments ago. Checked here rather than beside the 404
-   *  guard above so the stale copy read by the block above can still be served —
+   *  guard above so the stale copy read by the block above can still be served â€”
    *  yesterday's posters beat an empty rail, and unlike a 404 this data was real.
    *  Short window, so a passing 403 does not keep the rail empty for long, but
    *  long enough that the rails sharing a refused URL do not each pay a request.
@@ -1495,21 +1495,21 @@ async function tmdb(endpoint, params) {
       const data = await _mzFetchWithRetry(urlStr, controller.signal, { endpoint: endpoint, url: urlStr });
       tmdbCache.set(urlStr, data);
 
-      // Queued, not written inline — see DEFERRED CACHE WRITES above.
+      // Queued, not written inline â€” see DEFERRED CACHE WRITES above.
       _mzQueueCacheWrite(cacheKey, data);
 
       return data;
     } catch (e) {
-      /*  Every exit below returns data rather than rethrowing, exactly as before —
+      /*  Every exit below returns data rather than rethrowing, exactly as before â€”
        *  callers spread `r.results || []` across ~40 sites and none of them expect
        *  a rejection. What changed is the bookkeeping:
        *
-       *    • stale cache is preferred over an empty list, so a failed refresh
+       *    â€¢ stale cache is preferred over an empty list, so a failed refresh
        *      shows yesterday's posters instead of an empty rail;
-       *    • the failure is COUNTED, so loadMovies can tell a network fault from
+       *    â€¢ the failure is COUNTED, so loadMovies can tell a network fault from
        *      a genuinely empty category and stop retrying the latter forever;
-       *    • the returned object is MARKED, so a direct caller can check;
-       *    • only non-benign failures are reported, and via DD_RUM.addError with
+       *    â€¢ the returned object is MARKED, so a direct caller can check;
+       *    â€¢ only non-benign failures are reported, and via DD_RUM.addError with
        *      the endpoint attached instead of a bare console.error.
        */
       const benign = _mzIsBenignFailure(e);
@@ -1521,7 +1521,7 @@ async function tmdb(endpoint, params) {
          *  one request was refused. Already retried once by _mzFetchWithRetry, so
          *  by here it is not a passing burst rejection.
          *
-         *  Deliberately NOT counted in _mzFetchFailureCount — counting it would
+         *  Deliberately NOT counted in _mzFetchFailureCount â€” counting it would
          *  let one refused endpoint arm loadMovies' feed retry budget, which is
          *  how this turned into repeated request storms.
          *
@@ -1652,13 +1652,13 @@ async function init() {
     if (loader) loader.classList.add('loader-hidden');
   }
 
-  /*  Luxury Ambient Particles (Jugnu) — REMOVED.
+  /*  Luxury Ambient Particles (Jugnu) â€” REMOVED.
    *
    *  This built a fixed full-screen layer with 18 glowing divs (8 on low-end) and
-   *  left them floating up the viewport on an infinite 12–30s loop. Decorative,
+   *  left them floating up the viewport on an infinite 12â€“30s loop. Decorative,
    *  but not free: the keyframes animated box-shadow alongside transform, and
    *  box-shadow cannot be composited, so all 18 forced a repaint every frame for
-   *  as long as the tab stayed open — competing with scrolling and with poster
+   *  as long as the tab stayed open â€” competing with scrolling and with poster
    *  decode. The .ambient-particles / .particle CSS and @keyframes floatParticle3D
    *  are gone from moviezone.css too. */
 
@@ -1683,7 +1683,7 @@ function setupInfiniteScroll() {
     const observer = new IntersectionObserver((entries) => {
         const entry = entries[0];
         if (entry.isIntersecting && !isLoadingMore) {
-            if (isSearchResultsMode) return; // Search results are a fixed, related set — no infinite scroll
+            if (isSearchResultsMode) return; // Search results are a fixed, related set â€” no infinite scroll
             if (isWatchlistMode) return;     // Watchlist is a finite local list
             loadMoreMoviesAction();
         }
@@ -1708,14 +1708,14 @@ function setupUpcomingInfiniteScroll() {
     observer.observe(trigger);
 }
  
-/*  ══════════════════════════════════════════════════════════════════════
- *  RELEASE → PRINT QUALITY TIMELINE  (single source of truth)
- *  ══════════════════════════════════════════════════════════════════════
+/*  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+ *  RELEASE â†’ PRINT QUALITY TIMELINE  (single source of truth)
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  There is no external print-quality feed anywhere in this app, so quality is
  *  derived from how long ago a title released: a movie is a CAM print in its
  *  first weeks and works its way up to HD, FHD and finally 4K months later.
  *
- *  This table used to be duplicated — once inline in renderMovies() for the
+ *  This table used to be duplicated â€” once inline in renderMovies() for the
  *  badge, once as hard-coded day windows inside calculateMovieScore() for the
  *  ranking. Both now read these tables, so a card can never show "HD" while
  *  the ranking still believes the title is a CAM.
@@ -1743,12 +1743,12 @@ const MOVIE_QUALITY_TIMELINE = [
     orElse: { qual: 'FHD', cls: 'qual-fhd' } }
 ];
 
-/*  Web series and anime never go through a cam stage — they come straight off a
- *  streaming platform — but they DO get better copies over time, which is the
+/*  Web series and anime never go through a cam stage â€” they come straight off a
+ *  streaming platform â€” but they DO get better copies over time, which is the
  *  same event a viewer waits for:
  *    week 1     it has just dropped
  *    to ~1 month  the early web rip
- *    ~1 month     the clean full-season / better encode  ← worth re-surfacing
+ *    ~1 month     the clean full-season / better encode  â† worth re-surfacing
  *    ~4 months    the 4K or Blu-ray master (anime BD batches land here)
  *  Only those last two are real prints, so a series is not dragged back to the
  *  top merely for leaving its first week. */
@@ -1783,7 +1783,7 @@ function qualityAtStage(timeline, stageIndex, title) {
 }
 
 /*  Everything the UI and the ranking need to know about a title's print
- *  quality, and — the point of this feature — HOW RECENTLY that print changed.
+ *  quality, and â€” the point of this feature â€” HOW RECENTLY that print changed.
  *  Works for movies, web series and anime; only the timeline differs.
  *
  *  Returns:
@@ -1838,8 +1838,8 @@ function titleQualityState(title, nowMs) {
     firstStageOfLabel--;
   }
   // Only a real print counts as an upgrade. Three cases are filtered here: a
-  // better cam rip (CAM → TS → HDTS), a series merely leaving its first week
-  // (NEW → HD), and crossing the last stage without meeting the 4K bar, which
+  // better cam rip (CAM â†’ TS â†’ HDTS), a series merely leaving its first week
+  // (NEW â†’ HD), and crossing the last stage without meeting the 4K bar, which
   // walks back to the FHD stage and so is no upgrade at all.
   if (firstStageOfLabel > 0 && timeline[firstStageOfLabel].isRealPrint) {
     state.upgradedDaysAgo = state.daysOld - timeline[firstStageOfLabel].fromDay;
@@ -1852,8 +1852,8 @@ function titleQualityState(title, nowMs) {
 /*  How long ago the most recent thing worth surfacing happened.
  *
  *  For most titles that is simply the release. But a film that came out in a
- *  cam print four months ago and just got its HD print — or a series whose
- *  clean full-season encode just landed — is, as far as the catalogue is
+ *  cam print four months ago and just got its HD print â€” or a series whose
+ *  clean full-season encode just landed â€” is, as far as the catalogue is
  *  concerned, new again today, so its upgrade date wins. This is what pulls it
  *  back to the top of the ALL feed.
  */
@@ -1866,17 +1866,17 @@ function catalogueEventAgeDays(title, nowMs, qualityState) {
   return Math.max(0, state.daysOld);
 }
 
-/*  ══════════════════════════════════════════════════════════════════════
- *  REAL PRINT QUALITY — DERIVED FROM TMDB RELEASE TYPES
- *  ══════════════════════════════════════════════════════════════════════
+/*  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+ *  REAL PRINT QUALITY â€” DERIVED FROM TMDB RELEASE TYPES
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  The timeline above is a guess: it counts days from `release_date` and assumes
  *  the print ladder moved on schedule. That is wrong in both directions and
- *  visibly so — a Netflix original is a real HD stream on day one but the
+ *  visibly so â€” a Netflix original is a real HD stream on day one but the
  *  timeline calls it a CAM, while a festival darling with a nine-month
  *  theatrical tail gets promoted to FHD while it is still theatre-only.
  *
  *  NOTE ON "FETCH IT FROM IMDb": IMDb does not publish print quality. Neither
- *  does any other public catalogue — CAM/TS/FHD/4K are release-scene labels, not
+ *  does any other public catalogue â€” CAM/TS/FHD/4K are release-scene labels, not
  *  metadata anyone licenses. What IS real, published data is WHEN each kind of
  *  release happened, and that determines which print can physically exist:
  *
@@ -1887,19 +1887,19 @@ function catalogueEventAgeDays(title, nowMs, qualityState) {
  *  So the badge is now driven by dates TMDB actually publishes rather than by
  *  arithmetic on a single date. When a title has no release rows at all (common
  *  for TV, and for thinly-catalogued regional films) the timeline still answers,
- *  so nothing regresses — see fetchRealQualityState().
+ *  so nothing regresses â€” see fetchRealQualityState().
  */
 /*  Release type -> the window it opens.
  *
  *  TMDB's numbering: 1 Premiere, 2 Theatrical (limited), 3 Theatrical,
- *  4 Digital, 5 Physical, 6 TV. Type 1 is deliberately absent — a festival
+ *  4 Digital, 5 Physical, 6 TV. Type 1 is deliberately absent â€” a festival
  *  screening months ahead of release is not a print anyone can watch.
  *
  *  A lookup table rather than a switch on named constants: property names
  *  survive minification, and this file is measured against a parse-weight
  *  budget (asset-perf-check.js). */
 const RELEASE_TYPE_WINDOW = {
-  2: 'theatrical',  // limited theatrical — cam rips do come from these
+  2: 'theatrical',  // limited theatrical â€” cam rips do come from these
   3: 'theatrical',
   4: 'digital',     // streaming or digital purchase
   5: 'physical',    // Blu-ray / 4K UHD disc
@@ -1956,7 +1956,7 @@ function releaseWindowsFrom(payload) {
  * Best print that can exist today, given what has actually been released.
  *
  * Ordered best-source-first, because the highest release stage that has already
- * happened decides the ceiling. Returns null when no window has opened yet —
+ * happened decides the ceiling. Returns null when no window has opened yet â€”
  * i.e. TMDB knows nothing usable and the caller should keep the timeline guess.
  *
  * @returns {?{qual:string, cls:string}}
@@ -1977,7 +1977,7 @@ function qualityFromReleaseWindows(title, windows, nowMs) {
     return printQuality((now - windows.digital) / DAY_MS >= DIGITAL_SETTLE_DAYS ? 'FHD' : 'HD');
   }
 
-  // Aired on TV but never got a digital date — an HD broadcast rip is the best around.
+  // Aired on TV but never got a digital date â€” an HD broadcast rip is the best around.
   if (windows.tv != null && windows.tv <= now) return printQuality('HD');
 
   /*  Cinema only. This is the branch the timeline gets most wrong, and the one
@@ -2039,7 +2039,7 @@ function fetchRealQualityState(title) {
   return pending;
 }
 
-/*  FRESHNESS TIERS — how the ALL feed is ordered.
+/*  FRESHNESS TIERS â€” how the ALL feed is ordered.
  *
  *  Sorting purely by a composite score buries a brand-new release under
  *  years-old blockbusters with 8.5 ratings, which is why the feed never looked
@@ -2054,7 +2054,7 @@ function fetchRealQualityState(title) {
  *  than a day or two: at day granularity a no-name film released yesterday
  *  would outrank a blockbuster from five days ago, which is not what any large
  *  catalogue does. Within a week everything is "new", and the composite score
- *  decides who leads — so the week's biggest new release sits first, with the
+ *  decides who leads â€” so the week's biggest new release sits first, with the
  *  prints that just upgraded sitting right beside it. */
 const FRESH_TIER_DAYS = [7, 14, 30, 60, 120];
 
@@ -2066,14 +2066,14 @@ const FRESH_TIER_DAYS = [7, 14, 30, 60, 120];
 const FRESH_TIER_MIN_POPULARITY = 20;
 const FRESH_TIER_MIN_VOTES = 20;
 
-/*  INDUSTRY-SCALE RELEVANCE FLOOR — MOVIES ONLY.
+/*  INDUSTRY-SCALE RELEVANCE FLOOR â€” MOVIES ONLY.
  *
  *  TMDB popularity and vote counts are not comparable across industries. A
  *  Hindi, Tamil or Telugu release that the whole country is searching for in its
  *  first week still carries a fraction of the votes an English blockbuster
  *  collects in its opening weekend. Judged by the same 20/20 bar, almost every
  *  regional new release failed the gate, dropped to the "remaining movies" group
- *  and never appeared among the latest releases — which is why the top of the ALL
+ *  and never appeared among the latest releases â€” which is why the top of the ALL
  *  feed looked Hollywood-only even in a week when two Bollywood films had just
  *  come out.
  *
@@ -2082,8 +2082,8 @@ const FRESH_TIER_MIN_VOTES = 20;
  *  Bengali, Marathi, Punjabi, Gujarati, Odia and Assamese as well, and that was
  *  wrong in practice: those industries release a long tail of titles with almost
  *  no audience signal, so single-digit-popularity films reached the top of the
- *  feed next to real releases. They still reach the feed — the Indian windows
- *  fetch them — they just do not jump the queue any more.
+ *  feed next to real releases. They still reach the feed â€” the Indian windows
+ *  fetch them â€” they just do not jump the queue any more.
  *
  *  The floor is also higher than it first was (12/8, not 6/4). Real releases pass
  *  it comfortably: measured on the live feed, Batwara 1947 (24), Awarapan 2 (23),
@@ -2126,12 +2126,12 @@ function freshnessTier(title, eventAgeDays) {
 /*  STRICT ALL-FEED PRIORITY.
  *
  *  Freshness is deliberately evaluated inside these groups, never across them:
- *    0 — relevant movies released inside the latest-release window
- *    1 — relevant movies with a recent real quality upgrade
- *    2 — trending/latest streaming web series
- *    3 — trending/latest anime
- *    4 — every other movie
- *    5 — remaining series/anime fallback
+ *    0 â€” relevant movies released inside the latest-release window
+ *    1 â€” relevant movies with a recent real quality upgrade
+ *    2 â€” trending/latest streaming web series
+ *    3 â€” trending/latest anime
+ *    4 â€” every other movie
+ *    5 â€” remaining series/anime fallback
  *
  *  Groups 2 and 3 used to sit BELOW every movie, including the hundreds of
  *  catalogue films that are now group 4. Technically the web series and anime
@@ -2217,11 +2217,11 @@ function diversifyByLanguageWithinPriority(pool) {
   return output;
 }
 
-/*  ── TYPE INTERLEAVE (the shape a large catalogue actually ships) ──
+/*  â”€â”€ TYPE INTERLEAVE (the shape a large catalogue actually ships) â”€â”€
  *
  *  Priority groups alone produce blocks: thirty fresh films, thirty print
  *  upgrades, then the web series. Measured on the live feed that put the first
- *  series at card 60 and the first anime at card 95 — present, but far past where
+ *  series at card 60 and the first anime at card 95 â€” present, but far past where
  *  anyone scrolls, so the surface looked like a movies-only feed.
  *
  *  No large catalogue ships blocks. They rank inside each content type and then
@@ -2232,7 +2232,7 @@ function diversifyByLanguageWithinPriority(pool) {
  *  The pattern below is one screen's worth of cards, and it encodes the product
  *  order directly: movies first, then web series, then anime.
  *
- *  Movies take three quarters of it and the whole top of it — the feed is still a
+ *  Movies take three quarters of it and the whole top of it â€” the feed is still a
  *  movie feed, and the two fresh movie groups still open it. A web series lands at
  *  slot 5 and another at 9; anime waits until slot 11, so at least two web series
  *  are always ahead of the first anime. Nothing is blocked off into a section: the
@@ -2252,7 +2252,7 @@ function feedLaneOf(title) {
   return isAnimeContent(title) ? 'anime' : 'series';
 }
 
-/*  ── FIRST-SCREEN INDUSTRY REPRESENTATION ──
+/*  â”€â”€ FIRST-SCREEN INDUSTRY REPRESENTATION â”€â”€
  *
  *  Ranking alone hands the top of the feed to whoever wins on global popularity,
  *  and that is always Hollywood plus whatever foreign title happens to be
@@ -2263,28 +2263,28 @@ function feedLaneOf(title) {
  *
  *  So the first movie slots are guaranteed, one per industry: the freshest
  *  relevant release from Hollywood, Bollywood, Tamil and Telugu. This is the
- *  standard first-screen diversity pass — Netflix's rows do the same thing with
- *  regions — and it is deliberately narrow:
+ *  standard first-screen diversity pass â€” Netflix's rows do the same thing with
+ *  regions â€” and it is deliberately narrow:
  *
- *    • an industry's slot is filled from group 0 (a genuinely new release) and,
+ *    â€¢ an industry's slot is filled from group 0 (a genuinely new release) and,
  *      only if it has none this week, from group 1 (a film whose HD/FHD/4K print
  *      just landed). Both are new arrivals as far as the catalogue is concerned,
  *      which is the promise this section makes. Measured case: on a week with no
  *      new Telugu release, the alternative to group 1 was Telugu's first title
  *      appearing at card 60.
- *    • a group-1 promotion must still be recent enough to WEAR its ribbon —
+ *    â€¢ a group-1 promotion must still be recent enough to WEAR its ribbon â€”
  *      within QUALITY_UPGRADE_BADGE_DAYS of the upgrade. Without that rule the
  *      front row could show a four-month-old film with no badge and no
  *      explanation, which reads as a broken "latest" feed. Measured: it promoted
  *      a 135-day-old Telugu title whose print had long since stopped being news.
- *    • nothing older is ever eligible. If an industry has neither, it simply gets
+ *    â€¢ nothing older is ever eligible. If an industry has neither, it simply gets
  *      no slot; padding the front row with a year-old film would make the section
  *      lie about what it is.
- *    • the promoted titles keep their own relative ranking, so the biggest of
+ *    â€¢ the promoted titles keep their own relative ranking, so the biggest of
  *      them still leads the feed.
- *    • everything after them is untouched, in exact rank order.
+ *    â€¢ everything after them is untouched, in exact rank order.
  *
- *  Malayalam, Kannada and the rest are not on this list — they reach the feed on
+ *  Malayalam, Kannada and the rest are not on this list â€” they reach the feed on
  *  merit through the normal ranking, which is what stops single-digit-popularity
  *  titles from taking a guaranteed front-row seat.
  */
@@ -2337,7 +2337,7 @@ function interleaveFeedByType(pool) {
   const lanes = { movie: [], series: [], anime: [] };
   promoted.forEach((item) => { lanes[feedLaneOf(item)].push(item); });
 
-  // Nothing to interleave — one type only, so the ranked order already is the feed.
+  // Nothing to interleave â€” one type only, so the ranked order already is the feed.
   const activeLanes = ['movie', 'series', 'anime'].filter((lane) => lanes[lane].length > 0);
   if (activeLanes.length < 2) return promoted;
 
@@ -2356,7 +2356,7 @@ function interleaveFeedByType(pool) {
   return output;
 }
 
-/** IST calendar date, optionally shifted back by N days — used to build the
+/** IST calendar date, optionally shifted back by N days â€” used to build the
  *  release-window queries. TMDB expects plain YYYY-MM-DD. */
 function istDateStr(daysAgo) {
   const ms = Date.now() + (5.5 * 60 * 60 * 1000) - ((daysAgo || 0) * DAY_MS);
@@ -2364,7 +2364,7 @@ function istDateStr(daysAgo) {
 }
 
 /*  The two release windows the ALL feed fetches on purpose. Both are built here
- *  so loadMovies() and prefetchMoviesPage() send byte-identical params — tmdb()
+ *  so loadMovies() and prefetchMoviesPage() send byte-identical params â€” tmdb()
  *  caches by full URL, so a single reordered key would cost a cache miss and a
  *  duplicate request. */
 const LATEST_WINDOW_DAYS = 35;
@@ -2386,8 +2386,8 @@ function latestWindowQuery(page) {
  *  stage, young enough that their FHD crossing is also still ahead or recent.
  *  Window is derived from the timeline so it can never drift out of step. */
 function printUpgradeWindowQuery(page) {
-  const hdDay = MOVIE_QUALITY_TIMELINE[3].fromDay;   // 75  — digital / HD
-  const fhdDay = MOVIE_QUALITY_TIMELINE[4].fromDay;  // 120 — FHD
+  const hdDay = MOVIE_QUALITY_TIMELINE[3].fromDay;   // 75  â€” digital / HD
+  const fhdDay = MOVIE_QUALITY_TIMELINE[4].fromDay;  // 120 â€” FHD
   return {
     sort_by: 'popularity.desc',
     'primary_release_date.gte': istDateStr(fhdDay + 15),
@@ -2398,12 +2398,12 @@ function printUpgradeWindowQuery(page) {
   };
 }
 
-/*  ── INDUSTRY RELEASE WINDOWS (BOLLYWOOD / SOUTH / TOLLYWOOD / REGIONAL) ──
+/*  â”€â”€ INDUSTRY RELEASE WINDOWS (BOLLYWOOD / SOUTH / TOLLYWOOD / REGIONAL) â”€â”€
  *
  *  latestWindowQuery() and printUpgradeWindowQuery() rank the whole world by
  *  popularity, and on that scale a Hollywood weekend always wins the first page.
  *  So a Hindi or Telugu film that released two days ago was never even fetched,
- *  and no amount of re-ranking can surface a title that is not in the pool —
+ *  and no amount of re-ranking can surface a title that is not in the pool â€”
  *  which is the real reason the latest-release group looked English-only.
  *
  *  These three ask the same two questions per industry instead of globally:
@@ -2417,7 +2417,7 @@ function printUpgradeWindowQuery(page) {
  *  votes and real search demand. Popularity ordering plus the regional relevance
  *  floor above keeps the long tail out, and only the first page is ever read.
  *
- *  Movies only, on purpose — web series and anime keep their own windows.
+ *  Movies only, on purpose â€” web series and anime keep their own windows.
  */
 const INDIAN_ORIGIN_COUNTRY = 'IN';
 const BOLLYWOOD_LANGUAGE = 'hi';
@@ -2451,8 +2451,8 @@ function latestBollywoodWindowQuery(page) {
  *  global query uses, so a Bollywood or South film whose HD print just landed
  *  gets pulled back to the top exactly like a Hollywood one does. */
 function indianUpgradeWindowQuery(page) {
-  const hdDay = MOVIE_QUALITY_TIMELINE[3].fromDay;   // 75  — digital / HD
-  const fhdDay = MOVIE_QUALITY_TIMELINE[4].fromDay;  // 120 — FHD
+  const hdDay = MOVIE_QUALITY_TIMELINE[3].fromDay;   // 75  â€” digital / HD
+  const fhdDay = MOVIE_QUALITY_TIMELINE[4].fromDay;  // 120 â€” FHD
   return {
     with_origin_country: INDIAN_ORIGIN_COUNTRY,
     sort_by: 'popularity.desc',
@@ -2463,12 +2463,12 @@ function indianUpgradeWindowQuery(page) {
   };
 }
 
-/*  The Indian catalogue — what fills the "remaining movies" part of the feed
+/*  The Indian catalogue â€” what fills the "remaining movies" part of the feed
  *  once the fresh groups are exhausted.
  *
  *  This replaced three separate undated popularity queries (hi, ta, te). They
- *  cost three requests, were siloed to those three languages — Malayalam,
- *  Kannada and Bengali could never appear at all — and, because TMDB popularity
+ *  cost three requests, were siloed to those three languages â€” Malayalam,
+ *  Kannada and Bengali could never appear at all â€” and, because TMDB popularity
  *  is dominated by whatever released this week, most of their first page was the
  *  same fresh titles the release windows above already fetch.
  *
@@ -2487,20 +2487,20 @@ function indianCatalogueQuery(page) {
   };
 }
 
-/*  ── WEB SERIES + ANIME WINDOWS ──
+/*  â”€â”€ WEB SERIES + ANIME WINDOWS â”€â”€
  *  The ALL feed used to fetch movies only, so no series or anime could ever
  *  reach it however fresh they were. These three cover both halves of the
  *  ranking: what just dropped, and what just got a better print.
  *
  *  Series queries are restricted to streaming networks and exclude linear TV
- *  channels, the same guard the Web Series category uses — without it the feed
+ *  channels, the same guard the Web Series category uses â€” without it the feed
  *  fills up with daily soaps that air a new episode every evening.
  *
  *  All three carry a vote floor. Sorting by popularity alone still let through
  *  a long tail of no-name seasonal anime, and because a whole anime season
  *  premieres in the same week, they all cross a print stage on the same day and
  *  arrive as a block. The floor keeps the series and anime that reach the feed
- *  to the ones with actual traction — the trending ones. */
+ *  to the ones with actual traction â€” the trending ones. */
 const LATEST_SERIES_WINDOW_DAYS = 45;
 const LATEST_ANIME_WINDOW_DAYS = 60;
 const SERIES_MIN_VOTES = '12';
@@ -2521,10 +2521,10 @@ function latestSeriesWindowQuery(page) {
 }
 
 /** Series whose clean FHD encode (day 30) or BD/4K master (day 120) has just
- *  landed — the series equivalent of the movie print-upgrade cohort. */
+ *  landed â€” the series equivalent of the movie print-upgrade cohort. */
 function seriesUpgradeWindowQuery(page) {
-  const fhdDay = TV_QUALITY_TIMELINE[2].fromDay;  // 30  — clean full-season encode
-  const uhdDay = TV_QUALITY_TIMELINE[3].fromDay;  // 120 — BD / 4K master
+  const fhdDay = TV_QUALITY_TIMELINE[2].fromDay;  // 30  â€” clean full-season encode
+  const uhdDay = TV_QUALITY_TIMELINE[3].fromDay;  // 120 â€” BD / 4K master
   return {
     with_networks: STREAMING_NETWORK_IDS,
     without_networks: LINEAR_TV_EXCLUDE_IDS,
@@ -2552,26 +2552,26 @@ function latestAnimeWindowQuery(page) {
   };
 }
 
-/*  ══════════════════════════════════════════════════════════════════════
+/*  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  UPCOMING RELEASE SOURCES  (one per industry)
- *  ══════════════════════════════════════════════════════════════════════
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  The Upcoming section used to ask TMDB two questions: English releases and
  *  Hindi releases. In practice it rendered as a Hollywood-only section, for the
  *  same reason the ALL feed's latest group did (see latestIndianWindowQuery):
  *  `sort_by=popularity.desc` on a shared pool is always won by Hollywood, and
  *  the two Hindi requests carried `region: IN`, which drops any Indian title
- *  whose IN release date TMDB does not carry yet — i.e. exactly the not-yet-
+ *  whose IN release date TMDB does not carry yet â€” i.e. exactly the not-yet-
  *  released titles this section exists for.
  *
  *  So each industry now gets asked its own question, the same shape the home
  *  feed uses: Hollywood, all Indian industries together (one request covers
- *  Bollywood, Tollywood, Tamil, Malayalam, Kannada, Bengali…), then Bollywood,
+ *  Bollywood, Tollywood, Tamil, Malayalam, Kannada, Bengaliâ€¦), then Bollywood,
  *  Tollywood and Tamil individually so a big release week in one cannot push
  *  the others off their shared first page, plus anime and Korean.
  *
  *  Hollywood and the shared Indian window take two TMDB pages each because they
  *  are by far the deepest catalogues; the dedicated per-language sources take
- *  one, which keeps the whole section at nine requests — and tmdbBatch() folds
+ *  one, which keeps the whole section at nine requests â€” and tmdbBatch() folds
  *  those into a single round-trip.
  *
  *  Built here, in one place, because loadUpcoming() and prefetchUpcomingPage()
@@ -2581,7 +2581,7 @@ function latestAnimeWindowQuery(page) {
 const UPCOMING_WINDOW_MONTHS = 3;
 
 /** The release window: yesterday (so a title releasing today is never missed to
- *  a timezone) through three months out. Kept short on purpose — a wider window
+ *  a timezone) through three months out. Kept short on purpose â€” a wider window
  *  lets far-future blockbusters win the popularity sort and crowd genuine
  *  next-few-weeks releases out of page one. */
 function upcomingWindowDates() {
@@ -2627,7 +2627,7 @@ function upcomingPagePlan(pageNum) {
   return plan;
 }
 
-/*  ── INDUSTRY INTERLEAVE ──
+/*  â”€â”€ INDUSTRY INTERLEAVE â”€â”€
  *  Upcoming is ordered by release date, which is the only order that makes
  *  sense for it. But date order alone does not fix the section: Hollywood
  *  releases something almost every Friday, so the twelve cards shown before
@@ -2673,7 +2673,7 @@ function interleaveUpcomingByIndustry(list) {
   let remaining = list.length;
   let lastKey = null;
   let run = 0;
-  const picked = new Map();               // industry → how many it has placed so far
+  const picked = new Map();               // industry â†’ how many it has placed so far
   order.forEach(k => picked.set(k, 0));
 
   while (remaining > 0) {
@@ -2688,11 +2688,11 @@ function interleaveUpcomingByIndustry(list) {
       /*  Same-day tie-break: whoever has placed fewer cards so far wins. Without
        *  this, a day with eight releases is handed to whichever industry happens
        *  to sit earliest in `order`, and on a busy Friday that alone can fill the
-       *  first screen — which is the problem this function exists to solve. */
+       *  first screen â€” which is the problem this function exists to solve. */
       if (date === pickDate && picked.get(key) < picked.get(pickKey)) pickKey = key;
     }
     if (pickKey === null) {
-      // Everything left belongs to the industry that just hit its run cap —
+      // Everything left belongs to the industry that just hit its run cap â€”
       // release the cap rather than dropping the tail. remaining > 0 guarantees
       // some bucket is non-empty, so this cannot spin.
       lastKey = null;
@@ -2727,7 +2727,7 @@ function calculateMovieScore(movie) {
   const releaseDate = new Date(movie.release_date || movie.first_air_date || '2020-01-01');
   const daysSinceRelease = Math.max(0, (now - releaseDate) / (1000 * 60 * 60 * 24));
   
-  // 1. Rating Weight — Bayesian-shrunk, then boosted exponentially.
+  // 1. Rating Weight â€” Bayesian-shrunk, then boosted exponentially.
   // A raw 8.0 from three voters used to score exactly like an 8.0 from twenty
   // thousand, which put no-name seasonal titles above real hits the moment the
   // feed started ordering by freshness. Pulling the rating towards the catalogue
@@ -2736,7 +2736,7 @@ function calculateMovieScore(movie) {
   const voteCount = movie.vote_count || 1;
   const weightedRating = ((voteCount * rating) + (RATING_PRIOR_VOTES * RATING_PRIOR_MEAN))
     / (voteCount + RATING_PRIOR_VOTES);
-  const ratingScore = Math.pow(weightedRating, 1.8) * 2; // Exponential: 8.0 → 98, 7.0 → 76, 6.0 → 56
+  const ratingScore = Math.pow(weightedRating, 1.8) * 2; // Exponential: 8.0 â†’ 98, 7.0 â†’ 76, 6.0 â†’ 56
   
   // 2. Popularity Weight (TMDB popularity is 0-5000+): Normalize and cap
   const popularity = Math.min(movie.popularity || 0, 5000);
@@ -2753,7 +2753,7 @@ function calculateMovieScore(movie) {
   else recencyBoost = 0;
   
   // 4. Trending Velocity: If popularity is high relative to vote count, it's trending fast.
-  // Needs enough votes to mean anything — popularity/votes explodes for titles
+  // Needs enough votes to mean anything â€” popularity/votes explodes for titles
   // with two or three ratings and used to hand them a free 40 points.
   const trendingVelocity = voteCount >= TRENDING_MIN_VOTES
     ? Math.min((popularity / voteCount) * 5, 40)
@@ -2766,14 +2766,14 @@ function calculateMovieScore(movie) {
   const nowPlayingBonus = (daysSinceRelease <= 45 && daysSinceRelease >= 0) ? 25 : 0;
   
   // 7. QUALITY UPGRADE BOOST (Netflix-style "Newly Available in HD/4K")
-  // Jab title ka print upgrade hota hai (movie: CAM → HD → FHD → 4K; series aur
-  // anime: web rip → clean FHD → BD/4K), usko wapas massive boost milta hai,
+  // Jab title ka print upgrade hota hai (movie: CAM â†’ HD â†’ FHD â†’ 4K; series aur
+  // anime: web rip â†’ clean FHD â†’ BD/4K), usko wapas massive boost milta hai,
   // isse purani release dobara top par aa jaati hai. Windows timeline se aate
-  // hain, hardcoded din se nahi — badge aur ranking dono ek hi table padhte hain.
+  // hain, hardcoded din se nahi â€” badge aur ranking dono ek hi table padhte hain.
   let qualityUpgradeBoost = 0;
   const upgradedDaysAgo = titleQualityState(movie, now).upgradedDaysAgo;
   if (upgradedDaysAgo != null) {
-    if (upgradedDaysAgo <= 25) qualityUpgradeBoost = 70;       // print just landed — as strong as a new release
+    if (upgradedDaysAgo <= 25) qualityUpgradeBoost = 70;       // print just landed â€” as strong as a new release
     else if (upgradedDaysAgo <= 55) qualityUpgradeBoost = 55;  // still the current print everyone is looking for
     else if (upgradedDaysAgo <= 85) qualityUpgradeBoost = 35;  // fading
   }
@@ -2792,11 +2792,138 @@ function calculateMovieScore(movie) {
 let _mzCarouselAttempts = 0;
 const MZ_CAROUSEL_MAX_RETRIES = 2;
 
+/*  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+ *  HERO CAROUSEL â€” CATEGORY QUOTAS AND THE QUALITY BAR
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+ *  The ranking itself is unchanged: calculateMovieScore() still decides who is
+ *  better than whom. What is added here is WHO IS ALLOWED IN, and how many of
+ *  each.
+ *
+ *  Two problems this fixes.
+ *
+ *  1. The carousel had no web series and no anime series in it, at all. Every
+ *     one of its ten sources was a /movie endpoint - the "anime" source was
+ *     /discover/movie with genre 16, i.e. anime FILMS - so a viewer could never
+ *     see a trending show in the hero however big it was. Three /tv sources are
+ *     added for that.
+ *
+ *  2. Slots were handed out by original_language, one guaranteed each and a flat
+ *     cap of three. Language is not category: an English-language Netflix series
+ *     and a Hollywood blockbuster both count as 'en', so they competed for the
+ *     same allowance while Bollywood - the other half of this site's audience -
+ *     was capped at the same three as Korean.
+ *
+ *  Quotas are stated as min/max. The mins sum to exactly the ten slots, so in
+ *  the normal case every category gets precisely its share and the max never
+ *  binds. The max only matters when a category cannot fill its min - TMDB
+ *  returning no Tollywood release that clears the bar today - and then the best
+ *  remaining titles absorb the slack instead of the carousel shipping a gap.
+ */
+const CAROUSEL_SLOTS = 10;
+
+const CAROUSEL_CATEGORY_QUOTA = {
+  hollywood: { min: 3, max: 4 },
+  bollywood: { min: 2, max: 3 },
+  webseries: { min: 1, max: 2 },
+  anime:     { min: 1, max: 2 },
+  south:     { min: 1, max: 2 },
+  tollywood: { min: 1, max: 2 },
+  korean:    { min: 1, max: 1 },
+  world:     { min: 0, max: 1 }
+};
+
+/*  THE BAR: high rating AND real demand AND traction.
+ *
+ *  Split by industry scale, for the reason already documented at
+ *  INDUSTRY_FLOOR_LANGS: TMDB vote counts are not comparable across industries.
+ *  A Telugu release the whole state is watching carries a fraction of the votes
+ *  an English blockbuster collects in its opening weekend, so a single global
+ *  floor does not raise quality - it just deletes every regional category from
+ *  the carousel and calls the result "high rated".
+ *
+ *  GLOBAL covers the categories that draw worldwide vote volume (Hollywood, web
+ *  series, anime). REGIONAL covers the industries that do not. Both ask for the
+ *  same three things, at the scale their own audience actually produces.
+ */
+const CAROUSEL_BAR_GLOBAL   = { rating: 6.4, votes: 200, popularity: 25 };
+const CAROUSEL_BAR_REGIONAL = { rating: 5.8, votes: 30,  popularity: 12 };
+const CAROUSEL_REGIONAL_CATEGORIES = ['bollywood', 'south', 'tollywood', 'korean', 'world'];
+
+/** Which quota bucket a title belongs to. Checked in specificity order: anime
+ *  before web series (an anime series is both), and media type before language
+ *  (an English series is web series, not Hollywood). */
+function carouselCategoryOf(item) {
+  const lang = item.original_language || 'en';
+  const isAnimation = (item.genre_ids || []).indexOf(16) !== -1;
+  if (isAnimation && lang === 'ja') return 'anime';
+  if (mediaTypeOf(item) === 'tv') return 'webseries';
+  if (lang === 'hi') return 'bollywood';
+  if (lang === 'te') return 'tollywood';
+  if (lang === 'ta' || lang === 'ml' || lang === 'kn') return 'south';
+  if (lang === 'ko') return 'korean';
+  if (lang === 'en') return 'hollywood';
+  return 'world';
+}
+
+/** Does this title clear the bar for its own category? */
+function clearsCarouselBar(item, category) {
+  const bar = CAROUSEL_REGIONAL_CATEGORIES.indexOf(category) !== -1
+    ? CAROUSEL_BAR_REGIONAL : CAROUSEL_BAR_GLOBAL;
+  return (item.vote_average || 0) >= bar.rating
+    && (item.vote_count || 0) >= bar.votes
+    && (item.popularity || 0) >= bar.popularity;
+}
+
+/**
+ * Fills the carousel from a score-sorted pool, honouring the category quotas.
+ *
+ * Three passes, each a deliberate relaxation of the one before, so the carousel
+ * degrades in quality rather than in size:
+ *
+ *   1. every category takes up to its MIN, from titles that clear the bar;
+ *   2. any category still short of its min takes the best it has, bar or not -
+ *      a category being represented matters more than it being represented by
+ *      something with 200 votes;
+ *   3. leftover slots go to the best remaining title of any category that is
+ *      still under its MAX.
+ *
+ * @param {object[]} pool     score-sorted, best first
+ * @param {object[]} out      accumulator (mutated)
+ * @param {Set} usedIds       ids already placed (mutated)
+ * @param {object} taken      per-category counts (mutated)
+ * @returns {object[]} out
+ */
+function fillCarouselByQuota(pool, out, usedIds, taken) {
+  const place = (item, category) => {
+    item._carouselCategory = category;
+    out.push(item);
+    usedIds.add(item.id);
+    taken[category] = (taken[category] || 0) + 1;
+  };
+
+  const sweep = (requireBar, limitKey) => {
+    for (const item of pool) {
+      if (out.length >= CAROUSEL_SLOTS) return;
+      if (usedIds.has(item.id)) continue;
+      const category = carouselCategoryOf(item);
+      const quota = CAROUSEL_CATEGORY_QUOTA[category];
+      if (!quota) continue;
+      if ((taken[category] || 0) >= quota[limitKey]) continue;
+      if (requireBar && !clearsCarouselBar(item, category)) continue;
+      place(item, category);
+    }
+  };
+
+  sweep(true, 'min');    // 1. quality picks, one category share each
+  sweep(false, 'min');   // 2. representation over polish
+  sweep(false, 'max');   // 3. best of the rest
+  return out;
+}
 async function loadCarousel() {
   const _mzCarouselFailureMark = _mzFetchFailureCount;
   // FETCH FROM ALL MAJOR CATEGORIES IN ONE ROUND-TRIP (Professional-grade discovery)
   // tmdbBatch returns exactly what Promise.allSettled returned here before, and
-  // falls back to it if the edge endpoint is unavailable — so the indexed reads
+  // falls back to it if the edge endpoint is unavailable â€” so the indexed reads
   // below and sourceNames stay valid either way.
   const results = await tmdbBatch([
     ['/trending/movie/week', { language: 'en-US', page: '1' }],
@@ -2808,22 +2935,61 @@ async function loadCarousel() {
     ['/discover/movie', { with_original_language: 'ta', sort_by: 'popularity.desc', language: 'en-US', page: '1' }],
     ['/discover/movie', { with_original_language: 'te', sort_by: 'popularity.desc', language: 'en-US', page: '1' }],
     ['/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', language: 'en-US', page: '1' }],
-    ['/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', language: 'en-US', page: '1' }]
+    ['/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', language: 'en-US', page: '1' }],
+    /*  The three /tv sources. Everything above this line is a /movie endpoint,
+     *  which is why no web series or anime series could ever reach the hero.
+     *
+     *  trending/tv/week is the demand signal - whatever the world is actually
+     *  watching this week, in any language. The two /discover/tv calls are the
+     *  quality signal, asking TMDB itself to pre-filter on rating and vote count
+     *  so the bar is applied at the source rather than after the fact: one over
+     *  the streaming networks (excluding linear channels, or the pool fills with
+     *  daily soaps that air a new episode every evening), one over anime, which
+     *  is not on the network list and has to be matched by genre + language. */
+    ['/trending/tv/week', { language: 'en-US', page: '1' }],
+    ['/discover/tv', {
+      with_networks: STREAMING_NETWORK_IDS,
+      without_networks: LINEAR_TV_EXCLUDE_IDS,
+      sort_by: 'popularity.desc',
+      'vote_count.gte': String(CAROUSEL_BAR_GLOBAL.votes),
+      'vote_average.gte': String(CAROUSEL_BAR_GLOBAL.rating),
+      language: 'en-US', page: '1'
+    }],
+    ['/discover/tv', {
+      with_genres: '16',
+      with_original_language: 'ja',
+      sort_by: 'popularity.desc',
+      'vote_count.gte': String(CAROUSEL_BAR_GLOBAL.votes),
+      'vote_average.gte': String(CAROUSEL_BAR_GLOBAL.rating),
+      language: 'en-US', page: '1'
+    }]
   ]);
 
-  const sourceNames = ['trending_week','trending_day','popular','top_rated','now_playing','bollywood','south','tollywood','anime','korean'];
+  const sourceNames = ['trending_week','trending_day','popular','top_rated','now_playing','bollywood','south','tollywood','anime','korean','trending_tv','webseries','anime_tv'];
+
+  /*  /discover/tv results carry no media_type at all, and /trending/tv/week only
+   *  sometimes does. Without a tag mediaTypeOf() would fall back to guessing from
+   *  the presence of 	itle, and carouselCategoryOf() would file a series under
+   *  Hollywood. Tag at the source instead, where the answer is known. */
+  const CAROUSEL_TV_SOURCES = ['trending_tv', 'webseries', 'anime_tv'];
 
   // Combine all results into a master pool with source tags (safely handle null/undefined)
   const masterPool = [];
   results.forEach((r, idx) => {
     if (r.status === 'fulfilled' && r.value && r.value.results) {
-      r.value.results.forEach(m => { if (m) { m._source = sourceNames[idx]; masterPool.push(m); } });
+      const isTvSource = CAROUSEL_TV_SOURCES.indexOf(sourceNames[idx]) !== -1;
+      r.value.results.forEach(m => {
+        if (!m) return;
+        m._source = sourceNames[idx];
+        if (isTvSource) m.media_type = 'tv';
+        masterPool.push(m);
+      });
     }
   });
 
   /*  Empty pool. This used to just call buildCarousel() and give up silently, so
    *  a network blip on load left #hero as a bare gradient for the rest of the
-   *  session — and #hero holds the LCP element, so that is the most visible part
+   *  session â€” and #hero holds the LCP element, so that is the most visible part
    *  of the page staying broken.
    *
    *  Bounded retry, and only when the failure counter says the network actually
@@ -2881,71 +3047,25 @@ async function loadCarousel() {
   candidates.sort((a, b) => b._score - a._score);
   allReleased.sort((a, b) => b._score - a._score);
 
-  // FORCED REPRESENTATION: Ensure EVERY category gets at least 1 slot in carousel
+  /*  CATEGORY-QUOTA SELECTION
+   *  Replaces the old "one guaranteed slot per original_language, then max three
+   *  each" pass. See CAROUSEL_CATEGORY_QUOTA for why language was the wrong key
+   *  and what the quotas are. calculateMovieScore() still does all the ranking -
+   *  both pools below are already sorted by it - so this only decides who is
+   *  eligible for which slot, never who is better than whom.
+   *
+   *  Backdrop pool first, poster-only pool second, exactly as before: the hero
+   *  paints a 16:9 backdrop and a 2:3 poster stretched into that box looks
+   *  broken, so a title carrying one is always preferred. The second call only
+   *  reaches slots the first could not fill. */
   const diverseCarousel = [];
   const usedIds = new Set();
-  
-  // Step 1: Pick the BEST movie from each language/category (guaranteed slots)
-  // First try from candidates (with backdrop), then fallback to allReleased (poster only)
-  const langGroupsBackdrop = {};
-  const langGroupsAll = {};
-  candidates.forEach(m => {
-    const lang = m.original_language || 'en';
-    if (!langGroupsBackdrop[lang]) langGroupsBackdrop[lang] = [];
-    langGroupsBackdrop[lang].push(m);
-  });
-  allReleased.forEach(m => {
-    const lang = m.original_language || 'en';
-    if (!langGroupsAll[lang]) langGroupsAll[lang] = [];
-    langGroupsAll[lang].push(m);
-  });
-  
-  // Priority order: English (Hollywood), Hindi (Bollywood), Tamil (South), Telugu (Tollywood), Korean, Japanese (Anime)
-  const priorityLangs = ['en', 'hi', 'ta', 'te', 'ko', 'ja'];
-  
-  // Pick top 1 from each priority language (prefer backdrop, fallback to poster-only)
-  for (const lang of priorityLangs) {
-    if (diverseCarousel.length >= 10) break;
-    
-    // Try with backdrop first
-    const backdropPool = langGroupsBackdrop[lang] || [];
-    let best = backdropPool.find(m => !usedIds.has(m.id));
-    
-    // Fallback: pick from poster-only pool
-    if (!best) {
-      const allPool = langGroupsAll[lang] || [];
-      best = allPool.find(m => !usedIds.has(m.id));
-    }
-    
-    if (best) {
-      diverseCarousel.push(best);
-      usedIds.add(best.id);
-    }
+  const takenByCategory = {};
+
+  fillCarouselByQuota(candidates, diverseCarousel, usedIds, takenByCategory);
+  if (diverseCarousel.length < CAROUSEL_SLOTS) {
+    fillCarouselByQuota(allReleased, diverseCarousel, usedIds, takenByCategory);
   }
-  
-  // Step 2: Fill remaining slots (up to 10) with highest scored movies regardless of language
-  // But don't allow more than 3 from same language total
-  const langCount = {};
-  diverseCarousel.forEach(m => {
-    const lang = m.original_language || 'en';
-    langCount[lang] = (langCount[lang] || 0) + 1;
-  });
-  
-  for (const movie of candidates) {
-    if (diverseCarousel.length >= 10) break;
-    if (usedIds.has(movie.id)) continue;
-    
-    const lang = movie.original_language || 'en';
-    if ((langCount[lang] || 0) >= 3) continue; // Max 3 per language
-    
-    diverseCarousel.push(movie);
-    usedIds.add(movie.id);
-    langCount[lang] = (langCount[lang] || 0) + 1;
-  }
-  
-  // Step 3: Keep carousel in mixed order (forced picks first gives natural diversity)
-  // No re-sorting - the forced representation already ensures mix
-  
   // If diversity filter was too strict, just take top scored movies
   if (diverseCarousel.length < 4) {
     const fallback = candidates.filter(m => !usedIds.has(m.id)).slice(0, 10 - diverseCarousel.length);
@@ -2959,31 +3079,31 @@ async function loadCarousel() {
     
     // Priority: Freshness > Category-specific > Generic
     if (daysSince <= 7) {
-      m._badge = '🔥 JUST RELEASED';
+      m._badge = 'ðŸ”¥ JUST RELEASED';
     } else if (daysSince <= 30 && m._source === 'now_playing') {
-      m._badge = '🎬 NOW IN THEATERS';
+      m._badge = 'ðŸŽ¬ NOW IN THEATERS';
     } else if (lang === 'hi' && m.vote_average >= 7.0) {
-      m._badge = '🎬 BOLLYWOOD HIT';
+      m._badge = 'ðŸŽ¬ BOLLYWOOD HIT';
     } else if (lang === 'hi') {
-      m._badge = '🎬 BOLLYWOOD TRENDING';
+      m._badge = 'ðŸŽ¬ BOLLYWOOD TRENDING';
     } else if (lang === 'ta') {
-      m._badge = '🔥 SOUTH BLOCKBUSTER';
+      m._badge = 'ðŸ”¥ SOUTH BLOCKBUSTER';
     } else if (lang === 'te') {
-      m._badge = '🔥 TOLLYWOOD HIT';
+      m._badge = 'ðŸ”¥ TOLLYWOOD HIT';
     } else if (lang === 'ko') {
-      m._badge = '🇰🇷 KOREAN TRENDING';
+      m._badge = 'ðŸ‡°ðŸ‡· KOREAN TRENDING';
     } else if (lang === 'ja') {
-      m._badge = '🎌 ANIME TRENDING';
+      m._badge = 'ðŸŽŒ ANIME TRENDING';
     } else if (m._source === 'trending_day') {
-      m._badge = '📈 TRENDING TODAY';
+      m._badge = 'ðŸ“ˆ TRENDING TODAY';
     } else if (m._source === 'trending_week') {
-      m._badge = '🔥 TRENDING NOW';
+      m._badge = 'ðŸ”¥ TRENDING NOW';
     } else if (m.vote_average >= 8.0) {
-      m._badge = '⭐ CRITICALLY ACCLAIMED';
+      m._badge = 'â­ CRITICALLY ACCLAIMED';
     } else if (m._source === 'top_rated') {
-      m._badge = '🏆 TOP RATED';
+      m._badge = 'ðŸ† TOP RATED';
     } else {
-      m._badge = '🔥 POPULAR NOW';
+      m._badge = 'ðŸ”¥ POPULAR NOW';
     }
   });
 
@@ -2992,13 +3112,13 @@ async function loadCarousel() {
   // Align slide 0 with the backdrop <head> already preloaded, so the LCP image
   // is served from cache instead of being requested after the bundle parses.
   carouselMovies = pinPreloadedHero(carouselMovies, candidates);
-  console.log('🎬 Carousel Movies:', carouselMovies.map(m => `${m.title || m.name} (${m.original_language})`));
+  console.log('ðŸŽ¬ Carousel Movies:', carouselMovies.map(m => `${m.title || m.name} (${m.original_language})`));
   buildCarousel();
 }
 
-/*  ══════════════════════════════════════════════════════════════════════
- *  TOP 10 TRENDING — premium numbered rail below the hero carousel
- *  ══════════════════════════════════════════════════════════════════════
+/*  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+ *  TOP 10 TRENDING â€” premium numbered rail below the hero carousel
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  Pulls the globally most-watched movies straight from TMDB's own trending
  *  feed (/trending/movie/{day|week}) so the ranking is authentic, not a
  *  local re-score. Renders 10 numbered cards; the giant gold digit behind
@@ -3011,13 +3131,13 @@ const TOP10_COUNT = 10;
 
 /*  Keeps only titles a visitor can actually open.
  *
- *  TMDB's trending feed mixes in unreleased films — they trend on trailer
+ *  TMDB's trending feed mixes in unreleased films â€” they trend on trailer
  *  buzz alone. Two reasons they are dropped here rather than shown:
- *    • every other feed on this site filters future-dated titles, and a card
+ *    â€¢ every other feed on this site filters future-dated titles, and a card
  *      in Top 10 links to the same watch page, which would be empty;
- *    • titleQualityState() has no stage before day 0, so an unreleased film
+ *    â€¢ titleQualityState() has no stage before day 0, so an unreleased film
  *      would fall back to a flat "HD" chip, which is simply wrong.
- *  Ranking is otherwise untouched — TMDB's own order is preserved, so the
+ *  Ranking is otherwise untouched â€” TMDB's own order is preserved, so the
  *  numbers still reflect real trending position among watchable titles.
  */
 function _mzTop10Usable(m, todayIST) {
@@ -3028,10 +3148,10 @@ function _mzTop10Usable(m, todayIST) {
   return rDate <= todayIST;
 }
 
-/*  ══════════════════════════════════════════════════════════════════════
+/*  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  SELECTION: most-trending, cross-checked against rating and real demand
- *  ══════════════════════════════════════════════════════════════════════
- *  The source is TMDB's /trending/movie/week — its own demand ranking, built
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+ *  The source is TMDB's /trending/movie/week â€” its own demand ranking, built
  *  from what people actually do on TMDB that week (page views, votes,
  *  watchlist and favourite adds).
  *
@@ -3042,13 +3162,13 @@ function _mzTop10Usable(m, todayIST) {
  *  now one of three terms rather than the whole answer.
  *
  *  Three terms, weighted:
- *    • TREND  (45%) — position in TMDB's weekly ranking. Still the strongest
+ *    â€¢ TREND  (45%) â€” position in TMDB's weekly ranking. Still the strongest
  *                     single term, because "most trending" is the point.
- *    • RATING (30%) — vote_average, Bayesian-shrunk towards the catalogue mean
+ *    â€¢ RATING (30%) â€” vote_average, Bayesian-shrunk towards the catalogue mean
  *                     using the site's existing RATING_PRIOR_* constants, so a
  *                     9.0 from twelve voters cannot outrank an 8.0 from twenty
  *                     thousand. Same shrink calculateMovieScore() applies.
- *    • DEMAND (25%) — how many people actually watched/rated it: vote_count on
+ *    â€¢ DEMAND (25%) â€” how many people actually watched/rated it: vote_count on
  *                     a log scale (volume) blended with TMDB popularity
  *                     (current velocity).
  *
@@ -3073,7 +3193,7 @@ const TOP10_QUALITY_TIERS = [
 ];
 
 /** vote_average pulled towards the catalogue mean in proportion to how few
- *  votes back it — the standard fix for tiny-sample ratings. */
+ *  votes back it â€” the standard fix for tiny-sample ratings. */
 function top10ShrunkRating(m) {
   const votes = m.vote_count || 0;
   const raw = m.vote_average || 0;
@@ -3119,18 +3239,18 @@ function top10SelectRanked(pool) {
       (m.vote_count || 0) >= tier.votes && top10ShrunkRating(m) >= tier.rating);
     if (qualified.length >= TOP10_COUNT) break;
   }
-  // Every tier came up short — rank the whole pool rather than show a gap.
+  // Every tier came up short â€” rank the whole pool rather than show a gap.
   if (qualified.length < TOP10_COUNT) qualified = pool.slice();
 
   qualified.sort((a, b) => b._top10Score - a._top10Score);
   return qualified.slice(0, TOP10_COUNT);
 }
 
-/*  ══════════════════════════════════════════════════════════════════════
+/*  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  WHY /trending/movie/week
- *  ══════════════════════════════════════════════════════════════════════
- *  Week rather than day: day is a noisier signal — one viral trailer can own
- *  it for a few hours — and week is the list a visitor means by "what is
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+ *  Week rather than day: day is a noisier signal â€” one viral trailer can own
+ *  it for a few hours â€” and week is the list a visitor means by "what is
  *  trending right now".
  *
  *  Two pages are requested in ONE round trip via tmdbBatch, giving a ~40-title
@@ -3157,7 +3277,7 @@ async function loadTop10() {
     ]);
 
     /*  Flatten in response order so the index IS the trending position, then
-     *  de-duplicate — page boundaries can repeat a title. */
+     *  de-duplicate â€” page boundaries can repeat a title. */
     const pool = [];
     const seen = new Set();
     pages.forEach(res => {
@@ -3177,7 +3297,7 @@ async function loadTop10() {
   _mzTop10Loading = false;
 
   if (list.length === 0) {
-    // Nothing to show — keep the section hidden rather than showing an empty rail.
+    // Nothing to show â€” keep the section hidden rather than showing an empty rail.
     section.setAttribute('hidden', '');
     return;
   }
@@ -3221,14 +3341,14 @@ function renderTop10(list) {
 
     const metaBits = [];
     if (year) metaBits.push('<span>' + year + '</span>');
-    if (genres.length) metaBits.push('<span>' + genres.map(escapeHTML).join(' · ') + '</span>');
+    if (genres.length) metaBits.push('<span>' + genres.map(escapeHTML).join(' Â· ') + '</span>');
     if (lang) metaBits.push('<span class="t10-lang">' + escapeHTML(lang) + '</span>');
     const meta = metaBits.join(SEP);
 
     // Stagger the entrance the same way the movie grid does. Capped so the
     // tenth card is not left waiting most of a second.
     const delay = Math.min(i, 8) * 0.055;
-    // A high score earns the gold badge — see .top10-rating.is-high.
+    // A high score earns the gold badge â€” see .top10-rating.is-high.
     const ratingCls = (m.vote_average >= 7.5) ? ' is-high' : '';
 
     return (
@@ -3260,7 +3380,7 @@ function renderTop10(list) {
   _mzUpdateTop10Arrows();
 }
 
-/*  Delegated wiring — set up once. Clicks/keys open the detail modal, the
+/*  Delegated wiring â€” set up once. Clicks/keys open the detail modal, the
  *  Today/This Week toggle swaps the data set, and the arrows page the rail.
  */
 let _mzTop10Wired = false;
@@ -3363,7 +3483,7 @@ function buildCarousel() {
       ? (i === 0 ? getHeroBackdrop(m.backdrop_path) : getResponsiveBackdrop(m.backdrop_path))
       : `https://image.tmdb.org/t/p/w780${m.poster_path}`;
 
-    /*  LCP — slide 0's backdrop IS this page's Largest Contentful Paint element.
+    /*  LCP â€” slide 0's backdrop IS this page's Largest Contentful Paint element.
      *
      *  It used to be a CSS background-image on .slide-bg, helped along by a
      *  <link rel="preload"> that this loop injected. Both parts were weak:
@@ -3492,7 +3612,7 @@ function buildCarousel() {
     thumb.className = 'thumb' + (i === 0 ? ' active' : '');
     thumb.tabIndex = 0;
     /*  w185, not IMG (w342).
-     *  .thumb renders at min(58px, 5.02vh) wide — so w342 was roughly 6x the
+     *  .thumb renders at min(58px, 5.02vh) wide â€” so w342 was roughly 6x the
      *  pixels it displays on a 1x screen and still 2x on a 3x phone. Ten of these
      *  load with the carousel, which put ~250 KB of thumbnail on the critical
      *  path to show ~35 KB worth of image. w185 covers a 3x device exactly.
@@ -3504,7 +3624,7 @@ function buildCarousel() {
   };
 
   //  Slide 0 is the LCP element and slide 1 is what the auto-slide timer shows
-  //  next — the warm-up below also needs it in the DOM to prime its backdrop.
+  //  next â€” the warm-up below also needs it in the DOM to prime its backdrop.
   //  Both are cheap (slide 1 carries no image request, only data-bg), so they
   //  are built inline and everything after them is deferred.
   const INLINE_SLIDES = 2;
@@ -3562,7 +3682,7 @@ function buildCarousel() {
    *
    *  At idle, and only for the slide on screen: this is one extra TMDB call, and
    *  the reason it is not made for all ten slides up front is the same reason the
-   *  slide bodies are batched — a ten-call fan-out in the load tick queues at the
+   *  slide bodies are batched â€” a ten-call fan-out in the load tick queues at the
    *  origin and makes every request in it, including the hero backdrop, look
    *  slow. goToSlide() picks up the rest as the viewer reaches them, and tmdb()
    *  caches each answer for 12 h. */
@@ -3573,7 +3693,7 @@ function buildCarousel() {
   startAutoSlide();
 }
 
-/*  ── SLIDE BACKDROP MARKUP ───────────────────────────────────────────────────
+/*  â”€â”€ SLIDE BACKDROP MARKUP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *  One place that turns a backdrop URL into the element the carousel paints, so
  *  slide 0 (the LCP element) and the lazily-materialised slides cannot drift.
  *
@@ -3582,7 +3702,7 @@ function buildCarousel() {
  *  computes ~820 CSS px -> ~1640 device px and the browser picks w1280, which is
  *  the download this whole path exists to avoid on the connections least able to
  *  afford it. A media query is evaluated on CSS pixels, so the branch is
- *  predictable — and it is byte-identical to the media= on the two hero preload
+ *  predictable â€” and it is byte-identical to the media= on the two hero preload
  *  links in <head>, so the preload and the request can never resolve to two
  *  different URLs. getHeroBackdrop() answers the same question through
  *  matchMedia, but that read happens later: a window rotated or resized between
@@ -3591,7 +3711,7 @@ function buildCarousel() {
  *
  *  WHY THERE IS NO type="image/webp" OR AVIF SOURCE
  *  image.tmdb.org already content-negotiates on Accept. The same .jpg URL answers
- *  image/webp to every browser that advertises it — measured 171 KB -> 98 KB at
+ *  image/webp to every browser that advertises it â€” measured 171 KB -> 98 KB at
  *  w1280 and 90 KB -> 41 KB at w780, i.e. the ~45% saving is already live on
  *  every request, including the CSS background path. It does not serve AVIF at
  *  all: an Accept of image/avif alone still comes back image/jpeg. So a
@@ -3602,7 +3722,7 @@ function slideBgImg(url, isHero) {
   /*  Slide 0: eager + high, because it is the LCP element and every millisecond
    *  it spends behind another request is on the metric.
    *  Slides 1..n: low priority. They are only built when one is about to be
-   *  shown (see ensureSlideBg), which is a stricter gate than loading="lazy" —
+   *  shown (see ensureSlideBg), which is a stricter gate than loading="lazy" â€”
    *  a translateX carousel puts slide 1 only one viewport-width away, well
    *  inside Chrome's ~1250px lazy threshold, so the attribute would fetch three
    *  backdrops during the load window instead of none.
@@ -3622,7 +3742,7 @@ function slideBackdropMarkup(bgUrl, isHero, resizable) {
   /*  Three cases stay a plain <img>:
    *    - `resizable` false: a poster standing in for a missing backdrop. TMDB
    *      will happily serve /t/p/w1280/<poster>, but a 2:3 image at that width is
-   *      1280x1920 and measured 257 KB against the 96 KB of w780 — for a box that
+   *      1280x1920 and measured 257 KB against the 96 KB of w780 â€” for a box that
    *      only ever shows ~780px of it.
    *    - anything not shaped like a sized TMDB path, which there is no safe way
    *      to re-point at another width;
@@ -3649,7 +3769,7 @@ function slideBackdropMarkup(bgUrl, isHero, resizable) {
  *  getResponsiveBackdrop() picked when the deck was built (a window resized across
  *  1024px afterwards kept the wrong asset), and an <img> can carry
  *  fetchpriority="low" so warming slide 1 cannot outbid anything on screen.
- *  The lazy gate itself is unchanged — this function is still only called for the
+ *  The lazy gate itself is unchanged â€” this function is still only called for the
  *  current slide and the next one.
  */
 function ensureSlideBg(idx) {
@@ -3686,12 +3806,12 @@ function goToSlide(n) {
   refreshSlideQuality(currentSlide);
 }
 
-/*  ── PRINT BADGE: ESTIMATE → REAL DATA ──────────────────────────────────────
+/*  â”€â”€ PRINT BADGE: ESTIMATE â†’ REAL DATA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *  Replaces one slide's timeline-derived quality chip with the value implied by
  *  TMDB's actual release types. Idempotent and lazy, so it is safe to call on
  *  every slide change, including repeat visits to the same slide.
  *
- *  Only the chip's class and text are touched — never its position in the row —
+ *  Only the chip's class and text are touched â€” never its position in the row â€”
  *  so a correction arriving seconds after paint cannot shift the hero.
  */
 function refreshSlideQuality(index) {
@@ -3717,13 +3837,13 @@ function refreshSlideQuality(index) {
   });
 }
  
-/* ── AUTOPLAY ─────────────────────────────────────────────────────────────
-   One constant drives every start/resume path — change the seconds here and
+/* â”€â”€ AUTOPLAY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   One constant drives every start/resume path â€” change the seconds here and
    the progress bar follows.
 
    Why the "holds": pausing used to be a plain `mouseenter` on #hero, and #hero
    is 95vh. On a laptop the pointer is almost always somewhere inside it, so the
-   very first mouse move paused the carousel — and because `mouseleave` needs
+   very first mouse move paused the carousel â€” and because `mouseleave` needs
    another move (scrolling away does not fire one), it never resumed. Autoplay
    was effectively dead on desktop. Hover now only holds the timer over the
    controls the viewer may be aiming at, and the timer also stands down while
@@ -3756,7 +3876,7 @@ function restartProgressBar() {
   void bar.offsetWidth;
   bar.style.animation = 'carouselProgressFill ' + (CAROUSEL_AUTOPLAY_MS / 1000) + 's linear forwards';
 }
-// reason: 'pointer' | 'hidden' | 'offscreen' — each holds independently, so
+// reason: 'pointer' | 'hidden' | 'offscreen' â€” each holds independently, so
 // releasing one does not restart the timer while another still holds it.
 function pauseAutoSlide(reason) {
   autoSlideHolds[reason || 'pointer'] = true;
@@ -3772,7 +3892,7 @@ function resumeAutoSlide(reason) {
   autoSlideTimer = setInterval(() => { goToSlide(currentSlide + 1); }, CAROUSEL_AUTOPLAY_MS);
 }
  
-// -- HERO INTERACTIONS — pause-on-hover, swipe, arrow nav (premium UX) --
+// -- HERO INTERACTIONS â€” pause-on-hover, swipe, arrow nav (premium UX) --
 (function initHeroInteractions() {
   const hero = document.getElementById('hero');
   if (!hero) return;
@@ -3832,24 +3952,24 @@ function resumeAutoSlide(reason) {
   }, { passive: true });
 })();
  
-/*  ══════════════════════════════════════════════════════════════════════
- *  OTT PLATFORM IDs — VERIFIED AGAINST THE LIVE TMDB API
- *  ══════════════════════════════════════════════════════════════════════
+/*  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+ *  OTT PLATFORM IDs â€” VERIFIED AGAINST THE LIVE TMDB API
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  TMDB keeps watch-provider ids and network ids in SEPARATE namespaces, so
  *  the same number means different things depending on the parameter. Mixing
  *  them up is silent: the query still returns 200 with the wrong catalogue.
  *
  *  Values below were read from /watch/providers/{movie,tv}?watch_region=IN
  *  and /network/{id}. Two bugs this table replaces:
- *    • provider 122 ("Hotstar") is retired and NOT offered in region IN at
+ *    â€¢ provider 122 ("Hotstar") is retired and NOT offered in region IN at
  *      all, so the old JioHotstar movie query returned an empty list.
- *    • network 122 is PBS Kids (US) — the old JioHotstar show query was
+ *    â€¢ network 122 is PBS Kids (US) â€” the old JioHotstar show query was
  *      pulling American children's television into the section.
  *
  *  Rule of thumb: prefer with_watch_providers for "what can I stream on
  *  platform X", because a network id describes who ORIGINALLY aired a show,
  *  not who streams it now. JioHotstar licenses HBO/FOX/NBC content, so
- *  network filtering cannot describe it — provider filtering can.
+ *  network filtering cannot describe it â€” provider filtering can.
  */
 const OTT = {
   netflix:    { provider: '8',    regions: ['IN', 'US'], networks: '213' },
@@ -3857,7 +3977,7 @@ const OTT = {
   jiohotstar: { provider: '2336', regions: ['IN'],       networks: '3919' },
   /*  Zee5 needs a language constraint and the reason is measurable. TMDB
    *  attaches ~1900 movies to provider 232 in India, but only about 2% of the
-   *  popular head is actually included with a Zee5 subscription — the rest is
+   *  popular head is actually included with a Zee5 subscription â€” the rest is
    *  its RENTAL storefront. Spider-Man: No Way Home, for instance, lists 232
    *  under "rent", never under "flatrate", yet TMDB's discover index still
    *  returns it for with_watch_monetization_types=flatrate. So the monetization
@@ -3866,7 +3986,7 @@ const OTT = {
    *  Zee5's genuine subscription library is Indian-language cinema, and
    *  constraining to those languages measures 100% accurate against each
    *  title's own /watch/providers record (45/45 sampled) versus 2% (1/45)
-   *  unconstrained. This is not a hack around the API — it is what the
+   *  unconstrained. This is not a hack around the API â€” it is what the
    *  platform's catalogue actually is.
    */
   zee5:       { provider: '232',  regions: ['IN'],       networks: '2590|526|6989',
@@ -3876,7 +3996,7 @@ const OTT = {
 /*  Networks that are genuinely streaming platforms, for the "Web Series" tab.
  *  The previous list carried five ids that do not resolve at all (2600, 2212,
  *  2694, 3321, 3328 all 404) plus three that resolve to unrelated broadcasters
- *  — 122 PBS Kids, 3295 Azteca Uno (MX), 3009 Imedi TV (GE) and 2583 World
+ *  â€” 122 PBS Kids, 3295 Azteca Uno (MX), 3009 Imedi TV (GE) and 2583 World
  *  Fishing Network (CA). Those were injecting junk into the web-series grid.
  */
 const STREAMING_NETWORK_IDS = [
@@ -3903,20 +4023,20 @@ const LINEAR_TV_EXCLUDE_IDS = '71|105|70|118|194|2584|3294';
  *  reached for it would have quietly reintroduced the rental-catalogue leak.
  */
 
-// ══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // OTT SUB-FILTER: Web Series & Movies (like Cartoons sub-tabs)
-// ══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const OTT_MODES = [
-  { id: 'all',       label: 'All',          icon: '🎬' },
-  { id: 'webseries', label: 'Web Series',   icon: '📺' },
-  { id: 'movies',    label: 'Movies',       icon: '🍿' }
+  { id: 'all',       label: 'All',          icon: 'ðŸŽ¬' },
+  { id: 'webseries', label: 'Web Series',   icon: 'ðŸ“º' },
+  { id: 'movies',    label: 'Movies',       icon: 'ðŸ¿' }
 ];
 
 let currentOttMode = 'all';
 
-/*  ══════════════════════════════════════════════════════════════════════
- *  PLATFORM ACCURACY RULES — why every query below is provider-filtered
- *  ══════════════════════════════════════════════════════════════════════
+/*  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+ *  PLATFORM ACCURACY RULES â€” why every query below is provider-filtered
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  The first version of this sub-filter seeded the grid with
  *  /trending/tv/week and /trending/movie/week. Those endpoints are GLOBAL:
  *  they know nothing about watch providers, so the Netflix > Web Series tab
@@ -3924,12 +4044,12 @@ let currentOttMode = 'all';
  *  platform. That is the bug this block fixes.
  *
  *  The rule now: a title may only enter the grid if TMDB itself says it is
- *  streamable on that platform. Two things enforce it —
+ *  streamable on that platform. Two things enforce it â€”
  *
  *    1. EVERY content query carries with_watch_providers + watch_region, so
  *       the catalogue is correct by construction. Nothing global is a source.
  *    2. with_watch_monetization_types=flatrate keeps rent/buy titles out.
- *       Without it, "Prime Video" pulls in the whole Amazon rental store —
+ *       Without it, "Prime Video" pulls in the whole Amazon rental store â€”
  *       provider 119 is the subscription, but a title can be attached to it
  *       through a paid transaction too.
  *
@@ -3961,7 +4081,7 @@ function ottISTDate(offsetDays) {
 
 /**
  * OTT mode ke hisaab se queries. Har query provider-filtered hai, isliye
- * jo bhi aata hai wo us platform ka hi hota hai — trending aur latest bhi
+ * jo bhi aata hai wo us platform ka hi hota hai â€” trending aur latest bhi
  * usi filtered catalogue ke andar se nikalte hain.
  */
 function buildOttModeQueries(key, mode, page) {
@@ -3982,7 +4102,7 @@ function buildOttModeQueries(key, mode, page) {
   // Platforms whose subscription catalogue is language-scoped (see OTT table).
   if (cfg.langs) gate.with_original_language = cfg.langs;
   const q = [];
-  // tag: drives scoring in fetchOttMovies — 'trend' | 'latest' | 'top' | 'core'
+  // tag: drives scoring in fetchOttMovies â€” 'trend' | 'latest' | 'top' | 'core'
   const push = (endpoint, type, params, tag) =>
     q.push({ endpoint, type, tag, params: Object.assign({}, gate, params) });
 
@@ -4024,7 +4144,7 @@ function buildOttModeQueries(key, mode, page) {
     }, 'latest');
     // PROVEN HITS.
     push('/discover/movie', 'movie', { sort_by: 'vote_count.desc', page: p1 }, 'top');
-    // US subscription catalogue for the global platforms — still provider-gated.
+    // US subscription catalogue for the global platforms â€” still provider-gated.
     if (cfg.regions.includes('US')) {
       push('/discover/movie', 'movie', {
         with_watch_providers: cfg.providerUS || cfg.provider, watch_region: 'US',
@@ -4032,7 +4152,7 @@ function buildOttModeQueries(key, mode, page) {
       }, 'core');
     }
   } else {
-    // 'all' — both types, provider-gated, trending + latest of each on top.
+    // 'all' â€” both types, provider-gated, trending + latest of each on top.
     push('/discover/tv', 'tv', { sort_by: 'popularity.desc', page: p1 }, 'trend');
     push('/discover/movie', 'movie', { sort_by: 'popularity.desc', page: p1 }, 'trend');
     push('/discover/tv', 'tv', { sort_by: 'popularity.desc', page: p2 }, 'core');
@@ -4063,11 +4183,11 @@ function buildOttModeQueries(key, mode, page) {
  */
 const _ottVerifyCache = new Map();
 
-/*  ══════════════════════════════════════════════════════════════════════
+/*  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  WHY THE OTT SECTIONS USED TO ARRIVE LATE
- *  ══════════════════════════════════════════════════════════════════════
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  Opening Netflix / Prime / JioHotstar needed roughly 35 separate TMDB
- *  requests before the first card could paint, and — worse — they arrived in
+ *  requests before the first card could paint, and â€” worse â€” they arrived in
  *  three DEPENDENT waves, because each wave's URLs are only known once the
  *  previous one has answered:
  *
@@ -4077,7 +4197,7 @@ const _ottVerifyCache = new Map();
  *
  *  Sent one by one through the 8-lane concurrency gate that is ~6 sequential
  *  rounds, each one a full network round trip, and 35 requests also eats the
- *  entire 30-per-10s client rate budget — so a user who opened two platforms in
+ *  entire 30-per-10s client rate budget â€” so a user who opened two platforms in
  *  a row hit _mzRateDelayMs() and waited on a sleep, not on the network.
  *
  *  Meanwhile the homepage had already solved this: tmdbBatch() posts the whole
@@ -4085,7 +4205,7 @@ const _ottVerifyCache = new Map();
  *  TMDB and its KV cache, and returns everything in one response. The OTT path
  *  simply never used it.
  *
- *  It does now, and that is the entire fix — one batch per wave, so 35 requests
+ *  It does now, and that is the entire fix â€” one batch per wave, so 35 requests
  *  in ~6 rounds becomes 3 requests in 3 rounds. Nothing about WHICH endpoints
  *  are called, or how results are scored, filtered or ordered, changes: the
  *  batch only PRIMES tmdbCache, and the existing code below then runs exactly as
@@ -4106,7 +4226,7 @@ const _ottVerifyCache = new Map();
  *    - a throw here must never lose the section, hence the swallow.
  *
  *  Chunked at 40 because the Worker rejects a larger batch (MAX_BATCH_PATHS),
- *  and the chunks go out together — chunking sequentially would rebuild the
+ *  and the chunks go out together â€” chunking sequentially would rebuild the
  *  very wave structure this exists to remove.
  */
 async function _ottPrimeBatch(pairs) {
@@ -4127,7 +4247,7 @@ async function _ottPrimeBatch(pairs) {
  *  Titles already in _ottVerifyCache are skipped: that cache holds the in-flight
  *  or settled promise, so asking for them again would put URLs in the batch that
  *  nobody is waiting on. This is why the accuracy spot-check usually costs
- *  nothing — the trending pass has already verified most of the head.
+ *  nothing â€” the trending pass has already verified most of the head.
  */
 async function _ottPrimeProviders(key, items) {
   const seen = new Set();
@@ -4145,7 +4265,7 @@ async function _ottPrimeProviders(key, items) {
 /*  Returns true / false / null.
  *
  *  The null is the important part. An earlier version returned false when the
- *  request failed, which reads as "not on this platform" — so a rate-limited
+ *  request failed, which reads as "not on this platform" â€” so a rate-limited
  *  or offline user would have perfectly valid titles filtered out of the grid.
  *  Errors and missing provider data are now reported as "unknown" and every
  *  caller fails open on them. Only a provider record that genuinely lacks the
@@ -4162,7 +4282,7 @@ async function ottIsOnPlatform(key, type, id) {
     try {
       data = await tmdb('/' + type + '/' + id + '/watch/providers', {});
     } catch (e) {
-      return null;                       // network / rate limit — unknown
+      return null;                       // network / rate limit â€” unknown
     }
     const results = data && data.results;
     if (!results || !Object.keys(results).length) return null;  // no data at all
@@ -4188,7 +4308,7 @@ async function ottIsOnPlatform(key, type, id) {
 }
 
 /*  Which global trending lists ottVerifiedTrending() reads for this mode.
- *  Shared with the prefetch in fetchOttMovies so the two cannot drift — if they
+ *  Shared with the prefetch in fetchOttMovies so the two cannot drift â€” if they
  *  disagreed the batch would warm URLs nobody asks for while the real requests
  *  still went out one at a time, which is the bug this whole path just fixed. */
 function ottTrendingWants(mode) {
@@ -4210,7 +4330,7 @@ async function ottVerifiedTrending(key, mode, page) {
   const candidates = [];
   res.forEach((r, i) => {
     const list = (r.status === 'fulfilled' && r.value && r.value.results) ? r.value.results : [];
-    // Top slice only — the tail of the trending list is not worth verifying.
+    // Top slice only â€” the tail of the trending list is not worth verifying.
     list.slice(0, 10).forEach(raw => {
       if (!raw || !raw.poster_path || !raw.id) return;
       const item = Object.assign({}, raw);
@@ -4220,7 +4340,7 @@ async function ottVerifiedTrending(key, mode, page) {
   });
 
   // One request for every provider record this pass needs, before asking for
-  // the verdicts — otherwise these are up to 20 individual round trips.
+  // the verdicts â€” otherwise these are up to 20 individual round trips.
   await _ottPrimeProviders(key, candidates);
 
   const verdicts = await Promise.all(
@@ -4232,8 +4352,8 @@ async function ottVerifiedTrending(key, mode, page) {
 /*  Adaptive accuracy guard.
  *  The provider gate plus the per-platform language scope measures 100%
  *  accurate today, so verifying every card would be wasted requests. But TMDB
- *  provider data does drift — the Zee5 rental leak is exactly that kind of
- *  drift — so instead of trusting it blindly we spot-check a small sample of
+ *  provider data does drift â€” the Zee5 rental leak is exactly that kind of
+ *  drift â€” so instead of trusting it blindly we spot-check a small sample of
  *  the head. Clean sample: ship the list untouched, cost is a handful of
  *  cached requests. Dirty sample: verify the whole pool and drop anything the
  *  platform does not actually stream, so the section self-heals rather than
@@ -4252,7 +4372,7 @@ async function ottEnforceAccuracy(key, items) {
     sample.map(m => ottIsOnPlatform(key, m.media_type, m.id).catch(() => null))
   );
   const known = sampleVerdicts.filter(v => v !== null);
-  // Nothing conclusive (offline / TMDB hiccup) — fail open, an empty grid is
+  // Nothing conclusive (offline / TMDB hiccup) â€” fail open, an empty grid is
   // worse than an unverified one.
   if (known.length < 4) return items;
 
@@ -4267,7 +4387,7 @@ async function ottEnforceAccuracy(key, items) {
   );
   const kept = head.filter((m, i) => verdicts[i] !== false);
   console.warn('[OTT] ' + key + ': provider data looks polluted ('
-    + Math.round(passRate * 100) + '% of sample on-platform) — kept '
+    + Math.round(passRate * 100) + '% of sample on-platform) â€” kept '
     + kept.length + '/' + head.length + ' after verification');
   return kept;
 }
@@ -4282,7 +4402,7 @@ async function fetchOttMovies(key, mode, page) {
 
   /*  Everything the first render needs, in ONE request: the provider-gated
    *  catalogue pages and the two global trending lists the overlay reads. Only
-   *  primes the cache — the calls below are unchanged and now hit memory. */
+   *  primes the cache â€” the calls below are unchanged and now hit memory. */
   await _ottPrimeBatch([].concat(
     plan.map(p => [p.endpoint, p.params]),
     ottTrendingWants(mode).map(w => [w.endpoint, { language: 'en-US', page: String(page) }])
@@ -4333,7 +4453,7 @@ async function fetchOttMovies(key, mode, page) {
     list.forEach(raw => consider(raw, src.type, src.tag));
   });
 
-  // Verified trending sits above everything else — it is both confirmed on
+  // Verified trending sits above everything else â€” it is both confirmed on
   // the platform and confirmed hot right now.
   verifiedTrending.forEach(item => consider(item, item.media_type, 'trend', 4000));
 
@@ -4341,7 +4461,7 @@ async function fetchOttMovies(key, mode, page) {
   return ottEnforceAccuracy(key, ranked);
 }
 
-// ── OTT SUB-FILTER BAR (chips under category tabs) ──
+// â”€â”€ OTT SUB-FILTER BAR (chips under category tabs) â”€â”€
 function renderOttFilterBar() {
   const catTabs = document.getElementById('catTabs');
   if (!catTabs) return;
@@ -4374,7 +4494,7 @@ function updateOttHeading(cat) {
   if (currentOttMode === 'all') {
     h.textContent = platformName;
   } else {
-    h.textContent = platformName + ' • ' + m.label.toUpperCase();
+    h.textContent = platformName + ' â€¢ ' + m.label.toUpperCase();
   }
 }
 
@@ -4405,7 +4525,7 @@ function prefetchMoviesPage(cat, pageNum) {
     tmdb('/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
     tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
     tmdb('/movie/now_playing', { language: 'en-US', page: pageStr });
-    // Same freshness windows loadMovies('all') uses — identical params so the
+    // Same freshness windows loadMovies('all') uses â€” identical params so the
     // prefetch actually warms the cache instead of missing it.
     tmdb('/discover/movie', latestWindowQuery(pageStr));
     tmdb('/discover/movie', printUpgradeWindowQuery(pageStr));
@@ -4482,7 +4602,7 @@ function prefetchMoviesPage(cat, pageNum) {
     tmdb('/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
   }
   else if (OTT[cat]) {
-    // Netflix / Prime / JioHotstar / Zee5 — use active OTT mode for prefetch
+    // Netflix / Prime / JioHotstar / Zee5 â€” use active OTT mode for prefetch
     buildOttModeQueries(cat, currentOttMode, pageNum).forEach(q => tmdb(q.endpoint, q.params));
   }
   else {
@@ -4493,8 +4613,8 @@ function prefetchMoviesPage(cat, pageNum) {
 }
  
 function prefetchUpcomingPage(pageNum) {
-  /*  Same plan builder loadUpcoming() uses, so the params — and therefore the
-   *  cache keys — are byte-identical and this prefetch actually answers the next
+  /*  Same plan builder loadUpcoming() uses, so the params â€” and therefore the
+   *  cache keys â€” are byte-identical and this prefetch actually answers the next
    *  "Load More" instead of warming a URL nobody asks for. */
   tmdbBatch(upcomingPagePlan(pageNum));   // never rejects; fire and forget
 }
@@ -4519,24 +4639,24 @@ const CAT_PARAMS = {
   kids:      { with_genres: '16,10751', without_genres: '27,53,18', sort_by: 'popularity.desc', page: '1' }
 };
 
-/* ══════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    POWERFUL ANIME ENGINE
    Multi-source anime discovery: Trending, Latest, Airing Now,
-   Popular, Top Rated, Movies, Series — sab ek jagah.
-   ══════════════════════════════════════════════════════════════ */
+   Popular, Top Rated, Movies, Series â€” sab ek jagah.
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const ANIME_GENRE   = '16';        // TMDB Animation genre
 const ANIME_KEYWORD = '210024';    // TMDB "anime" keyword (Japanese + donghua style titles)
 
 const ANIME_MODES = [
-  { id: 'all',       label: 'All Anime',    icon: '🎌' },
-  { id: 'trending',  label: 'Trending',     icon: '🔥' },
-  { id: 'latest',    label: 'Latest',       icon: '🆕' },
-  { id: 'airing',    label: 'Airing Now',   icon: '📡' },
-  { id: 'popular',   label: 'Popular',      icon: '⭐' },
-  { id: 'top_rated', label: 'Top Rated',    icon: '🏆' },
-  { id: 'series',    label: 'Anime Series', icon: '📺' },
-  { id: 'movies',    label: 'Anime Movies', icon: '🎬' },
-  { id: 'classics',  label: 'All Time Best',icon: '👑' }
+  { id: 'all',       label: 'All Anime',    icon: 'ðŸŽŒ' },
+  { id: 'trending',  label: 'Trending',     icon: 'ðŸ”¥' },
+  { id: 'latest',    label: 'Latest',       icon: 'ðŸ†•' },
+  { id: 'airing',    label: 'Airing Now',   icon: 'ðŸ“¡' },
+  { id: 'popular',   label: 'Popular',      icon: 'â­' },
+  { id: 'top_rated', label: 'Top Rated',    icon: 'ðŸ†' },
+  { id: 'series',    label: 'Anime Series', icon: 'ðŸ“º' },
+  { id: 'movies',    label: 'Anime Movies', icon: 'ðŸŽ¬' },
+  { id: 'classics',  label: 'All Time Best',icon: 'ðŸ‘‘' }
 ];
 
 let currentAnimeMode = 'all';
@@ -4556,7 +4676,7 @@ function isAnimeItem(m) {
 
 /**
  * Builds the TMDB request plan for a given anime mode.
- * Returns [{ endpoint, params, type, badge }] — type forces media_type
+ * Returns [{ endpoint, params, type, badge }] â€” type forces media_type
  * so anime series ka season/episode support intact rahe.
  */
 function buildAnimeQueries(mode, page) {
@@ -4575,76 +4695,76 @@ function buildAnimeQueries(mode, page) {
   switch (mode) {
     case 'trending':
       // /trending filter support nahi karta, isliye locally anime filter hoga
-      push('/trending/tv/week',    { language: 'en-US', page: pg }, 'tv',    '🔥 TRENDING NOW');
-      push('/trending/movie/week', { language: 'en-US', page: pg }, 'movie', '🔥 TRENDING NOW');
-      push('/trending/tv/day',     { language: 'en-US', page: pg }, 'tv',    '🔥 TRENDING TODAY');
-      push('/trending/movie/day',  { language: 'en-US', page: pg }, 'movie', '🔥 TRENDING TODAY');
+      push('/trending/tv/week',    { language: 'en-US', page: pg }, 'tv',    'ðŸ”¥ TRENDING NOW');
+      push('/trending/movie/week', { language: 'en-US', page: pg }, 'movie', 'ðŸ”¥ TRENDING NOW');
+      push('/trending/tv/day',     { language: 'en-US', page: pg }, 'tv',    'ðŸ”¥ TRENDING TODAY');
+      push('/trending/movie/day',  { language: 'en-US', page: pg }, 'movie', 'ðŸ”¥ TRENDING TODAY');
       // Fallback fillers: recent high-momentum anime
-      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'popularity.desc', 'first_air_date.gte': animeISTDate(-400), 'first_air_date.lte': today, page: pg }), 'tv', '🔥 HOT ANIME');
-      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'popularity.desc', 'primary_release_date.gte': animeISTDate(-800), 'primary_release_date.lte': today, page: pg }), 'movie', '🔥 HOT ANIME');
+      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'popularity.desc', 'first_air_date.gte': animeISTDate(-400), 'first_air_date.lte': today, page: pg }), 'tv', 'ðŸ”¥ HOT ANIME');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'popularity.desc', 'primary_release_date.gte': animeISTDate(-800), 'primary_release_date.lte': today, page: pg }), 'movie', 'ðŸ”¥ HOT ANIME');
       break;
 
     case 'latest':
-      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'first_air_date.desc', 'first_air_date.lte': today, 'vote_count.gte': '2', page: pg }), 'tv', '🆕 NEW RELEASE');
-      push('/discover/tv', Object.assign({}, kwTv,   { sort_by: 'first_air_date.desc', 'first_air_date.lte': today, 'vote_count.gte': '2', page: pg }), 'tv', '🆕 NEW RELEASE');
-      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'primary_release_date.desc', 'primary_release_date.lte': today, 'vote_count.gte': '3', page: pg }), 'movie', '🆕 NEW MOVIE');
-      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'popularity.desc', 'first_air_date.gte': animeISTDate(-120), 'first_air_date.lte': today, page: pg }), 'tv', '🆕 THIS SEASON');
+      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'first_air_date.desc', 'first_air_date.lte': today, 'vote_count.gte': '2', page: pg }), 'tv', 'ðŸ†• NEW RELEASE');
+      push('/discover/tv', Object.assign({}, kwTv,   { sort_by: 'first_air_date.desc', 'first_air_date.lte': today, 'vote_count.gte': '2', page: pg }), 'tv', 'ðŸ†• NEW RELEASE');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'primary_release_date.desc', 'primary_release_date.lte': today, 'vote_count.gte': '3', page: pg }), 'movie', 'ðŸ†• NEW MOVIE');
+      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'popularity.desc', 'first_air_date.gte': animeISTDate(-120), 'first_air_date.lte': today, page: pg }), 'tv', 'ðŸ†• THIS SEASON');
       break;
 
     case 'airing':
-      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'popularity.desc', 'air_date.gte': animeISTDate(-30), 'air_date.lte': today, page: pg }), 'tv', '📡 AIRING NOW');
-      push('/discover/tv', Object.assign({}, kwTv,   { sort_by: 'popularity.desc', 'air_date.gte': animeISTDate(-30), 'air_date.lte': today, page: pg }), 'tv', '📡 AIRING NOW');
-      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '20', 'air_date.gte': animeISTDate(-60), 'air_date.lte': today, page: pg }), 'tv', '📡 ONGOING HIT');
+      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'popularity.desc', 'air_date.gte': animeISTDate(-30), 'air_date.lte': today, page: pg }), 'tv', 'ðŸ“¡ AIRING NOW');
+      push('/discover/tv', Object.assign({}, kwTv,   { sort_by: 'popularity.desc', 'air_date.gte': animeISTDate(-30), 'air_date.lte': today, page: pg }), 'tv', 'ðŸ“¡ AIRING NOW');
+      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '20', 'air_date.gte': animeISTDate(-60), 'air_date.lte': today, page: pg }), 'tv', 'ðŸ“¡ ONGOING HIT');
       break;
 
     case 'popular':
-      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'popularity.desc', page: p1 }), 'tv',    '⭐ POPULAR');
-      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'popularity.desc', page: p1 }), 'movie', '⭐ POPULAR');
-      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'popularity.desc', page: p2 }), 'tv',    '⭐ POPULAR');
-      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'popularity.desc', page: p2 }), 'movie', '⭐ POPULAR');
-      push('/discover/tv',    Object.assign({}, kwTv,   { sort_by: 'popularity.desc', page: p1 }), 'tv',    '⭐ POPULAR');
+      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'popularity.desc', page: p1 }), 'tv',    'â­ POPULAR');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'popularity.desc', page: p1 }), 'movie', 'â­ POPULAR');
+      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'popularity.desc', page: p2 }), 'tv',    'â­ POPULAR');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'popularity.desc', page: p2 }), 'movie', 'â­ POPULAR');
+      push('/discover/tv',    Object.assign({}, kwTv,   { sort_by: 'popularity.desc', page: p1 }), 'tv',    'â­ POPULAR');
       break;
 
     case 'top_rated':
-      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: p1 }), 'tv',    '🏆 TOP RATED');
-      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: p1 }), 'movie', '🏆 TOP RATED');
-      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: p2 }), 'tv',    '🏆 TOP RATED');
-      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: p2 }), 'movie', '🏆 TOP RATED');
+      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: p1 }), 'tv',    'ðŸ† TOP RATED');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: p1 }), 'movie', 'ðŸ† TOP RATED');
+      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: p2 }), 'tv',    'ðŸ† TOP RATED');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: p2 }), 'movie', 'ðŸ† TOP RATED');
       break;
 
     case 'series':
-      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'popularity.desc', page: p1 }), 'tv', '📺 ANIME SERIES');
-      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'popularity.desc', page: p2 }), 'tv', '📺 ANIME SERIES');
-      push('/discover/tv', Object.assign({}, kwTv,   { sort_by: 'popularity.desc', page: p1 }), 'tv', '📺 ANIME SERIES');
-      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'first_air_date.desc', 'first_air_date.lte': today, 'vote_count.gte': '5', page: pg }), 'tv', '📺 NEW SEASON');
+      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'popularity.desc', page: p1 }), 'tv', 'ðŸ“º ANIME SERIES');
+      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'popularity.desc', page: p2 }), 'tv', 'ðŸ“º ANIME SERIES');
+      push('/discover/tv', Object.assign({}, kwTv,   { sort_by: 'popularity.desc', page: p1 }), 'tv', 'ðŸ“º ANIME SERIES');
+      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'first_air_date.desc', 'first_air_date.lte': today, 'vote_count.gte': '5', page: pg }), 'tv', 'ðŸ“º NEW SEASON');
       break;
 
     case 'movies':
-      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'popularity.desc', page: p1 }), 'movie', '🎬 ANIME MOVIE');
-      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'popularity.desc', page: p2 }), 'movie', '🎬 ANIME MOVIE');
-      push('/discover/movie', Object.assign({}, kwMv,   { sort_by: 'popularity.desc', page: p1 }), 'movie', '🎬 ANIME MOVIE');
-      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '100', page: pg }), 'movie', '🎬 MUST WATCH');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'popularity.desc', page: p1 }), 'movie', 'ðŸŽ¬ ANIME MOVIE');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'popularity.desc', page: p2 }), 'movie', 'ðŸŽ¬ ANIME MOVIE');
+      push('/discover/movie', Object.assign({}, kwMv,   { sort_by: 'popularity.desc', page: p1 }), 'movie', 'ðŸŽ¬ ANIME MOVIE');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '100', page: pg }), 'movie', 'ðŸŽ¬ MUST WATCH');
       break;
 
     case 'classics':
-      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'vote_count.desc', page: p1 }), 'tv',    '👑 LEGENDARY');
-      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'vote_count.desc', page: p1 }), 'movie', '👑 LEGENDARY');
-      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'vote_count.desc', page: p2 }), 'tv',    '👑 LEGENDARY');
-      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'vote_count.desc', page: p2 }), 'movie', '👑 LEGENDARY');
+      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'vote_count.desc', page: p1 }), 'tv',    'ðŸ‘‘ LEGENDARY');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'vote_count.desc', page: p1 }), 'movie', 'ðŸ‘‘ LEGENDARY');
+      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'vote_count.desc', page: p2 }), 'tv',    'ðŸ‘‘ LEGENDARY');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'vote_count.desc', page: p2 }), 'movie', 'ðŸ‘‘ LEGENDARY');
       break;
 
     case 'all':
     default:
-      // Har flavour ka mix — trending + latest + popular + top rated + movies
-      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'popularity.desc', page: p1 }), 'tv',    '⭐ POPULAR');
-      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'popularity.desc', page: p1 }), 'movie', '🎬 ANIME MOVIE');
-      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'first_air_date.desc', 'first_air_date.lte': today, 'vote_count.gte': '5', page: pg }), 'tv', '🆕 LATEST');
-      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'popularity.desc', 'air_date.gte': animeISTDate(-30), 'air_date.lte': today, page: pg }), 'tv', '📡 AIRING NOW');
-      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: pg }), 'tv',    '🏆 TOP RATED');
-      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: pg }), 'movie', '🏆 TOP RATED');
-      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'popularity.desc', page: p2 }), 'tv',    '⭐ POPULAR');
-      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'popularity.desc', page: p2 }), 'movie', '🎬 ANIME MOVIE');
-      push('/discover/tv',    Object.assign({}, kwTv,   { sort_by: 'popularity.desc', page: p1 }), 'tv',    '🎌 ANIME');
+      // Har flavour ka mix â€” trending + latest + popular + top rated + movies
+      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'popularity.desc', page: p1 }), 'tv',    'â­ POPULAR');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'popularity.desc', page: p1 }), 'movie', 'ðŸŽ¬ ANIME MOVIE');
+      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'first_air_date.desc', 'first_air_date.lte': today, 'vote_count.gte': '5', page: pg }), 'tv', 'ðŸ†• LATEST');
+      push('/discover/tv', Object.assign({}, tvBase, { sort_by: 'popularity.desc', 'air_date.gte': animeISTDate(-30), 'air_date.lte': today, page: pg }), 'tv', 'ðŸ“¡ AIRING NOW');
+      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: pg }), 'tv',    'ðŸ† TOP RATED');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: pg }), 'movie', 'ðŸ† TOP RATED');
+      push('/discover/tv',    Object.assign({}, tvBase, { sort_by: 'popularity.desc', page: p2 }), 'tv',    'â­ POPULAR');
+      push('/discover/movie', Object.assign({}, mvBase, { sort_by: 'popularity.desc', page: p2 }), 'movie', 'ðŸŽ¬ ANIME MOVIE');
+      push('/discover/tv',    Object.assign({}, kwTv,   { sort_by: 'popularity.desc', page: p1 }), 'tv',    'ðŸŽŒ ANIME');
       break;
   }
   return q;
@@ -4686,7 +4806,7 @@ async function fetchAnimeMovies(mode, page) {
   return out;
 }
 
-// ── ANIME SUB-FILTER BAR (chips under category tabs) ──
+// â”€â”€ ANIME SUB-FILTER BAR (chips under category tabs) â”€â”€
 function renderAnimeFilterBar() {
   const catTabs = document.getElementById('catTabs');
   if (!catTabs) return;
@@ -4715,7 +4835,7 @@ function updateAnimeHeading() {
   const h = document.getElementById('sectionHeading');
   if (!h) return;
   const m = ANIME_MODES.find(x => x.id === currentAnimeMode) || ANIME_MODES[0];
-  h.textContent = currentAnimeMode === 'all' ? 'ANIME SERIES & MOVIES' : ('ANIME • ' + m.label.toUpperCase());
+  h.textContent = currentAnimeMode === 'all' ? 'ANIME SERIES & MOVIES' : ('ANIME â€¢ ' + m.label.toUpperCase());
 }
 
 function setAnimeMode(mode) {
@@ -4726,36 +4846,36 @@ function setAnimeMode(mode) {
   loadMovies('anime');
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
-   POWERFUL CARTOON ENGINE  (Cartoons tab — cat 'kids')
-   ──────────────────────────────────────────────────────────────────────────
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   POWERFUL CARTOON ENGINE  (Cartoons tab â€” cat 'kids')
+   â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    Do problem the section me the:
      1. Query sirf TMDB genre 10762 ("Kids") par chal rahi thi. Kids ek
-        AUDIENCE tag hai, animation ka tag nahi — isliye Baalveer,
+        AUDIENCE tag hai, animation ka tag nahi â€” isliye Baalveer,
         Shaka Laka Boom Boom, Tenali Rama, Sesame Street, Jessie jaise
         LIVE-ACTION shows (aur "Sex Chat with Pappu & Papa" tak) grid me
-        aa jaate the. Verified: /discover/tv?with_genres=10762&…lang=hi ka
+        aa jaate the. Verified: /discover/tv?with_genres=10762&â€¦lang=hi ka
         top result hi Baalveer hai (genres: Kids/Comedy/Sci-Fi, koi
         Animation nahi).
      2. Sab kuch round-robin interleave hota tha, koi ranking nahi thi, to
         famous cartoons top par aane ki koi guarantee nahi thi.
 
    Fix:
-     • ANIMATION GENRE (16) LAZMI. Yahi ek gate live-action kids shows ko
+     â€¢ ANIMATION GENRE (16) LAZMI. Yahi ek gate live-action kids shows ko
        100% bahar rakhta hai. Sirf curated cartoon IDs is gate ko bypass kar
        sakti hain (kuch Indian cartoons TMDB par bina genre ke pade hain,
        jaise Little Singham).
-     • Japanese/Chinese/Korean content sirf tab aata hai jab wo kids/family
-       cartoon ho ya curated famous ho — warna Jujutsu Kaisen/Naruto type
+     â€¢ Japanese/Chinese/Korean content sirf tab aata hai jab wo kids/family
+       cartoon ho ya curated famous ho â€” warna Jujutsu Kaisen/Naruto type
        anime (aur TMDB ka ja adult-animation kachra) yahan ghus jaata tha.
        Pure anime ke liye alag ANIME tab already hai.
-     • FAMOUS-FIRST RANKING: curated tier-1 (Doraemon, Shinchan, Tom & Jerry,
-       Oggy, Ben 10, Motu Patlu, Pokemon…) sabse upar, phir global legends,
+     â€¢ FAMOUS-FIRST RANKING: curated tier-1 (Doraemon, Shinchan, Tom & Jerry,
+       Oggy, Ben 10, Motu Patlu, Pokemonâ€¦) sabse upar, phir global legends,
        phir trending, phir popularity + vote weight.
-     • 12 sub-filter chips (Trending / All Time Famous / Hindi / Doraemon & Co
+     â€¢ 12 sub-filter chips (Trending / All Time Famous / Hindi / Doraemon & Co
        / Series / Movies / Cartoon Network / Nickelodeon / Disney / Action /
-       New) — anime engine ke jaise.
-   ══════════════════════════════════════════════════════════════════════════ */
+       New) â€” anime engine ke jaise.
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const CARTOON_GENRE_ANIMATION = '16';
 const CARTOON_GENRE_KIDS      = '10762';
 const CARTOON_GENRE_FAMILY    = '10751';
@@ -4771,7 +4891,7 @@ const CARTOON_NET_DISNEY = '54|44';
 const CARTOON_NET_INDIA  = '4945|8053|1439|6622';
 const CARTOON_NET_JAPAN  = '103';
 
-/* Tier 1 — jo cartoons India me sabse zyada dekhe jaate hain. Ye grid ke top
+/* Tier 1 â€” jo cartoons India me sabse zyada dekhe jaate hain. Ye grid ke top
    par pin hote hain. Saari ids TMDB se verify ki gayi hain. */
 const CARTOON_ICON_IDS = new Set([
   // Japanese classics (Hindi dub par hi bade hue hain)
@@ -4785,7 +4905,7 @@ const CARTOON_ICON_IDS = new Set([
   // Cartoon Network / Nick / Disney evergreens
   47480, 676, 7842, 4274,        // Tom & Jerry (all shows)
   2777, 131721,                  // Oggy and the Cockroaches
-  4686, 68295, 6040, 31109, 46922, // Ben 10 (2005 → Omniverse)
+  4686, 68295, 6040, 31109, 46922, // Ben 10 (2005 â†’ Omniverse)
   387, 4229, 2085, 607, 37606, 1877,
   18123, 926, 652,               // Scooby-Doo
   2530,                          // Mr. Bean: The Animated Series
@@ -4802,7 +4922,7 @@ const CARTOON_ICON_IDS = new Set([
   249066, 232840, 232838, 155835, 115983, 41780, 252106, 219676
 ]);
 
-/* Tier 2 — global cartoon legends / all-time classics. */
+/* Tier 2 â€” global cartoon legends / all-time classics. */
 const CARTOON_LEGEND_IDS = new Set([
   246, 82728, 46080, 3902, 38693, 194916, 7011, 34860,
   67667, 54728, 226688, 37807,   // Beyblade
@@ -4813,7 +4933,7 @@ const CARTOON_LEGEND_IDS = new Set([
   57775, 153485, 209246, 56426, 32910, 157747, 286822
 ]);
 
-/* Mature / adult animation — Cartoons tab me kabhi nahi. */
+/* Mature / adult animation â€” Cartoons tab me kabhi nahi. */
 const CARTOON_BLOCK_IDS = new Set([
   1434, 2190, 60625, 74204, 95557, 456, 97645, 2122
 ]);
@@ -4821,22 +4941,22 @@ const CARTOON_BLOCK_RE = /\b(family guy|south park|rick and morty|big mouth|invi
 /* Explicit / ecchi animation (TMDB ke ja animation results me kaafi hai). */
 const CARTOON_NSFW_RE = /(hentai|ecchi|erotic|uncensored|\bxxx\b|\bsex\b|\bnude\b|naked|lewd|\byaoi\b|\byuri\b|\bharem\b|seduc|\blust\b|shikiyoku|junketsu|netorare|\bmilf\b|18\+)/i;
 
-/* Ghar-ghar ke naam — curated id list se choot jaane par bhi boost mile. */
-const CARTOON_FAMOUS_RE = /\b(doraemon|shin[\s-]?chan|shinchan|crayon shin|ninja hattori|kiteretsu|perman|pokemon|pok[eé]mon|tom and jerry|tom & jerry|oggy|spongebob|dexter's laboratory|courage the cowardly|powerpuff|gumball|phineas and ferb|scooby|mr\.? bean|we bare bears|teen titans|adventure time|regular show|gravity falls|rugrats|peppa pig|paw patrol|bluey|masha and the bear|shaun the sheep|fairly odd|ninja turtles|loud house|jimmy neutron|penguins of madagascar|miraculous|motu patlu|chhota bheem|chota bheem|little bheem|mighty raju|bandbudh|simple samosa|little singham|roll no|rat-a-tat|pakdam|ben 10|my little pony|the last airbender|ninjago|chiikawa|bernard|rantaro|beyblade|johnny test|kick buttowski|dragon ball|looney tunes|bugs bunny|mickey mouse|donald duck|tweety|popeye|garfield|pink panther|richie rich|dora the explorer|noddy|winx club|transformers|smurfs|flintstones|jetsons|inspector gadget|swat kats|justice league|batman|superman|spider-verse|winnie the pooh|toy story|frozen|moana|zootopia|minions|despicable me|shrek|kung fu panda|madagascar|ice age|finding nemo|incredibles|lion king|aladdin|tangled|encanto|ratatouille|monsters, inc|inside out|jungle book|mowgli|super mario|sonic x|hagemaru|kochikame|duck ?tales|jackie chan adventures|eena meena deeka)\b/i;
+/* Ghar-ghar ke naam â€” curated id list se choot jaane par bhi boost mile. */
+const CARTOON_FAMOUS_RE = /\b(doraemon|shin[\s-]?chan|shinchan|crayon shin|ninja hattori|kiteretsu|perman|pokemon|pok[eÃ©]mon|tom and jerry|tom & jerry|oggy|spongebob|dexter's laboratory|courage the cowardly|powerpuff|gumball|phineas and ferb|scooby|mr\.? bean|we bare bears|teen titans|adventure time|regular show|gravity falls|rugrats|peppa pig|paw patrol|bluey|masha and the bear|shaun the sheep|fairly odd|ninja turtles|loud house|jimmy neutron|penguins of madagascar|miraculous|motu patlu|chhota bheem|chota bheem|little bheem|mighty raju|bandbudh|simple samosa|little singham|roll no|rat-a-tat|pakdam|ben 10|my little pony|the last airbender|ninjago|chiikawa|bernard|rantaro|beyblade|johnny test|kick buttowski|dragon ball|looney tunes|bugs bunny|mickey mouse|donald duck|tweety|popeye|garfield|pink panther|richie rich|dora the explorer|noddy|winx club|transformers|smurfs|flintstones|jetsons|inspector gadget|swat kats|justice league|batman|superman|spider-verse|winnie the pooh|toy story|frozen|moana|zootopia|minions|despicable me|shrek|kung fu panda|madagascar|ice age|finding nemo|incredibles|lion king|aladdin|tangled|encanto|ratatouille|monsters, inc|inside out|jungle book|mowgli|super mario|sonic x|hagemaru|kochikame|duck ?tales|jackie chan adventures|eena meena deeka)\b/i;
 
 const CARTOON_MODES = [
-  { id: 'all',       label: 'All Cartoons',    icon: '🎨' },
-  { id: 'trending',  label: 'Trending',        icon: '🔥' },
-  { id: 'legends',   label: 'All Time Famous', icon: '👑' },
-  { id: 'hindi',     label: 'Hindi Cartoons',  icon: '🇮🇳' },
-  { id: 'japanese',  label: 'Doraemon & Co',   icon: '🇯🇵' },
-  { id: 'series',    label: 'Cartoon Series',  icon: '📺' },
-  { id: 'movies',    label: 'Cartoon Movies',  icon: '🎬' },
-  { id: 'cn',        label: 'Cartoon Network', icon: '🌀' },
-  { id: 'nick',      label: 'Nickelodeon',     icon: '🟠' },
-  { id: 'disney',    label: 'Disney',          icon: '🏰' },
-  { id: 'superhero', label: 'Action & Heroes', icon: '🦸' },
-  { id: 'latest',    label: 'New Cartoons',    icon: '🆕' }
+  { id: 'all',       label: 'All Cartoons',    icon: 'ðŸŽ¨' },
+  { id: 'trending',  label: 'Trending',        icon: 'ðŸ”¥' },
+  { id: 'legends',   label: 'All Time Famous', icon: 'ðŸ‘‘' },
+  { id: 'hindi',     label: 'Hindi Cartoons',  icon: 'ðŸ‡®ðŸ‡³' },
+  { id: 'japanese',  label: 'Doraemon & Co',   icon: 'ðŸ‡¯ðŸ‡µ' },
+  { id: 'series',    label: 'Cartoon Series',  icon: 'ðŸ“º' },
+  { id: 'movies',    label: 'Cartoon Movies',  icon: 'ðŸŽ¬' },
+  { id: 'cn',        label: 'Cartoon Network', icon: 'ðŸŒ€' },
+  { id: 'nick',      label: 'Nickelodeon',     icon: 'ðŸŸ ' },
+  { id: 'disney',    label: 'Disney',          icon: 'ðŸ°' },
+  { id: 'superhero', label: 'Action & Heroes', icon: 'ðŸ¦¸' },
+  { id: 'latest',    label: 'New Cartoons',    icon: 'ðŸ†•' }
 ];
 
 let currentCartoonMode = 'all';
@@ -4866,7 +4986,7 @@ function isFamousCartoon(m) {
 }
 
 /**
- * Cartoons tab ka strict gate — sirf animated content pass karta hai.
+ * Cartoons tab ka strict gate â€” sirf animated content pass karta hai.
  * Live-action kids serials (Baalveer, Shaka Laka Boom Boom, Shinchan ke
  * live remakes), reality kids shows, aur adult animation sab block.
  */
@@ -4889,7 +5009,7 @@ function isStrictCartoon(m) {
   // War & Politics animation bachchon ke section me nahi.
   if (g.includes(10768) && !curated) return false;
 
-  // ja/zh/ko: sirf kids/family cartoons (Doraemon, Shin Chan, Pokemon) —
+  // ja/zh/ko: sirf kids/family cartoons (Doraemon, Shin Chan, Pokemon) â€”
   // shonen/seinen anime ANIME tab ka kaam hai.
   const lang = m.original_language;
   if (lang === 'ja' || lang === 'zh' || lang === 'ko') {
@@ -5018,7 +5138,7 @@ function buildCartoonQueries(mode, page) {
 
     case 'all':
     default:
-      // Famous + popular + legendary + trending + Hindi + movies — sab ek mix.
+      // Famous + popular + legendary + trending + Hindi + movies â€” sab ek mix.
       push('/discover/tv',    { with_genres: AK, sort_by: 'popularity.desc', page: p1 }, 'tv');
       push('/discover/tv',    { with_genres: AF, sort_by: 'popularity.desc', page: p1 }, 'tv');
       push('/discover/tv',    { with_genres: A, with_networks: CARTOON_NET_ALL, sort_by: 'popularity.desc', page: p1 }, 'tv');
@@ -5065,7 +5185,7 @@ async function fetchCartoonMovies(mode, page) {
   return Array.from(picked.values()).sort((a, b) => b._cartoonScore - a._cartoonScore);
 }
 
-// ── CARTOON SUB-FILTER BAR (chips under category tabs) ──
+// â”€â”€ CARTOON SUB-FILTER BAR (chips under category tabs) â”€â”€
 function renderCartoonFilterBar() {
   const catTabs = document.getElementById('catTabs');
   if (!catTabs) return;
@@ -5094,7 +5214,7 @@ function updateCartoonHeading() {
   const h = document.getElementById('sectionHeading');
   if (!h) return;
   const m = CARTOON_MODES.find(x => x.id === currentCartoonMode) || CARTOON_MODES[0];
-  h.textContent = currentCartoonMode === 'all' ? 'CARTOONS' : ('CARTOONS • ' + m.label.toUpperCase());
+  h.textContent = currentCartoonMode === 'all' ? 'CARTOONS' : ('CARTOONS â€¢ ' + m.label.toUpperCase());
 }
 
 function setCartoonMode(mode) {
@@ -5105,9 +5225,9 @@ function setCartoonMode(mode) {
   loadMovies('kids');
 }
 
-/*  ══════════════════════════════════════════════════════════════════════
+/*  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  FEED RETRY BUDGET + FAILURE UI
- *  ══════════════════════════════════════════════════════════════════════
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  Replaces the unbounded `setTimeout(() => loadMovies(cat), 3000)` that used
  *  to run for the lifetime of the tab whenever a feed came back empty. See the
  *  comment at the retry site inside loadMovies for the full story.
@@ -5152,7 +5272,7 @@ function renderFeedRetrying(cat, attempt, delayMs) {
     '<div class="no-results">' +
       '<h3>' + (offline ? 'You are offline' : 'Connection hiccup') + '</h3>' +
       '<p>' + (offline
-        ? 'Waiting for your connection to come back — this will retry itself.'
+        ? 'Waiting for your connection to come back â€” this will retry itself.'
         : 'Retrying in ' + Math.round(delayMs / 1000) + 's (attempt ' + attempt + ' of ' + MZ_FEED_MAX_RETRIES + ').') +
       '</p>' +
     '</div>';
@@ -5174,7 +5294,7 @@ function renderFeedError(cat) {
   btn.addEventListener('click', () => {
     _mzFeedRetryState(cat).attempts = 0;   // manual click buys a fresh budget
     btn.disabled = true;
-    btn.textContent = 'Retrying…';
+    btn.textContent = 'Retryingâ€¦';
     loadMovies(cat);
   }, { once: true });
 }
@@ -5217,7 +5337,7 @@ async function loadMovies(cat, isLoadMore = false) {
   const p1 = String(currentMoviePage * 2 - 1);
   const p2 = String(currentMoviePage * 2);
 
-  /*  tmdb() deliberately never rejects — 40-odd call sites read `r.results || []`
+  /*  tmdb() deliberately never rejects â€” 40-odd call sites read `r.results || []`
    *  and would all need try/catch otherwise. The cost is that a fetch failure and
    *  an honestly empty response look identical from here, which is what let the
    *  old code retry an empty category forever. Comparing the global failure
@@ -5238,22 +5358,22 @@ async function loadMovies(cat, isLoadMore = false) {
       //
       // The last six queries exist for the freshness ranking below and are the
       // reason it can actually work:
-      //   • LATEST WINDOWS — the most popular movies (last ~5 weeks), web series
+      //   â€¢ LATEST WINDOWS â€” the most popular movies (last ~5 weeks), web series
       //     (last ~6 weeks) and anime seasons (last ~2 months), so whatever just
       //     released is always in the candidate pool rather than whatever
       //     /movie/popular happens to return.
-      //   • INDUSTRY WINDOWS — the same release window asked per industry
+      //   â€¢ INDUSTRY WINDOWS â€” the same release window asked per industry
       //     (all Indian origins together, plus Bollywood on its own) because a
       //     single global popularity sort is always won by Hollywood, so no
       //     Bollywood/South/Tollywood release ever reached the pool.
-      //   • PRINT-UPGRADE WINDOWS — the cohorts that just crossed a real print
+      //   â€¢ PRINT-UPGRADE WINDOWS â€” the cohorts that just crossed a real print
       //     stage: movies at the HD/FHD marks (globally and for Indian titles),
       //     series at their clean-encode and BD/4K marks. Without deliberately
       //     fetching them, a four-month-old film whose HD print just dropped
       //     would never appear in the pool, so no amount of re-ranking could
       //     surface it.
       //
-      // Series and anime are also the only way TV reaches this feed at all —
+      // Series and anime are also the only way TV reaches this feed at all â€”
       // before this it fetched movies exclusively.
       const res = await tmdbBatch([
         ['/movie/now_playing', { language: 'en-US', page: pageStr }],
@@ -5276,7 +5396,7 @@ async function loadMovies(cat, isLoadMore = false) {
       
       // /discover/tv results carry no media_type, so tag them here instead of
       // relying on the name-vs-title guess further down the pipeline.
-      // Index of the first TV source above — must move whenever a movie source
+      // Index of the first TV source above â€” must move whenever a movie source
       // is added or removed, or series would be tagged as movies and vice versa.
       const TV_SOURCE_FROM = 12;
       const combinedMovies = [];
@@ -5467,7 +5587,7 @@ async function loadMovies(cat, isLoadMore = false) {
         });
       }
     } else if (cat === 'trending') {
-      // 🔥 TRENDING NOW: Global trending movies + shows, interleaved
+      // ðŸ”¥ TRENDING NOW: Global trending movies + shows, interleaved
       const res = await Promise.allSettled([
         tmdb('/trending/movie/week', { language: 'en-US', page: p1 }),
         tmdb('/trending/movie/day', { language: 'en-US', page: pageStr }),
@@ -5483,9 +5603,9 @@ async function loadMovies(cat, isLoadMore = false) {
       const seen = new Set();
       combined.forEach(m => { if (m && m.id && !seen.has(m.id)) { seen.add(m.id); movies.push(m); } });
     } else if (cat === 'uhd4k') {
-      // 💎 4K ULTRA HD: is app me "quality" release-date se decide hoti hai.
+      // ðŸ’Ž 4K ULTRA HD: is app me "quality" release-date se decide hoti hai.
       // CAM/TS/HD movies (0-120 din purani) yahan na aa saken, isliye sirf
-      // 240+ din purani, high-rated (>=7) movies fetch karte hain — badge 4K.
+      // 240+ din purani, high-rated (>=7) movies fetch karte hain â€” badge 4K.
       // UNLIMITED volume ke liye 8 languages + do pages har load par,
       // aur infinite scroll page aage badhata rehta hai.
       const uhdCutoff = new Date(Date.now() - 240 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -5522,7 +5642,7 @@ async function loadMovies(cat, isLoadMore = false) {
         });
       }
     } else if (cat === 'toprated') {
-      // ⭐ TOP RATED: IMDb-style highest rated, min vote threshold ताकि reliable ho
+      // â­ TOP RATED: IMDb-style highest rated, min vote threshold à¤¤à¤¾à¤•à¤¿ reliable ho
       const res = await Promise.allSettled([
         tmdb('/movie/top_rated', { language: 'en-US', page: p1 }),
         tmdb('/movie/top_rated', { language: 'en-US', page: p2 }),
@@ -5538,7 +5658,7 @@ async function loadMovies(cat, isLoadMore = false) {
       const seen = new Set();
       combined.forEach(m => { if (m && m.id && !seen.has(m.id)) { seen.add(m.id); movies.push(m); } });
     } else if (cat === 'kdrama') {
-      // 🇰🇷 K-DRAMA: Korean web series + movies
+      // ðŸ‡°ðŸ‡· K-DRAMA: Korean web series + movies
       const res = await Promise.allSettled([
         tmdb('/discover/tv', { with_original_language: 'ko', sort_by: 'popularity.desc', page: p1, language: 'en-US' }),
         tmdb('/discover/tv', { with_original_language: 'ko', sort_by: 'popularity.desc', page: p2, language: 'en-US' }),
@@ -5553,7 +5673,7 @@ async function loadMovies(cat, isLoadMore = false) {
       const seen = new Set();
       combined.forEach(m => { if (m && m.id && !seen.has(m.id)) { seen.add(m.id); movies.push(m); } });
     } else if (OTT[cat]) {
-      // ── PLATFORM TABS: Netflix / Prime Video / JioHotstar / Zee5 ──
+      // â”€â”€ PLATFORM TABS: Netflix / Prime Video / JioHotstar / Zee5 â”€â”€
       // Uses OTT sub-filter mode (all / webseries / movies) to decide queries.
       // Trending/latest content is boosted to the top via scoring.
       movies = movies.concat(await fetchOttMovies(cat, currentOttMode, currentMoviePage));
@@ -5589,13 +5709,13 @@ async function loadMovies(cat, isLoadMore = false) {
      *
      *  with no attempt counter and no exit condition. Two problems compounded:
      *
-     *    • It could not tell "the network is down" from "this category is
+     *    â€¢ It could not tell "the network is down" from "this category is
      *      genuinely empty", so BOTH retried forever, every 3 seconds, for as
      *      long as the tab stayed open. Each pass fans out to up to 15 parallel
-     *      tmdb() calls — roughly 300 requests a minute, each logging an error.
+     *      tmdb() calls â€” roughly 300 requests a minute, each logging an error.
      *      That is the source of the "91 TypeError: Failed to fetch in 24h" in
      *      Datadog; a couple of sessions on bad connections produce all of it.
-     *    • It lied. The message said "Loading..." forever, so a user on a broken
+     *    â€¢ It lied. The message said "Loading..." forever, so a user on a broken
      *      connection saw an eternal spinner with no way to act.
      *
      *  Now: only network failures retry, at most MZ_FEED_MAX_RETRIES times with
@@ -5615,7 +5735,7 @@ async function loadMovies(cat, isLoadMore = false) {
        *  this category. The pool is what the user is paging through and it still
        *  holds every earlier page, so nothing is lost: mark the pool final, clamp
        *  onto the last page that has content and repaint. renderFeedEmpty() would
-       *  be wrong here — the feed is not empty, it just has no MORE.
+       *  be wrong here â€” the feed is not empty, it just has no MORE.
        */
       if (MZ_FEED_PAGED && isLoadMore && allMovies.length) {
         mzFeedPoolExhausted = true;
@@ -5668,7 +5788,7 @@ async function loadMovies(cat, isLoadMore = false) {
    *
    *  Reported symptom: "saari images ek saath load ho rahi hain", 117 images over
    *  500ms, ~3.1s each. The posters were already lazy (all but the first six), but
-   *  lazy is not a promise of "later" — Chrome starts a lazy image once it is
+   *  lazy is not a promise of "later" â€” Chrome starts a lazy image once it is
    *  within roughly 1250px of the viewport, and 24 cards sitting directly under a
    *  95vh hero are all inside that margin. So effectively the whole first batch
    *  was requested at once, competing with the hero backdrop, which IS the LCP
@@ -5678,7 +5798,7 @@ async function loadMovies(cat, isLoadMore = false) {
    *  already in allMovies either way. What changes is how many <img> elements
    *  exist while the page is coming up. The remaining cards are appended once the
    *  main thread goes idle, so they are still in the DOM well before a user can
-   *  scroll to them — infinite scroll, the load-more paging and the ranking order
+   *  scroll to them â€” infinite scroll, the load-more paging and the ranking order
    *  all see the same list they did before.
    */
 
@@ -5697,7 +5817,7 @@ async function loadMovies(cat, isLoadMore = false) {
 
   if (MZ_FEED_PAGED && !isFullViewMovies) {
     /*  Paged feed: the pool just grew (or was just built), so repaint whichever
-     *  page the user is on out of it. An extension must NOT append to the DOM —
+     *  page the user is on out of it. An extension must NOT append to the DOM â€”
      *  the point of paging is that the grid holds one page.
      *
      *  If the extension produced nothing new, TMDB is out of titles for this
@@ -5752,15 +5872,15 @@ async function loadMovies(cat, isLoadMore = false) {
 // Hover-prefetch budget: ek session me itne se zyada card details prefetch na ho
 let _mzHoverPrefetchCount = 0;
 
-/*  ══════════════════════════════════════════════════════════════════════
- *  GRID EVENT DELEGATION — attached once, not per card
- *  ══════════════════════════════════════════════════════════════════════
+/*  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+ *  GRID EVENT DELEGATION â€” attached once, not per card
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  renderMovies() used to wire six listeners onto every single card: click,
  *  mouseenter (prefetch), touchstart (prefetch), focus (prefetch), mouseenter
  *  (hover lift) and mouseleave (hover lift). It also allocated three closures
  *  per card to capture `m` and `type`.
  *
- *  A first render is 24 cards — 144 listeners. Infinite scroll accumulates, and
+ *  A first render is 24 cards â€” 144 listeners. Infinite scroll accumulates, and
  *  the file's own comment already noted the shape of the problem ("200 cards =
  *  400 useless listeners"). At 200 cards that is 1200 listeners and 600 live
  *  closures, all of it built inside one synchronous loop, which is exactly the
@@ -5792,9 +5912,9 @@ function _mzCardPrefetch(card) {
   try { preconnectPlayerHosts(3); } catch (err) {}
 }
 
-/*  ══════════════════════════════════════════════════════════════════════
+/*  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  DETAIL REQUEST PARAMS  (single source of truth)
- *  ══════════════════════════════════════════════════════════════════════
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  TMDB applies `language` to the videos it appends as well, so
  *  `language=en-US` alone returns ONLY videos tagged English. That is why the
  *  hover trailer worked on Hollywood titles and silently did nothing on much of
@@ -5804,8 +5924,8 @@ function _mzCardPrefetch(card) {
  *  Measured across 54 popular titles spanning en/hi/te/ta/ml/ko movies and
  *  ja/hi/ko series: 22 had no playable video at all, and 10 of those 22 return
  *  one the moment this list is sent (one Tamil title went from 0 videos to 5).
- *  The remaining 12 genuinely have nothing on TMDB — mostly daily soaps and
- *  variety shows — which is why the trailer indicator is now conditional too.
+ *  The remaining 12 genuinely have nothing on TMDB â€” mostly daily soaps and
+ *  variety shows â€” which is why the trailer indicator is now conditional too.
  *
  *  `null` is TMDB's own token for videos carrying no language tag, and those are
  *  usually the ones regional distributors upload.
@@ -5813,7 +5933,7 @@ function _mzCardPrefetch(card) {
  *  Built here, in one place, because the hover prefetch and openModal() must send
  *  byte-identical params: tmdb() caches by full URL, so a single differing key
  *  spends the prefetch warming a URL nobody ever asks for.
- *  ══════════════════════════════════════════════════════════════════════ */
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const VIDEO_LANGS = 'en,hi,ta,te,ml,kn,mr,bn,pa,ja,ko,null';
 
 function detailParams(append) {
@@ -5898,7 +6018,7 @@ function renderMovies(movies, append = false) {
     const isHot  = m.popularity > 100 && ((m.vote_count || 0) > 50 || (mzNow - new Date(rDateStr || '2000-01-01')) / (1000*60*60*24) < 60);
 
     // -- PRINT QUALITY BADGE --
-    // Derived from the release→quality timeline the ALL feed also ranks by
+    // Derived from the releaseâ†’quality timeline the ALL feed also ranks by
     // (MOVIE_QUALITY_TIMELINE for films, TV_QUALITY_TIMELINE for series and
     // anime), so the badge and the ordering can never disagree.
     const qualityState = titleQualityState(m, mzNow);
@@ -5911,7 +6031,7 @@ function renderMovies(movies, append = false) {
     // -- SMART RELEASE FRESHNESS BADGE --
     // Two things earn the corner ribbon: a recent release, and a recent print
     // upgrade. The second one is why a months-old film that just got its HD
-    // print looks new again — same event that lifts it back up the feed.
+    // print looks new again â€” same event that lifts it back up the feed.
     let freshBadge = '';
     const daysOld = qualityState.daysOld;
     if (daysOld != null) {
@@ -5948,7 +6068,7 @@ function renderMovies(movies, append = false) {
              *  "above-the-fold / LCP". That premise does not hold on this page:
              *  #hero is 95vh tall, so no grid poster is above the fold on any
              *  viewport. Those six were simply six immediate requests to
-             *  image.tmdb.org — measured first-byte ~3.2s — racing the hero
+             *  image.tmdb.org â€” measured first-byte ~3.2s â€” racing the hero
              *  backdrop, which is the element LCP is actually scored on.
              *
              *  fetchpriority stays low for the same reason: even once Chrome
@@ -6015,22 +6135,22 @@ const CAT_HEADINGS = {
   scifi:'SCI-FI', animation:'ANIMATION', kids:'CARTOONS', anime:'ANIME SERIES & MOVIES',
   dubbed:'HINDI DUBBED MOVIES', // <-- YE LINE ADD KI HAI
   adult:'18+ ADULT MOVIES & WEB SERIES',
-  trending:'🔥 TRENDING NOW', uhd4k:'💎 4K ULTRA HD', toprated:'⭐ TOP RATED',
+  trending:'ðŸ”¥ TRENDING NOW', uhd4k:'ðŸ’Ž 4K ULTRA HD', toprated:'â­ TOP RATED',
   kdrama:'K-DRAMA & KOREAN', netflix:'NETFLIX ORIGINALS',
   prime:'AMAZON PRIME VIDEO', jiohotstar:'JIOHOTSTAR', zee5:'ZEE5 MOVIES & WEB SERIES',
   adventure:'ADVENTURE', fantasy:'FANTASY', crime:'CRIME', documentary:'DOCUMENTARY', family:'FAMILY'
 };
-/*  ══════════════════════════════════════════════════════════════════════
- *  GROUPED CATEGORY DROPDOWNS — "OTT Platform" and "Category"
- *  ══════════════════════════════════════════════════════════════════════
+/*  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+ *  GROUPED CATEGORY DROPDOWNS â€” "OTT Platform" and "Category"
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  The tab strip had grown to 27 pills across three wrapped rows. The
  *  platform and genre filters now live in two dropdowns, leaving only the
  *  primary destinations on the strip itself.
  *
  *  Menu items keep class="cat-tab" deliberately. Two existing functions
  *  depend on it and would break silently otherwise:
- *    • filterCat() marks the active filter by scanning .cat-tab elements
- *    • loadMoreMoviesAction() reads .cat-tab.active's onclick to decide which
+ *    â€¢ filterCat() marks the active filter by scanning .cat-tab elements
+ *    â€¢ loadMoreMoviesAction() reads .cat-tab.active's onclick to decide which
  *      category the infinite scroll should page next
  *  A closed menu is display:none, but querySelector still finds elements
  *  inside it, so paging keeps working while the menu is shut.
@@ -6049,7 +6169,7 @@ function closeCatGroups(except) {
 
 /*  Which ancestor is the containing block for a position:fixed descendant.
  *  Normally that is the viewport (null here), but several common properties
- *  hijack it — and this page has one: #movies-section carries
+ *  hijack it â€” and this page has one: #movies-section carries
  *  `content-visibility: auto`, which implies `contain: paint`. Without this the
  *  panel lands offset by that section's own top (~640px too low on a phone). */
 function fixedContainingBlock(el) {
@@ -6080,7 +6200,7 @@ function fixedContainingBlock(el) {
 //
 // Phones (<=768px, see the media query in moviezone.css): the tab strip is a
 // horizontal scroller and a scroll container clips its descendants on both
-// axes, which erased the absolutely positioned panel completely — tapping the
+// axes, which erased the absolutely positioned panel completely â€” tapping the
 // trigger looked like nothing happened. The panel is position:fixed there and
 // gets real viewport coordinates written here: anchored under the trigger,
 // clamped inside the viewport, flipped above when there is no room below.
@@ -6088,7 +6208,7 @@ function alignCatGroupMenu(group) {
   const menu = group.querySelector('.cat-group-menu');
   if (!menu) return;
   group.removeAttribute('data-align');
-  // Clear the previous run's coordinates before measuring — a stale `left`
+  // Clear the previous run's coordinates before measuring â€” a stale `left`
   // would skew the fresh rect.
   menu.style.top = '';
   menu.style.left = '';
@@ -6137,7 +6257,7 @@ function alignCatGroupMenu(group) {
 
   /*  Safety net. The containing block above is derived from computed styles, so
    *  a device/engine that resolves `fixed` differently could still park the
-   *  panel off screen — and an off-screen panel is exactly the symptom that
+   *  panel off screen â€” and an off-screen panel is exactly the symptom that
    *  reads as "tapping the pill does nothing". Measure where it actually landed
    *  and nudge it back inside the viewport; the measurement needs no assumption
    *  about which ancestor won. Only runs when something is genuinely out of
@@ -6161,12 +6281,12 @@ function alignCatGroupMenu(group) {
 /*  A fixed panel does not travel with the trigger, so keep it glued to the
  *  pill while the page or the tab strip scrolls. Repositioning (rather than
  *  closing on scroll) also matters because focusing the trigger can make the
- *  browser nudge the strip's scrollLeft by a few pixels right after the tap —
+ *  browser nudge the strip's scrollLeft by a few pixels right after the tap â€”
  *  a close-on-scroll rule would shut the menu the instant it opened. */
 let catGroupReflowQueued = false;
 /*  PERF FIX: ye listener capture phase me hai, matlab page ke HAR nested
  *  scroller ke liye bhi fire hota hai. Pehle har event pe
- *  document.querySelector('.cat-group.is-open') chalta tha — selector parse +
+ *  document.querySelector('.cat-group.is-open') chalta tha â€” selector parse +
  *  DOM walk, scroll ke dauraan sabse mehnga kaam. Live HTMLCollection ek baar
  *  banti hai aur .length check bahut sasta hai. */
 const _openCatGroups = document.getElementsByClassName('cat-group is-open');
@@ -6180,7 +6300,7 @@ function scheduleCatGroupReflow() {
   });
 }
 
-// Capture phase so scrolls inside .cat-tabs are seen too — those do not bubble.
+// Capture phase so scrolls inside .cat-tabs are seen too â€” those do not bubble.
 document.addEventListener('scroll', scheduleCatGroupReflow, { capture: true, passive: true });
 window.addEventListener('resize', scheduleCatGroupReflow);
 window.addEventListener('orientationchange', () => closeCatGroups());
@@ -6255,23 +6375,23 @@ function filterCat(cat, e) {
   loadMovies(cat);
 }
  
-/*  ══════════════════════════════════════════════════════════════════════
+/*  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  FEED PAGINATION
- *  ══════════════════════════════════════════════════════════════════════
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  The feed used to grow without end: an IntersectionObserver 400px below the
  *  grid fired loadMoreMoviesAction() and appended another page, forever. Nothing
  *  below the grid was ever reachable, the DOM grew on every scroll, and it
  *  fetched titles nobody asked for.
  *
- *  ── HOW PAGES ARE PRODUCED, AND WHY IT IS NOT ONE FETCH PER PAGE ───────────
- *  The obvious implementation — page N asks TMDB for page N — was wrong here,
+ *  â”€â”€ HOW PAGES ARE PRODUCED, AND WHY IT IS NOT ONE FETCH PER PAGE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ *  The obvious implementation â€” page N asks TMDB for page N â€” was wrong here,
  *  and measurably so.
  *
  *  One gather already returns far more than a screenful. The ALL feed merges 16
  *  sources at 20 results each, and after dedup and ranking that is a pool of
  *  roughly 200 unique titles. The old code rendered allMovies.slice(0, 24) and
  *  discarded the rest. So "page 2" refetched all 16 sources to build another 200
- *  and again showed 24 — paying a full round-trip for titles it already had.
+ *  and again showed 24 â€” paying a full round-trip for titles it already had.
  *
  *  Worse, it produced duplicates. Source A's page 2 routinely contains titles
  *  that were in source B's page 1, and dedup only ran within a single gather
@@ -6284,10 +6404,10 @@ function filterCat(cat, e) {
  *
  *  Two things fall out of that, both of them the behaviour asked for:
  *
- *    • NO DUPLICATES, by construction. allMovies is deduped by type+id before it
+ *    â€¢ NO DUPLICATES, by construction. allMovies is deduped by type+id before it
  *      is ever sliced, so a title cannot occupy two pages.
- *    • NO REFETCH. Moving between pages that the pool already covers is a slice
- *      and a render — no network, no skeletons, nothing to wait for. One gather
+ *    â€¢ NO REFETCH. Moving between pages that the pool already covers is a slice
+ *      and a render â€” no network, no skeletons, nothing to wait for. One gather
  *      now serves ~8 pages instead of 1.
  *
  *  When the pool runs short the next TMDB page is fetched and APPENDED, so the
@@ -6300,13 +6420,13 @@ function filterCat(cat, e) {
  *
  *  30, i.e. five rows of six on a desktop window. The grid is
  *  repeat(auto-fill, minmax(185px, 1fr)), so the column count follows the
- *  viewport — six across on a wide window, two on a phone. This number is
+ *  viewport â€” six across on a wide window, two on a phone. This number is
  *  therefore "cards per page", and the row count it produces depends on width;
  *  30 is what gives five rows at the six-across desktop layout.
  *
  *  Was 24 (four rows). Raising it costs nothing in requests: one gather already
  *  yields a pool of roughly 200 titles, so this only changes how much of that
- *  pool each page reveals — about 6 pages per gather instead of 8.
+ *  pool each page reveals â€” about 6 pages per gather instead of 8.
  */
 const MZ_FEED_PAGE_SIZE = 30;
 
@@ -6355,7 +6475,7 @@ function mzFeedPageIsReady(page) {
 }
 
 /*  Which page numbers to show: first, last, the current page's neighbours, and
- *  every fifth page, with … standing in for the runs left out.
+ *  every fifth page, with â€¦ standing in for the runs left out.
  *
  *  Deliberately the same rule as the SSR pager in seo-ssr.js, so the homepage
  *  control and the category-page control are recognisably the same thing.
@@ -6368,8 +6488,8 @@ function mzFeedPageNumbers(page, totalPages) {
 
 /*  Renders the current page out of the pool.
  *
- *  Keeps the two-stage paint the feed already used — a few cards immediately, the
- *  rest on an idle callback — so a page change costs the same main-thread work as
+ *  Keeps the two-stage paint the feed already used â€” a few cards immediately, the
+ *  rest on an idle callback â€” so a page change costs the same main-thread work as
  *  the first load rather than one 24-card long task.
  */
 function renderCurrentFeedPage() {
@@ -6399,7 +6519,7 @@ function renderFeedPager() {
   const host = document.getElementById('feedPager');
   if (!host) return;
 
-  // Search results and the watchlist are finite sets held locally — asking for
+  // Search results and the watchlist are finite sets held locally â€” asking for
   // page 2 of them is meaningless.
   if (!MZ_FEED_PAGED || isSearchResultsMode || isWatchlistMode) {
     host.innerHTML = '';
@@ -6439,7 +6559,7 @@ function renderFeedPager() {
   ensurePagerDelegation();
 }
 
-/*  One listener on the container, not one per button — the pager is re-rendered
+/*  One listener on the container, not one per button â€” the pager is re-rendered
  *  on every page change, and per-button handlers would leak a set each time.
  */
 function ensurePagerDelegation() {
@@ -6480,7 +6600,7 @@ function goToFeedPage(page) {
 
   /*  Past what the pool holds: extend it. isLoadMore appends the next TMDB page
    *  to allMovies rather than replacing it, so every earlier page keeps showing
-   *  exactly what it showed before, and the new titles cannot repeat old ones —
+   *  exactly what it showed before, and the new titles cannot repeat old ones â€”
    *  loadMovies dedups the append against the whole pool. */
   loadMovies(mzFeedPagerCategory, true);
 }
@@ -6568,7 +6688,7 @@ async function loadUpcoming(isLoadMore = false) {
   
   if (!isLoadMore) {
     currentUpcomingPage = 1;
-    /*  CLS — the placeholder count and shape have to match what actually
+    /*  CLS â€” the placeholder count and shape have to match what actually
      *  renders below (allUpcoming.slice(0, 12)), because this section is
      *  filled from an IntersectionObserver, i.e. exactly when it is on
      *  screen. Four poster-shaped .skeleton-cards reserved roughly half the
@@ -6583,7 +6703,7 @@ async function loadUpcoming(isLoadMore = false) {
   }
 
   try {
-    /*  Every industry, one round-trip — see UPCOMING_SOURCES. This replaced two
+    /*  Every industry, one round-trip â€” see UPCOMING_SOURCES. This replaced two
      *  English + two `region: IN` Hindi requests, which is why the section only
      *  ever showed Hollywood. */
     const res = await tmdbBatch(upcomingPagePlan(currentUpcomingPage));
@@ -6599,7 +6719,7 @@ async function loadUpcoming(isLoadMore = false) {
     let newMovies = movies.filter(m => { if(existingIds.has(m.id)) return false; existingIds.add(m.id); return true; });
     newMovies.sort((a, b) => a.release_date.localeCompare(b.release_date));
     /*  Chronological, but no single industry may take more than a few cards in
-     *  a row — otherwise the twelve cards on the first screen are still all
+     *  a row â€” otherwise the twelve cards on the first screen are still all
      *  Hollywood simply because it releases something every week. */
     newMovies = interleaveUpcomingByIndustry(newMovies);
     
@@ -6636,14 +6756,14 @@ async function loadUpcoming(isLoadMore = false) {
       card.className = 'upcoming-card reveal-up';
       card.tabIndex = 0;
       /*  PERF (TV / low-end): will-change promotes every card to its own
-       *  compositor layer and keeps it there for the life of the page — twelve
+       *  compositor layer and keeps it there for the life of the page â€” twelve
        *  layers of poster-sized texture on a device with a few hundred MB of
        *  graphics memory. On TV it buys literally nothing: tv-mode.css forces
        *  .reveal-up to full opacity, so the animation this was hinting at never
        *  runs (same reason the reveal observer is skipped below). The staggered
        *  animationDelay is dead weight there for exactly the same reason.
        *
-       *  Capable devices keep both — the stagger is part of how the section
+       *  Capable devices keep both â€” the stagger is part of how the section
        *  looks, and the hint still helps the animation that actually plays. */
       if (!isMzTV() && !mzLowTier) {
         card.style.willChange = 'transform, opacity';
@@ -6655,7 +6775,7 @@ async function loadUpcoming(isLoadMore = false) {
           '<img src="'+posterImg+'" alt="'+escapeHTML(m.title||'')+'" width="280" height="157" style="aspect-ratio:16/9;object-fit:cover;" loading="'+((!isLoadMore && i < 6) ? 'eager' : 'lazy')+'" decoding="async">' +
           '<div class="upcoming-poster-overlay"></div>' +
           '<div class="upcoming-release-badge"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" style="margin-right:4px;vertical-align:-1px"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10z"/></svg>'+dateStr+'</div>' +
-          (countdownText ? '<div class="upcoming-countdown-badge">⏳ '+countdownText+'</div>' : '') +
+          (countdownText ? '<div class="upcoming-countdown-badge">â³ '+countdownText+'</div>' : '') +
           '<div class="upcoming-play-hint"><svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3" stroke-linecap="round"/></svg><span>View Details</span></div>' +
         '</div>' +
         '<div class="upcoming-info">' +
@@ -6665,11 +6785,11 @@ async function loadUpcoming(isLoadMore = false) {
             genres.map(g => '<span class="upcoming-genre-tag">'+escapeHTML(g)+'</span>').join('') +
           '</div>' +
           '<p class="upcoming-desc">'+escapeHTML((m.overview||'').slice(0, 120))+(m.overview && m.overview.length > 120 ? '...' : '')+'</p>' +
-          '<button class="notify-me-btn'+(typeof isNotifySet === 'function' && isNotifySet(m.id) ? ' notified' : '')+'" data-movie-id="'+m.id+'" data-title="'+escapeHTML(m.title||'')+'" data-release="'+(m.release_date||'')+'" onclick="event.stopPropagation(); handleNotifyMe(this)"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span>'+(typeof isNotifySet === 'function' && isNotifySet(m.id) ? 'Notified ✓' : 'Notify Me')+'</span></button>' +
+          '<button class="notify-me-btn'+(typeof isNotifySet === 'function' && isNotifySet(m.id) ? ' notified' : '')+'" data-movie-id="'+m.id+'" data-title="'+escapeHTML(m.title||'')+'" data-release="'+(m.release_date||'')+'" onclick="event.stopPropagation(); handleNotifyMe(this)"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span>'+(typeof isNotifySet === 'function' && isNotifySet(m.id) ? 'Notified âœ“' : 'Notify Me')+'</span></button>' +
         '</div>';
       card.addEventListener('click', (event) => { openUpcomingDetail(m.id, undefined, event); });
       fragment.appendChild(card);
-      // PERF (TV): reveal observer skip — TV CSS me .reveal-up ka opacity force hai.
+      // PERF (TV): reveal observer skip â€” TV CSS me .reveal-up ka opacity force hai.
       if (!isMzTV()) scrollObserver.observe(card);
     });
     grid.appendChild(fragment);
@@ -6687,7 +6807,7 @@ async function loadUpcoming(isLoadMore = false) {
   }
 }
 
-// ── UPCOMING MOVIE DETAIL PAGE (Premium Info Modal) ──
+// â”€â”€ UPCOMING MOVIE DETAIL PAGE (Premium Info Modal) â”€â”€
 let currentUpcomingMovie = null;
 let upcomingTrailerKey = null;
 
@@ -6793,7 +6913,7 @@ async function openUpcomingDetail(id, type, activationEvent) {
       metaHTML += '<span class="ud-meta-item ud-meta-rating"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg> ' + details.vote_average.toFixed(1) + '</span>';
     }
     if (details.budget > 0) {
-      metaHTML += '<span class="ud-meta-item">💰 Budget: $' + (details.budget / 1000000).toFixed(0) + 'M</span>';
+      metaHTML += '<span class="ud-meta-item">ðŸ’° Budget: $' + (details.budget / 1000000).toFixed(0) + 'M</span>';
     }
     document.getElementById('udMeta').innerHTML = metaHTML;
     
@@ -6827,7 +6947,7 @@ async function openUpcomingDetail(id, type, activationEvent) {
         countdownEl.innerHTML = countdownHTML;
         countdownEl.style.display = 'flex';
       } else if (daysLeft === 0) {
-        countdownEl.innerHTML = '<div class="ud-countdown-label" style="color:var(--gold)">🎬 RELEASING TODAY!</div>';
+        countdownEl.innerHTML = '<div class="ud-countdown-label" style="color:var(--gold)">ðŸŽ¬ RELEASING TODAY!</div>';
         countdownEl.style.display = 'flex';
       } else {
         // Already released - hide countdown
@@ -6864,7 +6984,7 @@ async function openUpcomingDetail(id, type, activationEvent) {
       castGrid.innerHTML = topCast.map(person => {
         const imgSrc = person.profile_path 
           ? 'https://image.tmdb.org/t/p/w185' + person.profile_path 
-          : 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2280%22 height=%22120%22><rect width=%2280%22 height=%22120%22 fill=%22%23222%22/><text x=%2240%22 y=%2265%22 fill=%22%23555%22 text-anchor=%22middle%22 font-size=%2224%22>👤</text></svg>';
+          : 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2280%22 height=%22120%22><rect width=%2280%22 height=%22120%22 fill=%22%23222%22/><text x=%2240%22 y=%2265%22 fill=%22%23555%22 text-anchor=%22middle%22 font-size=%2224%22>ðŸ‘¤</text></svg>';
         return '<div class="ud-cast-card">' +
           '<img src="' + imgSrc + '" alt="' + escapeHTML(person.name) + '" width="80" height="120" loading="lazy" decoding="async">' +
           '<div class="ud-cast-name">' + escapeHTML(person.name) + '</div>' +
@@ -6964,7 +7084,7 @@ window.addEventListener('popstate', () => {
   }
 });
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  * INTELLIGENT SEARCH  v2.0
  * ------------------------------------------------------------------------
  *  1. DEBOUNCE ............ 350ms trailing debounce (MovieZoneSearch.debounce)
@@ -6976,8 +7096,8 @@ window.addEventListener('popstate', () => {
  *                           in search-engine.js, so misspellings still match.
  *  4. CLEAN UI ............ dropdown closes on outside click, Escape, selection,
  *                           blur, page scroll, resize, tab-hide and hash change.
- *                           A × button clears the box in one tap.
- * ════════════════════════════════════════════════════════════════════════ */
+ *                           A Ã— button clears the box in one tap.
+ * â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 const SEARCH_DEBOUNCE_MS = 400;     // wait for typing to settle before calling TMDB
 const SEARCH_MIN_CHARS = 2;         // suggestions start at 2 characters
@@ -7103,14 +7223,14 @@ if (searchInput) {
     if (query.length < SEARCH_MIN_CHARS) {
       debouncedSuggest.cancel();
       clearSearchRequest();
-      showSearchLoading('Type at least ' + SEARCH_MIN_CHARS + ' letters…', false);
+      showSearchLoading('Type at least ' + SEARCH_MIN_CHARS + ' lettersâ€¦', false);
       return;
     }
 
     if (query === _lastSearchQuery) return;
 
     // 2+ characters -> show skeleton instantly, fire the request after 400ms.
-    showSearchLoading('Finding the best matches…', true);
+    showSearchLoading('Finding the best matchesâ€¦', true);
     debouncedSuggest(query);
   });
 
@@ -7216,7 +7336,7 @@ document.addEventListener('keydown', event => {
 
 // Meaningful page scroll (ignores the tiny scroll a mobile keyboard causes).
 /*  PERF (TV / low-end): this listener used to do real work on EVERY scroll
- *  event even with the dropdown closed — a getElementById plus a classList read,
+ *  event even with the dropdown closed â€” a getElementById plus a classList read,
  *  and then a window.scrollY read, which is a layout read on a page that is
  *  still rendering rails. tv-perf-check attributed 113ms of TV main-thread time
  *  to this one handler during a 34-key D-pad session, making it the second most
@@ -7224,7 +7344,7 @@ document.addEventListener('keydown', event => {
  *
  *  A live HTMLCollection is the same trick scheduleCatGroupReflow above uses: it
  *  is maintained by the engine, so .length is a field read with no query and no
- *  layout. While the dropdown is closed — always, on a TV — the handler now
+ *  layout. While the dropdown is closed â€” always, on a TV â€” the handler now
  *  costs that one comparison.
  *
  *  Behaviour is unchanged: the 70px baseline is seeded by openDropdown(), which
@@ -7365,7 +7485,7 @@ async function loadSearchCatalog() {
 /**
  * The suggestion + results brain.
  * Live TMDb endpoints used:
- *   /search/movie  (primary — required for the auto-suggest dropdown)
+ *   /search/movie  (primary â€” required for the auto-suggest dropdown)
  *   /search/tv     (web series / anime coverage)
  *   /search/multi  (actor & mixed matches)
  * Everything is then re-ranked by the Fuse.js-compatible fuzzy engine.
@@ -7513,10 +7633,10 @@ function renderSearchDropdown(query, search) {
         '<img src="' + poster + '" alt="' + escapeHTML(title) + ' poster" width="42" height="60" loading="lazy" decoding="async">' +
         '<div class="search-result-info"><div class="search-result-title-row"><h4>' + highlightSearchMatch(title, query) + '</h4>' +
         '<span class="search-type-badge">' + (type === 'tv' ? 'SERIES' : 'MOVIE') + '</span></div>' +
-        '<p><span>' + escapeHTML((releaseDate || '----').slice(0, 4)) + '</span><span>★ ' + Number(item.vote_average || 0).toFixed(1) + '</span>' +
+        '<p><span>' + escapeHTML((releaseDate || '----').slice(0, 4)) + '</span><span>â˜… ' + Number(item.vote_average || 0).toFixed(1) + '</span>' +
         (upcoming ? '<span class="search-upcoming">UPCOMING</span>' : '') + '</p>' +
         '<small class="search-match-reason">' + escapeHTML(quality) + '</small></div>' +
-        '<span class="search-result-arrow">›</span>';
+        '<span class="search-result-arrow">â€º</span>';
 
       resultItem.addEventListener('mouseenter', () => setActiveSearchItem(index, Array.from(dropdown.querySelectorAll('[data-search-result]'))));
       resultItem.addEventListener('click', event => openSearchResult(item, event));
@@ -7526,7 +7646,7 @@ function renderSearchDropdown(query, search) {
     const footer = document.createElement('button');
     footer.type = 'button';
     footer.className = 'search-view-all';
-    footer.innerHTML = '<span>View all results for “' + escapeHTML(query) + '”</span><strong>Press Enter →</strong>';
+    footer.innerHTML = '<span>View all results for â€œ' + escapeHTML(query) + 'â€</span><strong>Press Enter â†’</strong>';
     footer.addEventListener('click', () => {
       searchAndDisplay(query);
       closeDropdown();
@@ -7561,11 +7681,11 @@ async function searchAndDisplay(query) {
     allMovies = movies;
     if (heading) {
       heading.textContent = search.correction
-        ? 'BEST RESULTS FOR "' + query.toUpperCase() + '" · DID YOU MEAN "' + search.correction.toUpperCase() + '"?'
+        ? 'BEST RESULTS FOR "' + query.toUpperCase() + '" Â· DID YOU MEAN "' + search.correction.toUpperCase() + '"?'
         : 'RESULTS FOR "' + query.toUpperCase() + '"';
     }
     // Keeps the page title aligned with what the user is actually looking at.
-    try { document.title = query.trim() + ' – Search results | MovieZone'; } catch (e) {}
+    try { document.title = query.trim() + ' â€“ Search results | MovieZone'; } catch (e) {}
     if (movies.length) renderMovies(movies);
     else grid.innerHTML = '<div class="search-grid-empty"><strong>No close matches found</strong><span>Try a title fragment, actor name, or check the spelling.</span></div>';
   } catch (error) {
@@ -7588,13 +7708,13 @@ function closeDropdown() {
   searchActiveIndex = -1;
 }
 
-/*  ══════════════════════════════════════════════════════════════════════
+/*  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  MODAL FIRST PAINT
- *  ══════════════════════════════════════════════════════════════════════
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  The modal opens instantly and only then awaits /{type}/{id}. That is the
  *  right call for responsiveness, but it used to paint "Loading..." into the
  *  3.2rem title and a one-line string into the overview, then swap both for
- *  text of a completely different height — the single largest layout shift a
+ *  text of a completely different height â€” the single largest layout shift a
  *  session could record (Datadog RUM attributed CLS 0.215 to
  *  #modalBox > .modal-info).
  *
@@ -7602,7 +7722,7 @@ function closeDropdown() {
  *  overview: they are fields on the TMDB list objects the cards were built
  *  from. Seeding the two text blocks from that data means the first paint is
  *  already the final text, so nothing re-lines when the detail response lands
- *  — only the meta block below fills in, and .modal-meta reserves that.
+ *  â€” only the meta block below fills in, and .modal-meta reserves that.
  *
  *  Deep links (#watch-movie-123 with a cold feed) find nothing and fall back
  *  to the placeholder, which is why the placeholder is kept.
@@ -7667,7 +7787,7 @@ window.addEventListener('load', () => setTimeout(runSearchFromUrl, 350), { once:
 // MODAL
 /*  Resolves after the browser has had a chance to paint.
  *
- *  rAF alone only gets us to just BEFORE the next frame — work scheduled there
+ *  rAF alone only gets us to just BEFORE the next frame â€” work scheduled there
  *  still delays it. Chaining a task after the frame (scheduler.postTask at
  *  user-visible priority, setTimeout elsewhere) means the pixels are committed
  *  first and the interaction is recorded as responsive.
@@ -7693,7 +7813,7 @@ async function openModal(id, type = 'movie', activationEvent) {
   if (!overlay) return;
  
   // 1. INSTANT UI OPEN (Bina backend wait kiye instantly page open karo)
-  /*  INP — the scroll reset comes BEFORE the class flip on purpose. The overlay
+  /*  INP â€” the scroll reset comes BEFORE the class flip on purpose. The overlay
    *  is display:none until .open lands, so writing scrollTop here is free;
    *  writing it afterwards forced a full synchronous layout of the entire modal
    *  subtree inside the click handler, which was the most expensive single thing
@@ -7730,7 +7850,7 @@ async function openModal(id, type = 'movie', activationEvent) {
   //
   // Deliberately synchronous: #externalSources is 450-700px of the modal on a
   // phone, so deferring it past the opening frame would trade INP for a shift
-  // of the same block. It renders from a static list — the cost is the
+  // of the same block. It renders from a static list â€” the cost is the
   // innerHTML write, not a fetch.
   try { renderExternalSources(id, getSelectedSourceIdx(), getSelectedLang()); } catch(e){}
 
@@ -7744,18 +7864,18 @@ async function openModal(id, type = 'movie', activationEvent) {
   // before starting it. Ordering is unchanged, only the paint boundary moved.
   await mzYieldToPaint();
 
-  // ⚡ SPEED: provider handshake details aane se pehle shuru kar do.
+  // âš¡ SPEED: provider handshake details aane se pehle shuru kar do.
   //
   // Order matters here. warmPlayerConnection() warms the host this user is
   // ACTUALLY going to stream from (their saved server, anime-corrected), so it
   // goes first and gets the idle connection. preconnectPlayerHosts used to run
   // ahead of it with a limit of 6, meaning six speculative DNS+TCP+TLS
-  // handshakes were opened before the one host that mattered — competing with
+  // handshakes were opened before the one host that mattered â€” competing with
   // the TMDB detail fetch, the backdrop image and the prewarm iframe for the
   // same connection budget on a phone.
   //
   // Two fallbacks are kept warm because the realistic failure mode is the user
-  // clicking one alternate server, not six — and they are the servers the retry
+  // clicking one alternate server, not six â€” and they are the servers the retry
   // chain would genuinely reach, not a fixed slice of an unrelated list.
   try {
     resetTriedSources();   // fresh title, fresh retry chain
@@ -7768,11 +7888,11 @@ async function openModal(id, type = 'movie', activationEvent) {
      *  localStorage.getItem plus a JSON.parse of a 20-50 KB payload before it
      *  ever awaits, and for this endpoint (append_to_response=videos,credits)
      *  that is ~70ms. It is already off the interaction because the
-     *  mzYieldToPaint() above committed the frame first — worth knowing before
+     *  mzYieldToPaint() above committed the frame first â€” worth knowing before
      *  anything is moved back above that boundary. */
     const details = await tmdb('/'+type+'/'+id, detailParams('videos,credits'));
 
-    /*  TMDB has no record for this id — confirmed 404, already logged silently by
+    /*  TMDB has no record for this id â€” confirmed 404, already logged silently by
      *  tmdb(). Every field below would be undefined, which left the modal sitting
      *  on "Loading..." and a spinner forever: the user gets no content and no
      *  explanation, and the only way out is the close button.
@@ -7828,7 +7948,7 @@ async function openModal(id, type = 'movie', activationEvent) {
 
       /*  The trailer indicator is conditional, and that is half the bug report.
        *  It used to be appended unconditionally, so titles TMDB has no video for
-       *  still advertised a play icon — you hover, nothing happens, and the
+       *  still advertised a play icon â€” you hover, nothing happens, and the
        *  feature looks broken rather than absent. Measured on a 54-title sample,
        *  12 titles genuinely have no video at all even with every video language
        *  requested, so this case is common and has to be handled honestly.
@@ -8039,9 +8159,9 @@ async function openModal(id, type = 'movie', activationEvent) {
       metaHTML += '<div class="modal-badge modal-badge-rating"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg> '+((details.vote_average||0).toFixed(1))+' <span class="modal-badge-sub">('+((details.vote_count||0).toLocaleString())+' votes)</span></div>';
       metaHTML += '<div class="modal-badge"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10z"/></svg> '+((details.release_date||details.first_air_date||'').slice(0,4))+'</div>';
       metaHTML += '<div class="modal-badge"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm4.2 14.2L11 13V7h1.5v5.2l4.5 2.7-.8 1.3z"/></svg> '+runtime+'</div>';
-      if (details.original_language) metaHTML += '<div class="modal-badge">🌐 '+(details.original_language).toUpperCase()+'</div>';
-      if (details.budget > 0) metaHTML += '<div class="modal-badge">💰 $'+(details.budget/1000000).toFixed(0)+'M</div>';
-      if (details.revenue > 0) metaHTML += '<div class="modal-badge modal-badge-revenue">📈 $'+(details.revenue/1000000).toFixed(0)+'M</div>';
+      if (details.original_language) metaHTML += '<div class="modal-badge">ðŸŒ '+(details.original_language).toUpperCase()+'</div>';
+      if (details.budget > 0) metaHTML += '<div class="modal-badge">ðŸ’° $'+(details.budget/1000000).toFixed(0)+'M</div>';
+      if (details.revenue > 0) metaHTML += '<div class="modal-badge modal-badge-revenue">ðŸ“ˆ $'+(details.revenue/1000000).toFixed(0)+'M</div>';
       metaHTML += audioBadge;
       metaHTML += '</div>';
       
@@ -8072,7 +8192,7 @@ async function openModal(id, type = 'movie', activationEvent) {
         topCast.forEach(person => {
           const imgSrc = person.profile_path 
             ? 'https://image.tmdb.org/t/p/w185'+person.profile_path 
-            : 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2248%22 height=%2248%22><rect width=%2248%22 height=%2248%22 rx=%2224%22 fill=%22%23222%22/><text x=%2224%22 y=%2230%22 fill=%22%23555%22 text-anchor=%22middle%22 font-size=%2216%22>👤</text></svg>';
+            : 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2248%22 height=%2248%22><rect width=%2248%22 height=%2248%22 rx=%2224%22 fill=%22%23222%22/><text x=%2224%22 y=%2230%22 fill=%22%23555%22 text-anchor=%22middle%22 font-size=%2216%22>ðŸ‘¤</text></svg>';
           metaHTML += '<div class="modal-cast-chip" title="'+escapeHTML(person.name)+' as '+escapeHTML(person.character||'')+'">' +
             '<img src="'+imgSrc+'" alt="'+escapeHTML(person.name)+'" width="48" height="48" loading="lazy" decoding="async">' +
             '<div class="modal-cast-info"><span class="modal-cast-name">'+escapeHTML(person.name)+'</span><span class="modal-cast-char">'+escapeHTML(person.character||'')+'</span></div>' +
@@ -8109,7 +8229,7 @@ async function openModal(id, type = 'movie', activationEvent) {
     const pb = document.getElementById('playBigBtn');
     if (pb) pb.addEventListener('click', playMovie);
 
-    // ⚡ INSTANT PLAY: stream ko background me abhi resolve karna shuru kar do
+    // âš¡ INSTANT PLAY: stream ko background me abhi resolve karna shuru kar do
     // (anime ke liye pehle AniList id, taaki double-load na ho)
     try {
       if (isAnimeContent(details)) {
@@ -8219,7 +8339,7 @@ async function openModal(id, type = 'movie', activationEvent) {
                  *  _mzTriedSources sirf naye title par reset hota tha, episode
                  *  badalne par nahi. Binge karte waqt set har episode ka failure
                  *  jodta rehta tha, to 3-4 episode baad eligible pool khali ho
-                 *  jaata aur fallback "wide" branch par gir jaata — jo dub/anime
+                 *  jaata aur fallback "wide" branch par gir jaata â€” jo dub/anime
                  *  eligibility ignore karke server uthata hai. Har episode ko
                  *  poora fallback chain milna chahiye. */
                 resetTriedSources();
@@ -8319,10 +8439,10 @@ window.addEventListener('popstate', (e) => {
   
   const overlay = document.getElementById('modal-overlay');
   if (overlay && overlay.classList.contains('open')) {
-    // Modal is open — close it on back navigation
+    // Modal is open â€” close it on back navigation
     closeModal();
   } else if (window.location.hash.startsWith('#watch-')) {
-    // Hash present but modal not open — clean up stale hash
+    // Hash present but modal not open â€” clean up stale hash
     window.history.replaceState(null, '', window.location.pathname + window.location.search);
   }
 });
@@ -8376,7 +8496,7 @@ document.addEventListener('keydown', (e) => {
 /*  A placeholder built from the real card's own elements.
  *
  *  The previous skeleton was a flat 170x255 box, but a populated
- *  .related-slider .movie-card measures 307-443px depending on breakpoint —
+ *  .related-slider .movie-card measures 307-443px depending on breakpoint â€”
  *  poster plus title, rating/year and genre chips. Filling the row therefore
  *  grew it by 75-210px every time. Reusing the card's markup means the box is
  *  correct at every width by construction, with no numbers to keep in sync.
@@ -8402,7 +8522,7 @@ const RELATED_SKELETON = Array(6).fill(
  *
  *  loadRelatedMovies() used to be the first thing to reveal this section, which
  *  meant ~350px appeared inside .modal-bottom a full round-trip after the modal
- *  had painted — measured as the largest single shift on the page. Showing the
+ *  had painted â€” measured as the largest single shift on the page. Showing the
  *  correctly-sized skeleton up front makes the later fill a pure content swap.
  *  The section still hides itself if the fetch comes back empty.
  */
@@ -8591,7 +8711,7 @@ async function loadRelatedMovies(id, type) {
           '</div>';
         card.addEventListener('click', (event) => { openModal(m.id, rType, event); });
         fragment.appendChild(card);
-        // PERF (TV): reveal observer skip — TV CSS me .reveal-up ka opacity force hai.
+        // PERF (TV): reveal observer skip â€” TV CSS me .reveal-up ka opacity force hai.
       if (!isMzTV()) scrollObserver.observe(card);
       });
       grid.appendChild(fragment);
@@ -8621,11 +8741,11 @@ async function loadRelatedMovies(id, type) {
   }
 }
  
-/* ══════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    ANIME PLAYBACK BRIDGE
    Anime/Cartoon servers AniList ID maangte hain (TMDB ID nahi),
-   isliye TMDB title → AniList ID mapping (cached in localStorage).
-   ══════════════════════════════════════════════════════════════ */
+   isliye TMDB title â†’ AniList ID mapping (cached in localStorage).
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 const anilistIdCache = new Map();
 let anilistLookupInFlight = false;
 
@@ -8747,7 +8867,7 @@ async function resolveAnilistId(m, season) {
       return best.id;
     }
   }
-  setAnilistId(m, s, null); // negative cache — dubara useless lookups na ho
+  setAnilistId(m, s, null); // negative cache â€” dubara useless lookups na ho
   return null;
 }
 
@@ -8771,12 +8891,12 @@ function ensureAnilistThenReload(m, season, srcIdx, lang, quality, type) {
   }).catch(() => { anilistLookupInFlight = false; });
 }
 
-// -- PLAYER SOURCES — FINAL (July 2026) --
+// -- PLAYER SOURCES â€” FINAL (July 2026) --
 // All tested & working. Includes 2 PREMIUM all-in-one servers.
 const playerSources = [
-  // ⚡ #0 ALL-ROUNDER: Anime + Cartoons + Movies + Web Series, with real Hindi dub tracks.
+  // âš¡ #0 ALL-ROUNDER: Anime + Cartoons + Movies + Web Series, with real Hindi dub tracks.
   // Anime ke liye AniList route (hindi/dub/sub), baaki sab ke liye TMDB route.
-  // ⚡ #1 ALL-ROUNDER 4K: Videasy — anime + movies + series, high bitrate, multi-audio
+  // âš¡ #1 ALL-ROUNDER 4K: Videasy â€” anime + movies + series, high bitrate, multi-audio
   { name: 'OmniPlay 4K', dubbed: true, is4K: true, anime: true, url: (id, lang, type, s, e) => {
     const m = currentModalMovie;
     const wantDub = (lang === 'hi' || lang === 'en');
@@ -8792,7 +8912,7 @@ const playerSources = [
       ? `https://player.videasy.net/tv/${id}/${s}/${e}?${common}&lang=${lang}`
       : `https://player.videasy.net/movie/${id}?${common}&lang=${lang}`;
   }},
-  // 🌸 ANIME SPECIALIST: AnimePahe mirror — purane/long-running anime & cartoons ke liye best
+  // ðŸŒ¸ ANIME SPECIALIST: AnimePahe mirror â€” purane/long-running anime & cartoons ke liye best
   { name: 'AnimePahe HD', dubbed: true, is4K: true, anime: true, url: (id, lang, type, s, e) => {
     const m = currentModalMovie;
     const track = animeAudioTrack(lang) === 'hindi' ? 'dub' : animeAudioTrack(lang); // animepahe: sub/dub
@@ -8809,13 +8929,13 @@ const playerSources = [
       : `https://vidnest.fun/movie/${id}?server=gama`;
   }},
   { name: '4K Ultra HD', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
-    // #1: Viduki.net API 2 — 4K AI Upscaling + Multi-Language + 5.1 Surround
+    // #1: Viduki.net API 2 â€” 4K AI Upscaling + Multi-Language + 5.1 Surround
     return type === 'tv'
       ? `https://www.viduki.net/2/tv/${id}/${s}/${e}`
       : `https://www.viduki.net/2/movie/${id}`;
   }},
-  // 🔁 Cinextream (cinextream.net) ka domain dead ho gaya (DNS record hi nahi bacha),
-  //    uski jagah VidFast — 4K/multi-audio, tez CDN, movies + series dono
+  // ðŸ” Cinextream (cinextream.net) ka domain dead ho gaya (DNS record hi nahi bacha),
+  //    uski jagah VidFast â€” 4K/multi-audio, tez CDN, movies + series dono
   { name: 'VidFast 4K', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
     const opts = `autoPlay=true&theme=FFC107&title=true&poster=true&autoNext=true&nextButton=true&lang=${lang}`;
     return type === 'tv'
@@ -8823,7 +8943,7 @@ const playerSources = [
       : `https://vidfast.pro/movie/${id}?${opts}`;
   }},
          { name: 'Flicky Stream', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
-    // #8: Flicky — Working embed, multiple servers
+    // #8: Flicky â€” Working embed, multiple servers
     return type === 'tv'
       ? `https://flicky.host/embed/tv/?id=${id}&s=${s}&e=${e}`
       : `https://flicky.host/embed/movie/?id=${id}`;
@@ -8843,11 +8963,11 @@ const playerSources = [
       : `https://111movies.com/movie/${id}`;
   }},
     { name: 'Ultra HD', dubbed: true, url: (id, lang, type, s, e) => {
-    // #6: AutoEmbed — India ke networks par blockage kam aati hai
+    // #6: AutoEmbed â€” India ke networks par blockage kam aati hai
     return (type === 'tv' ? `https://autoembed.co/tv/tmdb/${id}-${s}-${e}` : 'https://autoembed.co/movie/tmdb/' + id) + `?lang=${lang}`;
   }},
   { name: 'Pro Stream', dubbed: true, url: (id, lang, type, s, e) => {
-    // #4: VidLink Pro — Clean interface with settings
+    // #4: VidLink Pro â€” Clean interface with settings
     return (type === 'tv' ? `https://vidlink.pro/tv/${id}/${s}/${e}` : 'https://vidlink.pro/movie/' + id) + `?lang=${lang}`;
   }},
 
@@ -8930,7 +9050,7 @@ function renderExternalSources(id, srcIdx, lang) {
   const ext = document.getElementById('externalSources');
   if (!ext) return;
 
-  // ── Categorize servers for premium layout ──
+  // â”€â”€ Categorize servers for premium layout â”€â”€
   const premium4K = [];
   const hdStreams = [];
 
@@ -8984,11 +9104,11 @@ function renderExternalSources(id, srcIdx, lang) {
     + '</div>';
 
   const sectionsHtml = buildSection(
-    'Premium 4K • Hindi Dub',
+    'Premium 4K â€¢ Hindi Dub',
     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
     premium4K, 'srv-section--premium'
   ) + buildSection(
-    'HD Streams • Multi-Audio',
+    'HD Streams â€¢ Multi-Audio',
     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>',
     hdStreams, 'srv-section--hd'
   );
@@ -8997,10 +9117,10 @@ function renderExternalSources(id, srcIdx, lang) {
 
   const srcButtons = ext.querySelectorAll('.player-chip--source');
   srcButtons.forEach(btn => {
-    /*  ⚡ Warm the server the user is about to pick.
+    /*  âš¡ Warm the server the user is about to pick.
      *
      *  This used to listen on mouseenter and focus only, which means it did
-     *  nothing at all on a phone or tablet — there is no hover there, so every
+     *  nothing at all on a phone or tablet â€” there is no hover there, so every
      *  server switch on touch paid the full DNS + TCP + TLS + provider-document
      *  cost after the tap. That is most of the wait users feel when they try a
      *  different server.
@@ -9012,8 +9132,8 @@ function renderExternalSources(id, srcIdx, lang) {
      *
      *  The heavy path (hidden prewarm frame) stays on hover/focus, where there is
      *  a real signal of intent and a desktop or TV to afford it. prewarmPlayer()
-     *  also refuses once #playerFrame exists — which is exactly the switch-while-
-     *  watching case — so the light path is what carries that scenario, and it
+     *  also refuses once #playerFrame exists â€” which is exactly the switch-while-
+     *  watching case â€” so the light path is what carries that scenario, and it
      *  now runs there too.
      */
     const warmThis = (event) => {
@@ -9067,25 +9187,25 @@ function setSelectedQuality(quality) {
   localStorage.setItem('moviezone.playerQuality', quality);
 }
  
-/*  ══════════════════════════════════════════════════════════════════════
- *  LEARNED SERVER HEALTH — why playback used to feel slow
- *  ══════════════════════════════════════════════════════════════════════
+/*  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+ *  LEARNED SERVER HEALTH â€” why playback used to feel slow
+ *  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  The player had no memory. Every play started at a fixed server index and
  *  waited a flat 5000 ms before deciding that server was dead, then walked to
  *  the NEXT INDEX and waited another 5000 ms. If the first two providers were
- *  blocked on this user's network — which is normal, these hosts get blocked
- *  regionally all the time — the user sat through 10-15 seconds of spinner
+ *  blocked on this user's network â€” which is normal, these hosts get blocked
+ *  regionally all the time â€” the user sat through 10-15 seconds of spinner
  *  before anything played. And because nothing was recorded, the exact same
  *  penalty was paid again on the next movie, forever.
  *
  *  Now every load outcome is measured and persisted, so the player converges
  *  on whatever actually works fast for THIS user:
  *
- *    • ordering — servers are tried best-first by measured latency and failure
+ *    â€¢ ordering â€” servers are tried best-first by measured latency and failure
  *      rate instead of by their position in the array
- *    • give-up time — a server that normally answers in 1.2 s is no longer
+ *    â€¢ give-up time â€” a server that normally answers in 1.2 s is no longer
  *      given 5 s to prove it is broken; the timeout follows its own history
- *    • recovery — a success partially forgives past failures, so a provider
+ *    â€¢ recovery â€” a success partially forgives past failures, so a provider
  *      that was down for a day is not blacklisted forever
  *
  *  Latency is stored as an EWMA so one slow night does not condemn a good
@@ -9108,7 +9228,7 @@ function playerHealth() {
 }
 
 function _mzPersistPlayerHealth() {
-  // Tiny payload, but still keep it off the critical path — this fires right
+  // Tiny payload, but still keep it off the critical path â€” this fires right
   // when the player is starting up.
   _mzOnIdle(() => {
     try { localStorage.setItem(MZ_PLAYER_HEALTH_KEY, JSON.stringify(playerHealth())); }
@@ -9196,7 +9316,7 @@ function getSelectedSourceIdx() {
   const ranked = rankSourceIdxs(playerSources.map((_, i) => i));
   const best = ranked.length ? ranked[0] : 0;
 
-  // Nothing stored yet — open on whatever has actually performed best here
+  // Nothing stored yet â€” open on whatever has actually performed best here
   // rather than always on index 0.
   if (isNaN(saved) || saved < 0 || saved >= playerSources.length) return best;
 
@@ -9235,7 +9355,7 @@ function playMovie() {
     const animeIdx = playerSources.findIndex(sr => sr.anime);
     if (animeIdx !== -1) {
       currentSourceIdx = animeIdx;
-      showToast(`Anime detected — switched to ${playerSources[animeIdx].name}`);
+      showToast(`Anime detected â€” switched to ${playerSources[animeIdx].name}`);
     }
   }
   loadPlayer(currentModalMovie.id, currentSourceIdx, lang, quality, currentModalMovie.media_type);
@@ -9270,19 +9390,19 @@ function playNextEpisode() {
   }
 }
  
-/* ══════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    INSTANT PLAY ENGINE (Zero-wait playback)
    1. Provider host preconnect (DNS + TLS handshake pehle se ready)
-   2. Hidden prewarm iframe — stream background me resolve ho jata hai
+   2. Hidden prewarm iframe â€” stream background me resolve ho jata hai
       jab user description/servers dekh raha hota hai
    3. Play dabate hi wahi ready frame reveal hota hai (naya load nahi)
-   ══════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 /*  Every provider origin the player can actually navigate to, derived from
  *  playerSources instead of written out by hand.
  *
  *  The hand-written list had drifted badly and silently: it still warmed
  *  vidrock.ru and embed.smashystream.com (the latter is a commented-out source)
- *  while three live servers — vidfast.pro, flicky.host and 111movies.com — were
+ *  while three live servers â€” vidfast.pro, flicky.host and 111movies.com â€” were
  *  never warmed at all. A user switching to one of those paid a full DNS + TCP +
  *  TLS handshake at the exact moment they wanted video. Deriving the list means
  *  adding or replacing a server warms the right host automatically.
@@ -9332,13 +9452,13 @@ function preconnectPlayerHosts(limit) {
 /*  Warm the handshakes for the servers this user would ACTUALLY fall back to.
  *
  *  preconnectPlayerHosts() warms a slice of a hardcoded list, which has no
- *  relationship to the retry chain — it could warm three hosts none of which
+ *  relationship to the retry chain â€” it could warm three hosts none of which
  *  are ever used while the real fallback stays cold. This walks the same
  *  ranked, dub/anime-filtered pool that autoRetryNextServer() picks from, so
  *  if the first choice does fail the next attempt starts on an open connection
  *  instead of a fresh DNS lookup.
  *
- *  Only the TLS handshake is warmed here, not the embed document — prefetching
+ *  Only the TLS handshake is warmed here, not the embed document â€” prefetching
  *  several provider pages that will probably go unused is bandwidth a phone
  *  cannot spare.
  */
@@ -9398,7 +9518,7 @@ function destroyPrewarm() {
 const _mzWarmedDocs = new Set();
 
 /*  A warm-up that cannot reach the host at all is the earliest possible signal
- *  that this server is dead for THIS user — and it arrives while they are still
+ *  that this server is dead for THIS user â€” and it arrives while they are still
  *  reading the description, not after they pressed play and watched a spinner.
  *  Live probe from one Indian connection: nine of the ten servers answered in
  *  232-928ms, one did not answer within twelve seconds. Feeding that into the
@@ -9406,7 +9526,7 @@ const _mzWarmedDocs = new Set();
  *
  *  Only network-level failures count. A no-cors fetch resolves for opaque
  *  responses, including 403 and 404, so a rejection here means DNS, TLS, a
- *  refused connection or the timeout below — never "the provider answered
+ *  refused connection or the timeout below â€” never "the provider answered
  *  something we cannot read".
  */
 const MZ_WARM_TIMEOUT_MS = 8000;
@@ -9564,8 +9684,8 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
     localStorage.setItem('mz_progress_' + id, JSON.stringify({ season: parseInt(s), episode: parseInt(e) }));
   }
 
-  // ── INSTANT PLAY: agar yahi stream pehle se prewarm ho chuki hai to
-  //    naya load karne ki zarurat nahi — sirf usi ready frame ko reveal karo
+  // â”€â”€ INSTANT PLAY: agar yahi stream pehle se prewarm ho chuki hai to
+  //    naya load karne ki zarurat nahi â€” sirf usi ready frame ko reveal karo
   const preState = takePrewarmedFrame(embedEl, src);
   const reusable = preState ? preState.iframe : null;
   // Warm frame ko real (autoplay) URL par navigate karna padta hai, to loader dikhega.
@@ -9596,7 +9716,7 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
         ${reusable ? 'Almost ready...' : (isDubServer ? 'Loading Hindi Dubbed Stream...' : 'Loading Stream...')}
       </div>
       <div style="color:rgba(255,255,255,0.4); margin-top:6px; font-size:0.75rem;">
-        Server: ${escapeHTML(playerSources[srcIdx].name)} ${isDubServer ? '• Dubbed ?' : ''}
+        Server: ${escapeHTML(playerSources[srcIdx].name)} ${isDubServer ? 'â€¢ Dubbed ?' : ''}
       </div>
     `;
     embedEl.appendChild(loader);
@@ -9616,7 +9736,7 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
    *  'allowfullscreen'". Jab `allow` present hota hai to browser legacy
    *  `allowfullscreen` ko ignore kar deta hai aur warn karta hai. Legacy
    *  attributes sirf un purane browsers ke liye chahiye (kuch Smart TV
-   *  browsers) jo `allow` support nahi karte — isliye ab conditional. */
+   *  browsers) jo `allow` support nahi karte â€” isliye ab conditional. */
   if (!('allow' in HTMLIFrameElement.prototype)) {
     iframe.setAttribute('allowfullscreen', '');
     iframe.setAttribute('webkitallowfullscreen', '');
@@ -9653,7 +9773,7 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
     autoRetryNextServer(id, srcIdx, lang, quality, type);
   };
 
-  // Prewarm frame pehle hi load ho chuka tha — loader hi mat dikhao
+  // Prewarm frame pehle hi load ho chuka tha â€” loader hi mat dikhao
   if (preAlreadyLoaded && loader && loader.parentNode) loader.remove();
 
   // Timeout-based auto-retry. The wait now follows this server's own measured
@@ -9837,7 +9957,7 @@ async function downloadMovie() {
   const id = currentModalMovie.id;
   const isSeries = currentModalMovie.media_type === 'tv';
 
-  // VidVault (VidRock ka official download server) — instant, koi API wait nahi
+  // VidVault (VidRock ka official download server) â€” instant, koi API wait nahi
   let downloadUrl;
   if (isSeries) {
     const sel = currentEpisodeSelection();
@@ -10008,7 +10128,7 @@ window.addEventListener('scroll', () => {
   });
 }, { passive: true });
 
-// ═══ PREMIUM MOBILE NAV PANEL ═══
+// â•â•â• PREMIUM MOBILE NAV PANEL â•â•â•
 // Creates a separate full-screen panel outside navbar to avoid backdrop-filter stacking issues
 (function initMobileNav() {
   const hamburgerBtn = document.getElementById('hamburgerBtn');
@@ -10069,7 +10189,7 @@ window.addEventListener('scroll', () => {
   /* Viewport changes must not leave the menu in a broken state. The panel is
      display:none above the hamburger band, so a menu opened on a tablet and
      then resized/rotated to a desktop width would vanish while still holding
-     document.body.style.overflow = 'hidden' — the page would silently refuse
+     document.body.style.overflow = 'hidden' â€” the page would silently refuse
      to scroll with no visible menu to close. Close it whenever the hamburger
      itself is no longer on screen. */
   let navResizeRaf = 0;
@@ -10085,7 +10205,7 @@ window.addEventListener('scroll', () => {
   window.addEventListener('resize', syncNavToViewport, { passive: true });
   window.addEventListener('orientationchange', syncNavToViewport, { passive: true });
 
-  // Handle link clicks — trigger the original nav link actions
+  // Handle link clicks â€” trigger the original nav link actions
   panel.querySelectorAll('.mz-mp-link').forEach((link, idx) => {
     link.addEventListener('click', (e) => {
       e.preventDefault();
@@ -10275,7 +10395,7 @@ scheduleIdleWork([extractTopKeywords], 5000);
          *
          *  Since Datadog RUM collects console.error, the only thing this block
          *  actually did was file a steady stream of unactionable "errors" against
-         *  real users — and against every headless run of this repo's own test
+         *  real users â€” and against every headless run of this repo's own test
          *  suite.
          *
          *  It is now a debug log. The signal is still emitted for anyone who wants
@@ -10369,7 +10489,7 @@ scheduleIdleWork([extractTopKeywords], 5000);
 init();
 
 
-// ═══ CONTINUE WATCHING SYSTEM ═══
+// â•â•â• CONTINUE WATCHING SYSTEM â•â•â•
 (function initContinueWatching() {
   const CW_KEY = 'mz_continue_watching';
   const MAX_CW_ITEMS = 20;
@@ -10437,7 +10557,7 @@ init();
           <button class="cw-remove-btn" onclick="event.stopPropagation(); removeCW(${item.id})" aria-label="Remove"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
           <div class="cw-card-info">
             <div class="cw-card-title">${item.title}</div>
-            <div class="cw-card-meta">${timeAgo} • ${item.progress}% watched</div>
+            <div class="cw-card-meta">${timeAgo} â€¢ ${item.progress}% watched</div>
             <div class="cw-progress-bar"><div class="cw-progress-fill" style="width:${item.progress}%"></div></div>
           </div>
         </div>
@@ -10498,7 +10618,7 @@ init();
   /*  pwa-install.min.js is now loaded lazily (see the loader in index.html), so
    *  its monitor may not exist yet. This resolves the state from what is
    *  available now, and re-resolves it authoritatively when the controller
-   *  arrives — the mz:pwainstallready event the loader fires on script load.
+   *  arrives â€” the mz:pwainstallready event the loader fires on script load.
    */
   function syncPwaInstallState() {
     const monitor = window.__mzPwaInstallMonitor;
@@ -10531,13 +10651,13 @@ init();
       return window.__mzTriggerInstall();
     }
 
-    /*  The user got here before the lazy controller did — the common case being
+    /*  The user got here before the lazy controller did â€” the common case being
      *  a click within the first second or two. Pull it in and re-enter once, so
      *  the click is honoured instead of being dropped on a "still loading" toast.
      */
     if (typeof window.__mzLoadPwaInstall === 'function' && !window.__mzInstallRetried) {
       window.__mzInstallRetried = true;
-      if (typeof showToast === 'function') showToast('Preparing install…');
+      if (typeof showToast === 'function') showToast('Preparing installâ€¦');
       window.__mzLoadPwaInstall().then(function () {
         window.__mzInstallRetried = false;
         window.installPWA();
@@ -10569,7 +10689,7 @@ init();
   // 3. NOTIFY ME System
   const NOTIFY_KEY = 'mz_notify_movies';
 
-  // ── WEB PUSH SUBSCRIPTION ──
+  // â”€â”€ WEB PUSH SUBSCRIPTION â”€â”€
 
   /*  True when a response is the SPA shell rather than the API answering.
    *
@@ -10596,7 +10716,7 @@ init();
         const response = await fetch('/api/push/vapid-key', { cache: 'no-store' });
         if (!response.ok || servedSpaShell(response)) {
           /*  Push is not wired up on this deployment. That is a deployment
-           *  state rather than a fault, so it is said once, plainly — a warning
+           *  state rather than a fault, so it is said once, plainly â€” a warning
            *  carrying a SyntaxError stack taught us to scroll past the console
            *  instead of reading it. */
           if (!subscribeToPush.reportedMissing) {
@@ -10620,7 +10740,7 @@ init();
        *
        *  This used to POST the subscription on every single page load. The server
        *  wrote it to KV every time, and on Cloudflare's KV free plan (1,000
-       *  writes/day) that is what made /api/push/subscribe start answering 500 —
+       *  writes/day) that is what made /api/push/subscribe start answering 500 â€”
        *  the quota was being spent on writes that changed nothing.
        *
        *  The endpoint is still re-sent whenever it actually changes (browsers do
@@ -10709,7 +10829,7 @@ init();
       body: JSON.stringify({ endpoint: subscription.endpoint })
     });
     /*  A 200 carrying index.html would make response.json() throw here, and this
-     *  runs from a bare setTimeout — an unhandled rejection that silently stops
+     *  runs from a bare setTimeout â€” an unhandled rejection that silently stops
      *  the rest of the sync. Treated as "nothing to load" instead. */
     if (!response.ok || servedSpaShell(response)) return;
     const { movies = [] } = await response.json().catch(() => ({ movies: [] }));
@@ -10774,7 +10894,7 @@ init();
       if (subscription === 'local-only') {
         list.push(movie);
         localStorage.setItem(NOTIFY_KEY, JSON.stringify(list));
-        if (typeof showToast === 'function') showToast('🔔 Reminder saved for ' + movieTitle + '! You\'ll see it on your next visit.');
+        if (typeof showToast === 'function') showToast('ðŸ”” Reminder saved for ' + movieTitle + '! You\'ll see it on your next visit.');
         return true;
       }
 
@@ -10837,7 +10957,7 @@ window.handleNotifyMe = async function(btn) {
   try {
     const isNowSet = await toggleNotifyMe(movieId, title, releaseDate);
     btn.classList.toggle('notified', isNowSet);
-    if (label) label.textContent = isNowSet ? 'Notified ✓' : 'Notify Me';
+    if (label) label.textContent = isNowSet ? 'Notified âœ“' : 'Notify Me';
   } finally {
     btn.disabled = false;
   }
@@ -10846,34 +10966,34 @@ window.handleNotifyMe = async function(btn) {
 
 
 
-// === COLLECTIONS HUB (Premium Cinematic Universes — JioHotstar-level luxury) ===
+// === COLLECTIONS HUB (Premium Cinematic Universes â€” JioHotstar-level luxury) ===
 (function initCollectionsHub() {
   // Exact title lists and TMDB metadata live in collections-catalog.json.
-  // This array contains presentation metadata only — no broad keyword discovery.
+  // This array contains presentation metadata only â€” no broad keyword discovery.
   const UNIVERSES = [
-    // ── SUPERHERO ──
-    { slug: 'mcu', name: 'Marvel Cinematic Universe', badge: 'MARVEL', tagline: 'The complete MCU timeline — every film and narrative series.', accent: 'marvel', category: 'superhero' },
-    { slug: 'dceu', name: 'DC Universe', badge: 'DC', tagline: 'The DCEU legacy and DC Studios’ interconnected new era.', accent: 'dc', category: 'superhero' },
-    // ── SCI-FI ──
+    // â”€â”€ SUPERHERO â”€â”€
+    { slug: 'mcu', name: 'Marvel Cinematic Universe', badge: 'MARVEL', tagline: 'The complete MCU timeline â€” every film and narrative series.', accent: 'marvel', category: 'superhero' },
+    { slug: 'dceu', name: 'DC Universe', badge: 'DC', tagline: 'The DCEU legacy and DC Studiosâ€™ interconnected new era.', accent: 'dc', category: 'superhero' },
+    // â”€â”€ SCI-FI â”€â”€
     { slug: 'terminator', name: 'Terminator', badge: 'TERMINATOR', tagline: 'The complete war between humanity and the machines.', accent: 'terminator', category: 'scifi' },
-    { slug: 'transformers', name: 'Transformers', badge: 'TRANSFORMERS', tagline: 'Robots in disguise — films and animated sagas across generations.', accent: 'transformers', category: 'scifi' },
-    // ── FANTASY ──
-    { slug: 'wizarding-world', name: 'Wizarding World', badge: 'WIZARDING WORLD', tagline: 'Harry Potter and Fantastic Beasts — the complete magical journey.', accent: 'wizard', category: 'fantasy' },
+    { slug: 'transformers', name: 'Transformers', badge: 'TRANSFORMERS', tagline: 'Robots in disguise â€” films and animated sagas across generations.', accent: 'transformers', category: 'scifi' },
+    // â”€â”€ FANTASY â”€â”€
+    { slug: 'wizarding-world', name: 'Wizarding World', badge: 'WIZARDING WORLD', tagline: 'Harry Potter and Fantastic Beasts â€” the complete magical journey.', accent: 'wizard', category: 'fantasy' },
     { slug: 'middle-earth', name: 'Middle-earth', badge: 'MIDDLE-EARTH', tagline: 'The Lord of the Rings, The Hobbit and the ages of Middle-earth.', accent: 'lotr', category: 'fantasy' },
     { slug: 'pirates', name: 'Pirates of the Caribbean', badge: 'PIRATES', tagline: 'Captain Jack Sparrow and every voyage across the cursed seas.', accent: 'pirates', category: 'fantasy' },
-    // ── ACTION ──
+    // â”€â”€ ACTION â”€â”€
     { slug: 'fast-furious', name: 'Fast & Furious', badge: 'FAST', tagline: 'Every high-octane heist, race and family mission.', accent: 'fast', category: 'action' },
-    { slug: 'james-bond', name: 'James Bond 007', badge: '007', tagline: 'The complete EON 007 film canon — six decades of espionage.', accent: 'bond', category: 'action' },
+    { slug: 'james-bond', name: 'James Bond 007', badge: '007', tagline: 'The complete EON 007 film canon â€” six decades of espionage.', accent: 'bond', category: 'action' },
     { slug: 'mission-impossible', name: 'Mission: Impossible', badge: 'M:I', tagline: 'The original IMF series and every impossible cinematic mission.', accent: 'mi', category: 'action' },
     { slug: 'jurassic-park', name: 'Jurassic World', badge: 'JURASSIC', tagline: 'Every Jurassic Park and World film, plus the animated canon.', accent: 'jurassic', category: 'action' },
-    { slug: 'predator', name: 'Predator', badge: 'PREDATOR', tagline: 'The ultimate hunters — Predator, Prey and the AVP encounters.', accent: 'predator', category: 'action' },
-    // ── HORROR ──
+    { slug: 'predator', name: 'Predator', badge: 'PREDATOR', tagline: 'The ultimate hunters â€” Predator, Prey and the AVP encounters.', accent: 'predator', category: 'action' },
+    // â”€â”€ HORROR â”€â”€
     { slug: 'conjuring', name: 'The Conjuring Universe', badge: 'CONJURING', tagline: 'Conjuring, Annabelle, The Nun and every connected nightmare.', accent: 'horror', category: 'horror' },
-    // ── ANIMATION ──
+    // â”€â”€ ANIMATION â”€â”€
     { slug: 'despicable-me', name: 'Despicable Me & Minions', badge: 'MINIONS', tagline: 'Gru, the Minions and every supervillain adventure.', accent: 'minions', category: 'animation' },
     { slug: 'toy-story', name: 'Toy Story', badge: 'PIXAR', tagline: 'The complete Toy Story saga and its animated spin-offs.', accent: 'toystory', category: 'animation' },
     { slug: 'shrek', name: 'Shrek', badge: 'DREAMWORKS', tagline: 'Shrek, Puss in Boots and every Far Far Away adventure.', accent: 'shrek', category: 'animation' },
-    { slug: 'kung-fu-panda', name: 'Kung Fu Panda', badge: 'DREAMWORKS', tagline: 'Po’s complete journey across films and animated series.', accent: 'kungfu', category: 'animation' },
+    { slug: 'kung-fu-panda', name: 'Kung Fu Panda', badge: 'DREAMWORKS', tagline: 'Poâ€™s complete journey across films and animated series.', accent: 'kungfu', category: 'animation' },
     { slug: 'ice-age', name: 'Ice Age', badge: 'BLUE SKY', tagline: 'Manny, Sid, Diego, Scrat and every adventure with the herd.', accent: 'iceage', category: 'animation' }
   ];
 
@@ -10886,7 +11006,7 @@ window.handleNotifyMe = async function(btn) {
     return UNIVERSES.find(u => u.slug === slug);
   }
 
-  // ── Curated catalog loader ──
+  // â”€â”€ Curated catalog loader â”€â”€
   // One small static request replaces dozens of broad TMDB discover calls.
   // Exact IDs, titles, artwork and release dates were resolved by strict title+year.
   let curatedCatalogPromise = null;
@@ -10943,7 +11063,7 @@ window.handleNotifyMe = async function(btn) {
     getUniverse: slug => getUniverse(slug)
   });
 
-  // ── Performance / motion capability detection ──
+  // â”€â”€ Performance / motion capability detection â”€â”€
   const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const isTouchOnly = window.matchMedia ? !window.matchMedia('(hover: hover) and (pointer: fine)').matches : ('ontouchstart' in window);
   const lowPower = (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) ||
@@ -10955,7 +11075,7 @@ window.handleNotifyMe = async function(btn) {
 
   const ARROW_SVG = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>';
 
-  // Fade images in only once decoded — avoids janky pop-in and layout thrash
+  // Fade images in only once decoded â€” avoids janky pop-in and layout thrash
   function attachImageReveal(scope) {
     scope.querySelectorAll('img[data-ch-reveal]').forEach(img => {
       img.removeAttribute('data-ch-reveal');
@@ -10974,7 +11094,7 @@ window.handleNotifyMe = async function(btn) {
     });
   }
 
-  // ── Pointer-reactive 3D tilt + spotlight (rAF-throttled, one shared loop) ──
+  // â”€â”€ Pointer-reactive 3D tilt + spotlight (rAF-throttled, one shared loop) â”€â”€
   let tiltQueued = false;
   let tiltTarget = null;
   let tiltPoint = { x: 0, y: 0 };
@@ -11037,7 +11157,7 @@ window.handleNotifyMe = async function(btn) {
     card.className = 'ch-card ch-accent-' + universe.accent;
     card.setAttribute('data-slug', universe.slug);
     card.setAttribute('data-category', universe.category);
-    card.setAttribute('aria-label', universe.name + ' — explore collection');
+    card.setAttribute('aria-label', universe.name + ' â€” explore collection');
     card.style.setProperty('--delay', Math.min(index, 12) * 55 + 'ms');
     card.innerHTML =
       '<div class="ch-card-media">' +
@@ -11052,7 +11172,7 @@ window.handleNotifyMe = async function(btn) {
         '<h3>' + escapeHTML(universe.name) + '</h3>' +
         '<p>' + escapeHTML(universe.tagline) + '</p>' +
         '<div class="ch-card-meta">' +
-          '<span class="ch-card-count" id="chCount-' + universe.slug + '">Loading…</span>' +
+          '<span class="ch-card-count" id="chCount-' + universe.slug + '">Loadingâ€¦</span>' +
           '<span class="ch-card-cta">Explore ' + ARROW_SVG + '</span>' +
         '</div>' +
       '</div>';
@@ -11061,7 +11181,7 @@ window.handleNotifyMe = async function(btn) {
     return card;
   }
 
-  // ── Netflix-style hero poster mosaic (all universes merged) ──
+  // â”€â”€ Netflix-style hero poster mosaic (all universes merged) â”€â”€
   let mosaicBuilt = false;
   async function buildHeroMosaic() {
     const wrap = document.getElementById('chHeroMosaic');
@@ -11069,7 +11189,7 @@ window.handleNotifyMe = async function(btn) {
     if (!wrap || !grid || mosaicBuilt) return;
     mosaicBuilt = true;
 
-    // Reuses the same cached promises the cards use — zero extra network calls
+    // Reuses the same cached promises the cards use â€” zero extra network calls
     const perUniverse = await Promise.all(UNIVERSES.map(async (u) => {
       try {
         const [movies, tv] = await Promise.all([
@@ -11080,7 +11200,7 @@ window.handleNotifyMe = async function(btn) {
       } catch (e) { return []; }
     }));
 
-    // Round-robin interleave so Marvel, DC, Wizarding World… all appear mixed together
+    // Round-robin interleave so Marvel, DC, Wizarding Worldâ€¦ all appear mixed together
     const pool = [];
     const seen = new Set();
     const longest = perUniverse.reduce((m, l) => Math.max(m, l.length), 0);
@@ -11140,7 +11260,7 @@ window.handleNotifyMe = async function(btn) {
         const countEl = document.getElementById('chCount-' + universe.slug);
         if (countEl) {
           let text = movies.length + ' Movie' + (movies.length !== 1 ? 's' : '');
-          if (tvSeries.length > 0) text += ' · ' + tvSeries.length + ' Series';
+          if (tvSeries.length > 0) text += ' Â· ' + tvSeries.length + ' Series';
           countEl.textContent = text;
         }
         const postersEl = document.getElementById('chPosters-' + universe.slug);
@@ -11220,7 +11340,7 @@ window.handleNotifyMe = async function(btn) {
     allItems.sort((a, b) => ((a.release_date || a.first_air_date || '9999').localeCompare(b.release_date || b.first_air_date || '9999')));
 
     if (!allItems.length) {
-      detail.innerHTML = '<div class="ch-detail-empty"><div class="ch-detail-empty-icon">🎬</div><strong>No titles found for this universe yet.</strong><span>Please check back soon.</span></div>';
+      detail.innerHTML = '<div class="ch-detail-empty"><div class="ch-detail-empty-icon">ðŸŽ¬</div><strong>No titles found for this universe yet.</strong><span>Please check back soon.</span></div>';
       return;
     }
 
@@ -11245,10 +11365,10 @@ window.handleNotifyMe = async function(btn) {
               '<img src="' + IMG + item.poster_path + '" alt="' + escapeHTML(title) + ' poster" width="342" height="513" loading="lazy" decoding="async" data-ch-reveal>' +
               '<span class="ch-movie-order">' + (idx + 1) + '</span>' +
               (isTVItem ? '<span class="ch-movie-type-badge ch-type-tv">TV</span>' : '<span class="ch-movie-type-badge ch-type-movie">MOVIE</span>') +
-              (voteRaw > 0 ? '<div class="ch-movie-rating">★ ' + rating + '</div>' : '') +
+              (voteRaw > 0 ? '<div class="ch-movie-rating">â˜… ' + rating + '</div>' : '') +
               '<div class="ch-movie-shine"></div>' +
               '<div class="ch-movie-hover-overlay">' +
-                '<div class="ch-movie-hover-play">▶</div>' +
+                '<div class="ch-movie-hover-play">â–¶</div>' +
               '</div>' +
             '</div>' +
             '<div class="ch-movie-info"><h4>' + escapeHTML(title) + '</h4><span>' + year + '</span></div>' +
@@ -11280,7 +11400,7 @@ window.handleNotifyMe = async function(btn) {
           '<div class="ch-detail-meta">' +
             '<span class="ch-detail-count">' + totalMovies + ' Movie' + (totalMovies !== 1 ? 's' : '') + '</span>' +
             (totalTV > 0 ? '<span class="ch-detail-count">' + totalTV + ' TV Series</span>' : '') +
-            '<span class="ch-detail-count">' + yearStart + ' – ' + yearEnd + '</span>' +
+            '<span class="ch-detail-count">' + yearStart + ' â€“ ' + yearEnd + '</span>' +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -11292,7 +11412,7 @@ window.handleNotifyMe = async function(btn) {
       '<div class="ch-detail-sort">' +
         '<button class="ch-sort-btn active" data-sort="release">Release Order</button>' +
         '<button class="ch-sort-btn" data-sort="rating">Top Rated</button>' +
-        '<button class="ch-sort-btn" data-sort="title">A – Z</button>' +
+        '<button class="ch-sort-btn" data-sort="title">A â€“ Z</button>' +
       '</div>' +
       '<div class="ch-movie-grid" id="chMovieGrid"></div>';
 
@@ -11339,7 +11459,7 @@ window.handleNotifyMe = async function(btn) {
     bindMovieCardClicks();
   }
 
-  // Single delegated listener for the whole detail view — survives grid re-renders
+  // Single delegated listener for the whole detail view â€” survives grid re-renders
   let movieDelegationBound = false;
   function bindMovieCardClicks() {
     if (movieDelegationBound) return;
@@ -11380,7 +11500,7 @@ window.handleNotifyMe = async function(btn) {
     }
 
     const detail = document.getElementById('chDetailView');
-    if (detail) detail.innerHTML = '<div class="ch-detail-loading"><div class="ch-loading-spinner"></div><p>Loading ' + escapeHTML(universe.name) + '…</p></div>';
+    if (detail) detail.innerHTML = '<div class="ch-detail-loading"><div class="ch-loading-spinner"></div><p>Loading ' + escapeHTML(universe.name) + 'â€¦</p></div>';
 
     const scroller = document.getElementById('chScroll');
     if (scroller) scroller.scrollTo({ top: 0, behavior: 'instant' in Object.getPrototypeOf(scroller.scrollTo || {}) ? 'instant' : 'auto' });
@@ -11393,7 +11513,7 @@ window.handleNotifyMe = async function(btn) {
       if (activeUniverseSlug === slug) renderUniverseDetail(universe, movies, tvSeries);
     } catch (error) {
       console.warn('[MovieZone] Failed to open universe', slug, error);
-      if (detail) detail.innerHTML = '<div class="ch-detail-empty"><div class="ch-detail-empty-icon">⚠️</div><strong>Could not load this universe.</strong><span>Please try again in a moment.</span></div>';
+      if (detail) detail.innerHTML = '<div class="ch-detail-empty"><div class="ch-detail-empty-icon">âš ï¸</div><strong>Could not load this universe.</strong><span>Please try again in a moment.</span></div>';
     }
   }
 
@@ -11411,7 +11531,7 @@ window.handleNotifyMe = async function(btn) {
     }
   }
 
-  // ── Ambient particle field (DPR-capped, 30fps, auto-paused, spatial-hashed links) ──
+  // â”€â”€ Ambient particle field (DPR-capped, 30fps, auto-paused, spatial-hashed links) â”€â”€
   let particleAnimFrame = null;
   let particlesRunning = false;
   let particleResizeBound = false;
@@ -11466,7 +11586,7 @@ window.handleNotifyMe = async function(btn) {
     }
 
     const cells = new Map();
-    const FRAME_MS = 1000 / 30; // 30fps is plenty for ambient dust — halves GPU cost
+    const FRAME_MS = 1000 / 30; // 30fps is plenty for ambient dust â€” halves GPU cost
     let last = 0;
 
     function animate(now) {
@@ -11493,7 +11613,7 @@ window.handleNotifyMe = async function(btn) {
         bucket.push(p);
       }
 
-      // Only compare neighbours in adjacent cells instead of every pair (O(n) vs O(n²))
+      // Only compare neighbours in adjacent cells instead of every pair (O(n) vs O(nÂ²))
       ctx.lineWidth = 0.5;
       cells.forEach((bucket, key) => {
         const parts = key.split(':');
@@ -11609,7 +11729,7 @@ window.handleNotifyMe = async function(btn) {
     }
   });
 
-  // Deep-link support — clean up stale #collections hash on page load to prevent loop
+  // Deep-link support â€” clean up stale #collections hash on page load to prevent loop
   if (window.location.hash.startsWith('#collections')) {
     document.addEventListener('DOMContentLoaded', () => {
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
@@ -11617,25 +11737,25 @@ window.handleNotifyMe = async function(btn) {
   }
 })();
 
-/* ═══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
  *  TV PERFORMANCE & RESPONSIVE LAYOUT  (v1.0)
- *  ─────────────────────────────────────────────────────────────────────────
+ *  â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *  Ye module TV pe lag / hang / scrolling problem theek karta hai. Kuch bhi
- *  naya "design" nahi banaya — moviezone.css me pehle se maujood optimization
+ *  naya "design" nahi banaya â€” moviezone.css me pehle se maujood optimization
  *  classes ko TV pe actually apply kiya gaya hai (wo likhi gayi thi par TV pe
  *  kabhi lagti hi nahi thi), aur ek CSS bug fix kiya gaya hai.
  *
  *  KYA GALAT THA
- *  ─────────────
+ *  â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *  1. `low-end-mode` class TV pe kabhi nahi lagti thi.
  *     moviezone.js:64  ->  `if (isMobile) ... add('low-end-mode')`
  *     aur isMobile = !isMzTV() && /Mobi|Android|.../  => TV pe hamesha false.
  *     checkPerformance() bhi TV ko explicitly skip karta hai (line ~6725).
  *     Nateeja: TV, jo sabse weak device hai, ko poora heavy-effect version
- *     milta tha — box-shadows, ::before/::after decorations, staggered
+ *     milta tha â€” box-shadows, ::before/::after decorations, staggered
  *     entrance animations, will-change layers. Ye CSS already tayaar thi.
  *
- *  2. 🔴 SCROLLING BUG — asli wajah:
+ *  2. ðŸ”´ SCROLLING BUG â€” asli wajah:
  *     moviezone.css me hai:
  *       .large-screen-mode .movie-card { content-visibility: auto; }
  *     par uske saath `contain-intrinsic-size` nahi diya gaya.
@@ -11657,7 +11777,7 @@ window.handleNotifyMe = async function(btn) {
  *     collectFocusables() har D-pad press pe saare cards walk karta hai, to
  *     300 cards = har button press pe 300-element walk = hang.
  *     MAX_CARDS_TV = 24 aur profile.maxCards define the, par use nahi ho rahe.
- * ═══════════════════════════════════════════════════════════════════════════ */
+ * â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 (function initTVPerformance() {
   'use strict';
 
@@ -11667,20 +11787,20 @@ window.handleNotifyMe = async function(btn) {
   /* tv-mode.js `data-mz-tv-tier` set karta hai: low | mid | high
    * low  = Fire TV, webOS, Tizen, Vidaa, HbbTV, Opera TV  (sabse weak)
    * high = PlayStation, Xbox, Apple TV                    (kaafi powerful)
-   * High tier ko poori visual polish milti rahegi — sirf weak TVs pe
+   * High tier ko poori visual polish milti rahegi â€” sirf weak TVs pe
    * effects kam karte hain. */
   const tvTier = () => root.getAttribute('data-mz-tv-tier') || 'low';
 
-  /* ─────────────────────────────────────────────────────────────────────
+  /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    * 1. TV-only CSS: sirf wo cheezein jo moviezone.css me missing ya galat
    *    hain. Baaki sab kaam existing classes karti hain.
-   * ───────────────────────────────────────────────────────────────────── */
+   * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   function injectTVCss() {
     if (document.getElementById('mz-tv-perf-css')) return;
     const style = document.createElement('style');
     style.id = 'mz-tv-perf-css';
     style.textContent = `
-/* ── FIX A (asli scrolling bug): content-visibility ke saath intrinsic size ──
+/* â”€â”€ FIX A (asli scrolling bug): content-visibility ke saath intrinsic size â”€â”€
    Bina iske offscreen card ki height 0 ho jaati hai aur grid ki height scroll
    ke dauraan badalti rehti hai. --mz-card-h runtime pe measure hoti hai. */
 html[data-mz-tv="true"].large-screen-mode .movie-card,
@@ -11692,7 +11812,7 @@ html[data-mz-tv="true"] .upcoming-card {
   contain-intrinsic-size: auto var(--mz-upcoming-h, 300px);
 }
 
-/* ── FIX B: smooth scrolling TV pe hamesha laggy hoti hai (JS already
+/* â”€â”€ FIX B: smooth scrolling TV pe hamesha laggy hoti hai (JS already
    behavior:'auto' bhejta hai, par CSS scroll-behavior usko override kar deti
    hai). Har scroll container pe instant scroll. */
 html[data-mz-tv="true"],
@@ -11708,7 +11828,7 @@ html[data-mz-tv="true"] .collections-hub-overlay {
   scroll-behavior: auto !important;
 }
 
-/* ── FIX C: large-screen-mode navbar pe backdrop-filter ko !important se
+/* â”€â”€ FIX C: large-screen-mode navbar pe backdrop-filter ko !important se
    FORCE karti hai (moviezone.css). Blur TV GPU pe sabse mehnga effect hai aur
    navbar sticky hai, to har scroll frame pe re-composite hota hai. */
 html[data-mz-tv="true"] #navbar,
@@ -11728,8 +11848,8 @@ html[data-mz-tv="true"] #toast {
   -webkit-backdrop-filter: none !important;
 }
 
-/* ── FIX D: scroll ke dauraan blur filter recompute = frame drop.
-   (Poster ka saturate/contrast rehne diya — wo sasta hai aur focus feedback
+/* â”€â”€ FIX D: scroll ke dauraan blur filter recompute = frame drop.
+   (Poster ka saturate/contrast rehne diya â€” wo sasta hai aur focus feedback
    ke liye zaroori hai.) */
 html[data-mz-tv="true"] .slide-bg,
 html[data-mz-tv="true"] #modalBg,
@@ -11739,23 +11859,23 @@ html[data-mz-tv="true"] .ch-hero-mosaic-veil {
   filter: none !important;
 }
 
-/* ── FIX E: ambient firefly layer aur custom cursor ke 3 elements ab site se
+/* â”€â”€ FIX E: ambient firefly layer aur custom cursor ke 3 elements ab site se
    hi hata diye gaye hain (perf). Sirf collection-hero ka particle canvas bacha
    hai, wo TV pe band. */
 html[data-mz-tv="true"] .ch-particle-canvas {
   display: none !important;
 }
 
-/* ── FIX F: .reveal-up cards ka opacity:0 tabhi hatta hai jab
+/* â”€â”€ FIX F: .reveal-up cards ka opacity:0 tabhi hatta hai jab
    IntersectionObserver .in-view lagata hai. TV pe hum wo observer skip karte
-   hain, to yahan opacity force karni zaroori hai — warna card invisible. */
+   hain, to yahan opacity force karni zaroori hai â€” warna card invisible. */
 html[data-mz-tv="true"] .reveal-up { opacity: 1 !important; }
 
-/* ── FIX G: sticky navbar ko apni compositing layer do, taaki scroll ke waqt
+/* â”€â”€ FIX G: sticky navbar ko apni compositing layer do, taaki scroll ke waqt
    uske neeche ka content re-paint na kare. */
 html[data-mz-tv="true"] #navbar { transform: translateZ(0); }
 
-/* ── FIX H: 4K / 8K TV pe text 3 meter door se padhne layak rahe.
+/* â”€â”€ FIX H: 4K / 8K TV pe text 3 meter door se padhne layak rahe.
    moviezone.css me 2500px+ pe font-size 125% hai; usse aage kuch nahi tha. */
 @media (min-width: 3400px) {
   html[data-mz-tv="true"] { font-size: 150%; }
@@ -11775,11 +11895,11 @@ html[data-mz-tv="true"] #navbar { transform: translateZ(0); }
     document.head.appendChild(style);
   }
 
-  /* ─────────────────────────────────────────────────────────────────────
+  /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    * 2. Existing optimization classes TV pe apply karo
-   * ───────────────────────────────────────────────────────────────────── */
+   * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   function applyTVClasses() {
-    // content-visibility + contain: layout style paint — har TV width pe chahiye,
+    // content-visibility + contain: layout style paint â€” har TV width pe chahiye,
     // sirf >=1920px pe nahi. (Ab FIX A intrinsic size bhi de raha hai.)
     root.classList.add('large-screen-mode');
 
@@ -11788,12 +11908,12 @@ html[data-mz-tv="true"] #navbar { transform: translateZ(0); }
     if (tvTier() !== 'high') root.classList.add('low-end-mode');
   }
 
-  /* ─────────────────────────────────────────────────────────────────────
+  /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    * 3. Card ki asli height measure karke intrinsic size set karo.
    *    Ye number galat hone se hi scroll jump hota hai, isliye guess nahi
-   *    karte — DOM se padhte hain. Column width badalne pe height badalti
+   *    karte â€” DOM se padhte hain. Column width badalne pe height badalti
    *    hai, to resize pe dobara measure karte hain.
-   * ───────────────────────────────────────────────────────────────────── */
+   * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   let measureQueued = false;
   let seenCardH = 0;       // ab tak dekhi gayi sabse BADI card height
   let seenUpcomingH = 0;
@@ -11835,13 +11955,13 @@ html[data-mz-tv="true"] #navbar { transform: translateZ(0); }
     requestAnimationFrame(measureCards);
   }
 
-  /* ─────────────────────────────────────────────────────────────────────
+  /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    * 4. Card budget: TV pe DOM ko unbounded badhne se roko.
    *    Cards DELETE nahi karte (wo scroll position aur D-pad focus tod deta
    *    hai). Bas auto-infinite-scroll band karke "Load More" button dikha
-   *    dete hain — TV pe ye behtar UX bhi hai (remote se deliberate action)
+   *    dete hain â€” TV pe ye behtar UX bhi hai (remote se deliberate action)
    *    aur DOM bounded rehta hai.
-   * ───────────────────────────────────────────────────────────────────── */
+   * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   function tvCardBudget() {
     const tier = tvTier();
     return tier === 'high' ? 60 : tier === 'mid' ? 36 : 24;
@@ -11853,7 +11973,7 @@ html[data-mz-tv="true"] #navbar { transform: translateZ(0); }
     const loadMoreBtn = document.getElementById('loadMoreMoviesBtn');
     if (!grid || !trigger) return;
 
-    // Search results aur watchlist finite hote hain — unka trigger already
+    // Search results aur watchlist finite hote hain â€” unka trigger already
     // chhupa hota hai, usme dakhal nahi dena.
     if (trigger.style.display === 'none' && !trigger.dataset.mzTvBudget) return;
 
@@ -11867,7 +11987,7 @@ html[data-mz-tv="true"] #navbar { transform: translateZ(0); }
         /*  Bina shart ke dikhana ZAROORI hai: loadMovies() har render ke baad
          *  is button ko `display:none` kar deta hai ("Always hide button for
          *  infinite scroll"). Agar hum sirf tab dikhate jab wo hidden ho, to
-         *  ek race me button chhupa reh jaata aur trigger bhi hidden hota —
+         *  ek race me button chhupa reh jaata aur trigger bhi hidden hota â€”
          *  matlab user ke paas aur content load karne ka koi rasta hi nahi
          *  bachta (dead end). */
         loadMoreBtn.style.display = '';
@@ -11876,7 +11996,7 @@ html[data-mz-tv="true"] #navbar { transform: translateZ(0); }
           loadMoreBtn.addEventListener('click', () => {
             delete trigger.dataset.mzTvBudget;
             // Safety net: agar naya batch nahi aaya (last page), grid mutate
-            // nahi hoga aur observer bhi nahi chalega — to khud dobara check.
+            // nahi hoga aur observer bhi nahi chalega â€” to khud dobara check.
             setTimeout(enforceCardBudget, 1200);
           }, { passive: true });
         }
@@ -11888,7 +12008,7 @@ html[data-mz-tv="true"] #navbar { transform: translateZ(0); }
   }
 
   /* Grid badalne par (render / load more) budget + measurement refresh karo.
-   * MutationObserver sirf render pe fire hota hai, scroll pe nahi — to ye
+   * MutationObserver sirf render pe fire hota hai, scroll pe nahi â€” to ye
    * sasta hai. */
   function watchGrid() {
     const grid = document.getElementById('movieGrid');
@@ -11905,14 +12025,14 @@ html[data-mz-tv="true"] #navbar { transform: translateZ(0); }
     }).observe(grid, { childList: true });
   }
 
-  /* ─────────────────────────────────────────────────────────────────────
+  /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    * 5. Hero carousel: screen pe na ho to autoplay band.
    *    Pehle ye har 5.5 second me full-screen backdrop swap karta rehta tha
-   *    chahe user bahut neeche grid dekh raha ho — TV pe scrolling ke dauraan
+   *    chahe user bahut neeche grid dekh raha ho â€” TV pe scrolling ke dauraan
    *    saaf stutter aata tha. pauseAutoSlide()/resumeAutoSlide() already
    *    progress bar ko bhi handle karte hain, to sync nahi tootega.
    *    (Ye optimization har device ke liye faydemand hai, sirf TV nahi.)
-   * ───────────────────────────────────────────────────────────────────── */
+   * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   function pauseCarouselWhenHeroHidden() {
     const hero = document.getElementById('hero');
     if (!hero || typeof IntersectionObserver !== 'function') return;
@@ -11928,9 +12048,9 @@ html[data-mz-tv="true"] #navbar { transform: translateZ(0); }
     }, { threshold: 0.15 }).observe(hero);
   }
 
-  /* ─────────────────────────────────────────────────────────────────────
+  /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    * 6. Boot
-   * ───────────────────────────────────────────────────────────────────── */
+   * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   let started = false;
   function start() {
     if (started || !onTV()) return;
@@ -11947,7 +12067,7 @@ html[data-mz-tv="true"] #navbar { transform: translateZ(0); }
       resizeTimer = setTimeout(scheduleMeasure, 250);
     }, { passive: true });
 
-    console.log('[MovieZone TV] performance mode on — tier:', tvTier(), '| card budget:', tvCardBudget());
+    console.log('[MovieZone TV] performance mode on â€” tier:', tvTier(), '| card budget:', tvCardBudget());
   }
 
   // Hero carousel optimization har device pe chalti hai.
