@@ -107,7 +107,24 @@ const brotliOf = (p) => zlib.brotliCompressSync(fs.readFileSync(p), {
 }).length;
 
 const CRITICAL_WIRE_BUDGET = 115 * 1024;
-const CRITICAL_PARSE_BUDGET = 430 * 1024;
+
+/*  Raised 430 -> 435 KB for the hero print-quality badge (Sep 2026).
+ *
+ *  The feature resolves a title's real print (CAM/TS/HDTS/HD/FHD/4K) from TMDB's
+ *  release types instead of counting days since release_date, and costs 4.2 KB
+ *  minified: 2.4 KB JS for the resolver and the lazy per-slide refresh, 1.8 KB
+ *  CSS for the meta-row chips and the slide-title treatment. It was trimmed first
+ *  — the badge palette reuses the .top10-quality declarations rather than
+ *  redeclaring them, and the resolver derives its class names instead of carrying
+ *  a literal per branch — so what is left is the feature itself.
+ *
+ *  Why the ceiling moved rather than the feature shrinking: 430 KB was set with
+ *  ~2 KB of headroom, which is under half a percent and too tight to absorb any
+ *  real change. 435 KB restores roughly the same alarm distance it had before.
+ *  This is a regression alarm, not an optimisation target — but if it needs
+ *  raising again, that is the signal to go and delete something instead.
+ */
+const CRITICAL_PARSE_BUDGET = 435 * 1024;
 
 check('the first-paint transfer stays inside its brotli budget', () => {
   const parts = ['index.html', 'moviezone.min.css', 'moviezone.min.js'];

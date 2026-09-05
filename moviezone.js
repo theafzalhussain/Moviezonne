@@ -1866,6 +1866,179 @@ function catalogueEventAgeDays(title, nowMs, qualityState) {
   return Math.max(0, state.daysOld);
 }
 
+/*  ══════════════════════════════════════════════════════════════════════
+ *  REAL PRINT QUALITY — DERIVED FROM TMDB RELEASE TYPES
+ *  ══════════════════════════════════════════════════════════════════════
+ *  The timeline above is a guess: it counts days from `release_date` and assumes
+ *  the print ladder moved on schedule. That is wrong in both directions and
+ *  visibly so — a Netflix original is a real HD stream on day one but the
+ *  timeline calls it a CAM, while a festival darling with a nine-month
+ *  theatrical tail gets promoted to FHD while it is still theatre-only.
+ *
+ *  NOTE ON "FETCH IT FROM IMDb": IMDb does not publish print quality. Neither
+ *  does any other public catalogue — CAM/TS/FHD/4K are release-scene labels, not
+ *  metadata anyone licenses. What IS real, published data is WHEN each kind of
+ *  release happened, and that determines which print can physically exist:
+ *
+ *    /movie/{id}/release_dates -> type 3 Theatrical  cinema only, so cam rips
+ *                                 type 4 Digital     a real web print exists
+ *                                 type 5 Physical    Blu-ray / UHD master exists
+ *
+ *  So the badge is now driven by dates TMDB actually publishes rather than by
+ *  arithmetic on a single date. When a title has no release rows at all (common
+ *  for TV, and for thinly-catalogued regional films) the timeline still answers,
+ *  so nothing regresses — see fetchRealQualityState().
+ */
+/*  Release type -> the window it opens.
+ *
+ *  TMDB's numbering: 1 Premiere, 2 Theatrical (limited), 3 Theatrical,
+ *  4 Digital, 5 Physical, 6 TV. Type 1 is deliberately absent — a festival
+ *  screening months ahead of release is not a print anyone can watch.
+ *
+ *  A lookup table rather than a switch on named constants: property names
+ *  survive minification, and this file is measured against a parse-weight
+ *  budget (asset-perf-check.js). */
+const RELEASE_TYPE_WINDOW = {
+  2: 'theatrical',  // limited theatrical — cam rips do come from these
+  3: 'theatrical',
+  4: 'digital',     // streaming or digital purchase
+  5: 'physical',    // Blu-ray / 4K UHD disc
+  6: 'tv'
+};
+
+/*  The 4K bar, shared with MOVIE_QUALITY_TIMELINE's conditional stage: a disc
+ *  existing does not mean a UHD disc exists, and small titles only ever get a
+ *  1080p Blu-ray. Same numbers as the timeline so the two paths cannot disagree
+ *  about the same film. */
+const UHD_MIN_RATING = 7.0;
+const UHD_MIN_POPULARITY = 50;
+
+/*  How long after a digital drop the clean/settled encodes appear. Day one is a
+ *  rushed WEB-DL (HD); by the end of the month the good 1080p print is out. */
+const DIGITAL_SETTLE_DAYS = 30;
+
+/*  Every print label follows the same class convention already used by
+ *  .card-quality and .top10-quality, so the class is derived rather than carried
+ *  as a second literal at each return site. */
+function printQuality(qual) {
+  return { qual: qual, cls: 'qual-' + qual.toLowerCase() };
+}
+
+/**
+ * Earliest date per release kind, across every region TMDB lists.
+ *
+ * Earliest-anywhere rather than a preferred region on purpose: a print leaks
+ * from wherever it drops first, so an Indian viewer can have a US web print
+ * weeks before the local digital date.
+ *
+ * @param {object} payload  /movie/{id}/release_dates response
+ * @returns {{theatrical:?number, digital:?number, physical:?number, tv:?number}}
+ *          epoch ms, or null when TMDB lists nothing of that kind
+ */
+function releaseWindowsFrom(payload) {
+  const out = { theatrical: null, digital: null, physical: null, tv: null };
+  const regions = (payload && payload.results) || [];
+  for (let i = 0; i < regions.length; i++) {
+    const rows = (regions[i] && regions[i].release_dates) || [];
+    for (let j = 0; j < rows.length; j++) {
+      const row = rows[j];
+      const key = row && RELEASE_TYPE_WINDOW[row.type];
+      if (!key || !row.release_date) continue;
+      const ms = new Date(row.release_date).getTime();
+      if (!isFinite(ms)) continue;
+      if (out[key] == null || ms < out[key]) out[key] = ms;
+    }
+  }
+  return out;
+}
+
+/**
+ * Best print that can exist today, given what has actually been released.
+ *
+ * Ordered best-source-first, because the highest release stage that has already
+ * happened decides the ceiling. Returns null when no window has opened yet —
+ * i.e. TMDB knows nothing usable and the caller should keep the timeline guess.
+ *
+ * @returns {?{qual:string, cls:string}}
+ */
+function qualityFromReleaseWindows(title, windows, nowMs) {
+  const now = nowMs || Date.now();
+  const big = (title.vote_average || 0) >= UHD_MIN_RATING
+    && (title.popularity || 0) >= UHD_MIN_POPULARITY;
+
+  // Disc master is out: the best print this title will ever have.
+  if (windows.physical != null && windows.physical <= now) {
+    return printQuality(big ? '4K' : 'FHD');
+  }
+
+  // Streaming / digital purchase is live, so a real web print exists regardless
+  // of how recently the film was in cinemas.
+  if (windows.digital != null && windows.digital <= now) {
+    return printQuality((now - windows.digital) / DAY_MS >= DIGITAL_SETTLE_DAYS ? 'FHD' : 'HD');
+  }
+
+  // Aired on TV but never got a digital date — an HD broadcast rip is the best around.
+  if (windows.tv != null && windows.tv <= now) return printQuality('HD');
+
+  /*  Cinema only. This is the branch the timeline gets most wrong, and the one
+   *  real data helps most: a KNOWN future digital date is positive confirmation
+   *  that no legitimate print is out yet, however long the theatrical run has
+   *  been. The cam ladder is the only thing that can improve here. */
+  if (windows.theatrical != null && windows.theatrical <= now) {
+    const since = (now - windows.theatrical) / DAY_MS;
+    return printQuality(since < 21 ? 'CAM' : since < 45 ? 'TS' : 'HDTS');
+  }
+
+  return null;
+}
+
+/*  One in-flight promise per title id. Keyed by id rather than by object so the
+ *  same film appearing in the carousel and in a rail cannot fetch twice; tmdb()
+ *  then adds its own memory + 12 h localStorage layer on top, so a repeat visit
+ *  resolves without a request at all. */
+const _mzQualityFetches = new Map();
+
+/**
+ * The timeline state for a title, with `qual`/`cls` corrected by real TMDB
+ * release-type data when TMDB has any.
+ *
+ * Never rejects and never returns a partial state: on any failure the caller
+ * gets exactly the timeline state it would have computed itself, so a badge can
+ * only ever get more accurate, never disappear.
+ *
+ * @param {object} title  a TMDB movie/tv object
+ * @returns {Promise<object>} same shape as titleQualityState()
+ */
+function fetchRealQualityState(title) {
+  const base = title._qualityState || titleQualityState(title);
+
+  // Release types are a movie-only endpoint on TMDB; /tv has no equivalent, so
+  // series and anime keep TV_QUALITY_TIMELINE.
+  if (!title.id || mediaTypeOf(title) !== 'movie') return Promise.resolve(base);
+
+  const key = 'q' + title.id;
+  if (_mzQualityFetches.has(key)) return _mzQualityFetches.get(key);
+
+  const pending = (async () => {
+    let real = null;
+    try {
+      const payload = await tmdb('/movie/' + title.id + '/release_dates');
+      real = qualityFromReleaseWindows(title, releaseWindowsFrom(payload), Date.now());
+    } catch (e) {
+      // tmdb() already reports what is worth reporting; an unusable print badge
+      // is not an error worth surfacing twice.
+    }
+    if (!real) return base;
+    const out = Object.assign({}, base);
+    out.qual = real.qual;
+    out.cls = real.cls;
+    return out;
+  })();
+
+  _mzQualityFetches.set(key, pending);
+  return pending;
+}
+
 /*  FRESHNESS TIERS — how the ALL feed is ordered.
  *
  *  Sorting purely by a composite score buries a brand-new release under
@@ -3219,6 +3392,23 @@ function buildCarousel() {
       } catch (e) { /* quota / private mode - the hint is optional */ }
     }
 
+    const qualityState = m._qualityState || titleQualityState(m);
+    /*  Painted from the timeline now, corrected in place once the real
+     *  release-type data lands (see refreshSlideQuality). Rendering the estimate
+     *  first rather than an empty placeholder is deliberate: the chip sits inside
+     *  .slide-meta, so a node that gained its text a second later would reflow
+     *  the row directly under the LCP image. The correction reuses the same chip,
+     *  so it repaints without moving anything. */
+    const qualityChip =
+      '<span class="slide-quality ' + (qualityState.cls || '') + '"' +
+        ' data-mz-quality title="Available print quality">' +
+        escapeHTML(qualityState.qual) +
+      '</span>';
+
+    // TV objects carry first_air_date, not release_date, so every web-series and
+    // anime slide used to render an empty year chip.
+    const slideYear = (m.release_date || m.first_air_date || '').slice(0, 4);
+
     slide.innerHTML =
       '<div class="slide-bg"' + (i === 0 ? '' : ' data-bg="' + bgUrl + '"'
         // A poster stand-in for a title with no backdrop. Flagged so
@@ -3233,11 +3423,12 @@ function buildCarousel() {
         // one <h1> (the one in index.html); 6 competing <h1>s split the topical
         // signal Google reads from the page. Styling is class-based, so the
         // .slide-title look is unchanged.
-        '<h2 class="slide-title">'+escapeHTML(m.title||m.name||'')+'</h2>' +
+        '<h2 class="slide-title"><span class="slide-title-text">'+escapeHTML(m.title||m.name||'')+'</span></h2>' +
         '<div class="slide-meta">' +
           '<div class="slide-rating">RATING '+((m.vote_average||0).toFixed(1))+'</div>' +
-          '<span class="slide-year">'+((m.release_date||'').slice(0,4))+'</span>' +
+          (slideYear ? '<span class="slide-year">'+slideYear+'</span>' : '') +
           '<span class="slide-runtime">LANG '+(m.original_language||'EN').toUpperCase()+'</span>' +
+          qualityChip +
         '</div>' +
         '<div class="slide-genres">'+genres+'</div>' +
         '<p class="slide-desc">'+escapeHTML(m.overview||'')+'</p>' +
@@ -3330,6 +3521,18 @@ function buildCarousel() {
       warmNext();
     }
   }
+
+  /*  Correct slide 0's print badge from real release data.
+   *
+   *  At idle, and only for the slide on screen: this is one extra TMDB call, and
+   *  the reason it is not made for all ten slides up front is the same reason the
+   *  slide bodies are batched — a ten-call fan-out in the load tick queues at the
+   *  origin and makes every request in it, including the hero backdrop, look
+   *  slow. goToSlide() picks up the rest as the viewer reaches them, and tmdb()
+   *  caches each answer for 12 h. */
+  const settleHeroQuality = () => refreshSlideQuality(currentSlide);
+  if ('requestIdleCallback' in window) requestIdleCallback(settleHeroQuality, { timeout: 4000 });
+  else setTimeout(settleHeroQuality, 1500);
  
   startAutoSlide();
 }
@@ -3442,6 +3645,40 @@ function goToSlide(n) {
   // Make sure current + upcoming slide images are ready
   ensureSlideBg(currentSlide);
   ensureSlideBg((currentSlide + 1) % len);
+  // Real print quality for the slide now on screen, if it has not been resolved
+  // yet. Cheap after the first pass: both tmdb() and the promise map memoise.
+  refreshSlideQuality(currentSlide);
+}
+
+/*  ── PRINT BADGE: ESTIMATE → REAL DATA ──────────────────────────────────────
+ *  Replaces one slide's timeline-derived quality chip with the value implied by
+ *  TMDB's actual release types. Idempotent and lazy, so it is safe to call on
+ *  every slide change, including repeat visits to the same slide.
+ *
+ *  Only the chip's class and text are touched — never its position in the row —
+ *  so a correction arriving seconds after paint cannot shift the hero.
+ */
+function refreshSlideQuality(index) {
+  const movie = carouselMovies[index];
+  if (!movie) return;
+  const slide = document.querySelectorAll('.carousel-slide')[index];
+  if (!slide) return;
+  const chip = slide.querySelector('[data-mz-quality]');
+  if (!chip || chip.dataset.mzQualitySettled === '1') return;
+  chip.dataset.mzQualitySettled = '1';   // set before awaiting: no double flight
+
+  fetchRealQualityState(movie).then((state) => {
+    if (!state || !state.qual) return;
+    // Cache on the movie object so the rails and the ranking see the same
+    // corrected print for this title, not a second estimate.
+    movie._qualityState = state;
+    if (chip.textContent === state.qual) return;   // estimate was already right
+    chip.className = 'slide-quality ' + (state.cls || '');
+    chip.textContent = state.qual;
+    chip.classList.add('slide-quality--corrected');
+  }).catch(() => {
+    // Leave the timeline estimate on screen; it is still the best guess.
+  });
 }
  
 /* ── AUTOPLAY ─────────────────────────────────────────────────────────────
