@@ -11673,3 +11673,613 @@ img { content-visibility: auto; }
    targets larger than a pointer would need. */
 [data-mz-tv="true"] .mz-pager-btn,[data-mz-tv="true"] .mz-pager-cur{min-width:56px;min-height:56px;font-size:1.05rem}
 [data-mz-tv="true"] .mz-pager-btn:focus{outline:3px solid var(--gold);outline-offset:3px;background:rgba(245,197,24,.2)}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   TOP 10 TRENDING — PREMIUM NUMBERED RAIL (live from TMDB)
+   ═══════════════════════════════════════════════════════════════
+   No panel, no heading: the section sits directly on the page
+   background and the gold numerals carry the identity on their own.
+   Only the compact period toggle sits in the top-right corner.
+
+   RANK NUMERALS — why they are built this way
+   ─────────────────────────────────────────────────────────────
+   The first version looked soft/blurry. Three things caused it and all
+   three are gone:
+     1. filter: drop-shadow(0 0 22px …) — a wide gold halo around the
+        glyph. A blur radius on a filter forces the whole layer through a
+        Gaussian pass, so the crisp glyph edge is destroyed.
+     2. -webkit-text-stroke: 1.5px rgba(0,0,0,.42) — a semi-transparent
+        rim that muddied the outline instead of defining it.
+     3. a gradient that faded to rgba(70,52,0,.55) at the bottom, so the
+        lower half of every digit looked washed out.
+   The numerals are now a fully opaque metallic gradient with ZERO-blur
+   drop-shadows only (offset, no spread), which stay pixel-sharp at any
+   size, and they overlap their poster more deeply so the rail reads as
+   one composed object.
+   ═══════════════════════════════════════════════════════════════ */
+.top10-section {
+  /*  One knob drives poster size, numeral size and the overlap.
+   *
+   *  The vh term is the responsive safety valve. A 2/3 poster is 1.5× as tall
+   *  as it is wide, so a purely vw-based width overflows any short viewport —
+   *  a landscape phone at 800×400 would ask for a 344px poster, i.e. 516px
+   *  tall in a 400px window. min(vw, vh) caps the card by whichever axis is
+   *  actually scarce, which is what makes one rule work from a 320px phone up
+   *  to a 4K TV. Numerals scale off the same value, so they follow along. */
+  --t10-poster-w: clamp(132px, min(15.5vw, 40vh), 250px);
+  --t10-rank-scale: 1.2;                              /* numeral size vs poster */
+  --t10-overhang: calc(var(--t10-poster-w) * 0.33);   /* lane the numeral sits in.
+                                                         Smaller than the glyph on
+                                                         purpose — the difference is
+                                                         how far it tucks behind. */
+  position: relative;
+  padding: 2.25rem 4% 1.5rem;
+}
+.top10-section[hidden] { display: none; }
+
+/* ── RAIL ── */
+.top10-rail-wrap { position: relative; }
+
+.top10-rail {
+  display: flex;
+  align-items: flex-end;
+  gap: clamp(0.6rem, 1.1vw, 1.15rem);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  scroll-snap-type: x proximity;
+  /* Generous bottom padding: the numerals sit on the baseline of the card and
+     must never be clipped by overflow-y: hidden. */
+  padding: 1rem 0.35rem 1.5rem;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+.top10-rail::-webkit-scrollbar { display: none; }
+
+/* ── Arrows: small, and fully outside the rail ── */
+.top10-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 8;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(8, 8, 16, 0.78);
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  backdrop-filter: blur(10px) saturate(160%);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  transition: background 0.25s ease, color 0.25s ease, border-color 0.25s ease,
+              transform 0.25s var(--ease-spring, ease);
+}
+.top10-arrow:hover {
+  color: #17120a;
+  background: linear-gradient(135deg, var(--gold3), var(--gold2));
+  border-color: rgba(245, 197, 24, 0.5);
+  transform: translateY(-50%) scale(1.1);
+}
+.top10-arrow:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+.top10-arrow[hidden] { display: none; }
+/* Sit in the page gutter, clear of the posters. */
+.top10-arrow--prev { left: -2.4rem; }
+.top10-arrow--next { right: -2.4rem; }
+
+/* ── NUMBERED CARD ── */
+.top10-card {
+  position: relative;
+  flex: 0 0 auto;
+  width: calc(var(--t10-poster-w) + var(--t10-overhang));
+  padding-left: var(--t10-overhang);
+  scroll-snap-align: start;
+  cursor: pointer;
+  outline: none;
+}
+
+/*  The numeral.
+ *
+ *  ⚠ WHY line-height AND padding-top MATTER HERE
+ *  ──────────────────────────────────────────────
+ *  `background-clip: text` paints the gradient only where the element's
+ *  BACKGROUND BOX overlaps the glyph. Anything outside that box gets no
+ *  paint at all, so it renders transparent — which looks exactly like the
+ *  numeral being sliced off.
+ *
+ *  The first version set `line-height: 0.74`, making the box SHORTER than
+ *  the glyph it contained, so the top of every digit was cut. Bebas Neue's
+ *  ascender + descender span ~1.1em, so a 0.74em box could never cover it.
+ *
+ *  Now: line-height 1 plus a generous padding-top, which grows the
+ *  background box UPWARD only (the bottom edge is pinned by `bottom`), so
+ *  the glyph never moves but is always fully inside the painted area.
+ *  padding-right guards the last glyph against the negative letter-spacing
+ *  trimming the advance width. Horizontal position is untouched, so the
+ *  overlap with the poster is unchanged.
+ */
+.top10-rank {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  z-index: 1;
+  font-family: 'Bebas Neue', 'Anton', sans-serif;
+  font-size: calc(var(--t10-poster-w) * var(--t10-rank-scale));
+  /*  line-height 1 is the fix. Measured with canvas TextMetrics at 264px:
+   *  Bebas Neue's ink ascent is 190px and, in a line-height:1 box, the ink top
+   *  lands ~34px below the box top — comfortably inside. At the old 0.74 the
+   *  half-leading pulled the baseline up ~34px, putting the ink top ~0.6px
+   *  ABOVE the box, which is precisely the sliced-off top that was visible.
+   *  The small padding is a safety margin, not a requirement: top for font
+   *  fallbacks with taller ink, right so the negative letter-spacing cannot
+   *  trim the final glyph out of the paint box. */
+  line-height: 1;
+  padding: 0.06em 0.09em 0 0;
+  letter-spacing: -0.04em;
+  font-weight: 400;
+  /* Polished-metal gold: bright crown, a fast mid-band like a specular
+     highlight on brushed metal, then a deep base. Fully opaque — an alpha
+     stop here is what made the earlier version look washed out. */
+  background: linear-gradient(177deg,
+      #fffbe8 0%,
+      #ffeeae 10%,
+      #ffd85e 26%,
+      #ffc61f 40%,
+      #f5c518 48%,
+      #e0ac14 56%,
+      #c08d0d 72%,
+      #9c7008 88%,
+      #7d5a04 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: var(--gold);
+  /* Zero blur radius on every shadow — this is the whole trick. An offset with
+     no spread reads as a crisp bevel; any blur value here softens the glyph. */
+  filter:
+    drop-shadow(0 2px 0 rgba(0, 0, 0, 0.55))
+    drop-shadow(2px 0 0 rgba(0, 0, 0, 0.3))
+    drop-shadow(0 -1px 0 rgba(255, 255, 255, 0.16));
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+  pointer-events: none;
+  user-select: none;
+  transition: transform 0.35s var(--ease-spring, ease);
+}
+/* "10" is two glyphs wide, so it needs its own size + a wider lane to keep the
+   same visual overlap as the single digits. */
+.top10-card[data-rank="10"] {
+  --t10-rank-scale: 0.74;
+  --t10-overhang: calc(var(--t10-poster-w) * 0.46);
+}
+.top10-card:hover .top10-rank,
+.top10-card:focus-visible .top10-rank { transform: translateY(-4px); }
+
+/* ── Poster: the luxury surface ── */
+.top10-poster {
+  position: relative;
+  z-index: 2;
+  aspect-ratio: 2 / 3;
+  border-radius: 18px;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01)),
+    rgba(13, 13, 26, 0.94);
+  /* Two-tone edge: a warm hairline on top, darkness below — reads as bevelled
+     glass rather than a flat 1px box. */
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow:
+    0 22px 55px rgba(0, 0, 0, 0.55),
+    0 3px 10px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.5);
+  transition: transform 0.42s var(--ease-spring, cubic-bezier(0.2, 0.8, 0.2, 1)),
+              border-color 0.3s ease, box-shadow 0.42s ease;
+}
+.top10-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  backface-visibility: hidden;
+}
+.top10-card:hover .top10-poster,
+.top10-card:focus-visible .top10-poster {
+  transform: translateY(-9px);
+  border-color: rgba(245, 197, 24, 0.45);
+  box-shadow:
+    0 32px 70px rgba(0, 0, 0, 0.62),
+    0 0 32px rgba(245, 197, 24, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.5);
+}
+.top10-card:focus-visible .top10-poster { outline: 2px solid var(--gold); outline-offset: 3px; }
+
+/* Scrim behind the title block. */
+.top10-poster::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(to top,
+      rgba(0, 0, 0, 0.95) 0%,
+      rgba(0, 0, 0, 0.82) 16%,
+      rgba(0, 0, 0, 0.42) 36%,
+      rgba(0, 0, 0, 0.08) 54%,
+      transparent 70%);
+  pointer-events: none;
+}
+
+/*  Specular sheen — a narrow diagonal highlight that sweeps across the poster
+ *  on hover. Pure transform animation on a pseudo-element, so it costs one
+ *  compositor layer and never touches layout. This is most of what separates
+ *  "a card" from "a premium card". */
+.top10-poster::before {
+  content: '';
+  position: absolute;
+  top: -60%;
+  left: -75%;
+  width: 45%;
+  height: 220%;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(90deg,
+      rgba(255, 255, 255, 0) 0%,
+      rgba(255, 255, 255, 0.07) 40%,
+      rgba(255, 255, 255, 0.22) 50%,
+      rgba(255, 255, 255, 0.07) 60%,
+      rgba(255, 255, 255, 0) 100%);
+  transform: rotate(18deg) translateX(0);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.top10-card:hover .top10-poster::before,
+.top10-card:focus-visible .top10-poster::before {
+  opacity: 1;
+  animation: top10Sheen 0.95s cubic-bezier(0.25, 0.6, 0.3, 1) forwards;
+}
+@keyframes top10Sheen {
+  0%   { transform: rotate(18deg) translateX(0); }
+  100% { transform: rotate(18deg) translateX(420%); }
+}
+
+/*  Staggered entrance. animation-delay is written inline per card by
+ *  renderTop10(), matching how the movie grid staggers its cards. */
+.top10-card {
+  animation: top10Rise 0.5s cubic-bezier(0.22, 0.9, 0.24, 1) both;
+}
+@keyframes top10Rise {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Badges ── */
+.top10-badges {
+  position: absolute;
+  top: 9px;
+  left: 9px;
+  right: 9px;
+  z-index: 4;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.35rem;
+  pointer-events: none;
+}
+.top10-rating {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0.24rem 0.5rem;
+  border-radius: 999px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.73rem;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  color: #fff;
+  background: rgba(8, 8, 16, 0.82);
+  border: 1px solid rgba(245, 197, 24, 0.28);
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 3px 10px rgba(0, 0, 0, 0.35);
+}
+.top10-rating svg { color: var(--gold); flex-shrink: 0; }
+/*  Real signal, not decoration: TMDB score >= 7.5 gets the gold treatment, so a
+ *  genuinely acclaimed title is readable at a glance. Applied by renderTop10()
+ *  from the same vote_average it prints. */
+.top10-rating.is-high {
+  color: #17120a;
+  background: linear-gradient(135deg, var(--gold3), var(--gold) 60%, var(--gold2));
+  border-color: rgba(255, 255, 255, 0.3);
+  box-shadow: 0 3px 12px rgba(245, 197, 24, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+.top10-rating.is-high svg { color: #4a3200; }
+
+/* Quality chip reuses the catalogue's real qual-* palette (see .card-quality)
+   so a Top 10 card and a grid card never disagree about the same title. */
+.top10-quality {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.24rem 0.52rem;
+  border-radius: 999px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: var(--gold);
+  background: rgba(8, 8, 16, 0.82);
+  border: 1px solid rgba(245, 197, 24, 0.22);
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 3px 10px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+}
+.top10-quality.qual-cam  { background: rgba(220, 53, 69, 0.88);  border-color: rgba(220, 53, 69, 0.5);  color: #fff; }
+.top10-quality.qual-ts   { background: rgba(255, 107, 53, 0.88); border-color: rgba(255, 107, 53, 0.5); color: #fff; }
+.top10-quality.qual-hdts { background: rgba(255, 159, 28, 0.88); border-color: rgba(255, 159, 28, 0.5); color: #fff; }
+.top10-quality.qual-hd   { background: rgba(8, 8, 16, 0.82);     border-color: rgba(245, 197, 24, 0.22); color: var(--gold); }
+.top10-quality.qual-fhd  { background: rgba(16, 185, 129, 0.88); border-color: rgba(16, 185, 129, 0.5); color: #fff; }
+.top10-quality.qual-4k   { background: linear-gradient(135deg, #7c3aed, #a855f7); border-color: rgba(124, 58, 237, 0.5); color: #fff; }
+
+/* ── Title / meta ── */
+.top10-info {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  padding: 0.9rem 0.85rem 0.9rem;
+}
+/* Hairline gold rule above the title — small detail, does a lot of the
+   "premium" work without adding noise. */
+.top10-info::before {
+  content: '';
+  position: absolute;
+  left: 0.85rem;
+  top: 0;
+  width: 26px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--gold3), var(--gold2));
+  box-shadow: 0 0 10px rgba(245, 197, 24, 0.5);
+  opacity: 0.9;
+}
+.top10-name {
+  font-family: 'Outfit', sans-serif;
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.22;
+  letter-spacing: 0.1px;
+  color: #fff;
+  margin: 0.55rem 0 0.3rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.95);
+}
+.top10-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.34rem;
+  flex-wrap: wrap;
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.74);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.9);
+}
+.top10-meta .t10-sep {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--gold);
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+.top10-meta .t10-lang {
+  font-size: 0.63rem;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  padding: 0.1rem 0.34rem;
+  border-radius: 5px;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.11);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Hover play affordance. */
+.top10-play {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.top10-play span {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  padding-left: 3px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 1.05rem;
+  background: rgba(6, 6, 12, 0.55);
+  border: 1.5px solid rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5);
+  transform: scale(0.85);
+  transition: transform 0.3s var(--ease-spring, ease), background 0.3s ease, border-color 0.3s ease;
+}
+.top10-card:hover .top10-play,
+.top10-card:focus-visible .top10-play { opacity: 1; }
+.top10-card:hover .top10-play span {
+  transform: scale(1);
+  background: rgba(245, 197, 24, 0.94);
+  border-color: var(--gold3);
+  color: #17120a;
+}
+
+/* ── Loading skeletons ── */
+.top10-skeleton {
+  width: calc(var(--t10-poster-w) + var(--t10-overhang));
+  padding-left: var(--t10-overhang);
+  pointer-events: none;
+}
+.top10-skeleton::before {
+  content: '';
+  display: block;
+  aspect-ratio: 2 / 3;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: linear-gradient(100deg, var(--card) 28%, var(--card3) 50%, var(--card) 72%);
+  background-size: 220% 100%;
+  animation: top10Shimmer 1.5s ease-in-out infinite;
+}
+@keyframes top10Shimmer {
+  0%   { background-position: 180% 0; }
+  100% { background-position: -80% 0; }
+}
+
+/*  ══════════════════════════════════════════════════════════════════════
+ *  RESPONSIVE
+ *  ══════════════════════════════════════════════════════════════════════
+ *  Every breakpoint sets ONE property — --t10-poster-w — because the numeral
+ *  size and the overlap are both derived from it. That is why the numerals
+ *  never drift out of proportion on any screen.
+ *
+ *  Each value is min(vw, vh): a 2/3 poster is 1.5× taller than wide, so the
+ *  scarce axis has to win or the card overflows short windows (landscape
+ *  phones, split-screen tablets, browser windows dragged short).
+ *
+ *  Arrow gutters switch from a % page padding to a fixed rem padding below
+ *  1024px. At 4% of 800px there is only 32px of gutter, which is less than
+ *  the arrow, so it would sit on top of the first numeral.
+ *  ════════════════════════════════════════════════════════════════════ */
+
+/* ── Large desktop / 4K / TV panels ── */
+@media (min-width: 1800px) {
+  .top10-section {
+    --t10-poster-w: clamp(230px, min(13vw, 38vh), 310px);
+    padding: 2.75rem 4% 1.75rem;
+  }
+  .top10-arrow { width: 44px; height: 44px; }
+  .top10-arrow--prev { left: -3rem; }
+  .top10-arrow--next { right: -3rem; }
+}
+
+/* ── Laptop ── */
+@media (max-width: 1280px) {
+  .top10-section { --t10-poster-w: clamp(150px, min(17vw, 40vh), 215px); }
+}
+
+/* ── Tablet landscape / small laptop ── */
+@media (max-width: 1024px) {
+  .top10-section {
+    --t10-poster-w: clamp(140px, min(23vw, 38vh), 200px);
+    /* Fixed gutter so the arrows always have room to sit outside the rail. */
+    padding: 2rem 3.4rem 1.25rem;
+  }
+  .top10-arrow--prev { left: -2.5rem; }
+  .top10-arrow--next { right: -2.5rem; }
+}
+
+/* ── Tablet portrait ── */
+@media (max-width: 900px) {
+  .top10-section {
+    --t10-poster-w: clamp(140px, min(28vw, 36vh), 190px);
+    padding: 1.9rem 3.4rem 1.15rem;
+  }
+}
+
+/* ── Phones ── Full-bleed rail: the page gutter is worth more as poster
+   width here, and the rail scrolls by touch so the arrows are not needed. */
+@media (max-width: 768px) {
+  .top10-section {
+    --t10-poster-w: clamp(112px, min(43vw, 34vh), 230px);
+    --t10-rank-scale: 1.08;
+    padding: 1.35rem 0 0.9rem;
+  }
+  .top10-arrow { display: none; }
+  .top10-rail {
+    gap: 0.5rem;
+    /* Inline padding doubles as the page gutter and as scroll padding, so the
+       first numeral is never flush against the screen edge. */
+    padding: 0.7rem 4vw 1.1rem;
+    scroll-padding-inline: 4vw;
+  }
+  .top10-card[data-rank="10"] { --t10-rank-scale: 0.68; }
+  .top10-poster { border-radius: 15px; }
+  .top10-name { font-size: 0.86rem; }
+  .top10-meta { font-size: 0.68rem; gap: 0.28rem; }
+  .top10-info { padding: 0.7rem 0.65rem 0.7rem; }
+  .top10-info::before { left: 0.65rem; width: 20px; }
+  .top10-play span { width: 42px; height: 42px; font-size: 0.85rem; }
+  .top10-rating, .top10-quality { font-size: 0.66rem; padding: 0.2rem 0.42rem; }
+  .top10-quality { font-size: 0.6rem; }
+  .top10-badges { top: 7px; left: 7px; right: 7px; }
+}
+
+/* ── Small phones ── */
+@media (max-width: 480px) {
+  .top10-section { --t10-poster-w: clamp(112px, min(47vw, 32vh), 200px); }
+  .top10-rail { gap: 0.4rem; }
+  .top10-name { font-size: 0.8rem; -webkit-line-clamp: 2; }
+  .top10-meta { font-size: 0.64rem; }
+  /* The language chip is the first thing to go when width is scarce — year
+     and genre carry more meaning. */
+  .top10-meta .t10-lang { display: none; }
+}
+
+/* ── Very small phones (320-360px) ── */
+@media (max-width: 360px) {
+  .top10-section {
+    --t10-poster-w: min(53vw, 30vh);
+    --t10-rank-scale: 1;
+  }
+  .top10-card[data-rank="10"] { --t10-rank-scale: 0.62; }
+  .top10-info { padding: 0.6rem 0.55rem 0.6rem; }
+  .top10-info::before { left: 0.55rem; }
+  .top10-play { display: none; }   /* no hover on touch — reclaim the paint */
+}
+
+/*  ── Short viewports ──
+ *  Landscape phones and short desktop windows. Height is the scarce axis, so
+ *  drive the card off vh and keep the whole rail inside the fold. */
+@media (max-height: 560px) and (orientation: landscape) {
+  .top10-section {
+    --t10-poster-w: min(24vw, 46vh);
+    padding: 1rem 2.5rem 0.75rem;
+  }
+  .top10-rail { padding-top: 0.5rem; padding-bottom: 0.8rem; }
+  .top10-arrow { width: 30px; height: 30px; }
+  .top10-arrow--prev { left: -2rem; }
+  .top10-arrow--next { right: -2rem; }
+}
+
+/* Reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  .top10-skeleton::before { animation: none; }
+  .top10-card { animation: none; opacity: 1; transform: none; }
+  .top10-poster,
+  .top10-rank,
+  .top10-play span { transition: none; }
+  .top10-card:hover .top10-poster,
+  .top10-card:focus-visible .top10-poster,
+  .top10-card:hover .top10-rank { transform: none; }
+  .top10-card:hover .top10-poster::before,
+  .top10-card:focus-visible .top10-poster::before { animation: none; opacity: 0; }
+  .top10-rail { scroll-behavior: auto; }
+}
+
+/* TV / D-pad. */
+[data-mz-tv="true"] .top10-card:focus-visible .top10-poster {
+  outline: 3px solid var(--gold);
+  outline-offset: 4px;
+}
+[data-mz-tv="true"] .top10-arrow { width: 48px; height: 48px; }
