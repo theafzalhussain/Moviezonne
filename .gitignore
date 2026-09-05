@@ -1,3 +1,9 @@
 node_modules/
 .env
 .DS_Store
+
+# Local wrangler/miniflare dev state and bundle output. These are machine-local
+# build artifacts: .wrangler/tmp alone accounted for ~21k lines of churn in one
+# commit. Files already tracked under .wrangler/state stay tracked until they
+# are explicitly removed with `git rm --cached`.
+.wrangler/

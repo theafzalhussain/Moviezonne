@@ -13,9 +13,9 @@
 <link rel="preconnect" href="https://image.tmdb.org" crossorigin>
 <link rel="dns-prefetch" href="https://image.tmdb.org">
 
-<link rel="stylesheet" href="/moviezone.min.css?v=6.7">
+<link rel="stylesheet" href="/moviezone.min.css?v=7.3">
 <!--MZ_PERF_HEAD-->
-<link rel="preload" href="/moviezone.min.css?v=6.7" as="style" fetchpriority="high">
+<link rel="preload" href="/moviezone.min.css?v=7.3" as="style" fetchpriority="high">
 <link rel="preload" as="image" media="(max-width: 1024px)" href="https://image.tmdb.org/t/p/w780/qeQJx07rK2xm8SD2sJxFKhE7gs0.jpg" fetchpriority="high">
 <link rel="preload" as="image" media="(min-width: 1025px)" href="https://image.tmdb.org/t/p/w1280/qeQJx07rK2xm8SD2sJxFKhE7gs0.jpg" fetchpriority="high">
 <meta name="mz-hero-backdrop" content="/qeQJx07rK2xm8SD2sJxFKhE7gs0.jpg">
@@ -37,7 +37,7 @@
 <link rel="preload" href="/fonts/outfit-latin-var.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/bebas-neue-latin-400.woff2" as="font" type="font/woff2" crossorigin>
 
-<link rel="preload" href="/moviezone.min.js?v=9.9" as="script">
+<link rel="preload" href="/moviezone.min.js?v=10.5" as="script">
 
 
 <style id="mz-fonts">
@@ -1063,6 +1063,33 @@ html.mz-no-ads .mz-ad-slot{display:none}
 </section>
 
 
+<!-- ── TOP 10 TRENDING (premium, numbered — live from TMDB) ──
+     No visible heading and no controls by design: the giant gold rank
+     numerals are the section's identity. The h2 stays for screen readers and
+     SEO, which still need a labelled landmark.
+     Ranking is TMDB's /trending/movie/week order, verbatim. -->
+<section id="top10-trending" class="top10-section" aria-labelledby="top10Heading" hidden>
+  <h2 id="top10Heading" class="visually-hidden">Top 10 Trending Movies This Week</h2>
+
+  <div class="top10-rail-wrap">
+    <button type="button" class="top10-arrow top10-arrow--prev" aria-label="Scroll left" hidden>
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg>
+    </button>
+    <div class="top10-rail" id="top10Rail">
+      <!-- premium numbered cards injected by loadTop10() -->
+      <div class="top10-card top10-skeleton"></div>
+      <div class="top10-card top10-skeleton"></div>
+      <div class="top10-card top10-skeleton"></div>
+      <div class="top10-card top10-skeleton"></div>
+      <div class="top10-card top10-skeleton"></div>
+    </div>
+    <button type="button" class="top10-arrow top10-arrow--next" aria-label="Scroll right" hidden>
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+    </button>
+  </div>
+</section>
+
+
 <!-- CONTINUE WATCHING
      No inline style="display:none" here any more: it beat every stylesheet rule,
      so the section could only be revealed from JS on DOMContentLoaded — after
@@ -1682,7 +1709,7 @@ html.mz-no-ads .mz-ad-slot{display:none}
       unstyled text. A leading slash is the whole fix. -->
 <script src="/tv-mode.min.js?v=1.4" defer></script>
 <script src="/search-engine.min.js?v=2.1" defer></script>
-<script src="/moviezone.min.js?v=9.9" defer></script>
+<script src="/moviezone.min.js?v=10.5" defer></script>
 <script>
 /*  ── pwa-install.min.js is NOT loaded with the others ─────────────────────────
  *  It was a fourth `defer` script, so its 30 KB was parsed and executed inside

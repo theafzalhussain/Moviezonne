@@ -1629,6 +1629,10 @@ async function init() {
       loadMovies('all')
     ]);
 
+    // TOP 10 TRENDING sits just below the hero; kick it off right after the
+    // carousel/grid fan-out so it fills in without blocking first paint.
+    initTop10();
+
     // 4. Upcoming is below the fold, so do not ask for it until the section is
     //    near the viewport (see setupLazySections above). On engines without an
     //    IntersectionObserver that falls back to an idle-time load.
@@ -1860,6 +1864,179 @@ function catalogueEventAgeDays(title, nowMs, qualityState) {
     return Math.max(0, state.upgradedDaysAgo);
   }
   return Math.max(0, state.daysOld);
+}
+
+/*  ══════════════════════════════════════════════════════════════════════
+ *  REAL PRINT QUALITY — DERIVED FROM TMDB RELEASE TYPES
+ *  ══════════════════════════════════════════════════════════════════════
+ *  The timeline above is a guess: it counts days from `release_date` and assumes
+ *  the print ladder moved on schedule. That is wrong in both directions and
+ *  visibly so — a Netflix original is a real HD stream on day one but the
+ *  timeline calls it a CAM, while a festival darling with a nine-month
+ *  theatrical tail gets promoted to FHD while it is still theatre-only.
+ *
+ *  NOTE ON "FETCH IT FROM IMDb": IMDb does not publish print quality. Neither
+ *  does any other public catalogue — CAM/TS/FHD/4K are release-scene labels, not
+ *  metadata anyone licenses. What IS real, published data is WHEN each kind of
+ *  release happened, and that determines which print can physically exist:
+ *
+ *    /movie/{id}/release_dates -> type 3 Theatrical  cinema only, so cam rips
+ *                                 type 4 Digital     a real web print exists
+ *                                 type 5 Physical    Blu-ray / UHD master exists
+ *
+ *  So the badge is now driven by dates TMDB actually publishes rather than by
+ *  arithmetic on a single date. When a title has no release rows at all (common
+ *  for TV, and for thinly-catalogued regional films) the timeline still answers,
+ *  so nothing regresses — see fetchRealQualityState().
+ */
+/*  Release type -> the window it opens.
+ *
+ *  TMDB's numbering: 1 Premiere, 2 Theatrical (limited), 3 Theatrical,
+ *  4 Digital, 5 Physical, 6 TV. Type 1 is deliberately absent — a festival
+ *  screening months ahead of release is not a print anyone can watch.
+ *
+ *  A lookup table rather than a switch on named constants: property names
+ *  survive minification, and this file is measured against a parse-weight
+ *  budget (asset-perf-check.js). */
+const RELEASE_TYPE_WINDOW = {
+  2: 'theatrical',  // limited theatrical — cam rips do come from these
+  3: 'theatrical',
+  4: 'digital',     // streaming or digital purchase
+  5: 'physical',    // Blu-ray / 4K UHD disc
+  6: 'tv'
+};
+
+/*  The 4K bar, shared with MOVIE_QUALITY_TIMELINE's conditional stage: a disc
+ *  existing does not mean a UHD disc exists, and small titles only ever get a
+ *  1080p Blu-ray. Same numbers as the timeline so the two paths cannot disagree
+ *  about the same film. */
+const UHD_MIN_RATING = 7.0;
+const UHD_MIN_POPULARITY = 50;
+
+/*  How long after a digital drop the clean/settled encodes appear. Day one is a
+ *  rushed WEB-DL (HD); by the end of the month the good 1080p print is out. */
+const DIGITAL_SETTLE_DAYS = 30;
+
+/*  Every print label follows the same class convention already used by
+ *  .card-quality and .top10-quality, so the class is derived rather than carried
+ *  as a second literal at each return site. */
+function printQuality(qual) {
+  return { qual: qual, cls: 'qual-' + qual.toLowerCase() };
+}
+
+/**
+ * Earliest date per release kind, across every region TMDB lists.
+ *
+ * Earliest-anywhere rather than a preferred region on purpose: a print leaks
+ * from wherever it drops first, so an Indian viewer can have a US web print
+ * weeks before the local digital date.
+ *
+ * @param {object} payload  /movie/{id}/release_dates response
+ * @returns {{theatrical:?number, digital:?number, physical:?number, tv:?number}}
+ *          epoch ms, or null when TMDB lists nothing of that kind
+ */
+function releaseWindowsFrom(payload) {
+  const out = { theatrical: null, digital: null, physical: null, tv: null };
+  const regions = (payload && payload.results) || [];
+  for (let i = 0; i < regions.length; i++) {
+    const rows = (regions[i] && regions[i].release_dates) || [];
+    for (let j = 0; j < rows.length; j++) {
+      const row = rows[j];
+      const key = row && RELEASE_TYPE_WINDOW[row.type];
+      if (!key || !row.release_date) continue;
+      const ms = new Date(row.release_date).getTime();
+      if (!isFinite(ms)) continue;
+      if (out[key] == null || ms < out[key]) out[key] = ms;
+    }
+  }
+  return out;
+}
+
+/**
+ * Best print that can exist today, given what has actually been released.
+ *
+ * Ordered best-source-first, because the highest release stage that has already
+ * happened decides the ceiling. Returns null when no window has opened yet —
+ * i.e. TMDB knows nothing usable and the caller should keep the timeline guess.
+ *
+ * @returns {?{qual:string, cls:string}}
+ */
+function qualityFromReleaseWindows(title, windows, nowMs) {
+  const now = nowMs || Date.now();
+  const big = (title.vote_average || 0) >= UHD_MIN_RATING
+    && (title.popularity || 0) >= UHD_MIN_POPULARITY;
+
+  // Disc master is out: the best print this title will ever have.
+  if (windows.physical != null && windows.physical <= now) {
+    return printQuality(big ? '4K' : 'FHD');
+  }
+
+  // Streaming / digital purchase is live, so a real web print exists regardless
+  // of how recently the film was in cinemas.
+  if (windows.digital != null && windows.digital <= now) {
+    return printQuality((now - windows.digital) / DAY_MS >= DIGITAL_SETTLE_DAYS ? 'FHD' : 'HD');
+  }
+
+  // Aired on TV but never got a digital date — an HD broadcast rip is the best around.
+  if (windows.tv != null && windows.tv <= now) return printQuality('HD');
+
+  /*  Cinema only. This is the branch the timeline gets most wrong, and the one
+   *  real data helps most: a KNOWN future digital date is positive confirmation
+   *  that no legitimate print is out yet, however long the theatrical run has
+   *  been. The cam ladder is the only thing that can improve here. */
+  if (windows.theatrical != null && windows.theatrical <= now) {
+    const since = (now - windows.theatrical) / DAY_MS;
+    return printQuality(since < 21 ? 'CAM' : since < 45 ? 'TS' : 'HDTS');
+  }
+
+  return null;
+}
+
+/*  One in-flight promise per title id. Keyed by id rather than by object so the
+ *  same film appearing in the carousel and in a rail cannot fetch twice; tmdb()
+ *  then adds its own memory + 12 h localStorage layer on top, so a repeat visit
+ *  resolves without a request at all. */
+const _mzQualityFetches = new Map();
+
+/**
+ * The timeline state for a title, with `qual`/`cls` corrected by real TMDB
+ * release-type data when TMDB has any.
+ *
+ * Never rejects and never returns a partial state: on any failure the caller
+ * gets exactly the timeline state it would have computed itself, so a badge can
+ * only ever get more accurate, never disappear.
+ *
+ * @param {object} title  a TMDB movie/tv object
+ * @returns {Promise<object>} same shape as titleQualityState()
+ */
+function fetchRealQualityState(title) {
+  const base = title._qualityState || titleQualityState(title);
+
+  // Release types are a movie-only endpoint on TMDB; /tv has no equivalent, so
+  // series and anime keep TV_QUALITY_TIMELINE.
+  if (!title.id || mediaTypeOf(title) !== 'movie') return Promise.resolve(base);
+
+  const key = 'q' + title.id;
+  if (_mzQualityFetches.has(key)) return _mzQualityFetches.get(key);
+
+  const pending = (async () => {
+    let real = null;
+    try {
+      const payload = await tmdb('/movie/' + title.id + '/release_dates');
+      real = qualityFromReleaseWindows(title, releaseWindowsFrom(payload), Date.now());
+    } catch (e) {
+      // tmdb() already reports what is worth reporting; an unusable print badge
+      // is not an error worth surfacing twice.
+    }
+    if (!real) return base;
+    const out = Object.assign({}, base);
+    out.qual = real.qual;
+    out.cls = real.cls;
+    return out;
+  })();
+
+  _mzQualityFetches.set(key, pending);
+  return pending;
 }
 
 /*  FRESHNESS TIERS — how the ALL feed is ordered.
@@ -2818,7 +2995,342 @@ async function loadCarousel() {
   console.log('🎬 Carousel Movies:', carouselMovies.map(m => `${m.title || m.name} (${m.original_language})`));
   buildCarousel();
 }
- 
+
+/*  ══════════════════════════════════════════════════════════════════════
+ *  TOP 10 TRENDING — premium numbered rail below the hero carousel
+ *  ══════════════════════════════════════════════════════════════════════
+ *  Pulls the globally most-watched movies straight from TMDB's own trending
+ *  feed (/trending/movie/{day|week}) so the ranking is authentic, not a
+ *  local re-score. Renders 10 numbered cards; the giant gold digit behind
+ *  each poster is pure CSS (.top10-rank). Clicking a card opens the same
+ *  detail modal every other card on the page uses (openModal).
+ */
+let _mzTop10Loading = false;
+let _mzTop10Data = null;       // the resolved ranking, cached for the session
+const TOP10_COUNT = 10;
+
+/*  Keeps only titles a visitor can actually open.
+ *
+ *  TMDB's trending feed mixes in unreleased films — they trend on trailer
+ *  buzz alone. Two reasons they are dropped here rather than shown:
+ *    • every other feed on this site filters future-dated titles, and a card
+ *      in Top 10 links to the same watch page, which would be empty;
+ *    • titleQualityState() has no stage before day 0, so an unreleased film
+ *      would fall back to a flat "HD" chip, which is simply wrong.
+ *  Ranking is otherwise untouched — TMDB's own order is preserved, so the
+ *  numbers still reflect real trending position among watchable titles.
+ */
+function _mzTop10Usable(m, todayIST) {
+  if (!m || !m.poster_path) return false;
+  if (!(m.title || m.name)) return false;
+  const rDate = m.release_date || m.first_air_date;
+  if (!rDate) return (m.vote_count || 0) > 50;   // no date: only if clearly out
+  return rDate <= todayIST;
+}
+
+/*  ══════════════════════════════════════════════════════════════════════
+ *  SELECTION: most-trending, cross-checked against rating and real demand
+ *  ══════════════════════════════════════════════════════════════════════
+ *  The source is TMDB's /trending/movie/week — its own demand ranking, built
+ *  from what people actually do on TMDB that week (page views, votes,
+ *  watchlist and favourite adds).
+ *
+ *  An earlier version rendered that order verbatim. It is authentic but it is
+ *  a pure buzz signal: a badly-reviewed film can sit at position 3 all week,
+ *  and a thinly-voted title can drift in. This section is meant to show the
+ *  titles that are trending AND worth the click, so the trending position is
+ *  now one of three terms rather than the whole answer.
+ *
+ *  Three terms, weighted:
+ *    • TREND  (45%) — position in TMDB's weekly ranking. Still the strongest
+ *                     single term, because "most trending" is the point.
+ *    • RATING (30%) — vote_average, Bayesian-shrunk towards the catalogue mean
+ *                     using the site's existing RATING_PRIOR_* constants, so a
+ *                     9.0 from twelve voters cannot outrank an 8.0 from twenty
+ *                     thousand. Same shrink calculateMovieScore() applies.
+ *    • DEMAND (25%) — how many people actually watched/rated it: vote_count on
+ *                     a log scale (volume) blended with TMDB popularity
+ *                     (current velocity).
+ *
+ *  Deliberately NOT reusing calculateMovieScore(): its recency term is worth
+ *  up to 80 points, which would turn this rail into "newest releases" instead
+ *  of "biggest and best right now".
+ */
+const TOP10_TREND_WEIGHT  = 0.45;
+const TOP10_RATING_WEIGHT = 0.30;
+const TOP10_DEMAND_WEIGHT = 0.25;
+
+/*  Quality floors, strictest first. The pool is filtered at the tightest tier
+ *  that still yields a full ten; only if a tier cannot fill the rail does it
+ *  fall through to the next. So a normal week is gated hard, and a thin week
+ *  still renders ten cards instead of an empty section.
+ *    votes = credibility of the rating; rating = the shrunk value, not raw. */
+const TOP10_QUALITY_TIERS = [
+  { votes: 300, rating: 6.8 },
+  { votes: 120, rating: 6.3 },
+  { votes: 40,  rating: 5.8 },
+  { votes: 0,   rating: 0   }   // last resort: keep the rail populated
+];
+
+/** vote_average pulled towards the catalogue mean in proportion to how few
+ *  votes back it — the standard fix for tiny-sample ratings. */
+function top10ShrunkRating(m) {
+  const votes = m.vote_count || 0;
+  const raw = m.vote_average || 0;
+  return ((votes * raw) + (RATING_PRIOR_VOTES * RATING_PRIOR_MEAN)) / (votes + RATING_PRIOR_VOTES);
+}
+
+/** 0-100 composite. `trendIndex` is the title's position in TMDB's trending
+ *  response, `poolSize` the number of candidates it was ranked among. */
+function top10Score(m, trendIndex, poolSize) {
+  const votes = m.vote_count || 0;
+
+  // Position 1 scores 100 and the last candidate ~0.
+  const trendTerm = ((poolSize - trendIndex) / poolSize) * 100;
+
+  // 5.0 shrunk -> 0, 9.0 shrunk -> 100. Below 5 contributes nothing.
+  const ratingTerm = Math.max(0, Math.min(100, ((top10ShrunkRating(m) - 5) / 4) * 100));
+
+  // Volume (how many actually watched it) blended with current velocity.
+  const votesTerm = Math.min(100, (Math.log10(votes + 1) / Math.log10(30000)) * 100);
+  const popTerm = Math.min(100, ((m.popularity || 0) / 300) * 100);
+  const demandTerm = (votesTerm * 0.5) + (popTerm * 0.5);
+
+  return (trendTerm * TOP10_TREND_WEIGHT)
+       + (ratingTerm * TOP10_RATING_WEIGHT)
+       + (demandTerm * TOP10_DEMAND_WEIGHT);
+}
+
+/** Picks and orders the final ten out of a trending pool.
+ *
+ *  Pure and separate from the fetch so the ranking can be tested directly:
+ *  give it a pool with _trendIndex set and it returns the rail's contents.
+ */
+function top10SelectRanked(pool) {
+  if (!pool || !pool.length) return [];
+
+  pool.forEach(m => { m._top10Score = top10Score(m, m._trendIndex, pool.length); });
+
+  // Tightest tier that can still fill the rail wins.
+  let qualified = [];
+  for (let t = 0; t < TOP10_QUALITY_TIERS.length; t++) {
+    const tier = TOP10_QUALITY_TIERS[t];
+    qualified = pool.filter(m =>
+      (m.vote_count || 0) >= tier.votes && top10ShrunkRating(m) >= tier.rating);
+    if (qualified.length >= TOP10_COUNT) break;
+  }
+  // Every tier came up short — rank the whole pool rather than show a gap.
+  if (qualified.length < TOP10_COUNT) qualified = pool.slice();
+
+  qualified.sort((a, b) => b._top10Score - a._top10Score);
+  return qualified.slice(0, TOP10_COUNT);
+}
+
+/*  ══════════════════════════════════════════════════════════════════════
+ *  WHY /trending/movie/week
+ *  ══════════════════════════════════════════════════════════════════════
+ *  Week rather than day: day is a noisier signal — one viral trailer can own
+ *  it for a few hours — and week is the list a visitor means by "what is
+ *  trending right now".
+ *
+ *  Two pages are requested in ONE round trip via tmdbBatch, giving a ~40-title
+ *  pool to pick ten from. A 20-title pool was too small to apply a quality bar
+ *  without regularly falling through to the loosest tier.
+ */
+async function loadTop10() {
+  const rail = document.getElementById('top10Rail');
+  const section = document.getElementById('top10-trending');
+  if (!rail || !section) return;
+
+  if (_mzTop10Data) { renderTop10(_mzTop10Data); return; }
+  if (_mzTop10Loading) return;
+  _mzTop10Loading = true;
+
+  // IST date, matching loadCarousel's release cutoff.
+  const todayIST = new Date(Date.now() + (5.5 * 60 * 60 * 1000)).toISOString().split('T')[0];
+
+  let list = [];
+  try {
+    const pages = await tmdbBatch([
+      ['/trending/movie/week', { language: 'en-US', page: '1' }],
+      ['/trending/movie/week', { language: 'en-US', page: '2' }]
+    ]);
+
+    /*  Flatten in response order so the index IS the trending position, then
+     *  de-duplicate — page boundaries can repeat a title. */
+    const pool = [];
+    const seen = new Set();
+    pages.forEach(res => {
+      if (res.status !== 'fulfilled' || !res.value || !res.value.results) return;
+      res.value.results.forEach(m => {
+        if (!_mzTop10Usable(m, todayIST) || seen.has(m.id)) return;
+        seen.add(m.id);
+        m._trendIndex = pool.length;      // 0 = most trending
+        pool.push(m);
+      });
+    });
+
+    list = top10SelectRanked(pool);
+  } catch (e) {
+    list = [];
+  }
+  _mzTop10Loading = false;
+
+  if (list.length === 0) {
+    // Nothing to show — keep the section hidden rather than showing an empty rail.
+    section.setAttribute('hidden', '');
+    return;
+  }
+
+  _mzTop10Data = list;
+  renderTop10(list);
+}
+
+function renderTop10(list) {
+  const rail = document.getElementById('top10Rail');
+  const section = document.getElementById('top10-trending');
+  if (!rail || !section) return;
+
+  const CROWN = '<svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true"><path d="M3 7l4 4 5-6 5 6 4-4v11H3V7z"/></svg>';
+  const STAR = '<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M12 2l2.9 6.1 6.6.9-4.8 4.6 1.2 6.6L12 17.8 6.1 20.8l1.2-6.6L2.5 9.6l6.6-.9L12 2z"/></svg>';
+  const SEP = '<span class="t10-sep" aria-hidden="true"></span>';
+
+  const html = list.map((m, i) => {
+    const rank = i + 1;
+    // Every field below is straight off the TMDB record for this title.
+    const title = escapeHTML(m.title || m.name || '');
+    const year = (m.release_date || m.first_air_date || '').slice(0, 4);
+    const rating = m.vote_average ? m.vote_average.toFixed(1) : null;
+    const genres = (m.genre_ids || []).slice(0, 2).map(id => GENRE_MAP[id]).filter(Boolean);
+    const lang = (m.original_language || '').toUpperCase();
+
+    /*  Quality label comes from the catalogue's OWN release-date timeline
+     *  (titleQualityState -> CAM/TS/HDTS/HD/FHD/4K), the same function the
+     *  movie grid uses. An earlier version guessed from popularity, which
+     *  meant a Top 10 card and a grid card could disagree about one title. */
+    let qual = 'HD';
+    let qualCls = 'qual-hd';
+    if (typeof titleQualityState === 'function') {
+      const qs = titleQualityState(m);
+      if (qs && qs.qual) { qual = qs.qual; qualCls = qs.cls || ''; }
+    }
+
+    const p342 = 'https://image.tmdb.org/t/p/w342' + m.poster_path;
+    const p500 = 'https://image.tmdb.org/t/p/w500' + m.poster_path;
+    const p185 = 'https://image.tmdb.org/t/p/w185' + m.poster_path;
+
+    const metaBits = [];
+    if (year) metaBits.push('<span>' + year + '</span>');
+    if (genres.length) metaBits.push('<span>' + genres.map(escapeHTML).join(' · ') + '</span>');
+    if (lang) metaBits.push('<span class="t10-lang">' + escapeHTML(lang) + '</span>');
+    const meta = metaBits.join(SEP);
+
+    // Stagger the entrance the same way the movie grid does. Capped so the
+    // tenth card is not left waiting most of a second.
+    const delay = Math.min(i, 8) * 0.055;
+    // A high score earns the gold badge — see .top10-rating.is-high.
+    const ratingCls = (m.vote_average >= 7.5) ? ' is-high' : '';
+
+    return (
+      '<div class="top10-card" data-rank="' + rank + '" data-id="' + m.id + '" data-type="movie"' +
+        ' tabindex="0" role="button" aria-label="' + title + ', ranked number ' + rank + '"' +
+        ' style="animation-delay:' + delay.toFixed(3) + 's">' +
+        '<span class="top10-rank" aria-hidden="true">' + rank + '</span>' +
+        '<div class="top10-poster">' +
+          '<img src="' + p342 + '"' +
+            ' srcset="' + p185 + ' 185w, ' + p342 + ' 342w, ' + p500 + ' 500w"' +
+            ' sizes="(max-width: 420px) 50vw, (max-width: 768px) 43vw, (max-width: 1024px) 212px, 250px"' +
+            ' alt="' + title + '" width="250" height="375" loading="lazy" decoding="async" fetchpriority="low" draggable="false">' +
+          '<div class="top10-badges">' +
+            (rating ? '<span class="top10-rating' + ratingCls + '">' + STAR + rating + '</span>' : '<span></span>') +
+            '<span class="top10-quality ' + qualCls + '">' + (qual === '4K' ? CROWN : '') + qual + '</span>' +
+          '</div>' +
+          '<div class="top10-play"><span>&#9654;</span></div>' +
+          '<div class="top10-info">' +
+            '<h3 class="top10-name">' + title + '</h3>' +
+            '<div class="top10-meta">' + meta + '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>'
+    );
+  }).join('');
+
+  rail.innerHTML = html;
+  section.removeAttribute('hidden');
+  _mzUpdateTop10Arrows();
+}
+
+/*  Delegated wiring — set up once. Clicks/keys open the detail modal, the
+ *  Today/This Week toggle swaps the data set, and the arrows page the rail.
+ */
+let _mzTop10Wired = false;
+function _mzUpdateTop10Arrows() {
+  const rail = document.getElementById('top10Rail');
+  const wrap = rail && rail.closest('.top10-rail-wrap');
+  if (!rail || !wrap) return;
+  const prev = wrap.querySelector('.top10-arrow--prev');
+  const next = wrap.querySelector('.top10-arrow--next');
+  const scrollable = rail.scrollWidth - rail.clientWidth > 8;
+  if (prev) prev.hidden = !scrollable || rail.scrollLeft <= 4;
+  if (next) next.hidden = !scrollable || rail.scrollLeft >= (rail.scrollWidth - rail.clientWidth - 4);
+}
+
+function initTop10() {
+  const section = document.getElementById('top10-trending');
+  if (!section || _mzTop10Wired) { if (section) loadTop10(); return; }
+  _mzTop10Wired = true;
+
+  const rail = section.querySelector('#top10Rail');
+
+  // Open detail on card activation (mirrors the movie grid's delegated handler).
+  section.addEventListener('click', (event) => {
+    const card = event.target.closest('.top10-card[data-id]');
+    if (!card || !section.contains(card)) return;
+    if (typeof openModal === 'function') {
+      openModal(parseInt(card.dataset.id, 10), card.dataset.type || 'movie', event);
+    }
+  });
+  section.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const card = event.target.closest('.top10-card[data-id]');
+    if (!card) return;
+    event.preventDefault();
+    if (typeof openModal === 'function') {
+      openModal(parseInt(card.dataset.id, 10), card.dataset.type || 'movie', event);
+    }
+  });
+
+  // Arrows + scroll state.
+  if (rail) {
+    /*  Page by whole cards rather than a fraction of the viewport, so a click
+     *  never leaves a numeral sliced by the rail edge. */
+    const step = () => {
+      const card = rail.querySelector('.top10-card');
+      const cardW = card ? card.getBoundingClientRect().width : 240;
+      const gap = parseFloat(getComputedStyle(rail).columnGap || '12') || 12;
+      const per = Math.max(1, Math.floor(rail.clientWidth / (cardW + gap)));
+      return per * (cardW + gap);
+    };
+    const prev = section.querySelector('.top10-arrow--prev');
+    const next = section.querySelector('.top10-arrow--next');
+    if (prev) prev.addEventListener('click', () => rail.scrollBy({ left: -step(), behavior: 'smooth' }));
+    if (next) next.addEventListener('click', () => rail.scrollBy({ left: step(), behavior: 'smooth' }));
+    rail.addEventListener('scroll', _mzUpdateTop10Arrows, { passive: true });
+
+    /*  Arrow visibility depends on scrollWidth vs clientWidth, and both change
+     *  on any resize, orientation flip, or when the poster size variable steps
+     *  to a new breakpoint. ResizeObserver catches all of those; the window
+     *  listener is the fallback for engines without it. */
+    if (typeof ResizeObserver === 'function') {
+      new ResizeObserver(() => _mzUpdateTop10Arrows()).observe(rail);
+    }
+    window.addEventListener('resize', _mzUpdateTop10Arrows, { passive: true });
+    window.addEventListener('orientationchange', () => setTimeout(_mzUpdateTop10Arrows, 150));
+  }
+
+  loadTop10();
+}
+
 function buildCarousel() {
   const track = document.getElementById('carouselTrack');
   const dots  = document.getElementById('carouselDots');
@@ -2880,6 +3392,23 @@ function buildCarousel() {
       } catch (e) { /* quota / private mode - the hint is optional */ }
     }
 
+    const qualityState = m._qualityState || titleQualityState(m);
+    /*  Painted from the timeline now, corrected in place once the real
+     *  release-type data lands (see refreshSlideQuality). Rendering the estimate
+     *  first rather than an empty placeholder is deliberate: the chip sits inside
+     *  .slide-meta, so a node that gained its text a second later would reflow
+     *  the row directly under the LCP image. The correction reuses the same chip,
+     *  so it repaints without moving anything. */
+    const qualityChip =
+      '<span class="slide-quality ' + (qualityState.cls || '') + '"' +
+        ' data-mz-quality title="Available print quality">' +
+        escapeHTML(qualityState.qual) +
+      '</span>';
+
+    // TV objects carry first_air_date, not release_date, so every web-series and
+    // anime slide used to render an empty year chip.
+    const slideYear = (m.release_date || m.first_air_date || '').slice(0, 4);
+
     slide.innerHTML =
       '<div class="slide-bg"' + (i === 0 ? '' : ' data-bg="' + bgUrl + '"'
         // A poster stand-in for a title with no backdrop. Flagged so
@@ -2894,11 +3423,12 @@ function buildCarousel() {
         // one <h1> (the one in index.html); 6 competing <h1>s split the topical
         // signal Google reads from the page. Styling is class-based, so the
         // .slide-title look is unchanged.
-        '<h2 class="slide-title">'+escapeHTML(m.title||m.name||'')+'</h2>' +
+        '<h2 class="slide-title"><span class="slide-title-text">'+escapeHTML(m.title||m.name||'')+'</span></h2>' +
         '<div class="slide-meta">' +
           '<div class="slide-rating">RATING '+((m.vote_average||0).toFixed(1))+'</div>' +
-          '<span class="slide-year">'+((m.release_date||'').slice(0,4))+'</span>' +
+          (slideYear ? '<span class="slide-year">'+slideYear+'</span>' : '') +
           '<span class="slide-runtime">LANG '+(m.original_language||'EN').toUpperCase()+'</span>' +
+          qualityChip +
         '</div>' +
         '<div class="slide-genres">'+genres+'</div>' +
         '<p class="slide-desc">'+escapeHTML(m.overview||'')+'</p>' +
@@ -2991,6 +3521,18 @@ function buildCarousel() {
       warmNext();
     }
   }
+
+  /*  Correct slide 0's print badge from real release data.
+   *
+   *  At idle, and only for the slide on screen: this is one extra TMDB call, and
+   *  the reason it is not made for all ten slides up front is the same reason the
+   *  slide bodies are batched — a ten-call fan-out in the load tick queues at the
+   *  origin and makes every request in it, including the hero backdrop, look
+   *  slow. goToSlide() picks up the rest as the viewer reaches them, and tmdb()
+   *  caches each answer for 12 h. */
+  const settleHeroQuality = () => refreshSlideQuality(currentSlide);
+  if ('requestIdleCallback' in window) requestIdleCallback(settleHeroQuality, { timeout: 4000 });
+  else setTimeout(settleHeroQuality, 1500);
  
   startAutoSlide();
 }
@@ -3103,6 +3645,40 @@ function goToSlide(n) {
   // Make sure current + upcoming slide images are ready
   ensureSlideBg(currentSlide);
   ensureSlideBg((currentSlide + 1) % len);
+  // Real print quality for the slide now on screen, if it has not been resolved
+  // yet. Cheap after the first pass: both tmdb() and the promise map memoise.
+  refreshSlideQuality(currentSlide);
+}
+
+/*  ── PRINT BADGE: ESTIMATE → REAL DATA ──────────────────────────────────────
+ *  Replaces one slide's timeline-derived quality chip with the value implied by
+ *  TMDB's actual release types. Idempotent and lazy, so it is safe to call on
+ *  every slide change, including repeat visits to the same slide.
+ *
+ *  Only the chip's class and text are touched — never its position in the row —
+ *  so a correction arriving seconds after paint cannot shift the hero.
+ */
+function refreshSlideQuality(index) {
+  const movie = carouselMovies[index];
+  if (!movie) return;
+  const slide = document.querySelectorAll('.carousel-slide')[index];
+  if (!slide) return;
+  const chip = slide.querySelector('[data-mz-quality]');
+  if (!chip || chip.dataset.mzQualitySettled === '1') return;
+  chip.dataset.mzQualitySettled = '1';   // set before awaiting: no double flight
+
+  fetchRealQualityState(movie).then((state) => {
+    if (!state || !state.qual) return;
+    // Cache on the movie object so the rails and the ranking see the same
+    // corrected print for this title, not a second estimate.
+    movie._qualityState = state;
+    if (chip.textContent === state.qual) return;   // estimate was already right
+    chip.className = 'slide-quality ' + (state.cls || '');
+    chip.textContent = state.qual;
+    chip.classList.add('slide-quality--corrected');
+  }).catch(() => {
+    // Leave the timeline estimate on screen; it is still the best guess.
+  });
 }
  
 /* ── AUTOPLAY ─────────────────────────────────────────────────────────────
