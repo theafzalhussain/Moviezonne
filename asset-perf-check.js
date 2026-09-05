@@ -124,7 +124,38 @@ const CRITICAL_WIRE_BUDGET = 115 * 1024;
  *  This is a regression alarm, not an optimisation target — but if it needs
  *  raising again, that is the signal to go and delete something instead.
  */
-const CRITICAL_PARSE_BUDGET = 435 * 1024;
+/*  Raised again, 435 -> 440 KB, for the carousel category quotas (Sep 2026).
+ *
+ *  The note below said that if this ever needed raising a second time, that was
+ *  the signal to go and delete something instead. That was tried first and it is
+ *  worth writing down what came of it, so the next person does not repeat it:
+ *
+ *    - one genuinely redundant `.low-end-mode *` block was found and deleted
+ *      last commit; that bought 135 bytes;
+ *    - a scan for exact duplicate selector+body pairs in the minified CSS found
+ *      none - cleancss already collapses those;
+ *    - terser `passes=2` and `passes=3` were measured and save 244 and 249 bytes,
+ *      which is not worth changing the build for;
+ *    - trimming the new module itself (array literals instead of {min,max}
+ *      objects, shorter property names) was estimated at ~250 bytes, against the
+ *      ~1330 needed.
+ *
+ *  So there is no dead weight of the required size left to remove, and the
+ *  feature - web series and anime finally reaching the hero, with per-category
+ *  quotas and a rating/demand bar - is not optional decoration.
+ *
+ *  There ARE two functions that nothing calls: loadSearchCatalog (~1.9k of
+ *  source) and togglePlayerLang. They are deliberately left alone. Deleting
+ *  someone's unreferenced feature code to win a byte budget is a product
+ *  decision, not a perf one, and it needs an owner's yes. If that yes comes,
+ *  removing them should pay this raise back and then some.
+ *
+ *  Also noted while looking: interleaveFeedByType is exercised by
+ *  all-feed-ranking.browser.test.html but is never called by the app. Either the
+ *  feed lost its interleave step or the function is vestigial - worth a look,
+ *  independently of this budget.
+ */
+const CRITICAL_PARSE_BUDGET = 440 * 1024;
 
 check('the first-paint transfer stays inside its brotli budget', () => {
   const parts = ['index.html', 'moviezone.min.css', 'moviezone.min.js'];
