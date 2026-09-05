@@ -698,7 +698,7 @@ async function fetchTmdbJson(path, env, ctx) {
   const text = await response.text();
 
   if (env.TMDB_CACHE && response.status === 200) {
-    ctx.waitUntil(env.TMDB_CACHE.put(cacheKey, text, { expirationTtl: TMDB_CACHE_TTL }));
+    ctx.waitUntil(env.TMDB_CACHE.put(cacheKey, text, { expirationTtl: tmdbCacheTtl(path) }));
   }
 
   return { status: response.status, text, cache: 'MISS' };
@@ -713,7 +713,11 @@ async function handleTmdbProxy(request, env, ctx, url) {
     headers: {
       'content-type': 'application/json',
       'x-cache': result.cache,
-      'cache-control': 'public, max-age=21600'    // ← 3600 se 21600 kar do
+      /*  Browser/CDN freshness follows the same split as the KV entry. Six hours
+       *  on a discovery list means a visitor can be answered from their own HTTP
+       *  cache with a body that predates today's releases, which defeats the
+       *  point of shortening the KV TTL at all. */
+      'cache-control': 'public, max-age=' + (isVolatileTmdbPath(path) ? 1800 : 21600)
     }
   });
 }
@@ -744,8 +748,45 @@ async function handleTmdbProxy(request, env, ctx, url) {
  *  never taken from input.
  */
 const MAX_BATCH_PATHS = 40;
-const TMDB_CACHE_TTL = 604800;  // 7 days — movie data rarely changes
-const BATCH_CACHE_TTL = 86400;  // 24 hours — homepage plan same all day
+const TMDB_CACHE_TTL = 604800;  // 7 days — a title's own record rarely changes
+
+/*  ── AUTO-UPDATE: THE TTL HAS TO KNOW WHAT IT IS CACHING ──
+ *
+ *  One TTL for every TMDB path was the reason a new release could take a week to
+ *  reach the home page. 7 days is a sensible number for /movie/{id} — runtime,
+ *  cast and overview do not change — and an actively harmful one for
+ *  /trending/movie/week, /movie/now_playing and the /discover queries the hero
+ *  and the feeds are assembled from. Those ARE the "what is out right now"
+ *  answer, so caching them for a week freezes the site's front page for a week:
+ *  a Friday release would first appear the following Friday.
+ *
+ *  Discovery lists therefore expire in 3 hours and everything else keeps 7 days.
+ *  Cost is bounded and small: the discovery plan is shared by every visitor, so
+ *  this is at most 8 fan-outs a day for the whole site, and the per-title
+ *  requests — the overwhelming majority — are unchanged.
+ *
+ *  The batch entry moves for the same reason. It holds the assembled first screen
+ *  and is keyed on the plan, so leaving it at 24h would have kept serving a
+ *  day-old hero no matter how fresh the individual entries behind it were: the
+ *  shortest TTL in the chain is the only one that matters, and the batch sits in
+ *  front of all of them.
+ */
+const TMDB_VOLATILE_CACHE_TTL = 10800;   // 3 hours — release-sensitive lists
+const BATCH_CACHE_TTL = 10800;           // 3 hours — matches the lists inside it
+
+/*  /movie/top_rated is deliberately not here: it is an all-time ranking and
+ *  barely moves, so it keeps the long TTL. Anchored at the start of the path so
+ *  a title id can never be mistaken for a list name. */
+const VOLATILE_TMDB_PATH_RE = /^\/(?:trending|discover)\/|^\/movie\/(?:popular|now_playing|upcoming)\b|^\/tv\/(?:popular|airing_today|on_the_air)\b/;
+
+function isVolatileTmdbPath(path) {
+  return VOLATILE_TMDB_PATH_RE.test(String(path || ''));
+}
+
+/** KV lifetime for one TMDB path. */
+function tmdbCacheTtl(path) {
+  return isVolatileTmdbPath(path) ? TMDB_VOLATILE_CACHE_TTL : TMDB_CACHE_TTL;
+}
 
 
 
