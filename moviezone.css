@@ -1688,9 +1688,16 @@ body {
   }
 }
 
+/*  Sits at 19% from the bottom, not 13%.
+    At 13% the block was tucked into the bottom edge with the dots and the
+    progress bar crowding it, and the top two thirds of a 95vh hero carried
+    nothing at all. Lifting it reads as composed rather than bottom-anchored and
+    gives the backdrop room to be the image it is. Checked against the tallest
+    case the layout can produce - an xlong two-line title plus a three-line
+    description - so the buttons still clear #hero's bottom edge. */
 .slide-content {
   position: absolute;
-  bottom: 13%;
+  bottom: 19%;
   left: 5.5%;
   max-width: 680px;
   transform: translateY(40px);
@@ -1704,43 +1711,69 @@ body {
   opacity: 1;
 }
 
+/* ── TRENDING BADGE ──
+   Black glass with a hairline gold edge, not a coloured pill.
+   It went red-gradient -> flat red -> this. Both earlier versions had the same
+   problem: a saturated block of colour is the loudest thing in the hero, and it
+   was sitting directly above a white Watch Now button competing for the same
+   attention. Near-black with a thin warm border reads as a mark of quality
+   instead of an advert, and it ties the badge to the gold rating and quality
+   chip below it so the whole block looks like one designed system. */
 .slide-badge {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
-  background: linear-gradient(135deg, var(--accent), var(--red));
-  padding: 0.28rem 1rem;
+  gap: 0.5rem;
+  background: linear-gradient(135deg, rgba(58, 44, 16, 0.95) 0%, rgba(20, 15, 6, 0.92) 45%, rgba(8, 7, 4, 0.9) 100%);
+  border: 1px solid rgba(245, 197, 24, 0.5);
+  color: #ffdc94;
+  padding: 0.42rem 1.05rem;
   border-radius: 50px;
   font-size: 0.7rem;
   font-weight: 800;
-  letter-spacing: 2px;
+  letter-spacing: 1.6px;
   text-transform: uppercase;
-  margin-bottom: 1.1rem;
-  box-shadow: 0 8px 24px rgba(124, 58, 237, 0.3);
+  margin-bottom: 1.2rem;
+  letter-spacing: 1.9px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.55),
+    0 0 22px rgba(245, 197, 24, 0.13),
+    inset 0 1px 0 rgba(255, 226, 158, 0.28),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.4);
+}
+
+/*  The gold mark that replaced the emoji the badge text used to carry.
+    The emoji were authored in the _badge strings and rendered as "??" the moment
+    anything re-encoded the bundle - and they were platform-drawn cartoons sitting
+    next to gold letterforms, which is not what luxury looks like. One crisp
+    four-point star, same gold as the border, is drawn per slide instead. */
+.slide-badge-mark {
+  flex: 0 0 auto;
+  color: var(--gold);
+  filter: drop-shadow(0 0 5px rgba(245, 197, 24, 0.6));
 }
 
 
 /* ── SLIDE TITLE ──
-   The movie name is the thing a viewer reads first, so it gets three fixes on
-   top of the old plain-white treatment:
+   Plain white, no gradient fill and no rule underneath it.
+   An earlier pass gave the name a white→gold gradient and an animated accent
+   bar. Against a real backdrop that was worse, not better: the gold half sank
+   into warm-lit posters (this hero is mostly amber and firelight), and the bar
+   ate a line of height in a 95vh box that .slide-desc and .slide-actions were
+   already competing for. Solid white on a layered shadow is what actually holds
+   contrast over an arbitrary photograph.
 
-   1. A warm white→gold gradient fill, behind @supports so any engine without
-      background-clip:text keeps the solid #fff declared above it. drop-shadow()
-      rather than text-shadow, because a shadow on transparent-filled text is
-      painted from the glyph alpha and reads muddier than a filter on the box.
-   2. text-wrap: balance + a 2-line clamp. Long titles ("Mission: Impossible -
-      The Final Reckoning") used to wrap into three ragged lines at 7rem and
-      push .slide-actions past the bottom of #hero on short viewports.
-   3. The accent rule under the name draws itself in when the slide activates,
-      which is what makes the name feel like it lands rather than just appear. */
+   Kept from that pass: text-wrap: balance and the 2-line clamp, because long
+   titles used to wrap to three ragged lines at 7rem and push the buttons out of
+   the hero. Bebas Neue is asserted by cwv.browser.test.html - do not swap it. */
 .slide-title {
   font-family: 'Bebas Neue', sans-serif;
-  font-size: clamp(3.5rem, 8.5vw, 7rem);
-  line-height: 0.95;
-  letter-spacing: 1.5px;
+  font-size: clamp(3.5rem, 8.5vw, 6.6rem);
+  line-height: 0.92;
+  letter-spacing: 1px;
   color: #fff;
-  margin-bottom: 1.1rem;
-  text-shadow: 0 8px 40px rgba(0, 0, 0, 0.7), 0 2px 10px rgba(0, 0, 0, 0.5);
+  margin-bottom: 0.85rem;
+  text-shadow: 0 4px 18px rgba(0, 0, 0, 0.85), 0 12px 48px rgba(0, 0, 0, 0.6);
   position: relative;
   text-wrap: balance;
   overflow-wrap: break-word;
@@ -1753,92 +1786,161 @@ body {
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-wrap: balance;
+  /*  Both of these are declared EXPLICITLY, not left to inherit.
+
+      The sheen rule below clips a gradient to this text, which requires
+      transparent fill. Its guard (html:not(.low-end-mode)) does correctly stop
+      the rule from matching on weak devices - verified by walking the matched
+      rules in a real browser - and yet the computed fill still came back
+      transparent there, inherited down the ancestor chain. A title that is
+      transparent with no gradient behind it is an invisible title, i.e. a blank
+      hero on exactly the devices least able to recover from it.
+
+      So the readable state is stated outright and the sheen overrides it by
+      specificity, rather than the readable state being "whatever is left when
+      the sheen rule is absent". Cheap insurance against an unpaintable hero. */
+  color: #fff;
+  -webkit-text-fill-color: #fff;
 }
 
-@supports ((-webkit-background-clip: text) or (background-clip: text)) {
-  .slide-title-text {
-    background: linear-gradient(180deg, #fff 0%, #fff 52%, #ffe9ae 100%);
+/*  ── TITLE SHEEN ──
+    A gold highlight sweeps across the movie name once, each time a slide becomes
+    the active one.
+
+    Why a sweep and not a gold gradient fill. An earlier pass DID tint the whole
+    title white-to-gold permanently, and it had to come out: over a warm-lit
+    backdrop the gold half of the letterforms sank into the image. A moving
+    highlight gives the same expensive look without ever leaving the text less
+    readable than solid white - the gold band is only over a third of the word at
+    any instant, and when the animation finishes the title is plain white again.
+
+    One-shot, not infinite. goToSlide() adds and removes .active, so the animation
+    restarts on every slide change for free. An infinite loop would repaint the
+    largest text on the page forever for a decoration nobody is looking at after
+    the first second.
+
+    Both guards matter and neither is optional:
+      - html:not(.low-end-mode) keeps background-clip: text away from weak devices
+        entirely. .low-end-mode * forces animation: none, and a clipped title
+        with no animation would be a transparent title.
+      - prefers-reduced-motion is a sweep across the biggest element on screen. */
+@media (prefers-reduced-motion: no-preference) {
+  html:not(.low-end-mode) .carousel-slide.active .slide-title-text {
+    background: linear-gradient(100deg, #fff 34%, #ffeec0 50%, #fff 66%);
+    background-size: 260% 100%;
+    background-position: 130% 0;
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
     color: transparent;
-    filter: drop-shadow(0 6px 26px rgba(0, 0, 0, 0.75)) drop-shadow(0 1px 4px rgba(0, 0, 0, 0.6));
+    /*  text-shadow is painted from the glyph alpha and survives the clip, but it
+        reads muddy under transparent fill - drop-shadow on the box is cleaner. */
+    filter: drop-shadow(0 5px 20px rgba(0, 0, 0, 0.9));
+    animation: titleSheen 2.4s cubic-bezier(0.22, 0.61, 0.36, 1) 0.45s 1 forwards;
   }
 
-  .slide-title {
-    /* The gradient carries the shadow now; keeping both double-darkened the
-       glyph edges on light backdrops. */
+  html:not(.low-end-mode) .carousel-slide.active .slide-title {
+    /*  The sweep carries its own shadow; keeping the h2's as well double-darkened
+        the glyph edges for the duration of the animation. */
     text-shadow: none;
   }
 }
 
-.slide-title::after {
-  content: '';
-  display: block;
-  width: 0;
-  height: 4px;
-  margin-top: 1rem;
-  border-radius: 999px;
-  background: linear-gradient(90deg, var(--gold), var(--red) 65%, transparent);
-  box-shadow: 0 0 14px rgba(245, 197, 24, 0.55);
-  transition: width 0.75s var(--ease-spring);
+@keyframes titleSheen {
+  from { background-position: 130% 0; }
+  to   { background-position: -30% 0; }
 }
 
-.carousel-slide.active .slide-title::after {
-  width: 120px;
+/*  Long-title size steps. Set from JS by character count (see buildOne) because
+ *  nothing else knows the string length before layout. Each step also tightens
+ *  letter-spacing slightly - Bebas Neue is already condensed, and at a smaller
+ *  size the wide tracking that suits a 6rem title starts to look loose.
+ *
+ *  Doubled-up selector (.slide-title.slide-title--long) on purpose: the mobile
+ *  breakpoints further down the file all set a plain `.slide-title { font-size }`,
+ *  and with equal specificity those later rules would win and silently disable
+ *  the whole feature below 1024px. The mins are tuned to stay BELOW the mobile
+ *  base of 2.5rem so a long title is never rendered larger than a short one. */
+.slide-title.slide-title--long {
+  font-size: clamp(2.2rem, 6.2vw, 4.7rem);
+  letter-spacing: 0.6px;
+}
+
+.slide-title.slide-title--xlong {
+  font-size: clamp(1.75rem, 4.8vw, 3.6rem);
+  letter-spacing: 0.3px;
+  line-height: 0.98;
 }
 
 .slide-meta {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  margin-bottom: 1.1rem;
+  gap: 0.65rem;
+  margin-bottom: 1.15rem;
   flex-wrap: wrap;
 }
 
+/* ── RATING ──
+   Gold star + the number, no chip and no "RATING" label. The label was pure
+   redundancy next to a star, and dropping the box lets the number sit as the
+   brightest thing in the row, which is the one figure people actually scan for. */
 .slide-rating {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  background: rgba(245, 197, 24, 0.14);
-  border: 1px solid rgba(245, 197, 24, 0.28);
-  padding: 0.38rem 0.85rem;
-  border-radius: 10px;
-  font-size: 0.9rem;
-  font-weight: 700;
   color: var(--gold);
-  box-shadow: 0 4px 16px rgba(245, 197, 24, 0.12);
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.75));
+}
+
+.slide-rating b {
+  color: #fff;
+  font-weight: 800;
+}
+
+/* Year sits as bare text beside the star, not as a chip: it is context, not a
+   property of the release, and boxing it made the row read as four equal badges
+   with no hierarchy. */
+.slide-year {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
 }
 
 /* ── META ROW CHIPS ──
-   RATING was a chip while the year and language beside it were bare grey text,
-   so the row read as one badge followed by two loose labels. They are all chips
-   now, which is also what lets the print-quality badge join the row without
-   looking bolted on.
+   Genres, language and print quality are the actual properties of the title, so
+   only these three are boxed. Neutral translucent fill with a hairline border —
+   deliberately quiet, so the white Watch Now button below stays the loudest
+   thing in the hero.
 
    No backdrop-filter here on purpose, unlike .genre-tag: these sit over the
-   darkest part of .slide-gradient where a blur is invisible, and four more
+   darkest part of .slide-gradient where a blur is invisible, and three more
    blurred layers inside #hero is a measurable cost on the phones that can least
    afford it. */
-.slide-year,
+.slide-genres,
 .slide-runtime,
 .slide-quality {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  padding: 0.38rem 0.8rem;
-  border-radius: 10px;
-  font-size: 0.85rem;
-  font-weight: 700;
-  letter-spacing: 0.6px;
+  padding: 0.34rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.4px;
   white-space: nowrap;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  color: var(--text2);
-}
-
-.slide-runtime {
-  color: var(--text3);
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  /*  Was var(--text2) here with var(--text3) overriding it on .slide-runtime.
+   *  --text3 is #555570, the dimmest token in the palette, so over a bright
+   *  backdrop the LANG label was effectively invisible. One shared near-white
+   *  for all three chips instead: genres, language and quality now carry equal
+   *  weight, which is what the row was meant to do. */
+  color: rgba(255, 255, 255, 0.84);
 }
 
 /* ── PRINT QUALITY BADGE ──
@@ -1847,13 +1949,25 @@ body {
    Resolved from TMDB's real release types — see fetchRealQualityState() in
    moviezone.js — with the day-count timeline as the fallback.
 
-   The colours are NOT redeclared here: .slide-quality is added to the existing
-   .top10-quality selector lists further down the file instead. Two copies of the
-   palette is how the same title ends up looking like two different prints in two
-   places on one page, and it costs parse weight for the privilege. */
+   ONE fixed colour for every label - CAM, TS, HDTS, HD, FHD and 4K all render
+   the same warm gold. It used to tint per label (red for CAM, green for FHD,
+   purple for 4K) and that was the problem: six different accent colours in a
+   five-item row made the hero look like a status dashboard, and a red chip beside
+   a white button read as a warning rather than information.
+
+   The tone is deliberately a step softer than .slide-rating's #ffc107 - the star
+   should still be the brightest thing in the row - and the label text itself is
+   what tells a viewer which print they get.
+
+   Note this is only the hero. .top10-quality keeps its loud per-label fills,
+   which is right there: that is a 60px badge on a poster thumbnail with no room
+   for text hierarchy, so colour has to do the work. */
 .slide-quality {
   text-transform: uppercase;
-  transition: background 0.35s ease, border-color 0.35s ease, color 0.35s ease;
+  font-weight: 700;
+  color: #e8be6a;
+  border-color: rgba(232, 190, 106, 0.38);
+  background: rgba(232, 190, 106, 0.11);
 }
 
 /* One short pulse when the estimate is replaced by the real release data, so
@@ -1869,23 +1983,14 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .slide-title::after,
-  .carousel-slide.active .slide-title::after {
-    width: 120px;
-    transition: none;
-  }
-
   .slide-quality--corrected {
     animation: none;
   }
 }
 
-.slide-genres {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
+/* .genre-tag is the modal's pill (openModal / upcoming detail). The carousel no
+   longer emits it - .slide-genres is a single chip now - but the class is still
+   live elsewhere, so it stays. */
 .genre-tag {
   padding: 0.3rem 0.82rem;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -1897,21 +2002,140 @@ body {
 }
 
 .slide-desc {
-  font-size: 1.05rem;
-  color: rgba(255, 255, 255, 0.82);
-  line-height: 1.72;
-  margin-bottom: 2rem;
+  font-size: 1rem;
+  color: rgba(255, 255, 255, 0.78);
+  line-height: 1.62;
+  /*  PADDING, not margin. The synopsis is the only multi-line block in the hero
+      and needs a visible break from the single-line chip row above it, or the two
+      read as one dense column.
+
+      margin-top was the first attempt and it did nothing at all: .slide-meta and
+      .slide-desc are adjacent siblings, so their vertical margins COLLAPSE to
+      max(1.15rem, 0.5rem) = 1.15rem - exactly the gap that was already there.
+      Measured 18px before and 18px after. Padding does not collapse, so the space
+      is real. Scaled down at the breakpoints, where vertical room is scarcer. */
+  padding-top: 0.5rem;
+  margin-bottom: 1.75rem;
   display: -webkit-box;
   -webkit-line-clamp: 3;
+  line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
-  max-width: 580px;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.75);
+  max-width: 600px;
 }
 
 .slide-actions {
   display: flex;
-  gap: 0.85rem;
+  gap: 0.75rem;
+}
+
+/* -- HERO BUTTONS --
+   Scoped to .slide-actions on purpose. .btn-play is shared with the modal's
+   premium-play-btn (index.html) and with tv-mode, so restyling the bare class
+   would repaint buttons in three unrelated surfaces.
+
+   Watch Now is near-white with dark text. Highest contrast available over an
+   arbitrary film backdrop, which is why every major streaming hero uses it - the
+   old red-gradient button competed with the badge above it and lost. The details
+   that make it read as premium rather than flat: a barely-there top-down gradient
+   so the surface has a light source, a 1px inset highlight on the top edge, and a
+   layered shadow (tight contact shadow + wide ambient) instead of one soft blur.
+   It lifts on hover; it does not change colour, because there is nowhere brighter
+   than white to go. */
+.slide-actions .btn-play {
+  background: linear-gradient(180deg, #fff 0%, #e8e8f0 100%);
+  color: #08080f;
+  border: none;
+  padding: 0.95rem 2.15rem;
+  border-radius: 12px;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  gap: 0.55rem;
+  /*  Four layers, each doing one job: a 1px contact shadow so the button sits
+      ON the backdrop rather than floating over it, a wide ambient shadow for
+      depth, a full-strength top inset so the upper edge catches light, and a
+      faint bottom inset so the lower edge turns away from it. That bevel is
+      the whole difference between a white rectangle and a physical key. */
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.45),
+    0 12px 34px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+  transition: transform 0.28s var(--ease-spring), box-shadow 0.28s ease, filter 0.28s ease;
+}
+
+.slide-actions .btn-play::before {
+  content: none;
+}
+
+.slide-actions .btn-play:hover,
+.slide-actions .btn-play:focus-visible {
+  transform: translateY(-2px);
+  filter: brightness(1.05);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.45),
+    0 20px 46px rgba(0, 0, 0, 0.58),
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.08);
+}
+
+.slide-actions .btn-play:active {
+  transform: translateY(0);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.45),
+    0 6px 16px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+/*  More Info is the secondary action, so it stays glass rather than becoming a
+ *  second filled button. The hairline border does the shape work and the fill is
+ *  dark enough to survive a bright backdrop without a blur - deliberately no
+ *  backdrop-filter, for the same reason the meta chips do not have one. */
+.slide-actions .btn-info {
+  background: linear-gradient(180deg, rgba(56, 56, 68, 0.7), rgba(22, 22, 30, 0.78));
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  /*  1px less vertical padding than Watch Now, because this one carries a
+      border and Watch Now does not - without the compensation the two buttons
+      end up a pixel different in height and the row looks misaligned. */
+  padding: calc(0.95rem - 1px) 1.9rem;
+  border-radius: 12px;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  gap: 0.55rem;
+  box-shadow:
+    0 12px 34px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+  transition: transform 0.28s var(--ease-spring), background 0.28s ease, border-color 0.28s ease;
+}
+
+/*  Both glyphs to the same 20px. The markup ships width="24" on each, which is
+    chunky beside 1rem type and, being the tallest child, was what actually set
+    the button height - so the icon size was silently driving the layout. */
+.slide-actions .btn-play svg,
+.slide-actions .btn-info svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+}
+
+.slide-actions .btn-info:hover,
+.slide-actions .btn-info:focus-visible {
+  background: linear-gradient(180deg, rgba(78, 78, 92, 0.85), rgba(36, 36, 46, 0.9));
+  border-color: rgba(255, 255, 255, 0.38);
+  transform: translateY(-2px);
+  box-shadow:
+    0 20px 46px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+}
+
+.slide-actions .btn-info:active {
+  transform: translateY(0);
 }
 
 .btn-play {
@@ -2118,6 +2342,19 @@ body {
   display: none;
 }
 
+/* ── THUMBNAIL RAIL ITEMS ──
+   Premium pass over the old look, with the geometry untouched: the min() widths
+   and heights are what keep ten thumbs inside a 95vh hero (see the rail comment
+   above and carousel-fit-check.js), so only the finish changed.
+
+   What changed and why:
+     - inactive thumbs are dimmed but no longer desaturated to 0.7. Greying the
+       posters made the rail look broken rather than secondary; a straight
+       brightness drop reads as "not selected" and keeps the artwork legible.
+     - the active thumb gets a white ring plus a soft gold outer glow instead of
+       a flat gold border, which is what lifts it off the glass panel.
+     - transition is on the three properties that actually change rather than
+       `all`, so hovering the rail cannot trigger a layout-wide interpolation. */
 .thumb {
   /* Fixed values first as the fallback for engines without min() (older
      Smart TV browsers), then the height-aware version overrides them. */
@@ -2126,29 +2363,34 @@ body {
   width: min(58px, 5.02vh);
   height: min(82px, 7.1vh);
   flex: 0 0 auto;
-  border-radius: 10px;
+  border-radius: 9px;
   overflow: hidden;
   cursor: pointer;
   border: 2px solid transparent;
-  transition: all 0.4s var(--ease-spring);
-  opacity: 0.45;
-  filter: saturate(0.7);
+  transition: transform 0.4s var(--ease-spring), opacity 0.3s ease, box-shadow 0.35s ease;
+  opacity: 0.5;
+  filter: brightness(0.72);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
-.thumb:hover {
-  opacity: 0.75;
-  transform: scale(1.06);
-  filter: saturate(1);
+.thumb:hover,
+.thumb:focus-visible {
+  opacity: 0.88;
+  transform: scale(1.07);
+  filter: brightness(0.95);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  outline: none;
 }
 
 .thumb.active {
-  border-color: var(--gold);
+  border-color: rgba(255, 255, 255, 0.92);
   opacity: 1;
-  transform: scale(1.1);
-  filter: saturate(1);
+  transform: scale(1.08);
+  filter: brightness(1);
   box-shadow:
-    0 0 0 1px rgba(245, 197, 24, 0.2),
-    0 8px 24px rgba(245, 197, 24, 0.2);
+    0 0 0 1px rgba(0, 0, 0, 0.5),
+    0 0 18px rgba(245, 197, 24, 0.35),
+    0 10px 28px rgba(0, 0, 0, 0.5);
 }
 
 .thumb img {
@@ -6287,6 +6529,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   .slide-content {
     left: 5%;
     max-width: 680px;
+    bottom: 18%;
   }
 }
 
@@ -6403,7 +6646,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   .slide-content {
     left: 4%;
     right: 4%;
-    bottom: 12%;
+    bottom: 17%;
     max-width: none;
   }
 
@@ -6428,6 +6671,7 @@ html[data-mz-tv="true"] .cat-group-menu {
     line-height: 1.4;
     -webkit-line-clamp: 2;
     margin-bottom: 1.2rem;
+    
   }
 
   .slide-actions {
@@ -6629,7 +6873,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 
   .slide-content {
-    bottom: 11%;
+    bottom: 15%;
   }
 
   .slide-badge {
@@ -6648,17 +6892,25 @@ html[data-mz-tv="true"] .cat-group-menu {
     margin-bottom: 0.6rem;
   }
 
-  .slide-rating,
-  .slide-year,
+  .slide-rating {
+    font-size: 0.85rem;
+  }
+
+  .slide-year {
+    font-size: 0.8rem;
+  }
+
+  .slide-genres,
   .slide-runtime,
   .slide-quality {
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     padding: 0.2rem 0.5rem;
   }
 
   .slide-desc {
     font-size: 0.8rem;
     -webkit-line-clamp: 2;
+    padding-top: 0.25rem;
     margin-bottom: 1rem;
   }
 
@@ -7527,13 +7779,14 @@ html[data-mz-tv="true"] .cat-group-menu {
    TV styles are in tv-mode.css (uses html[data-mz-tv="true"])
    ═══════════════════════════════════════════════════════════════ */
 
-/* === LOW-END MODE styles === */
-.low-end-mode * {
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  text-shadow: none !important;
-  filter: none !important;
-}
+/* === LOW-END MODE styles ===
+   A .low-end-mode * block used to sit here declaring backdrop-filter,
+   -webkit-backdrop-filter, text-shadow and filter as none !important. Removed:
+   every one of those four is declared again, identically and also !important, by
+   the .low-end-mode *, ...::before, ...::after block near the end of this file,
+   which is both broader and later - so it won this cascade already and the copy
+   here never decided anything. Deleted rather than re-raising the parse-weight
+   budget in asset-perf-check.js, which is what its comment asks for. */
 
 /* Film grain noise filter is GPU-expensive — remove */
 .low-end-mode #hero::before {
@@ -7617,20 +7870,12 @@ html[data-mz-tv="true"] .cat-group-menu {
   animation: none !important;
 }
 
-/* Slide title: drop the compositing work, keep the look. drop-shadow() on the
-   gradient-filled title is a filter on the largest text on the page, and the
-   accent-bar sweep is an animation inside #hero. The gradient fill itself is a
-   paint-time cost only, so it stays. */
-.low-end-mode .slide-title-text {
-  filter: none !important;
-}
-
-.low-end-mode .slide-title::after,
-.low-end-mode .carousel-slide.active .slide-title::after {
-  width: 120px !important;
-  transition: none !important;
-  box-shadow: none !important;
-}
+/* No hero-content overrides are needed here any more. The gradient title fill and
+   its accent bar are gone (see .slide-title), and `.low-end-mode *` further down
+   already strips filter/text-shadow/box-shadow globally — which is also why the
+   thumbnail rail falls back to opacity-only dimming on these devices rather than
+   the brightness() it uses on desktop. Both read correctly; only the mechanism
+   differs. */
 
 /* ═══════════════════════════════════════════════════════════════
    TV SCREEN RESPONSIVE LAYOUT (43inch+ / 1920px+)
@@ -12136,16 +12381,12 @@ img { content-visibility: auto; }
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 3px 10px rgba(0, 0, 0, 0.3);
   white-space: nowrap;
 }
-/*  Shared with the hero carousel's .slide-quality chip: one palette, so a title
- *  showing FHD in the Top 10 rail cannot show HD in the hero on the same page.
- *  qual-new only occurs on series/anime, which the Top 10 rail does not render. */
-.top10-quality.qual-cam,  .slide-quality.qual-cam  { background: rgba(220, 53, 69, 0.88);  border-color: rgba(220, 53, 69, 0.5);  color: #fff; }
-.top10-quality.qual-ts,   .slide-quality.qual-ts   { background: rgba(255, 107, 53, 0.88); border-color: rgba(255, 107, 53, 0.5); color: #fff; }
-.top10-quality.qual-hdts, .slide-quality.qual-hdts { background: rgba(255, 159, 28, 0.88); border-color: rgba(255, 159, 28, 0.5); color: #fff; }
-.top10-quality.qual-hd,   .slide-quality.qual-hd   { background: rgba(8, 8, 16, 0.82);     border-color: rgba(245, 197, 24, 0.22); color: var(--gold); }
-.top10-quality.qual-fhd,  .slide-quality.qual-fhd  { background: rgba(16, 185, 129, 0.88); border-color: rgba(16, 185, 129, 0.5); color: #fff; }
-.top10-quality.qual-4k,   .slide-quality.qual-4k   { background: linear-gradient(135deg, #7c3aed, #a855f7); border-color: rgba(124, 58, 237, 0.5); color: #fff; }
-.slide-quality.qual-new { background: rgba(59, 130, 246, 0.88); border-color: rgba(59, 130, 246, 0.5); color: #fff; }
+.top10-quality.qual-cam  { background: rgba(220, 53, 69, 0.88);  border-color: rgba(220, 53, 69, 0.5);  color: #fff; }
+.top10-quality.qual-ts   { background: rgba(255, 107, 53, 0.88); border-color: rgba(255, 107, 53, 0.5); color: #fff; }
+.top10-quality.qual-hdts { background: rgba(255, 159, 28, 0.88); border-color: rgba(255, 159, 28, 0.5); color: #fff; }
+.top10-quality.qual-hd   { background: rgba(8, 8, 16, 0.82);     border-color: rgba(245, 197, 24, 0.22); color: var(--gold); }
+.top10-quality.qual-fhd  { background: rgba(16, 185, 129, 0.88); border-color: rgba(16, 185, 129, 0.5); color: #fff; }
+.top10-quality.qual-4k   { background: linear-gradient(135deg, #7c3aed, #a855f7); border-color: rgba(124, 58, 237, 0.5); color: #fff; }
 
 /* ── Title / meta ── */
 .top10-info {
