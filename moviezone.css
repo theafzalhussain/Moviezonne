@@ -1,4 +1,4 @@
-﻿/* ═══════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    MOVIEZONE — ULTRA PREMIUM LUXURY EDITION
    Complete design system with cinematic animations
    ═══════════════════════════════════════════════════════════════ */
@@ -1826,10 +1826,7 @@ body {
       - prefers-reduced-motion is a sweep across the biggest element on screen. */
 @media (prefers-reduced-motion: no-preference) {
   html:not(.low-end-mode) .carousel-slide.active .slide-title-text {
-    background: linear-gradient(100deg,
-      #fff 0%, #fff 34%,
-      #ffe6a8 46%, #fff5d6 50%, #ffe6a8 54%,
-      #fff 66%, #fff 100%);
+    background: linear-gradient(100deg, #fff 34%, #ffeec0 50%, #fff 66%);
     background-size: 260% 100%;
     background-position: 130% 0;
     -webkit-background-clip: text;
@@ -2008,6 +2005,16 @@ body {
   font-size: 1rem;
   color: rgba(255, 255, 255, 0.78);
   line-height: 1.62;
+  /*  PADDING, not margin. The synopsis is the only multi-line block in the hero
+      and needs a visible break from the single-line chip row above it, or the two
+      read as one dense column.
+
+      margin-top was the first attempt and it did nothing at all: .slide-meta and
+      .slide-desc are adjacent siblings, so their vertical margins COLLAPSE to
+      max(1.15rem, 0.5rem) = 1.15rem - exactly the gap that was already there.
+      Measured 18px before and 18px after. Padding does not collapse, so the space
+      is real. Scaled down at the breakpoints, where vertical room is scarcer. */
+  padding-top: 0.5rem;
   margin-bottom: 1.75rem;
   display: -webkit-box;
   -webkit-line-clamp: 3;
@@ -2037,18 +2044,25 @@ body {
    It lifts on hover; it does not change colour, because there is nowhere brighter
    than white to go. */
 .slide-actions .btn-play {
-  background: linear-gradient(180deg, #fff 0%, #ececf2 100%);
+  background: linear-gradient(180deg, #fff 0%, #e8e8f0 100%);
   color: #08080f;
   border: none;
-  padding: 0.9rem 2rem;
+  padding: 0.95rem 2.15rem;
   border-radius: 12px;
   font-size: 1rem;
   font-weight: 700;
-  letter-spacing: 0.2px;
+  letter-spacing: 0.3px;
+  gap: 0.55rem;
+  /*  Four layers, each doing one job: a 1px contact shadow so the button sits
+      ON the backdrop rather than floating over it, a wide ambient shadow for
+      depth, a full-strength top inset so the upper edge catches light, and a
+      faint bottom inset so the lower edge turns away from it. That bevel is
+      the whole difference between a white rectangle and a physical key. */
   box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.4),
-    0 10px 30px rgba(0, 0, 0, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    0 1px 2px rgba(0, 0, 0, 0.45),
+    0 12px 34px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.1);
   transition: transform 0.28s var(--ease-spring), box-shadow 0.28s ease, filter 0.28s ease;
 }
 
@@ -2059,11 +2073,12 @@ body {
 .slide-actions .btn-play:hover,
 .slide-actions .btn-play:focus-visible {
   transform: translateY(-2px);
-  filter: brightness(1.06);
+  filter: brightness(1.05);
   box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.4),
-    0 18px 42px rgba(0, 0, 0, 0.55),
-    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+    0 1px 2px rgba(0, 0, 0, 0.45),
+    0 20px 46px rgba(0, 0, 0, 0.58),
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.08);
 }
 
 .slide-actions .btn-play:active {
@@ -2079,25 +2094,44 @@ body {
  *  dark enough to survive a bright backdrop without a blur - deliberately no
  *  backdrop-filter, for the same reason the meta chips do not have one. */
 .slide-actions .btn-info {
-  background: linear-gradient(180deg, rgba(52, 52, 62, 0.72), rgba(28, 28, 36, 0.78));
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: linear-gradient(180deg, rgba(56, 56, 68, 0.7), rgba(22, 22, 30, 0.78));
+  border: 1px solid rgba(255, 255, 255, 0.2);
   color: #fff;
-  padding: 0.9rem 1.75rem;
+  /*  1px less vertical padding than Watch Now, because this one carries a
+      border and Watch Now does not - without the compensation the two buttons
+      end up a pixel different in height and the row looks misaligned. */
+  padding: calc(0.95rem - 1px) 1.9rem;
   border-radius: 12px;
   font-size: 1rem;
   font-weight: 600;
-  letter-spacing: 0.2px;
+  letter-spacing: 0.3px;
+  gap: 0.55rem;
   box-shadow:
-    0 10px 30px rgba(0, 0, 0, 0.38),
-    inset 0 1px 0 rgba(255, 255, 255, 0.09);
+    0 12px 34px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25);
   transition: transform 0.28s var(--ease-spring), background 0.28s ease, border-color 0.28s ease;
+}
+
+/*  Both glyphs to the same 20px. The markup ships width="24" on each, which is
+    chunky beside 1rem type and, being the tallest child, was what actually set
+    the button height - so the icon size was silently driving the layout. */
+.slide-actions .btn-play svg,
+.slide-actions .btn-info svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
 }
 
 .slide-actions .btn-info:hover,
 .slide-actions .btn-info:focus-visible {
-  background: linear-gradient(180deg, rgba(72, 72, 84, 0.85), rgba(40, 40, 50, 0.88));
-  border-color: rgba(255, 255, 255, 0.34);
+  background: linear-gradient(180deg, rgba(78, 78, 92, 0.85), rgba(36, 36, 46, 0.9));
+  border-color: rgba(255, 255, 255, 0.38);
   transform: translateY(-2px);
+  box-shadow:
+    0 20px 46px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25);
 }
 
 .slide-actions .btn-info:active {
@@ -6876,6 +6910,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   .slide-desc {
     font-size: 0.8rem;
     -webkit-line-clamp: 2;
+    padding-top: 0.25rem;
     margin-bottom: 1rem;
   }
 
@@ -7744,13 +7779,14 @@ html[data-mz-tv="true"] .cat-group-menu {
    TV styles are in tv-mode.css (uses html[data-mz-tv="true"])
    ═══════════════════════════════════════════════════════════════ */
 
-/* === LOW-END MODE styles === */
-.low-end-mode * {
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  text-shadow: none !important;
-  filter: none !important;
-}
+/* === LOW-END MODE styles ===
+   A .low-end-mode * block used to sit here declaring backdrop-filter,
+   -webkit-backdrop-filter, text-shadow and filter as none !important. Removed:
+   every one of those four is declared again, identically and also !important, by
+   the .low-end-mode *, ...::before, ...::after block near the end of this file,
+   which is both broader and later - so it won this cascade already and the copy
+   here never decided anything. Deleted rather than re-raising the parse-weight
+   budget in asset-perf-check.js, which is what its comment asks for. */
 
 /* Film grain noise filter is GPU-expensive — remove */
 .low-end-mode #hero::before {

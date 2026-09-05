@@ -3349,7 +3349,13 @@ function buildCarousel() {
    *  queue in small batches. Order and markup are identical either way.
    */
   const buildOne = (m, i, trackFrag, dotsFrag, thumbsFrag) => {
-    const genres = (m.genre_ids||[]).slice(0,3).map(id => '<span class="genre-tag">'+escapeHTML(GENRE_MAP[id]||'Movie')+'</span>').join('');
+    /*  Genres render as ONE chip in the meta row ("Action - Adventure") rather
+     *  than a separate row of pills below it. Two reasons: it is what the
+     *  reference design does, and it gives .slide-desc back a line of vertical
+     *  space inside a 95vh hero that was already tight on short laptops.
+     *  .genre-tag itself is untouched - the modal still uses it. */
+    const genreLabel = (m.genre_ids || []).slice(0, 3)
+      .map(id => GENRE_MAP[id] || 'Movie').join(' \u00B7 ');
     const slide = document.createElement('div');
     slide.className = 'carousel-slide' + (i === 0 ? ' active' : '');
     const isBackdrop = !!m.backdrop_path;
@@ -3450,15 +3456,20 @@ function buildCarousel() {
         // .slide-title look is unchanged.
         '<h2 class="slide-title'+titleSizeCls+'"><span class="slide-title-text">'+escapeHTML(heroTitle)+'</span></h2>' +
         '<div class="slide-meta">' +
-          '<div class="slide-rating">RATING '+((m.vote_average||0).toFixed(1))+'</div>' +
+          '<span class="slide-rating" aria-label="Rating ' + ((m.vote_average||0).toFixed(1)) + ' out of 10">' +
+            '<svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true">' +
+              '<path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>' +
+            '</svg>' +
+            '<b>' + ((m.vote_average||0).toFixed(1)) + '</b>' +
+          '</span>' +
           (slideYear ? '<span class="slide-year">'+slideYear+'</span>' : '') +
+          (genreLabel ? '<span class="slide-genres">'+escapeHTML(genreLabel)+'</span>' : '') +
           '<span class="slide-runtime">LANG '+(m.original_language||'EN').toUpperCase()+'</span>' +
           qualityChip +
         '</div>' +
-        '<div class="slide-genres">'+genres+'</div>' +
         '<p class="slide-desc">'+escapeHTML(m.overview||'')+'</p>' +
         '<div class="slide-actions">' +
-          '<button class="btn-play" tabindex="0" data-id="'+m.id+'" data-type="'+(m.media_type||(m.title?'movie':'tv'))+'"><svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Play Now</button>' +
+          '<button class="btn-play" tabindex="0" data-id="'+m.id+'" data-type="'+(m.media_type||(m.title?'movie':'tv'))+'"><svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Watch Now</button>' +
           '<button class="btn-info" tabindex="0" data-id="'+m.id+'" data-type="'+(m.media_type||(m.title?'movie':'tv'))+'"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg> More Info</button>' +
         '</div>' +
       '</div>';
