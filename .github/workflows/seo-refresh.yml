@@ -76,8 +76,11 @@ jobs:
             echo "The Worker will keep serving its bounded live-built sitemaps."
             exit 0
           fi
-          npx --yes wrangler@4 kv key put sitemap:catalog \
-            --path sitemap-cache.json --binding TMDB_CACHE --remote
+          if ! npx --yes wrangler@4 kv key put sitemap:catalog \
+            --path sitemap-cache.json --binding TMDB_CACHE --remote; then
+            echo "::warning::Cloudflare KV upload failed (quota or API failure)."
+            echo "The Worker will keep serving the last successfully published catalogue."
+          fi
 
       - name: Sanity-check the SEO layer before committing
         run: |
