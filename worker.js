@@ -987,14 +987,14 @@ async function routeApi(request, env, ctx, url) {
 
 /** Cache-Control values, kept identical to the Express handlers. */
 const SSR_DETAIL_CACHE = 'public, max-age=1800, s-maxage=86400, stale-while-revalidate=604800';
-const SSR_CATEGORY_CACHE = 'public, max-age=900, s-maxage=21600, stale-while-revalidate=86400';
+const SSR_CATEGORY_CACHE = 'public, max-age=1800, s-maxage=86400, stale-while-revalidate=604800';
 // Shorter than the detail page: embed hosts rotate, and a stale player frame is
 // worse than a slightly slower page.
 const SSR_WATCH_CACHE = 'public, max-age=300, s-maxage=900';
 
 /** The append_to_response the detail template needs; same list as server.js. */
-const SSR_DETAIL_APPEND = 'credits,similar,recommendations,videos,watch/providers,'
-  + 'release_dates,content_ratings';
+const SSR_DETAIL_APPEND = 'credits,similar,recommendations,videos,watch/providers';
+
 
 /**
  * Adapts the KV-cached TMDB proxy to the `tmdb(path, params)` contract the
@@ -1140,7 +1140,7 @@ const SITEMAP_KV_TTL = 86400;
 const SITEMAP_CHUNK = 2000;
 
 /** Pages pulled per endpoint when there is no catalogue to read. */
-const SITEMAP_LIVE_PAGES = 8;
+const SITEMAP_LIVE_PAGES = 3;
 
 const SITEMAP_CATALOG_KV_KEY = 'sitemap:catalog';
 const sitemapItemsKvKey = (kind) => 'sitemap:items:' + kind;
@@ -1370,6 +1370,21 @@ async function serveMediaSitemap(kind, chunkStr, env, ctx) {
 
 /** Every catalogue entry, tagged with the kind its detail URL needs. */
 async function browseEntries(env, ctx) {
+  const store = seoStore(env);
+  if (store) {
+    try {
+      const raw = await store.get(SITEMAP_CATALOG_KV_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const movies = Array.isArray(parsed.movie) ? parsed.movie : [];
+        const tv = Array.isArray(parsed.tv) ? parsed.tv : [];
+        return movies.map((m) => Object.assign({ media_type: 'movie' }, m))
+          .concat(tv.map((t) => Object.assign({ media_type: 'tv' }, t)));
+      }
+    } catch (err) {
+      console.warn('[ssr] browseEntries catalog fallback:', err && err.message);
+    }
+  }
   const [movie, tv] = await Promise.all([
     getSitemapItems('movie', env, ctx),
     getSitemapItems('tv', env, ctx)
@@ -1377,7 +1392,6 @@ async function browseEntries(env, ctx) {
   return movie.items.map((m) => Object.assign({ media_type: 'movie' }, m))
     .concat(tv.items.map((t) => Object.assign({ media_type: 'tv' }, t)));
 }
-
 function browseHtml(html) {
   return ssrHtml(html, SSR_BROWSE_CACHE, 'index, follow');
 }
