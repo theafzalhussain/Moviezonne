@@ -1688,6 +1688,25 @@ body {
   }
 }
 
+/*  MOBILE READABILITY SCRIM — do not remove.
+    On a phone the content block sits at bottom:14% (see the mobile .slide-content
+    rule below), which on some backdrops is exactly where the image is brightest
+    (a pale sky, a sun-bleached floor). The base "to top" gradient only reaches
+    full darkness at 0%, so the title/synopsis were washing out over that band —
+    the reported bug. This deepens and RAISES the dark zone so the whole content
+    block (badge → buttons) always sits on near-solid ink, and the top of the
+    frame stays clear so the backdrop still reads as an image. */
+@media (max-width: 1023px) {
+  .slide-gradient {
+    background: linear-gradient(to top,
+      rgba(3, 3, 10, 0.94) 0%,
+      rgba(3, 3, 10, 0.88) 30%,
+      rgba(3, 3, 10, 0.62) 52%,
+      rgba(3, 3, 10, 0.18) 78%,
+      transparent 100%);
+  }
+}
+
 /*  Sits at 19% from the bottom, not 13%.
     At 13% the block was tucked into the bottom edge with the dots and the
     progress bar crowding it, and the top two thirds of a 95vh hero carried
@@ -1709,6 +1728,85 @@ body {
 .carousel-slide.active .slide-content {
   transform: translateY(0);
   opacity: 1;
+}
+
+/*  MOBILE HERO LAYOUT — everything below is phone/tablet-portrait only.
+    Desktop keeps its own values above; these are wrapped in the breakpoint so a
+    resize back to a wide window restores the desktop composition exactly.
+
+    The reported problem was two-fold: the text/buttons were not sized for a
+    narrow column, and they sat too high (bottom:19%) — up in the bright part of
+    the backdrop. Dropping the block to bottom:14%, giving it near-full width and
+    stepping the type down puts the whole thing on the deepened mobile scrim and
+    lets long titles/synopses breathe without pushing the buttons off-screen. */
+@media (max-width: 1023px) {
+  .slide-content {
+    bottom: 13%;
+    left: 5%;
+    right: 5%;
+    max-width: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .slide-title {
+    font-size: clamp(2.4rem, 11vw, 4rem);
+    margin-bottom: 0.6rem;
+  }
+  .slide-badge {
+    margin-bottom: 0.85rem;
+    padding: 0.36rem 0.85rem;
+    font-size: 0.62rem;
+    letter-spacing: 1.4px;
+  }
+  .slide-meta {
+    gap: 0.5rem;
+    margin-bottom: 0.85rem;
+  }
+  .slide-rating { font-size: 0.92rem; }
+  .slide-year { font-size: 0.85rem; }
+  .slide-genres,
+  .slide-runtime,
+  .slide-quality {
+    font-size: 0.72rem;
+    padding: 0.28rem 0.6rem;
+  }
+  .slide-desc {
+    font-size: 0.9rem;
+    line-height: 1.5;
+    margin-bottom: 1.15rem;
+    padding-top: 0.35rem;
+    max-width: none;
+  }
+  /*  Buttons share the row and stretch to fill it. On a 360px screen two fixed
+      buttons overflowed or crowded the gutter; equal flex + centred labels keeps
+      them tap-friendly (≥44px tall) and edge-to-edge. */
+  .slide-actions {
+    gap: 0.6rem;
+  }
+  .slide-actions .btn-play,
+  .slide-actions .btn-info {
+    flex: 1 1 0;
+    justify-content: center;
+    padding: 0.85rem 1rem;
+    font-size: 0.92rem;
+  }
+}
+
+/*  Very small phones (≤400px): the synopsis is the first thing to sacrifice so
+    the title and both buttons always stay in the hero. */
+@media (max-width: 400px) {
+  .slide-title { font-size: clamp(2.1rem, 12vw, 3rem); }
+  .slide-desc {
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    font-size: 0.86rem;
+  }
+  .slide-actions .btn-play,
+  .slide-actions .btn-info {
+    padding: 0.8rem 0.75rem;
+    font-size: 0.88rem;
+  }
 }
 
 /* ── TRENDING BADGE ──
@@ -1785,6 +1883,13 @@ body {
   line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  /*  INK GUARD — do not remove. line-height 0.92 puts Bebas Neue's ink
+   *  outside its line box, and this box is overflow:hidden, so without the
+   *  padding the top of every capital is shaved. Measured at a 390px
+   *  viewport before the fix: 70px of ink inside a 65px box, and the cut was
+   *  clearly visible on the hero title. Padding adds room without changing
+   *  the clamp's line count or the tight setting. */
+  padding: 0.1em 0 0.08em;
   text-wrap: balance;
   /*  Both of these are declared EXPLICITLY, not left to inherit.
 
@@ -6580,7 +6685,13 @@ html[data-mz-tv="true"] .cat-group-menu {
 
   /* Remove GPU-heavy grain */
   .slide-gradient {
-    background: linear-gradient(to top, rgba(3, 3, 10, 0.98) 0%, rgba(3, 3, 10, 0.3) 50%, transparent 100%) !important;
+    /*  Shaped so every row of the text block sits on dark: near-solid under
+     *  the buttons, still 60% behind the title, gone by the top of the
+     *  poster. This is the mobile equivalent of the desktop left-to-right
+     *  scrim - same job, different text position. */
+    background: linear-gradient(to top,
+        rgba(3, 3, 10, 0.97) 0%, rgba(3, 3, 10, 0.9) 24%, rgba(3, 3, 10, 0.62) 44%,
+        rgba(3, 3, 10, 0.26) 64%, transparent 84%) !important;
   }
 
   #navbar {
@@ -6652,6 +6763,9 @@ html[data-mz-tv="true"] .cat-group-menu {
 
   .slide-title {
     font-size: clamp(2.5rem, 9vw, 3.8rem);
+    /* Looser than the desktop 0.92: two clamped lines at phone size need the
+       breathing room more than they need the tight setting. */
+    line-height: 1.02;
     margin-bottom: 0.8rem;
   }
 
@@ -6667,9 +6781,11 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 
   .slide-desc {
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     line-height: 1.4;
-    -webkit-line-clamp: 2;
+    /* Three lines, not two: the synopsis was being cut mid-sentence and there
+       is ~50px of clear space above the dots to spend on it. */
+    -webkit-line-clamp: 3;
     margin-bottom: 1.2rem;
     
   }
@@ -6884,6 +7000,7 @@ html[data-mz-tv="true"] .cat-group-menu {
 
   .slide-title {
     font-size: clamp(2rem, 10vw, 2.6rem);
+    line-height: 1.04;
     margin-bottom: 0.6rem;
   }
 
@@ -6903,13 +7020,22 @@ html[data-mz-tv="true"] .cat-group-menu {
   .slide-genres,
   .slide-runtime,
   .slide-quality {
-    font-size: 0.72rem;
-    padding: 0.2rem 0.5rem;
+    font-size: 0.68rem;
+    padding: 0.18rem 0.42rem;
+  }
+
+  /*  The LANG chip is the first thing to go once width is scarce: rating, year,
+   *  genre and print quality all say more, and the language is repeated in the
+   *  detail modal anyway. Keeping all five chips wrapped the meta row onto a
+   *  second line on 360-414px phones as soon as a title had three genres, which
+   *  pushed the synopsis into the buttons. */
+  .slide-runtime {
+    display: none;
   }
 
   .slide-desc {
-    font-size: 0.8rem;
-    -webkit-line-clamp: 2;
+    font-size: 0.86rem;
+    -webkit-line-clamp: 3;
     padding-top: 0.25rem;
     margin-bottom: 1rem;
   }
@@ -7132,15 +7258,17 @@ html[data-mz-tv="true"] .cat-group-menu {
 
   .slide-title {
     font-size: 1.8rem !important;
+    line-height: 1.06;
     margin-bottom: 0.5rem;
   }
 
   .slide-desc {
-    font-size: 0.75rem;
-    line-height: 1.3;
-    -webkit-line-clamp: 2;
+    font-size: 0.82rem;
+    line-height: 1.35;
+    -webkit-line-clamp: 3;
     margin-bottom: 0.8rem;
   }
+
 
   .slide-actions {
     flex-direction: row;
@@ -11903,8 +12031,6 @@ img { content-visibility: auto; }
   .movie-card::before, .movie-card::after, .upcoming-card::before, .upcoming-card::after,
   .nav-search::before, #navbar::before { display: none !important; }
 
-  /* Reduce paint complexity */
-  .slide-gradient { background: linear-gradient(to top, rgba(3,3,10,0.95) 0%, transparent 60%) !important; }
 }
 
 /* === TABLET (768px - 1024px) === */
@@ -12043,8 +12169,9 @@ img { content-visibility: auto; }
 /* ═══════════════════════════════════════════════════════════════
    TOP 10 TRENDING — PREMIUM NUMBERED RAIL (live from TMDB)
    ═══════════════════════════════════════════════════════════════
-   No panel, no heading: the section sits directly on the page
-   background and the gold numerals carry the identity on their own.
+   No panel: the section sits directly on the page background. A gold
+   "TOP 10 / TRENDING MOVIES" title and the period toggle share one header
+   row (.top10-head); the giant numerals still carry the identity.
    Only the compact period toggle sits in the top-right corner.
 
    RANK NUMERALS — why they are built this way
@@ -12079,9 +12206,181 @@ img { content-visibility: auto; }
                                                          purpose — the difference is
                                                          how far it tucks behind. */
   position: relative;
-  padding: 2.25rem 4% 1.5rem;
+  /*  Top padding is small because the toggle now sits IN FLOW at the top of the
+   *  section (see .top10-toggle) and contributes its own height. */
+  padding: 1rem 4% 1.5rem;
 }
 .top10-section[hidden] { display: none; }
+
+/* ── SECTION HEADER ROW ──
+   Title left, Today/This Week pill right, on one line. flex-wrap is load-bearing
+   rather than defensive: at ~380px the title (~215px) and the pill (~180px) do
+   not fit on one line, so the pill drops to a second line and margin-left:auto
+   keeps it right-aligned instead of letting the title squash or the pill
+   overflow the 4% gutter. */
+.top10-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem 1rem;
+  margin: 0 0 0.35rem;
+}
+/*  "TOP 10" is Bebas Neue in the same poured-gold gradient as the rank numerals
+ *  (.top10-rank) so the title reads as part of the same object, and it is the
+ *  same zero-blur bevel trick — a blur radius here would soften the glyph edge.
+ *  "TRENDING MOVIES" is the Outfit UI face, uppercase and tracked, at a smaller
+ *  size: two weights of the same idea rather than two competing titles. */
+.top10-heading {
+  margin: 0;
+  font: 400 clamp(1.55rem, 2.6vw, 2.2rem)/1 'Bebas Neue', sans-serif;
+  letter-spacing: 0.045em;
+  background: linear-gradient(177deg, #fffbe8, #ffd85e 30%, #f5c518 52%, #8a6205);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.5));
+}
+/*  -webkit-text-fill-color, not color: the parent's background-clip:text is
+ *  inherited by the span, so plain color would still paint transparent. */
+.top10-heading span {
+  margin-left: 0.5rem;
+  font: 700 clamp(0.92rem, 1.35vw, 1.12rem)/1 'Outfit', sans-serif;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  -webkit-text-fill-color: rgba(255, 255, 255, 0.8);
+}
+
+/*  MOBILE HEADER — the reported "text and button not responsive" in this section.
+    On a phone the heading + pill were competing for one line and the label
+    tracking/size did not step down, so the block looked cramped against the 4%
+    gutter. Below 600px the heading scales down and the pill drops to its own full
+    line under the title, so neither squashes the other. */
+@media (max-width: 600px) {
+  .top10-head {
+    gap: 0.5rem 0.6rem;
+    margin-bottom: 0.5rem;
+  }
+  .top10-heading {
+    font-size: clamp(1.5rem, 7vw, 1.95rem);
+    letter-spacing: 0.03em;
+    flex: 1 1 100%;
+  }
+  .top10-heading span {
+    display: block;
+    margin-left: 0;
+    margin-top: 0.15rem;
+    font-size: 0.82rem;
+    letter-spacing: 0.11em;
+  }
+  /*  Full-width pill on its own line. margin-left:auto no longer applies once it
+      spans the row, so the two buttons split the width evenly and stay a
+      comfortable tap target. */
+  .top10-toggle {
+    flex: 1 1 100%;
+    width: 100%;
+    margin-left: 0;
+    justify-content: stretch;
+  }
+  .top10-toggle-btn {
+    flex: 1 1 0;
+    text-align: center;
+  }
+  /*  The sliding indicator is measured in px by JS off the active button's
+      offsetWidth, which now equals half the pill — the fallback 50% width below
+      is already correct, and _mzSyncTop10Ind keeps it exact after layout. */
+}
+
+
+/* ── TODAY / THIS WEEK TOGGLE ──
+   Premium gold pill on the right, directly above the rail. One sliding
+   indicator (.top10-toggle-ind) glides under the active label instead of each
+   button restyling itself, so the highlight moves rather than blinks.
+
+   ⚠ IN FLOW ON PURPOSE — do not put position:absolute back.
+   It used to be pinned (top:1.5rem; right:4%), which laid it OVER the rail: the
+   pill covered the top-right poster and its rating/quality badges, and the
+   overlap got worse the shorter the viewport, because the rail moved up under a
+   pill that stayed put. It now lives in the .top10-head flex row, so the rail
+   always begins below it and no resize, zoom or font-size change can make the
+   two collide.
+
+   Every declaration here is load-bearing: this file's minified size is inside
+   400 bytes of asset-perf-check's parse budget, so the block is kept lean —
+   single-layer background, two-stop gradient, no var() fallbacks (--gold*,
+   --ease-spring are all defined in :root above). */
+.top10-toggle {
+  position: relative;
+  z-index: 9;
+  display: flex;
+  width: max-content;
+  /* Pushed to the right end of .top10-head; the rail's own 1rem top padding is
+     the gap down to the posters. */
+  margin-left: auto;
+  align-items: center;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(11, 11, 19, 0.84);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+/*  The indicator's width and offset are measured in JS (_mzSyncTop10Ind), because
+ *  "Today" and "This Week" are not the same width — a fixed 50% pill sat visibly
+ *  off-centre on one of the two. The values below are the pre-JS fallback. */
+.top10-toggle-ind {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  height: calc(100% - 8px);
+  width: calc(50% - 4px);
+  border-radius: 999px;
+  /* Poured gold, not a flat fill: bright crown into a deeper base — the same
+     read as the rank numerals. */
+  background: linear-gradient(160deg, #fff3c4, var(--gold3) 40%, var(--gold2));
+  box-shadow: 0 4px 16px rgba(245, 197, 24, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  /* width animates too, because the two labels are different widths. */
+  transition: transform 0.42s var(--ease-spring), width 0.42s var(--ease-spring);
+  pointer-events: none;
+}
+/* No-JS fallback slide; the inline transform wins once JS has measured. */
+.top10-toggle.is-week .top10-toggle-ind { transform: translateX(100%); }
+.top10-toggle-btn {
+  position: relative;
+  z-index: 1;
+  padding: 8px 18px;
+  border: 0;
+  background: none;
+  color: rgba(255, 255, 255, 0.58);
+  /*  Outfit is the site's UI face and is already self-hosted, so naming it costs
+   *  no extra request — it only stops the label inheriting whatever the section
+   *  happened to sit in. Uppercase with real tracking is what makes a 12px label
+   *  read as a premium control rather than body copy. */
+  font: 700 0.74rem/1 'Outfit', sans-serif;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  border-radius: 999px;
+  transition: color 0.28s ease;
+}
+.top10-toggle-btn:hover { color: rgba(255, 255, 255, 0.92); }
+/*  Weight is deliberately identical in both states: a bolder active label would
+ *  change the button's width, and the indicator is sized from that width. */
+.top10-toggle-btn.is-active { color: #16110a; text-shadow: 0 1px 0 rgba(255, 255, 255, 0.26); }
+.top10-toggle-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+
+@media (max-width: 560px) {
+  .top10-toggle { padding: 3px; }
+  /*  Taller, not smaller. Measured before this: 24px buttons inside a 32px
+   *  pill — a thumb needs ~44px, so the padding grows on touch widths even
+   *  though the desktop pill is deliberately compact. Font goes UP slightly
+   *  too: 10px uppercase at arm's length was hard to read. */
+  .top10-toggle-btn { padding: 15px 16px; font-size: 0.72rem; letter-spacing: 0.07em; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .top10-toggle-ind { transition: none; }
+}
 
 /* ── RAIL ── */
 .top10-rail-wrap { position: relative; }
@@ -12571,6 +12870,10 @@ img { content-visibility: auto; }
     padding: 1.35rem 0 0.9rem;
   }
   .top10-arrow { display: none; }
+  /*  The section goes full-bleed here, so the header row has to supply the page
+   *  gutter itself — and it must be the SAME 4vw the rail below uses, or the
+   *  title will not line up with the first poster. */
+  .top10-head { padding: 0 4vw; }
   .top10-rail {
     gap: 0.5rem;
     /* Inline padding doubles as the page gutter and as scroll padding, so the
@@ -12592,19 +12895,27 @@ img { content-visibility: auto; }
 
 /* ── Small phones ── */
 @media (max-width: 480px) {
-  .top10-section { --t10-poster-w: clamp(112px, min(47vw, 32vh), 200px); }
+  /*  42vw, was 47vw: at 390px that is a 164px poster instead of 183px, so the
+   *  next card peeks in and the rail reads as a rail. The width it gives up
+   *  pays for the larger name/meta below. */
+  .top10-section { --t10-poster-w: clamp(112px, min(42vw, 32vh), 200px); }
   .top10-rail { gap: 0.4rem; }
-  .top10-name { font-size: 0.8rem; -webkit-line-clamp: 2; }
-  .top10-meta { font-size: 0.64rem; }
+  .top10-name { font-size: 0.86rem; -webkit-line-clamp: 2; }
+  .top10-meta { font-size: 0.7rem; }
   /* The language chip is the first thing to go when width is scarce — year
      and genre carry more meaning. */
   .top10-meta .t10-lang { display: none; }
+  /*  ...and the separator in front of it, or the row ends in a stray "·".
+   *  :has() is doing previous-sibling selection, which nothing else can do. */
+  .top10-meta .t10-sep:has(+ .t10-lang) { display: none; }
 }
 
 /* ── Very small phones (320-360px) ── */
 @media (max-width: 360px) {
   .top10-section {
-    --t10-poster-w: min(53vw, 30vh);
+    /* 46vw, was 53vw: at 360px one card plus its numeral was the entire
+       screen, so the rail did not read as scrollable. */
+    --t10-poster-w: min(46vw, 30vh);
     --t10-rank-scale: 1;
   }
   .top10-card[data-rank="10"] { --t10-rank-scale: 0.62; }

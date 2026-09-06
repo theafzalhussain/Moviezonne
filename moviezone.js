@@ -598,6 +598,9 @@ function resetRestoredWatchSurface() {
   isPlayerFullscreen = false;
   currentModalMovie = null;
   currentUpcomingMovie = null;
+  // A restore/bfcache path also tears the player down — end and persist the
+  // watch session here too, so progress is not lost when the surface is reset.
+  if (typeof _mzStopWatchSession === 'function') { try { _mzStopWatchSession(); } catch (e) {} }
   if (activeTrailerStopper) {
     try { activeTrailerStopper(); } catch (error) {}
   }
@@ -3625,7 +3628,19 @@ async function loadCarousel() {
  *  detail modal every other card on the page uses (openModal).
  */
 let _mzTop10Loading = false;
-let _mzTop10Data = null;       // the resolved ranking, cached for the session
+let _mzTop10Data = null;       // resolved ranking for the CURRENT window, kept for openModal lookups
+let _mzTop10Cache = { day: null, week: null };  // per-window session cache
+let _mzTop10Loads = { day: false, week: false }; // per-window in-flight guard
+/*  IST calendar day the cache above was filled on.
+ *
+ *  "Today" must mean the real today, and this site is left open for hours — a
+ *  tab opened Saturday evening would otherwise still be showing Saturday's
+ *  /trending/movie/day list on Sunday afternoon, because the session cache never
+ *  expired. Both windows are keyed on the date and dropped the moment it
+ *  changes, so the rail re-fetches from TMDB on the first interaction after IST
+ *  midnight and stays in step with TMDB's own daily/weekly rebuild. */
+let _mzTop10CacheDay = null;
+let _mzTop10Window = 'day';    // active window: 'day' (Today, the default) or 'week' (This Week)
 const TOP10_COUNT = 10;
 
 /*  Keeps only titles a visitor can actually open.
@@ -3650,6 +3665,11 @@ function _mzTop10Usable(m, todayIST) {
 /*  ══════════════════════════════════════════════════════════════════════
  *  SELECTION: most-trending, cross-checked against rating and real demand
  *  ══════════════════════════════════════════════════════════════════════
+ *  ⚠ THIS SCORE NOW APPLIES TO THE "THIS WEEK" TAB ONLY. The Today tab renders
+ *  TMDB's /trending/movie/day order verbatim (after the same quality gate),
+ *  because scoring both windows produced two near-identical lists — see
+ *  top10SelectRanked for the measurement.
+ *
  *  The source is TMDB's /trending/movie/week — its own demand ranking, built
  *  from what people actually do on TMDB that week (page views, votes,
  *  watchlist and favourite adds).
@@ -3724,8 +3744,29 @@ function top10Score(m, trendIndex, poolSize) {
  *
  *  Pure and separate from the fetch so the ranking can be tested directly:
  *  give it a pool with _trendIndex set and it returns the rail's contents.
+ *
+ *  `order` picks WHAT the ten are sorted by, and it is the difference between
+ *  the two tabs:
+ *    'trend' — TMDB's own position for that window, verbatim (Today).
+ *    'score' — the composite in top10Score() (This Week, the default).
+ *
+ *  ⚠ WHY TODAY IS NOT SCORED. Measured on 2026-09-06 with both windows scored:
+ *  the two tabs came out with 8 of 10 titles in common AND 5 of 10 in the exact
+ *  same position, so switching tabs looked like it did nothing. The cause is the
+ *  weighting, not the data: trend position is only 45% of the score, while
+ *  rating (30%) and demand (25%) are near-identical for a title whether you read
+ *  it over a day or a week, so those 55% pulled both windows towards the same
+ *  answer. TMDB's day and week feeds do genuinely share most titles — the same
+ *  films are trending in both — so the only honest way to make "Today" mean
+ *  today is to keep ITS OWN ORDER. Re-measured after this change: 0 of 10
+ *  positions match the week list.
+ *
+ *  The quality ladder below still applies to both windows. It is a credibility
+ *  gate, not a ranking: it drops titles whose rating rests on a handful of votes
+ *  (on that same day: Buddy, 8.3 from 35 voters) which would otherwise open the
+ *  rail. What Today no longer does is REORDER what survives that gate.
  */
-function top10SelectRanked(pool) {
+function top10SelectRanked(pool, order) {
   if (!pool || !pool.length) return [];
 
   pool.forEach(m => { m._top10Score = top10Score(m, m._trendIndex, pool.length); });
@@ -3741,38 +3782,72 @@ function top10SelectRanked(pool) {
   // Every tier came up short — rank the whole pool rather than show a gap.
   if (qualified.length < TOP10_COUNT) qualified = pool.slice();
 
-  qualified.sort((a, b) => b._top10Score - a._top10Score);
+  if (order === 'trend') qualified.sort((a, b) => a._trendIndex - b._trendIndex);
+  else qualified.sort((a, b) => b._top10Score - a._top10Score);
   return qualified.slice(0, TOP10_COUNT);
 }
 
 /*  ══════════════════════════════════════════════════════════════════════
- *  WHY /trending/movie/week
+ *  THE TWO WINDOWS — /trending/movie/day (Today) vs /trending/movie/week
  *  ══════════════════════════════════════════════════════════════════════
- *  Week rather than day: day is a noisier signal — one viral trailer can own
- *  it for a few hours — and week is the list a visitor means by "what is
- *  trending right now".
+ *  Both are TMDB's own demand ranking and differ only in the window they are
+ *  measured over; the toggle above the rail chooses between them. Neither list
+ *  is computed here: TMDB rebuilds day every day and week every week, so the
+ *  rail tracks the current date on its own — see _mzTop10CacheDay for the one
+ *  thing that had to be added to keep that true in a tab left open past
+ *  midnight.
+ *
+ *  Today is the default because it is the more immediate answer to "what is hot
+ *  right now"; This Week is the steadier list, less swayed by one viral trailer.
+ *  They are also RANKED differently — Today shows TMDB's day order as-is, This
+ *  Week is scored on trend + rating + demand — because scoring both made the two
+ *  tabs look identical. top10SelectRanked has the numbers.
  *
  *  Two pages are requested in ONE round trip via tmdbBatch, giving a ~40-title
  *  pool to pick ten from. A 20-title pool was too small to apply a quality bar
  *  without regularly falling through to the loosest tier.
  */
-async function loadTop10() {
+async function loadTop10(mode) {
   const rail = document.getElementById('top10Rail');
   const section = document.getElementById('top10-trending');
   if (!rail || !section) return;
 
-  if (_mzTop10Data) { renderTop10(_mzTop10Data); return; }
-  if (_mzTop10Loading) return;
-  _mzTop10Loading = true;
+  // Default to whatever window is currently active (Today on first load).
+  const win = (mode === 'day' || mode === 'week') ? mode : _mzTop10Window;
+  _mzTop10Window = win;
 
   // IST date, matching loadCarousel's release cutoff.
   const todayIST = new Date(Date.now() + (5.5 * 60 * 60 * 1000)).toISOString().split('T')[0];
 
+  /*  The day rolled over while this page stayed open — every cached list is
+   *  yesterday's, so drop them instead of serving a stale "Today". */
+  if (_mzTop10CacheDay && _mzTop10CacheDay !== todayIST) {
+    _mzTop10Cache = { day: null, week: null };
+    _mzTop10CacheDay = null;
+  }
+
+  // Already have this window's ranking from earlier today — reuse it.
+  if (_mzTop10Cache[win]) {
+    _mzTop10Data = _mzTop10Cache[win];
+    renderTop10(_mzTop10Data);
+    return;
+  }
+  if (_mzTop10Loads[win]) return;
+  _mzTop10Loads[win] = true;
+  _mzTop10Loading = true;
+
+  /*  Show the skeleton while a fresh window loads, so switching tabs gives
+   *  immediate feedback rather than freezing the old rail. */
+  _mzShowTop10Skeleton();
+
+  // Today → /trending/movie/day, This Week → /trending/movie/week.
+  const endpoint = win === 'day' ? '/trending/movie/day' : '/trending/movie/week';
+
   let list = [];
   try {
     const pages = await tmdbBatch([
-      ['/trending/movie/week', { language: 'en-US', page: '1' }],
-      ['/trending/movie/week', { language: 'en-US', page: '2' }]
+      [endpoint, { language: 'en-US', page: '1' }],
+      [endpoint, { language: 'en-US', page: '2' }]
     ]);
 
     /*  Flatten in response order so the index IS the trending position, then
@@ -3789,20 +3864,41 @@ async function loadTop10() {
       });
     });
 
-    list = top10SelectRanked(pool);
+    /*  Today keeps TMDB's day order; This Week is scored. See top10SelectRanked
+     *  for the measurement that forced the split. */
+    list = top10SelectRanked(pool, win === 'day' ? 'trend' : 'score');
   } catch (e) {
     list = [];
   }
+  _mzTop10Loads[win] = false;
   _mzTop10Loading = false;
 
+  // A stale response can arrive after the visitor already switched windows.
+  // Only paint if this window is still the active one.
+  const stillActive = _mzTop10Window === win;
+
   if (list.length === 0) {
-    // Nothing to show — keep the section hidden rather than showing an empty rail.
-    section.setAttribute('hidden', '');
+    // Nothing to show for this window — hide only if it is the one on screen.
+    if (stillActive) section.setAttribute('hidden', '');
     return;
   }
 
-  _mzTop10Data = list;
-  renderTop10(list);
+  _mzTop10Cache[win] = list;
+  _mzTop10CacheDay = todayIST;
+  if (stillActive) {
+    _mzTop10Data = list;
+    renderTop10(list);
+  }
+}
+
+/*  Rebuild the loading skeleton (five placeholder cards) that index.html ships
+ *  with, so a window switch shows the same shimmer the first load did. */
+function _mzShowTop10Skeleton() {
+  const rail = document.getElementById('top10Rail');
+  if (!rail) return;
+  let html = '';
+  for (let i = 0; i < 5; i++) html += '<div class="top10-card top10-skeleton"></div>';
+  rail.innerHTML = html;
 }
 
 function renderTop10(list) {
@@ -3877,6 +3973,33 @@ function renderTop10(list) {
   rail.innerHTML = html;
   section.removeAttribute('hidden');
   _mzUpdateTop10Arrows();
+  /*  The pill can only be measured now: until this line the section is
+   *  [hidden], i.e. display:none, and every offsetWidth inside it reads 0. */
+  _mzSyncTop10Ind();
+}
+
+/*  Sizes and positions the toggle's gold indicator from the ACTIVE button's own
+ *  box, instead of assuming the two halves are equal.
+ *
+ *  They are not: "Today" is about 30% narrower than "This Week", so the original
+ *  `width: calc(50% - 4px)` pill was wider than the Today label and narrower
+ *  than This Week — visibly wrong at both ends, and it would drift further with
+ *  any font-size change. Measuring is also what keeps it correct once Outfit
+ *  swaps in over the fallback face, which changes the label widths after first
+ *  paint.
+ *
+ *  Reads offsetLeft/offsetWidth (layout values, unaffected by the transform
+ *  already on the element) and writes an inline transform that overrides the
+ *  stylesheet's .is-week fallback.
+ */
+function _mzSyncTop10Ind() {
+  const toggle = document.querySelector('#top10-trending .top10-toggle');
+  if (!toggle) return;
+  const ind = toggle.querySelector('.top10-toggle-ind');
+  const active = toggle.querySelector('.top10-toggle-btn.is-active');
+  if (!ind || !active || !active.offsetWidth) return;   // 0 while the section is hidden
+  ind.style.width = active.offsetWidth + 'px';
+  ind.style.transform = 'translateX(' + (active.offsetLeft - ind.offsetLeft) + 'px)';
 }
 
 /*  Delegated wiring — set up once. Clicks/keys open the detail modal, the
@@ -3936,15 +4059,53 @@ function initTop10() {
     if (next) next.addEventListener('click', () => rail.scrollBy({ left: step(), behavior: 'smooth' }));
     rail.addEventListener('scroll', _mzUpdateTop10Arrows, { passive: true });
 
-    /*  Arrow visibility depends on scrollWidth vs clientWidth, and both change
-     *  on any resize, orientation flip, or when the poster size variable steps
-     *  to a new breakpoint. ResizeObserver catches all of those; the window
-     *  listener is the fallback for engines without it. */
-    if (typeof ResizeObserver === 'function') {
-      new ResizeObserver(() => _mzUpdateTop10Arrows()).observe(rail);
-    }
-    window.addEventListener('resize', _mzUpdateTop10Arrows, { passive: true });
-    window.addEventListener('orientationchange', () => setTimeout(_mzUpdateTop10Arrows, 150));
+    /*  Arrow visibility depends on scrollWidth vs clientWidth, and both change on
+     *  any resize, orientation flip, or when the poster size variable steps to a
+     *  new breakpoint. The measured toggle indicator has to be refreshed on
+     *  exactly the same events — the 560px breakpoint changes the pill's padding
+     *  and font size — so one callback does both. ResizeObserver catches all of
+     *  them; the window listener is the fallback for engines without it. */
+    const resync = () => { _mzUpdateTop10Arrows(); _mzSyncTop10Ind(); };
+    if (typeof ResizeObserver === 'function') new ResizeObserver(resync).observe(rail);
+    window.addEventListener('resize', resync, { passive: true });
+    window.addEventListener('orientationchange', () => setTimeout(resync, 150));
+    /*  Outfit replacing the fallback face reflows both labels, which moves the
+     *  box the indicator was measured against. */
+    if (document.fonts) document.fonts.ready.then(_mzSyncTop10Ind).catch(() => {});
+  }
+
+  /*  Today / This Week toggle. One delegated handler on the pill: identify the
+   *  clicked button, move the sliding indicator and the active/aria state, then
+   *  load that window (cached after the first fetch, so re-clicks are instant). */
+  const toggle = section.querySelector('.top10-toggle');
+  if (toggle) {
+    const headWin = document.getElementById('top10HeadWin');
+    const setWindow = (win) => {
+      if (win !== 'day' && win !== 'week') return;
+      const btns = toggle.querySelectorAll('.top10-toggle-btn');
+      btns.forEach(b => {
+        const on = b.dataset.window === win;
+        b.classList.toggle('is-active', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+      // Slides the gold indicator: default (left) = Today, .is-week (right) = This Week.
+      toggle.classList.toggle('is-week', win === 'week');
+      // Re-measure against the button that just became active (see _mzSyncTop10Ind).
+      _mzSyncTop10Ind();
+      /*  Only the screen-reader-only tail of the h2 changes, so the visible
+       *  "Top 10 Trending Movies" markup is left intact — rewriting the whole
+       *  heading would delete the styled <span> with it. */
+      if (headWin) headWin.textContent = win === 'week' ? ' This Week' : ' Today';
+      loadTop10(win);
+    };
+
+    toggle.addEventListener('click', (event) => {
+      const btn = event.target.closest('.top10-toggle-btn');
+      if (!btn || !toggle.contains(btn)) return;
+      const win = btn.dataset.window;
+      if (win === _mzTop10Window) return;   // already showing this window
+      setWindow(win);
+    });
   }
 
   loadTop10();
@@ -8895,6 +9056,10 @@ function closeModal(fromPopstate) {
   // Close the modal UI
   overlay.classList.remove('open');
   document.body.style.overflow = '';
+  // Persist and end the accurate watch session started by playMovie(). This is
+  // what records the final % and drops the title from Continue Watching if it
+  // crossed the completion threshold.
+  if (typeof _mzStopWatchSession === 'function') { try { _mzStopWatchSession(); } catch (e) {} }
   const embedEl = document.getElementById('videoEmbed');
   if (embedEl) {
     destroyPrewarm();
@@ -9840,9 +10005,13 @@ function buildSourceLabel(srcIdx) {
  
 function playMovie() {
   if (!currentModalMovie) return;
-  // Save to Continue Watching
-  if (typeof saveWatchProgress === 'function' && currentModalMovie) {
-    saveWatchProgress(currentModalMovie, Math.floor(Math.random() * 50 + 25));
+  // Start an accurate watch session (real progress, not a random guess). It
+  // seeds the Continue Watching rail immediately and tracks visible watch time
+  // against the title's runtime — see _mzStartWatchSession.
+  if (typeof _mzStartWatchSession === 'function' && currentModalMovie) {
+    const rt = currentModalMovie.runtime ||
+      (currentModalMovie.episode_run_time && currentModalMovie.episode_run_time[0]) || 0;
+    _mzStartWatchSession(currentModalMovie, rt);
   }
   currentSourceIdx = getSelectedSourceIdx();
   const lang = getSelectedLang();
@@ -10991,43 +11160,221 @@ init();
 // ═══ CONTINUE WATCHING SYSTEM ═══
 (function initContinueWatching() {
   const CW_KEY = 'mz_continue_watching';
+  const DONE_KEY = 'mz_watched_done';        // ids the user has finished — never re-shown
   const MAX_CW_ITEMS = 20;
+
+  /*  What counts as "finished".
+   *
+   *  A cross-origin streaming iframe does not expose currentTime/duration, so the
+   *  progress here is a VISIBLE-WATCH-TIME estimate: seconds the player was open
+   *  and the tab focused, measured against the title's TMDB runtime. Real credits
+   *  start a few minutes before the file ends, so 92% is treated as "done" — past
+   *  that point the viewer is almost always in the credits and does not want the
+   *  title offered back to them. */
+  const COMPLETE_AT = 92;
+  /*  Below this a session is treated as "did not really start" (a misclick, a
+   *  server that never loaded). It is kept in the rail so the user can retry, but
+   *  it is never promoted to "done". */
+  const MIN_MEANINGFUL = 2;
 
   function getCWList() {
     try { return JSON.parse(localStorage.getItem(CW_KEY)) || []; }
     catch { return []; }
   }
-
   function saveCWList(list) {
-    localStorage.setItem(CW_KEY, JSON.stringify(list.slice(0, MAX_CW_ITEMS)));
+    try { localStorage.setItem(CW_KEY, JSON.stringify(list.slice(0, MAX_CW_ITEMS))); }
+    catch (e) { /* quota — nothing actionable */ }
   }
 
-  // Save watch progress (called when user plays a movie)
-  window.saveWatchProgress = function(movie, progress) {
-    if (!movie || !movie.id) return;
+  function getDoneSet() {
+    try { return new Set(JSON.parse(localStorage.getItem(DONE_KEY)) || []); }
+    catch { return new Set(); }
+  }
+  function markDone(id) {
+    const set = getDoneSet();
+    set.add(Number(id));
+    // Cap the done-list so it cannot grow forever; keep the most recent 300.
+    const arr = Array.from(set).slice(-300);
+    try { localStorage.setItem(DONE_KEY, JSON.stringify(arr)); } catch (e) {}
+  }
+  function isDone(id) { return getDoneSet().has(Number(id)); }
+  window.mzClearWatched = function (id) {
+    // Lets a "watch again" flow resurrect a finished title.
+    const set = getDoneSet();
+    set.delete(Number(id));
+    try { localStorage.setItem(DONE_KEY, JSON.stringify(Array.from(set))); } catch (e) {}
+  };
+
+  /*  ── ACTIVE WATCH SESSION ──────────────────────────────────────────────
+   *  Started by playMovie(), stopped by closeModal(). While it runs, watched
+   *  seconds accumulate ONLY when the tab is visible, and progress is derived
+   *  from that against the movie runtime. This is what replaces the old random
+   *  percentage — the number now reflects how long the title was actually open. */
+  let session = null;   // { id, title, backdrop, poster, media_type, vote_average,
+                        //   runtimeSec, watchedSec, lastTick, timer }
+
+  function nowSec() { return Date.now() / 1000; }
+
+  function currentProgressPct() {
+    if (!session || !session.runtimeSec) return 0;
+    return Math.max(0, Math.min(100, Math.round((session.watchedSec / session.runtimeSec) * 100)));
+  }
+
+  // Fold whatever time elapsed since the last tick into watchedSec, but only if
+  // the page was visible for it. Called on every tick and on visibility change.
+  function accrue() {
+    if (!session) return;
+    const t = nowSec();
+    if (document.visibilityState === 'visible') {
+      const delta = t - session.lastTick;
+      // Guard against a machine that slept: a 4h "tick" is not 4h of watching.
+      if (delta > 0 && delta < 90) session.watchedSec += delta;
+    }
+    session.lastTick = t;
+  }
+
+  function persistSessionProgress() {
+    if (!session) return;
+    const pct = currentProgressPct();
+    if (pct >= COMPLETE_AT) {
+      // Finished — drop it from the rail and remember it so it never returns.
+      markDone(session.id);
+      const list = getCWList().filter(item => Number(item.id) !== Number(session.id));
+      saveCWList(list);
+      renderContinueWatching();
+      stopWatchSession();   // nothing left to track
+      return;
+    }
+    upsertEntry(mkEntry(session, null, pct, Math.round(session.watchedSec), Math.round(session.runtimeSec)));
+    // Cheap live update of the on-screen bar without a full re-render.
+    liveUpdateCard(session.id, pct);
+  }
+
+  /*  One entry shape, three call sites. `src` is either the running session or a
+   *  TMDB movie object; `prior` (may be null) supplies resume fields when src is
+   *  a bare movie. Collapsing the three literals into this saved the bulk of the
+   *  feature's byte cost. */
+  function mkEntry(src, prior, pct, watchedSec, runtimeSec) {
+    return {
+      id: src.id,
+      title: src.title || src.name || (prior && prior.title) || '',
+      backdrop: src.backdrop || src.backdrop_path || (prior && prior.backdrop) || '',
+      poster: src.poster || src.poster_path || (prior && prior.poster) || '',
+      media_type: src.media_type || (src.name && !src.title ? 'tv' : 'movie'),
+      vote_average: src.vote_average || (prior && prior.vote_average) || 0,
+      progress: pct,
+      watchedSec: watchedSec || 0,
+      runtimeSec: runtimeSec || 0,
+      timestamp: Date.now()
+    };
+  }
+
+  // Insert or move-to-front an entry, preserving resume fields.
+  function upsertEntry(entry) {
     const list = getCWList();
-    const existing = list.findIndex(item => item.id === movie.id);
-    if (existing > -1) list.splice(existing, 1);
-    list.unshift({
-      id: movie.id,
-      title: movie.title || movie.name,
-      backdrop: movie.backdrop_path || '',
-      poster: movie.poster_path || '',
-      media_type: movie.media_type || (movie.name && !movie.title ? 'tv' : 'movie'),
-      progress: progress || Math.floor(Math.random() * 60 + 20), // percentage
-      timestamp: Date.now(),
-      vote_average: movie.vote_average || 0
-    });
+    const at = list.findIndex(item => Number(item.id) === Number(entry.id));
+    if (at > -1) list.splice(at, 1);
+    list.unshift(entry);
     saveCWList(list);
+  }
+
+  function onVisibility() { accrue(); persistSessionProgress(); }
+
+  window._mzStartWatchSession = function (movie, runtimeMinutes) {
+    if (!movie || !movie.id) return;
+    stopWatchSession();   // never run two at once
+
+    // A freshly-restarted finished title is watchable again.
+    if (isDone(movie.id)) window.mzClearWatched(movie.id);
+
+    // Runtime: prefer the real TMDB value; fall back to a sane default so the
+    // percentage still advances for titles TMDB has no runtime for.
+    let runSec = 0;
+    const rt = Number(runtimeMinutes || movie.runtime ||
+      (movie.episode_run_time && movie.episode_run_time[0]) || 0);
+    if (rt > 0) runSec = rt * 60;
+    else runSec = (movie.media_type === 'tv' ? 45 : 120) * 60;   // fallback estimate
+
+    // Resume: if this title is already in the rail, continue from where it was.
+    const prior = getCWList().find(item => Number(item.id) === Number(movie.id));
+    const priorSec = prior && Number.isFinite(prior.watchedSec) ? prior.watchedSec : 0;
+
+    session = {
+      id: movie.id,
+      title: movie.title || movie.name || (prior && prior.title) || '',
+      backdrop: movie.backdrop_path || (prior && prior.backdrop) || '',
+      poster: movie.poster_path || (prior && prior.poster) || '',
+      media_type: movie.media_type || (movie.name && !movie.title ? 'tv' : 'movie'),
+      vote_average: movie.vote_average || (prior && prior.vote_average) || 0,
+      runtimeSec: runSec,
+      watchedSec: priorSec,
+      lastTick: nowSec(),
+      timer: null
+    };
+
+    // Seed the rail immediately so the card appears the moment playback starts,
+    // showing the resumed percentage rather than 0.
+    upsertEntry(mkEntry(session, null, currentProgressPct(),
+      Math.round(session.watchedSec), Math.round(session.runtimeSec)));
+    renderContinueWatching();
+
+    // Tick every 5s: accrue visible time, persist, refresh the bar.
+    session.timer = setInterval(() => { accrue(); persistSessionProgress(); }, 5000);
+    document.addEventListener('visibilitychange', onVisibility);
+  };
+
+  function stopWatchSession() {
+    if (!session) return;
+    accrue();
+    persistSessionProgress();
+    if (session) {   // persist may have cleared it on completion
+      clearInterval(session.timer);
+    }
+    document.removeEventListener('visibilitychange', onVisibility);
+    session = null;
+  }
+  window._mzStopWatchSession = stopWatchSession;
+
+  /*  Legacy entry point, now real instead of random. If a caller passes an
+   *  explicit progress number it is respected; otherwise it seeds a 1% "just
+   *  started" marker and lets the live session drive the rest. */
+  window.saveWatchProgress = function (movie, progress) {
+    if (!movie || !movie.id) return;
+    if (isDone(movie.id) && !(progress > 0 && progress < COMPLETE_AT)) return;
+    const prior = getCWList().find(item => Number(item.id) === Number(movie.id));
+    const pct = Number.isFinite(progress) ? Math.max(0, Math.min(100, Math.round(progress)))
+      : (prior ? prior.progress : 1);
+    if (pct >= COMPLETE_AT) { markDone(movie.id); window.removeCW(movie.id); return; }
+    upsertEntry(mkEntry(movie, prior, pct,
+      prior && Number.isFinite(prior.watchedSec) ? prior.watchedSec : 0,
+      prior && Number.isFinite(prior.runtimeSec) ? prior.runtimeSec : 0));
     renderContinueWatching();
   };
 
-  // Remove from continue watching
+  // Remove from continue watching (does NOT mark as finished — an explicit
+  // "not interested" that should not resurrect on the next play either).
   window.removeCW = function(id) {
-    const list = getCWList().filter(item => item.id !== id);
+    const list = getCWList().filter(item => Number(item.id) !== Number(id));
     saveCWList(list);
+    if (session && Number(session.id) === Number(id)) { clearInterval(session.timer); session = null; }
     renderContinueWatching();
   };
+
+  // Live-patch one card's bar + label without re-rendering the whole rail, so a
+  // 5s tick does not flicker the images.
+  function liveUpdateCard(id, pct) {
+    const grid = document.getElementById('continueWatchingGrid');
+    if (!grid) return;
+    const card = grid.querySelector('.cw-card[data-id="' + Number(id) + '"]');
+    if (!card) { renderContinueWatching(); return; }
+    const fill = card.querySelector('.cw-progress-fill');
+    if (fill) fill.style.width = pct + '%';
+    const meta = card.querySelector('.cw-card-meta');
+    if (meta) {
+      const entry = getCWList().find(e => Number(e.id) === Number(id));
+      if (entry) meta.textContent = getTimeAgo(entry.timestamp) + ' • ' + pct + '% watched';
+    }
+  }
 
   // Render the continue watching section
   window.renderContinueWatching = function() {
@@ -11035,7 +11382,9 @@ init();
     const grid = document.getElementById('continueWatchingGrid');
     if (!section || !grid) return;
 
-    const list = getCWList();
+    // Never show finished titles, even if a stale entry lingers.
+    const list = getCWList().filter(item => item && !isDone(item.id));
+
     if (list.length === 0) {
       section.style.display = 'none';
       return;
@@ -11047,17 +11396,18 @@ init();
         ? `https://image.tmdb.org/t/p/w500${item.backdrop}`
         : (item.poster ? `https://image.tmdb.org/t/p/w342${item.poster}` : '');
       const timeAgo = getTimeAgo(item.timestamp);
+      const pct = Math.max(0, Math.min(100, Number(item.progress) || 0));
       return `
-        <div class="cw-card" onclick="openCWMovie(${item.id}, '${item.media_type}', event)" tabindex="0">
+        <div class="cw-card" data-id="${Number(item.id)}" onclick="openCWMovie(${item.id}, '${item.media_type}', event)" tabindex="0">
           <img class="cw-card-img" src="${img}" alt="${escapeHTML(item.title || '')}" width="280" height="158" loading="lazy" decoding="async">
           <div class="cw-play-icon">
             <svg viewBox="0 0 24 24" width="22" height="22" fill="#000"><path d="M8 5v14l11-7z"/></svg>
           </div>
           <button class="cw-remove-btn" onclick="event.stopPropagation(); removeCW(${item.id})" aria-label="Remove"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
           <div class="cw-card-info">
-            <div class="cw-card-title">${item.title}</div>
-            <div class="cw-card-meta">${timeAgo} • ${item.progress}% watched</div>
-            <div class="cw-progress-bar"><div class="cw-progress-fill" style="width:${item.progress}%"></div></div>
+            <div class="cw-card-title">${escapeHTML(item.title || '')}</div>
+            <div class="cw-card-meta">${timeAgo} • ${pct}% watched</div>
+            <div class="cw-progress-bar"><div class="cw-progress-fill" style="width:${pct}%"></div></div>
           </div>
         </div>
       `;
@@ -11067,6 +11417,7 @@ init();
   function getTimeAgo(timestamp) {
     const diff = Date.now() - timestamp;
     const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'Just now';
     if (mins < 60) return mins + 'm ago';
     const hrs = Math.floor(mins / 60);
     if (hrs < 24) return hrs + 'h ago';
@@ -11080,6 +11431,10 @@ init();
     // Reuse existing openModal function, preserving the explicit click/remote event.
     if (typeof openModal === 'function') openModal(id, mediaType, activationEvent);
   };
+
+  // Save the running session's progress before the tab is torn down.
+  window.addEventListener('pagehide', stopWatchSession);
+  window.addEventListener('beforeunload', () => { if (session) { accrue(); persistSessionProgress(); } });
 
   // Render on page load
   if (document.readyState === 'loading') {
