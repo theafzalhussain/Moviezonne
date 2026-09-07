@@ -7465,7 +7465,7 @@ html[data-mz-tv="true"] .cat-group-menu {
 
 /* ═══════════════════════════════════════════════════════════════
    SERVER SECTIONS — SMALL SCREEN CENTERING
-   ═══════════════════════════════════════════════════════════════ */
+   ════════════════════��══════════════════════════════════════════ */
 
 @media (max-width: 768px) {
   .srv-container {
@@ -12122,6 +12122,12 @@ img { content-visibility: auto; }
    size, and they overlap their poster more deeply so the rail reads as
    one composed object.
    ═══════════════════════════════════════════════════════════════ */
+/* Reserve this below-fold rail while its non-blocking stylesheet loads. */
+.providers-section { min-height: 336px; visibility: hidden; }
+@media (max-width: 600px) {
+  .providers-section { min-height: 312px; }
+}
+
 .top10-section {
   /*  One knob drives poster size, numeral size and the overlap.
    *

@@ -13,9 +13,9 @@
 <link rel="preconnect" href="https://image.tmdb.org" crossorigin>
 <link rel="dns-prefetch" href="https://image.tmdb.org">
 
-<link rel="stylesheet" href="/moviezone.min.css?v=8.7">
+<link rel="stylesheet" href="/moviezone.min.css?v=8.8">
 <!--MZ_PERF_HEAD-->
-<link rel="preload" href="/moviezone.min.css?v=8.7" as="style" fetchpriority="high">
+<link rel="preload" href="/moviezone.min.css?v=8.8" as="style" fetchpriority="high">
 <link rel="preload" as="image" media="(max-width: 1024px)" href="https://image.tmdb.org/t/p/w780/qeQJx07rK2xm8SD2sJxFKhE7gs0.jpg" fetchpriority="high">
 <link rel="preload" as="image" media="(min-width: 1025px)" href="https://image.tmdb.org/t/p/w1280/qeQJx07rK2xm8SD2sJxFKhE7gs0.jpg" fetchpriority="high">
 <meta name="mz-hero-backdrop" content="/qeQJx07rK2xm8SD2sJxFKhE7gs0.jpg">
@@ -37,7 +37,7 @@
 <link rel="preload" href="/fonts/outfit-latin-var.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/bebas-neue-latin-400.woff2" as="font" type="font/woff2" crossorigin>
 
-<link rel="preload" href="/moviezone.min.js?v=11.7" as="script">
+<link rel="preload" href="/moviezone.min.js?v=11.8" as="script">
 
 
 <style id="mz-fonts">
@@ -1005,7 +1005,7 @@ html.mz-no-ads .mz-ad-slot{display:none}
 <!-- ── MOBILE NAV OVERLAY ── -->
 <div class="mobile-nav-overlay" id="mobileNavOverlay"></div>
 
-<!-- â”€â”€ NAVBAR â”€â”€ -->
+<!-- â��€â”€ NAVBAR â”€â”€ -->
 <nav id="navbar" role="navigation" aria-label="Main navigation">
   <div class="nav-brand">
     <a class="nav-logo" href="#" aria-label="MovieZone home">
@@ -1110,6 +1110,63 @@ html.mz-no-ads .mz-ad-slot{display:none}
   </div>
 </section>
 
+
+<link rel="stylesheet" href="/providers.css?v=2" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="/providers.css?v=2"></noscript>
+<section id="top-providers" class="providers-section" aria-labelledby="providersHeading">
+  <div class="providers-header">
+    <div>
+      <h2 id="providersHeading" class="providers-heading">Top Providers</h2>
+      <p class="providers-subtitle">Find your next watch on your favourite platform.</p>
+    </div>
+    <div class="providers-controls" role="group" aria-label="Provider carousel" hidden>
+      <button class="providers-arrow" type="button" data-provider-scroll="-1" aria-label="Previous providers" aria-controls="providersRail" disabled>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg>
+      </button>
+      <button class="providers-arrow" type="button" data-provider-scroll="1" aria-label="Next providers" aria-controls="providersRail">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+      </button>
+    </div>
+  </div>
+  <ul id="providersRail" class="providers-rail" aria-label="Streaming providers">
+    <li><a class="provider-card" href="#movies-section" data-provider-cat="netflix" aria-label="Netflix — browse movies and shows">
+      <span class="provider-logo"><img src="/provider-netflix.svg" alt="Netflix" width="160" height="64" loading="lazy" decoding="async"></span>
+      <span class="provider-caption">Explore catalogue <span aria-hidden="true">&rarr;</span></span>
+    </a></li>
+    <li><a class="provider-card" href="#movies-section" data-provider-cat="prime" aria-label="Prime Video — browse movies and shows">
+      <span class="provider-logo"><img src="/provider-prime.svg" alt="Prime Video" width="160" height="64" loading="lazy" decoding="async"></span>
+      <span class="provider-caption">Explore catalogue <span aria-hidden="true">&rarr;</span></span>
+    </a></li>
+    <li><a class="provider-card" href="#movies-section" data-provider-cat="jiohotstar" aria-label="JioHotstar — browse movies and shows">
+      <span class="provider-logo"><img src="/provider-jiohotstar.png" alt="JioHotstar" width="160" height="64" loading="lazy" decoding="async"></span>
+      <span class="provider-caption">Explore catalogue <span aria-hidden="true">&rarr;</span></span>
+    </a></li>
+    <li><a class="provider-card" href="https://tv.apple.com/" target="_blank" rel="noopener noreferrer" aria-label="Apple TV+ — official site, opens in a new tab">
+      <span class="provider-logo provider-logo--apple"><img src="/provider-apple.svg" alt="Apple TV" width="108" height="108" loading="lazy" decoding="async"><span aria-hidden="true">+</span></span>
+      <span class="provider-caption">Official site <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg></span>
+    </a></li>
+    <li><a class="provider-card" href="#movies-section" data-provider-cat="zee5" aria-label="ZEE5 — browse movies and shows">
+      <span class="provider-logo"><img src="/provider-zee5.svg" alt="ZEE5" width="160" height="64" loading="lazy" decoding="async"></span>
+      <span class="provider-caption">Explore catalogue <span aria-hidden="true">&rarr;</span></span>
+    </a></li>
+    <li><a class="provider-card" href="https://www.sonyliv.com/" target="_blank" rel="noopener noreferrer" aria-label="SonyLIV — official site, opens in a new tab">
+      <span class="provider-logo provider-logo--square"><img src="/provider-sonyliv.png" alt="SonyLIV" width="80" height="80" loading="lazy" decoding="async"></span>
+      <span class="provider-caption">Official site <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg></span>
+    </a></li>
+    <li><a class="provider-card" href="https://www.mxplayer.in/" target="_blank" rel="noopener noreferrer" aria-label="Amazon MX Player — official site, opens in a new tab">
+      <span class="provider-logo"><img src="/provider-mxplayer.png" alt="Amazon MX Player" width="160" height="64" loading="lazy" decoding="async"></span>
+      <span class="provider-caption">Amazon MX Player <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg></span>
+    </a></li>
+    <li><a class="provider-card" href="https://www.aha.video/" target="_blank" rel="noopener noreferrer" aria-label="aha — official site, opens in a new tab">
+      <span class="provider-logo provider-logo--aha"><img src="/provider-aha.svg" alt="aha" width="100" height="64" loading="lazy" decoding="async"></span>
+      <span class="provider-caption">Official site <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg></span>
+    </a></li>
+    <li><a class="provider-card" href="https://www.crunchyroll.com/" target="_blank" rel="noopener noreferrer" aria-label="Crunchyroll — official site, opens in a new tab">
+      <span class="provider-logo"><img src="/provider-crunchyroll.svg" alt="Crunchyroll" width="160" height="64" loading="lazy" decoding="async"></span>
+      <span class="provider-caption">Official site <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg></span>
+    </a></li>
+  </ul>
+</section>
 
 <!-- CONTINUE WATCHING
      No inline style="display:none" here any more: it beat every stylesheet rule,
@@ -1730,7 +1787,7 @@ html.mz-no-ads .mz-ad-slot{display:none}
       unstyled text. A leading slash is the whole fix. -->
 <script src="/tv-mode.min.js?v=1.4" defer></script>
 <script src="/search-engine.min.js?v=2.1" defer></script>
-<script src="/moviezone.min.js?v=11.7" defer></script>
+<script src="/moviezone.min.js?v=11.8" defer></script>
 <script>
 /*  ── pwa-install.min.js is NOT loaded with the others ─────────────────────────
  *  It was a fourth `defer` script, so its 30 KB was parsed and executed inside

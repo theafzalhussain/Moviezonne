@@ -663,7 +663,7 @@ let abortControllers = new Map(); // Track controllers to cancel stale requests
 
 /*  ══════════════════════════════════════════════════════════════════════
  *  DEFERRED CACHE WRITES
- *  ══════════════════════════════════════════════════════════════════════
+ *  ══════════════════════════════════════════════════════════════��═══════
  *  localStorage is synchronous: setItem blocks the main thread until the
  *  write lands. The SWR cache below used to call it inline in every response
  *  handler, and a cold homepage fires 15-20 TMDB requests at once — so the
@@ -1332,7 +1332,7 @@ const MZ_TMDB_SWR_FRESH_MS = 12 * 60 * 60 * 1000;
 
 /*  ══════════════════════════════════════════════════════════════════════
  *  AUTO-UPDATE: FRESHNESS IS PER ENDPOINT, NOT ONE NUMBER
- *  ══════════════════════════════════════════════════════════════════════
+ *  ═══════════════════════════════════════════════════════════════���══════
  *  A single 12h window is right for a title's own record - Interstellar's runtime
  *  and cast do not change - and wrong for the lists the home page is built from.
  *  /trending/movie/week, /movie/now_playing and every /discover query are the
@@ -3600,7 +3600,7 @@ async function loadCarousel() {
     } else if (lang === 'hi' && m.vote_average >= 7.0) {
       m._badge = '🎬 BOLLYWOOD HIT';
     } else if (lang === 'hi') {
-      m._badge = '🎬 BOLLYWOOD TRENDING';
+      m._badge = '�� BOLLYWOOD TRENDING';
     } else if (category === 'tollywood') {
       /*  Category, not language. A pinned title is placed into the bucket the pin
        *  names rather than the one its language implies, so reading `lang` here
@@ -4521,7 +4521,7 @@ function refreshSlideQuality(index) {
   });
 }
  
-/* ── AUTOPLAY ─────────────────────────────────────────────────────────────
+/* ── AUTOPLAY ─────────────────────────────────────────────────────────���───
    One constant drives every start/resume path — change the seconds here and
    the progress bar follows.
 
@@ -6598,7 +6598,7 @@ function _mzCardPrefetch(card) {
 
 /*  ══════════════════════════════════════════════════════════════════════
  *  DETAIL REQUEST PARAMS  (single source of truth)
- *  ══════════════════════════════════════════════════════════════════════
+ *  ═══════════════════════════════════════════════════════��══════════════
  *  TMDB applies `language` to the videos it appends as well, so
  *  `language=en-US` alone returns ONLY videos tagged English. That is why the
  *  hover trailer worked on Hollywood titles and silently did nothing on much of
@@ -7035,6 +7035,72 @@ document.addEventListener('keydown', (e) => {
   if (!document.querySelector('.cat-group.is-open')) return;
   closeCatGroups();
 });
+
+(function initProviderCarousel() {
+  function mount() {
+    const section = document.getElementById('top-providers');
+    if (!section) return;
+    const rail = section.querySelector('#providersRail');
+    const controls = section.querySelector('.providers-controls');
+    const previous = section.querySelector('[data-provider-scroll="-1"]');
+    const next = section.querySelector('[data-provider-scroll="1"]');
+    const cards = Array.from(rail.querySelectorAll('.provider-card'));
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let scrollFrame = 0;
+
+    function updateControls() {
+      scrollFrame = 0;
+      const maximum = rail.scrollWidth - rail.clientWidth;
+      controls.hidden = maximum <= 2;
+      previous.disabled = rail.scrollLeft <= 2;
+      next.disabled = rail.scrollLeft >= maximum - 2;
+    }
+
+    section.addEventListener('click', function (event) {
+      const scrollButton = event.target.closest('[data-provider-scroll]');
+      if (scrollButton && !scrollButton.disabled) {
+        rail.scrollBy({
+          left: Number(scrollButton.dataset.providerScroll) * rail.clientWidth * 0.85,
+          behavior: reducedMotion.matches ? 'instant' : 'smooth'
+        });
+      }
+      const provider = event.target.closest('[data-provider-cat]');
+      if (provider && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey && event.button === 0) {
+        event.preventDefault();
+        filterCat(provider.dataset.providerCat);
+        const heading = document.getElementById('sectionHeading');
+        if (heading) {
+          heading.setAttribute('tabindex', '-1');
+          heading.focus({ preventScroll: true });
+        }
+      }
+    });
+
+    rail.addEventListener('keydown', function (event) {
+      if (event.isComposing || event.keyCode === 229 || event.altKey || event.ctrlKey || event.metaKey) return;
+      const index = cards.indexOf(event.target.closest('.provider-card'));
+      if (index < 0) return;
+      let target = index;
+      if (event.key === 'ArrowRight') target = Math.min(index + 1, cards.length - 1);
+      else if (event.key === 'ArrowLeft') target = Math.max(index - 1, 0);
+      else if (event.key === 'Home') target = 0;
+      else if (event.key === 'End') target = cards.length - 1;
+      else return;
+      event.preventDefault();
+      cards[target].focus({ preventScroll: true });
+      cards[target].scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: reducedMotion.matches ? 'instant' : 'smooth' });
+    });
+
+    rail.addEventListener('scroll', function () {
+      if (!scrollFrame) scrollFrame = requestAnimationFrame(updateControls);
+    }, { passive: true });
+    if (typeof ResizeObserver === 'function') new ResizeObserver(updateControls).observe(rail);
+    else window.addEventListener('resize', updateControls, { passive: true });
+    updateControls();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true });
+  else mount();
+})();
 
 function filterCat(cat, e) {
   if (e) e.preventDefault();
