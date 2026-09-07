@@ -7,3 +7,4 @@ node_modules/
 # commit. Files already tracked under .wrangler/state stay tracked until they
 # are explicitly removed with `git rm --cached`.
 .wrangler/
+moviezone-worker-504-fix/
