@@ -1,4 +1,4 @@
-/* ═══════════════════════════════════════════════════════════════
+﻿/* ═══════════════════════════════════════════════════════════════
    MOVIEZONE — ULTRA PREMIUM LUXURY EDITION
    Complete design system with cinematic animations
    ═══════════════════════════════════════════════════════════════ */
@@ -1671,39 +1671,45 @@ body {
   filter: brightness(0.52) saturate(1.15);
 }
 
-/* ✨ PREMIUM GRADIENT: Makes movie data 100% readable on all screens */
+/*  ── SLIDE SCRIM ──
+    ONE gradient system for every screen — phone, laptop and TV.
+
+    The left-to-right wash is the base and is no longer wrapped in a
+    (min-width: 1024px) query: it is what makes the hero read as a lit frame,
+    with the text column on ink and the backdrop opening up towards the right.
+    Phones used to get a "to top"-only variant instead — a flat black band under
+    the whole block — which is exactly why the mobile hero looked like a
+    different design from the laptop one, and TV widths inherited whichever
+    branch their viewport happened to match.
+
+    The shallow "to top" layer stays underneath so the dots and the progress bar
+    at the bottom edge never sit on bare image.
+
+    The phone override below is the SAME two layers, only deeper, because there
+    the text column spans nearly the full width instead of the left third. */
 .slide-gradient {
   position: absolute;
   inset: 0;
-  background: linear-gradient(to top, rgba(3, 3, 10, 0.85) 0%, rgba(3, 3, 10, 0.2) 50%, transparent 85%);
+  background:
+    linear-gradient(to right, rgba(3, 3, 10, 0.85) 0%, rgba(3, 3, 10, 0.3) 35%, transparent 80%),
+    linear-gradient(to top, rgba(3, 3, 10, 0.5) 0%, transparent 30%);
   z-index: 2;
   pointer-events: none;
 }
 
-@media (min-width: 1024px) {
-  .slide-gradient {
-    background:
-      linear-gradient(to right, rgba(3, 3, 10, 0.85) 0%, rgba(3, 3, 10, 0.3) 35%, transparent 80%),
-      linear-gradient(to top, rgba(3, 3, 10, 0.5) 0%, transparent 30%);
-  }
-}
-
 /*  MOBILE READABILITY SCRIM — do not remove.
-    On a phone the content block sits at bottom:14% (see the mobile .slide-content
-    rule below), which on some backdrops is exactly where the image is brightest
-    (a pale sky, a sun-bleached floor). The base "to top" gradient only reaches
-    full darkness at 0%, so the title/synopsis were washing out over that band —
-    the reported bug. This deepens and RAISES the dark zone so the whole content
-    block (badge → buttons) always sits on near-solid ink, and the top of the
-    frame stays clear so the backdrop still reads as an image. */
+    Same directional structure as the desktop scrim, pushed harder: the content
+    block runs from 5% to 95% of the width on a phone, so the horizontal wash has
+    to stay dark much further across (0.4 at 72%) than the desktop 35% stop, and
+    the vertical layer is deepened because on some backdrops the brightest band
+    of the image (a pale sky, a sun-bleached floor) lands exactly where the title
+    and synopsis sit. Top-right still clears to 0.18 so the backdrop reads as an
+    image rather than a black panel. */
 @media (max-width: 1023px) {
   .slide-gradient {
-    background: linear-gradient(to top,
-      rgba(3, 3, 10, 0.94) 0%,
-      rgba(3, 3, 10, 0.88) 30%,
-      rgba(3, 3, 10, 0.62) 52%,
-      rgba(3, 3, 10, 0.18) 78%,
-      transparent 100%);
+    background:
+      linear-gradient(to right, rgba(3, 3, 10, 0.92) 0%, rgba(3, 3, 10, 0.74) 45%, rgba(3, 3, 10, 0.4) 72%, rgba(3, 3, 10, 0.18) 100%),
+      linear-gradient(to top, rgba(3, 3, 10, 0.92) 0%, rgba(3, 3, 10, 0.55) 34%, transparent 68%);
   }
 }
 
@@ -1730,84 +1736,7 @@ body {
   opacity: 1;
 }
 
-/*  MOBILE HERO LAYOUT — everything below is phone/tablet-portrait only.
-    Desktop keeps its own values above; these are wrapped in the breakpoint so a
-    resize back to a wide window restores the desktop composition exactly.
 
-    The reported problem was two-fold: the text/buttons were not sized for a
-    narrow column, and they sat too high (bottom:19%) — up in the bright part of
-    the backdrop. Dropping the block to bottom:14%, giving it near-full width and
-    stepping the type down puts the whole thing on the deepened mobile scrim and
-    lets long titles/synopses breathe without pushing the buttons off-screen. */
-@media (max-width: 1023px) {
-  .slide-content {
-    bottom: 13%;
-    left: 5%;
-    right: 5%;
-    max-width: none;
-  }
-}
-
-@media (max-width: 768px) {
-  .slide-title {
-    font-size: clamp(2.4rem, 11vw, 4rem);
-    margin-bottom: 0.6rem;
-  }
-  .slide-badge {
-    margin-bottom: 0.85rem;
-    padding: 0.36rem 0.85rem;
-    font-size: 0.62rem;
-    letter-spacing: 1.4px;
-  }
-  .slide-meta {
-    gap: 0.5rem;
-    margin-bottom: 0.85rem;
-  }
-  .slide-rating { font-size: 0.92rem; }
-  .slide-year { font-size: 0.85rem; }
-  .slide-genres,
-  .slide-runtime,
-  .slide-quality {
-    font-size: 0.72rem;
-    padding: 0.28rem 0.6rem;
-  }
-  .slide-desc {
-    font-size: 0.9rem;
-    line-height: 1.5;
-    margin-bottom: 1.15rem;
-    padding-top: 0.35rem;
-    max-width: none;
-  }
-  /*  Buttons share the row and stretch to fill it. On a 360px screen two fixed
-      buttons overflowed or crowded the gutter; equal flex + centred labels keeps
-      them tap-friendly (≥44px tall) and edge-to-edge. */
-  .slide-actions {
-    gap: 0.6rem;
-  }
-  .slide-actions .btn-play,
-  .slide-actions .btn-info {
-    flex: 1 1 0;
-    justify-content: center;
-    padding: 0.85rem 1rem;
-    font-size: 0.92rem;
-  }
-}
-
-/*  Very small phones (≤400px): the synopsis is the first thing to sacrifice so
-    the title and both buttons always stay in the hero. */
-@media (max-width: 400px) {
-  .slide-title { font-size: clamp(2.1rem, 12vw, 3rem); }
-  .slide-desc {
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    font-size: 0.86rem;
-  }
-  .slide-actions .btn-play,
-  .slide-actions .btn-info {
-    padding: 0.8rem 0.75rem;
-    font-size: 0.88rem;
-  }
-}
 
 /* ── TRENDING BADGE ──
    Black glass with a hairline gold edge, not a coloured pill.
@@ -2241,6 +2170,134 @@ body {
 
 .slide-actions .btn-info:active {
   transform: translateY(0);
+}
+
+/*  ── MOBILE HERO LAYOUT ──
+    ONE place for the phone hero, and it MUST stay below every base .slide-*
+    rule above — a media query carries no extra specificity, so if this block is
+    moved up next to #hero it silently loses the cascade and the phone renders
+    desktop type again. (That is exactly what happened while writing it: the
+    title came back out at 2.2rem because the desktop .slide-title--long rule sat
+    further down the file.)
+
+    It used to be spread across five breakpoint blocks in three different parts
+    of this file (768 / 480 / 400 / 380 plus the ≤1024 tablet band), each
+    stepping the type down again, and the last one winning with
+    `font-size: 1.8rem !important`. The compound result on a 344px phone was a
+    26px title, a 12px synopsis and 10px buttons crushed into the bottom third of
+    a 55vh hero — the reported "movie data is not properly visible". Everything
+    hero-related for small screens now lives here, sized to MIRROR the desktop
+    composition instead of shrinking away from it.
+
+    The tall box is the other half of the fix: the phone hero was 65vh (60vh
+    ≤480px, 55vh ≤380px) with the two-row navbar sitting on top of it, so the
+    badge → title → meta → synopsis → buttons stack had nowhere to breathe. A
+    full-height hero gives that stack the same room it gets on a laptop, and the
+    deepened directional scrim keeps every row of it on ink. */
+@media (max-width: 1023px) {
+  .slide-content {
+    bottom: 14%;
+    left: 5%;
+    right: 5%;
+    max-width: none;
+  }
+}
+
+@media (max-width: 768px) {
+  #hero {
+    /*  vh first as the fallback for anything without svh (old TV/webview
+        engines), then the real value. svh is the SMALL viewport height — the
+        one that excludes the mobile browser's collapsing toolbars — so the
+        hero, its dots and the top of the next section all stay put instead of
+        jumping when the toolbar hides. The subtraction is the two-row phone
+        navbar this section is offset by (margin-top further down the file);
+        without it the hero ran past the fold and took the dots with it. */
+    height: 86vh;
+    height: calc(100svh - 110px);
+    min-height: 460px;
+  }
+  /*  Title steps: the base AND both length variants are set here, because
+      buildOne() adds .slide-title--long / --xlong by character count and the
+      desktop floors for those (2.2rem / 1.75rem) are smaller than the phone
+      base — a long title would otherwise render smaller on a phone than a short
+      one, which is how the reported title ended up at 26px. */
+  .slide-title {
+    font-size: clamp(2.35rem, 10.5vw, 3.6rem);
+    line-height: 1;
+    margin-bottom: 0.7rem;
+  }
+  .slide-title.slide-title--long { font-size: clamp(2.1rem, 9.4vw, 3.1rem); }
+  .slide-title.slide-title--xlong { font-size: clamp(1.95rem, 8.6vw, 2.8rem); }
+  .slide-badge {
+    margin-bottom: 0.8rem;
+    padding: 0.34rem 0.8rem;
+    font-size: 0.63rem;
+    letter-spacing: 1.4px;
+  }
+  .slide-meta {
+    gap: 0.45rem 0.55rem;
+    margin-bottom: 0.85rem;
+  }
+  .slide-rating { font-size: 0.95rem; }
+  .slide-year { font-size: 0.88rem; }
+  .slide-genres,
+  .slide-runtime,
+  .slide-quality {
+    font-size: 0.72rem;
+    padding: 0.26rem 0.55rem;
+  }
+  /*  Synopsis keeps the desktop's three lines, and its ink goes UP rather than
+      down: 0.82rem at rgba(255,255,255,0.78) over a flat black band is what
+      "not readable" actually looked like on a phone. */
+  .slide-desc {
+    font-size: 0.92rem;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.88);
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    margin-bottom: 1.2rem;
+    padding-top: 0.35rem;
+    max-width: none;
+  }
+  /*  Buttons share the row and stretch to fill it, and they keep a real ~46px
+      tap target instead of the 0.45rem padding the ≤380px band used to apply.
+      Equal height comes free from the flex row's default align-items: stretch,
+      so .btn-info's border does not make it a pixel shorter. */
+  .slide-actions {
+    gap: 0.6rem;
+  }
+  .slide-actions .btn-play,
+  .slide-actions .btn-info {
+    flex: 1 1 0;
+    width: auto;
+    justify-content: center;
+    /*  nowrap + tight side padding: at 344px "Watch Now" and "More Info" broke
+        onto two lines inside the button, which is what made the pair look
+        unfinished. The label sets the width now, not the padding. */
+    white-space: nowrap;
+    padding: 0.85rem 0.6rem;
+    font-size: 0.92rem;
+    border-radius: 12px;
+  }
+  .slide-actions .btn-play svg,
+  .slide-actions .btn-info svg {
+    width: 18px;
+    height: 18px;
+  }
+}
+
+/*  Short viewports (landscape phone, split screen, tiny window). Two things have
+    to give here: the 460px min-height, which in a 360px-tall window pushed the
+    buttons clean off the bottom of the screen, and the synopsis — title, meta
+    row and both buttons all stay, which is the order they matter in. */
+@media (max-width: 1023px) and (max-height: 560px) {
+  #hero {
+    height: 68vh;
+    height: calc(100svh - 108px);
+    min-height: 0;
+  }
+  .slide-content { bottom: 9%; }
+  .slide-desc { display: none; }
 }
 
 .btn-play {
@@ -6626,16 +6683,6 @@ html[data-mz-tv="true"] .cat-group-menu {
   .footer-inner {
     grid-template-columns: 1.2fr 1fr 1fr 1fr;
   }
-
-  #hero {
-    height: 86vh;
-  }
-
-  .slide-content {
-    left: 5%;
-    max-width: 680px;
-    bottom: 18%;
-  }
 }
 
 /* Tablets and foldables (769px-1024px) sat between the two breakpoints above:
@@ -6645,6 +6692,21 @@ html[data-mz-tv="true"] .cat-group-menu {
    shrunk to "Instal"). Give this band the same collapsed-nav treatment as
    phones, just without the phone-only hero/grid/footer overrides below. */
 @media (max-width: 1024px) and (min-width: 769px) {
+  /*  Hero box for the tablet band ONLY. It used to live in the ≤1024px block
+      above, which also matched every phone and therefore overrode the phone
+      hero height further down the file — that is how the 92vh phone hero kept
+      coming out at 86vh. Phones are handled by the mobile hero block near the
+      carousel CSS; this is the 769-1024px composition. */
+  #hero {
+    height: 86vh;
+  }
+
+  .slide-content {
+    bottom: 16%;
+    right: auto;
+    max-width: 680px;
+  }
+
   #navbar {
     flex-wrap: wrap;
     align-items: center;
@@ -6684,15 +6746,6 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 
   /* Remove GPU-heavy grain */
-  .slide-gradient {
-    /*  Shaped so every row of the text block sits on dark: near-solid under
-     *  the buttons, still 60% behind the title, gone by the top of the
-     *  poster. This is the mobile equivalent of the desktop left-to-right
-     *  scrim - same job, different text position. */
-    background: linear-gradient(to top,
-        rgba(3, 3, 10, 0.97) 0%, rgba(3, 3, 10, 0.9) 24%, rgba(3, 3, 10, 0.62) 44%,
-        rgba(3, 3, 10, 0.26) 64%, transparent 84%) !important;
-  }
 
   #navbar {
     width: min(100% - 0.75rem, 1400px);
@@ -6748,60 +6801,11 @@ html[data-mz-tv="true"] .cat-group-menu {
     display: none !important;
   }
 
+  /*  Height and the whole text composition live in the mobile hero block up with
+      the carousel CSS. Only the top offset is here, because it is the two-row
+      phone navbar's height and belongs with the navbar rules above it. */
   #hero {
-    height: 65vh;
-    min-height: 380px;
     margin-top: 105px;
-  }
-
-  .slide-content {
-    left: 4%;
-    right: 4%;
-    bottom: 17%;
-    max-width: none;
-  }
-
-  .slide-title {
-    font-size: clamp(2.5rem, 9vw, 3.8rem);
-    /* Looser than the desktop 0.92: two clamped lines at phone size need the
-       breathing room more than they need the tight setting. */
-    line-height: 1.02;
-    margin-bottom: 0.8rem;
-  }
-
-  .slide-badge {
-    margin-bottom: 0.8rem;
-    font-size: 0.65rem;
-    padding: 0.25rem 0.8rem;
-  }
-
-  .slide-meta {
-    margin-bottom: 0.8rem;
-    gap: 0.6rem;
-  }
-
-  .slide-desc {
-    font-size: 0.9rem;
-    line-height: 1.4;
-    /* Three lines, not two: the synopsis was being cut mid-sentence and there
-       is ~50px of clear space above the dots to spend on it. */
-    -webkit-line-clamp: 3;
-    margin-bottom: 1.2rem;
-    
-  }
-
-  .slide-actions {
-    flex-direction: row;
-    gap: 0.6rem;
-  }
-
-  .slide-actions .btn-play,
-  .slide-actions .btn-info {
-    width: 50%;
-    justify-content: center;
-    padding: 0.8rem 1rem;
-    font-size: 0.95rem;
-    border-radius: 12px;
   }
 
   .carousel-thumbs {
@@ -6984,65 +6988,15 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 
   #hero {
-    height: 60vh;
     margin-top: 95px;
   }
 
-  .slide-content {
-    bottom: 15%;
-  }
-
-  .slide-badge {
-    font-size: 0.6rem;
-    padding: 0.2rem 0.6rem;
-    margin-bottom: 0.6rem;
-  }
-
-  .slide-title {
-    font-size: clamp(2rem, 10vw, 2.6rem);
-    line-height: 1.04;
-    margin-bottom: 0.6rem;
-  }
-
-  .slide-meta {
-    gap: 0.5rem;
-    margin-bottom: 0.6rem;
-  }
-
-  .slide-rating {
-    font-size: 0.85rem;
-  }
-
-  .slide-year {
-    font-size: 0.8rem;
-  }
-
-  .slide-genres,
-  .slide-runtime,
-  .slide-quality {
-    font-size: 0.68rem;
-    padding: 0.18rem 0.42rem;
-  }
-
-  /*  The LANG chip is the first thing to go once width is scarce: rating, year,
-   *  genre and print quality all say more, and the language is repeated in the
-   *  detail modal anyway. Keeping all five chips wrapped the meta row onto a
-   *  second line on 360-414px phones as soon as a title had three genres, which
-   *  pushed the synopsis into the buttons. */
-  .slide-runtime {
-    display: none;
-  }
-
-  .slide-desc {
-    font-size: 0.86rem;
-    -webkit-line-clamp: 3;
-    padding-top: 0.25rem;
-    margin-bottom: 1rem;
-  }
-
-  .btn-play,
-  .btn-info {
-    padding: 0.75rem 0.5rem;
+  /*  Modal play button only. This used to be a bare `.btn-play, .btn-info` rule,
+      which also hit the hero's Watch Now / More Info and shrank them to 0.85rem
+      — the hero pair is sized in the mobile hero block instead, so the selector
+      is scoped to the surface it was actually for. */
+  .modal-actions .btn-play {
+    padding: 0.75rem 1.1rem;
     font-size: 0.85rem;
     border-radius: 10px;
   }
@@ -7252,42 +7206,20 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 
   #hero {
-    height: 55vh;
     margin-top: 85px;
   }
 
-  .slide-title {
-    font-size: 1.8rem !important;
-    line-height: 1.06;
-    margin-bottom: 0.5rem;
-  }
+  /*  Hero type is NOT re-shrunk here any more. This band used to force
+      `.slide-title { font-size: 1.8rem !important }` plus a 0.82rem synopsis and
+      0.7rem buttons, on top of `html { font-size: 92% }` above — a 344px phone
+      ended up with a 26px title and 10px buttons. The mobile hero block sizes
+      the whole stack in vw, so it scales down here on its own. */
 
-  .slide-desc {
-    font-size: 0.82rem;
-    line-height: 1.35;
-    -webkit-line-clamp: 3;
-    margin-bottom: 0.8rem;
-  }
-
-
-  .slide-actions {
-    flex-direction: row;
-    gap: 0.4rem;
-  }
-
-  .btn-play,
-  .btn-info {
-    padding: 0.45rem 0.3rem;
-    width: 50%;
-    justify-content: center;
-    font-size: 0.7rem;
-    border-radius: 6px;
-  }
-
-  .btn-play svg,
-  .btn-info svg {
-    width: 14px;
-    height: 14px;
+  /*  Modal play button only — see the ≤480px note. */
+  .modal-actions .btn-play {
+    padding: 0.55rem 0.8rem;
+    font-size: 0.78rem;
+    border-radius: 8px;
   }
 
   .main-content,
@@ -12250,44 +12182,41 @@ img { content-visibility: auto; }
   -webkit-text-fill-color: rgba(255, 255, 255, 0.8);
 }
 
-/*  MOBILE HEADER — the reported "text and button not responsive" in this section.
-    On a phone the heading + pill were competing for one line and the label
-    tracking/size did not step down, so the block looked cramped against the 4%
-    gutter. Below 600px the heading scales down and the pill drops to its own full
-    line under the title, so neither squashes the other. */
-@media (max-width: 600px) {
+/*  MOBILE HEADER — the Today / This Week pill is HIDDEN below 768px on purpose.
+    On a phone it was either squashed against the 4% gutter beside the title or
+    dropped onto its own full-width line, and either way it spent a whole row of
+    vertical space above the rail on a control that is barely used there. The
+    rail keeps TMDB's "Today" window — the default this markup ships and the one
+    #top10HeadWin already announces to assistive tech — and the switch is still
+    available from tablet width up.
+
+    Nothing in JS needs the pill: _mzSyncTop10Ind() bails out when the active
+    button has no layout box (`!active.offsetWidth`), and the window switch is a
+    delegated listener on the section, so a display:none pill is simply never
+    clicked.
+
+    With the pill gone the title gets the whole row back, so "TOP 10" and
+    "TRENDING MOVIES" sit on ONE line again instead of being stacked to make
+    room, and both step up in size. */
+@media (max-width: 768px) {
+  /*  Descendant selector, not a bare `.top10-toggle`: the base pill rule is
+      declared FURTHER DOWN this file, so an equal-specificity `display: none`
+      here would lose the cascade and the pill would still paint. */
+  .top10-head .top10-toggle { display: none; }
   .top10-head {
-    gap: 0.5rem 0.6rem;
-    margin-bottom: 0.5rem;
+    gap: 0.45rem;
+    margin-bottom: 0.4rem;
   }
   .top10-heading {
-    font-size: clamp(1.5rem, 7vw, 1.95rem);
-    letter-spacing: 0.03em;
-    flex: 1 1 100%;
+    font-size: clamp(1.7rem, 8vw, 2.2rem);
+    letter-spacing: 0.035em;
+    font-weight: 800;
   }
   .top10-heading span {
-    display: block;
-    margin-left: 0;
-    margin-top: 0.15rem;
-    font-size: 0.82rem;
-    letter-spacing: 0.11em;
+    margin-left: 0.45rem;
+    font-size: 1.35rem;
+    letter-spacing: 0.1em;
   }
-  /*  Full-width pill on its own line. margin-left:auto no longer applies once it
-      spans the row, so the two buttons split the width evenly and stay a
-      comfortable tap target. */
-  .top10-toggle {
-    flex: 1 1 100%;
-    width: 100%;
-    margin-left: 0;
-    justify-content: stretch;
-  }
-  .top10-toggle-btn {
-    flex: 1 1 0;
-    text-align: center;
-  }
-  /*  The sliding indicator is measured in px by JS off the active button's
-      offsetWidth, which now equals half the pill — the fallback 50% width below
-      is already correct, and _mzSyncTop10Ind keeps it exact after layout. */
 }
 
 
@@ -12370,14 +12299,6 @@ img { content-visibility: auto; }
 .top10-toggle-btn.is-active { color: #16110a; text-shadow: 0 1px 0 rgba(255, 255, 255, 0.26); }
 .top10-toggle-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 
-@media (max-width: 560px) {
-  .top10-toggle { padding: 3px; }
-  /*  Taller, not smaller. Measured before this: 24px buttons inside a 32px
-   *  pill — a thumb needs ~44px, so the padding grows on touch widths even
-   *  though the desktop pill is deliberately compact. Font goes UP slightly
-   *  too: 10px uppercase at arm's length was hard to read. */
-  .top10-toggle-btn { padding: 15px 16px; font-size: 0.72rem; letter-spacing: 0.07em; }
-}
 @media (prefers-reduced-motion: reduce) {
   .top10-toggle-ind { transition: none; }
 }
