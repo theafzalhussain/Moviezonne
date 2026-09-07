@@ -3184,6 +3184,23 @@ const CAROUSEL_EDITORIAL_PINS = [
   { id: 1213243, category: 'tollywood', title: 'Toxic: A Fairy Tale for Grown-ups' }
 ];
 
+/*  ══════════════════════════════════════════════════════════════════════
+ *  CAROUSEL BACKDROP OVERRIDES — swap one title's hero image, nothing else
+ *  ══════════════════════════════════════════════════════════════════════
+ *  Keyed by TMDB movie id -> a backdrop file_path from that title's own
+ *  /movie/{id}/images response. The carousel normally paints m.backdrop_path
+ *  (TMDB's default backdrop); when an id is listed here the slide uses this
+ *  path instead. Everything else about the slide — title, rating, genres,
+ *  quality chip, ordering, the editorial pin above — is untouched.
+ *
+ *  Toxic's default backdrop is the white studio cut-out (tBRSSfgqOAq…); this
+ *  points it at the cinematic burning-figure still instead, which also leaves
+ *  the left third clear for the hero title/buttons.
+ */
+const CAROUSEL_BACKDROP_OVERRIDES = {
+  1213243: '/oOJ8g4DIb8hfLas43eNnO79DIy3.jpg'
+};
+
 /** Which quota bucket a title belongs to. Checked in specificity order: anime
  *  before web series (an anime series is both), and media type before language
  *  (an English series is web series, not Hollywood).
@@ -4138,9 +4155,16 @@ function buildCarousel() {
       .map(id => GENRE_MAP[id] || 'Movie').join(' \u00B7 ');
     const slide = document.createElement('div');
     slide.className = 'carousel-slide' + (i === 0 ? ' active' : '');
-    const isBackdrop = !!m.backdrop_path;
+    /*  Editorial backdrop swap (see CAROUSEL_BACKDROP_OVERRIDES). Resolve the
+     *  path here, at the single point the slide's image is chosen, so the
+     *  override flows into the LCP <img>, the lazy data-bg, the localStorage LCP
+     *  hint and the thumbnail alike — and TMDB refreshing m.backdrop_path can
+     *  never bring the old image back. The shared m object is left untouched. */
+    const overridePath = CAROUSEL_BACKDROP_OVERRIDES[m.id];
+    const backdropPath = overridePath || m.backdrop_path;
+    const isBackdrop = !!backdropPath;
     const bgUrl = isBackdrop
-      ? (i === 0 ? getHeroBackdrop(m.backdrop_path) : getResponsiveBackdrop(m.backdrop_path))
+      ? (i === 0 ? getHeroBackdrop(backdropPath) : getResponsiveBackdrop(backdropPath))
       : `https://image.tmdb.org/t/p/w780${m.poster_path}`;
 
     /*  LCP — slide 0's backdrop IS this page's Largest Contentful Paint element.
