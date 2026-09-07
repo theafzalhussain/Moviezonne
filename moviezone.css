@@ -12182,46 +12182,61 @@ img { content-visibility: auto; }
   gap: 0.55rem 1rem;
   margin: 0 0 0.35rem;
 }
-/*  ── HEADING: the site's own title language, at a smaller size ──
+/*  ── HEADING: big OUTLINED "TOP 10" + stacked sub-label ──
  *
- *  This used to be Bebas Neue carrying the same nine-stop poured-gold gradient as
- *  the rank numerals, clipped to the text. It read as its own product. Every other
- *  section says the same thing a different way: a solid title beside a rounded
- *  accent bar — CONTINUE WATCHING and ALL MOVIES & SHOWS through .section-title,
- *  Top Providers through .providers-heading. So this now speaks that language, with
- *  the same gold->red->accent bar .title-line uses.
+ *  The format the owner picked: an oversized OUTLINED "TOP 10" with a small solid
+ *  two-line label beside it ("MOVIES" over "TODAY"). Two deliberate departures from
+ *  the reference: the outline is this project's gold rather than pure red, and the
+ *  whole thing is a step smaller so it sits above the poster rail without competing
+ *  with the rank numerals below it.
  *
- *  Deliberately SMALLER than .section-title h2 (2.3rem) and smaller than it was
- *  before: it sits directly above a rail of big posters and oversized numerals, and
- *  the brief was for it to stay compact rather than compete with them.
+ *  Outline = transparent fill + -webkit-text-stroke, the same technique
+ *  .top10-rank--outline uses for ranks 4-10, so the heading and the numerals are
+ *  visibly the same idea. A gold->red ramp is clipped to the glyph and then the
+ *  interior is knocked out with -webkit-text-fill-color: transparent, so only the
+ *  edge paints. There is no accent bar here - the hollow numerals are the ornament.
  *
- *  Losing background-clip:text also removes the reason the child span needed
- *  -webkit-text-fill-color, so the span is plain `color` again. */
+ *  NOTE ON THE CLASS NAMES: these are .top10-* and the markup must use .top10-*.
+ *  An earlier pass had CSS on .top10-big while the markup said .t10-big, so nothing
+ *  matched and the heading rendered as flat unstyled text. */
 .top10-heading {
   display: flex;
   align-items: center;
   gap: 0.7rem;
   margin: 0;
-  font: 400 clamp(1.3rem, 1.85vw, 1.68rem)/1.1 'Bebas Neue', sans-serif;
-  letter-spacing: 2px;
-  color: var(--text);
-  text-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
-/*  The accent bar is .title-line — the SAME class CONTINUE WATCHING and ALL MOVIES
- *  & SHOWS use. The bar rule is a DESCENDANT selector (.section-title .title-line),
- *  so .top10-heading had to be added to it: as a bare class the span inherited
- *  nothing and rendered 0px wide, which is exactly what it did on first attempt.
- *  Extending that selector reuses the one gradient in the bundle instead of adding
- *  a second copy, and keeps the three headings from drifting apart. Only the height
- *  is overridden here — .title-line ships a fixed 36px sized for a 2.3rem title,
- *  which is too tall beside this smaller one. Declared after it, so it wins. */
-.top10-heading .title-line { height: 1.15em; }
-.top10-heading .t10-sub {
-  font: 700 clamp(0.7rem, 1vw, 0.84rem)/1 'Outfit', sans-serif;
-  letter-spacing: 0.13em;
+.top10-big {
+  display: flex;
+  align-items: baseline;
+  gap: 0.14em;
+  font: 400 clamp(2rem, 4.1vw, 3.1rem)/0.82 'Bebas Neue', 'Anton', sans-serif;
+  letter-spacing: 0.035em;
+  background: linear-gradient(150deg, var(--gold3, #ffd750) 0%, var(--gold, #ffc107) 45%, var(--red, #e63946) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  -webkit-text-stroke: clamp(1px, 0.12vw, 1.7px) var(--gold, #ffc107);
+  filter: drop-shadow(0 3px 12px rgba(245, 197, 24, 0.22));
+  white-space: nowrap;
+}
+.top10-big-num { letter-spacing: 0.01em; }
+/*  Two short lines, not one long one — that stacking is what gives the reference
+ *  its poster-credit look and it keeps the heading narrow beside the toggle. */
+.top10-sub {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28em;
+  line-height: 1;
+}
+.top10-sub-a,
+.top10-sub-b {
+  font: 800 clamp(0.68rem, 1.05vw, 0.88rem)/1 'Outfit', sans-serif;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: var(--text2);
+  color: var(--text);
+  white-space: nowrap;
 }
+.top10-sub-b { color: var(--text2); }
 
 /*  MOBILE HEADER — the Today / This Week pill is HIDDEN below 768px on purpose.
     On a phone it was either squashed against the 4% gutter beside the title or
@@ -12251,14 +12266,11 @@ img { content-visibility: auto; }
   /*  No font-weight here. This is Bebas Neue and the only face shipped is
       bebas-neue-latin-400.woff2, so the 800 that used to be on this rule bought a
       synthetically-smeared glyph, not a bolder one. */
-  .top10-heading {
-    font-size: clamp(1.24rem, 5vw, 1.5rem);
-    letter-spacing: 1.5px;
-    gap: 0.55rem;
-  }
-  .top10-heading .t10-sub {
-    font-size: 0.74rem;
-    letter-spacing: 0.1em;
+  .top10-heading { gap: 0.6rem; }
+  .top10-sub-a,
+  .top10-sub-b {
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
   }
 }
 

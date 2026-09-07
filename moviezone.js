@@ -4162,7 +4162,9 @@ function initTop10() {
       /*  Only the screen-reader-only tail of the h2 changes, so the visible
        *  "Top 10 Trending Movies" markup is left intact — rewriting the whole
        *  heading would delete the styled <span> with it. */
-      if (headWin) headWin.textContent = win === 'week' ? ' This Week' : ' Today';
+      if (headWin) headWin.textContent = win === 'week' ? 'This Week' : 'Today';
+      const _t10h = document.getElementById('top10Heading');
+      if (_t10h) _t10h.setAttribute('aria-label', 'Top 10 Movies ' + (win === 'week' ? 'This Week' : 'Today'));
       loadTop10(win);
     };
 
@@ -9798,10 +9800,10 @@ const playerSources = [
       ? `https://vidrock.net/tv/${id}/${s}/${e}`
       : `https://vidrock.net/movie/${id}`;
   }},
-  // { name: 'Hindi Multi-Audio', dubbed: true, url: (id, lang, type, s, e) => {
-  //   const base = `https://embed.smashystream.com/playere.php?tmdb=${id}`;
-  //   return type === 'tv' ? `${base}&season=${s}&episode=${e}` : base;
-  // }},
+  { name: 'Hindi Multi-Audio', dubbed: true, url: (id, lang, type, s, e) => {
+    const base = `https://embed.smashystream.com/playere.php?tmdb=${id}`;
+    return type === 'tv' ? `${base}&season=${s}&episode=${e}` : base;
+  }},
   { name: 'Turbo Stream', dubbed: true, url: (id, lang, type, s, e) => {
     return type === 'tv'
       ? `https://111movies.com/tv/${id}/${s}/${e}`

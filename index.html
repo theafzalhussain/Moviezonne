@@ -1136,7 +1136,7 @@ html.mz-no-ads .mz-ad-slot{display:none}
           "Top 10 Trending Movies Today", which is what aria-labelledby names the
           landmark. #top10HeadWin is the ONLY part JS rewrites, so the visible
           markup here survives a window switch. -->
-    <h2 id="top10Heading" class="top10-heading"><span class="title-line" aria-hidden="true"></span>Top 10 <span class="t10-sub">Trending Movies</span><span id="top10HeadWin" class="visually-hidden"> Today</span></h2>
+    <h2 id="top10Heading" class="top10-heading" aria-label="Top 10 Movies Today"><span class="top10-big" aria-hidden="true">TOP<span class="top10-big-num">10</span></span><span class="top10-sub" aria-hidden="true"><span class="top10-sub-a">Movies</span><span id="top10HeadWin" class="top10-sub-b">Today</span></span></h2>
 
     <!-- Today / This Week window switch. Picks the TMDB trending feed the rail is
          built from: /trending/movie/day for Today, /trending/movie/week for This
