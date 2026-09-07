@@ -28,11 +28,17 @@
 
   // Categories that must remain reachable somewhere in the strip after grouping.
   // 'dubbed' was intentionally dropped from the UI, so it is not listed.
+  /*  The nine OTT platforms are deliberately NOT here. They no longer have a
+      .cat-tab at all: the OTT Platform dropdown was removed and a platform is
+      opened from the Top Providers rail. ott-sections-check.js asserts each one
+      has a data-provider-cat card and does NOT have a cat-tab. */
   var REQUIRED = ['all', 'trending', 'uhd4k', 'toprated', 'hollywood', 'bollywood',
-    'south', 'kdrama', 'anime', 'kids', 'adult', 'tv', 'tollywood', 'netflix',
-    'prime', 'jiohotstar', 'zee5', 'action', 'comedy', 'horror', 'thriller',
+    'south', 'kdrama', 'anime', 'kids', 'adult', 'tv', 'tollywood',
+    'action', 'comedy', 'horror', 'thriller',
     'romance', 'scifi', 'adventure', 'fantasy', 'crime', 'documentary', 'family',
     'animation'];
+  var GONE_FROM_TABS = ['netflix', 'prime', 'jiohotstar', 'zee5', 'apple',
+    'sonyliv', 'mxplayer', 'aha', 'crunchyroll'];
 
   // Only these belong on the strip itself (everything else moved to a dropdown).
   var DIRECT = ['all', 'trending', 'uhd4k', 'toprated', 'hollywood', 'bollywood',
@@ -113,10 +119,15 @@
       stillPresent.length === 0, 'still present: ' + stillPresent.join(', '));
 
     var groups = strip.querySelectorAll('.cat-group');
-    ok('two dropdown groups present', groups.length === 2, 'found ' + groups.length);
+    ok('one dropdown group present (OTT Platform was removed)',
+      groups.length === 1, 'found ' + groups.length);
+    ok('no OTT Platform dropdown remains',
+      !doc.getElementById('catGroupOttBtn') && !doc.getElementById('catGroupOttMenu'));
+    var stillTabbed = GONE_FROM_TABS.filter(function (c) { return !!catTabFor(doc, c); });
+    ok('platforms are not in the tab strip any more',
+      stillTabbed.length === 0, 'still tabbed: ' + stillTabbed.join(', '));
 
-    var ottMenu = doc.getElementById('catGroupOttMenu');
-    var genreMenu = doc.getElementById('catGroupGenreMenu');
+    var dropMenu = doc.getElementById('catGroupGenreMenu');
     // Assert the exact contents rather than a count, so an accidentally dropped
     // entry is named in the failure instead of just shifting a threshold.
     function menuCats(menu) {
@@ -125,26 +136,22 @@
         return m ? m[1] : '?';
       });
     }
-    var EXPECTED_OTT = ['netflix', 'prime', 'jiohotstar', 'zee5'];
     var EXPECTED_GENRE = ['tollywood', 'action', 'comedy', 'horror', 'thriller',
       'romance', 'scifi', 'adventure', 'fantasy', 'crime', 'documentary',
       'family', 'animation'];
 
-    ok('OTT menu holds exactly the 4 platforms',
-      ottMenu && menuCats(ottMenu).join(',') === EXPECTED_OTT.join(','),
-      ottMenu ? menuCats(ottMenu).join(',') : 'no menu');
     ok('Category menu holds exactly the genre list',
-      genreMenu && menuCats(genreMenu).join(',') === EXPECTED_GENRE.join(','),
-      genreMenu ? menuCats(genreMenu).join(',') : 'no menu');
+      dropMenu && menuCats(dropMenu).join(',') === EXPECTED_GENRE.join(','),
+      dropMenu ? menuCats(dropMenu).join(',') : 'no menu');
 
     // ── 4. menus start closed ────────────────────────────────────────────
-    ok('OTT menu starts hidden',
-      ottMenu && win.getComputedStyle(ottMenu).display === 'none',
-      ottMenu ? win.getComputedStyle(ottMenu).display : 'n/a');
+    ok('dropdown menu starts hidden',
+      dropMenu && win.getComputedStyle(dropMenu).display === 'none',
+      dropMenu ? win.getComputedStyle(dropMenu).display : 'n/a');
 
-    var ottTrigger = doc.getElementById('catGroupOttBtn');
+    var dropTrigger = doc.getElementById('catGroupGenreBtn');
     ok('trigger reports collapsed via aria-expanded',
-      ottTrigger && ottTrigger.getAttribute('aria-expanded') === 'false');
+      dropTrigger && dropTrigger.getAttribute('aria-expanded') === 'false');
 
     // ── 4b. THE SIZING REGRESSION ────────────────────────────────────────
     // The global ripple handler injects a <span> whose inline width/height are
@@ -156,31 +163,31 @@
       var r = el.getBoundingClientRect();
       return { w: Math.round(r.width), h: Math.round(r.height) };
     }
-    var before = boxOf(ottTrigger);
+    var before = boxOf(dropTrigger);
     ok('trigger starts at a normal pill size',
       before.h > 24 && before.h < 56 && before.w > 80 && before.w < 220,
       before.w + 'x' + before.h);
 
     ok('trigger has no click transition', 
-      win.getComputedStyle(ottTrigger).transitionDuration === '0s',
-      win.getComputedStyle(ottTrigger).transitionDuration);
+      win.getComputedStyle(dropTrigger).transitionDuration === '0s',
+      win.getComputedStyle(dropTrigger).transitionDuration);
 
     // ── 5. trigger opens the menu ────────────────────────────────────────
-    ottTrigger.click();
-    var after = boxOf(ottTrigger);
+    dropTrigger.click();
+    var after = boxOf(dropTrigger);
     ok('trigger does not grow when clicked',
       after.w === before.w && after.h === before.h,
       before.w + 'x' + before.h + ' -> ' + after.w + 'x' + after.h);
     ok('no ripple span is injected into the trigger',
-      !ottTrigger.querySelector('.ripple-span'));
+      !dropTrigger.querySelector('.ripple-span'));
     ok('group box stays pill-sized while open',
-      boxOf(ottTrigger.closest('.cat-group')).h === before.h,
-      String(boxOf(ottTrigger.closest('.cat-group')).h));
+      boxOf(dropTrigger.closest('.cat-group')).h === before.h,
+      String(boxOf(dropTrigger.closest('.cat-group')).h));
 
     ok('clicking the trigger opens the menu',
-      win.getComputedStyle(ottMenu).display !== 'none',
-      win.getComputedStyle(ottMenu).display);
-    ok('aria-expanded flips to true', ottTrigger.getAttribute('aria-expanded') === 'true');
+      win.getComputedStyle(dropMenu).display !== 'none',
+      win.getComputedStyle(dropMenu).display);
+    ok('aria-expanded flips to true', dropTrigger.getAttribute('aria-expanded') === 'true');
 
     // A normal pill must still get its ripple — only triggers are excluded.
     var plainPill = catTabFor(doc, 'bollywood');
@@ -188,40 +195,49 @@
     ok('normal tabs keep their ripple effect', !!plainPill.querySelector('.ripple-span'));
     ok('a normal tab does not grow from its ripple either',
       boxOf(plainPill).h < 56, String(boxOf(plainPill).h));
-    ottTrigger.click();
+    dropTrigger.click();
 
-    // ── 6. opening one group closes the other ───────────────────────────
-    var genreTrigger = doc.getElementById('catGroupGenreBtn');
-    genreTrigger.click();
-    ok('opening the second group closes the first',
-      win.getComputedStyle(ottMenu).display === 'none'
-        && win.getComputedStyle(genreMenu).display !== 'none');
+    /*  ── 6. self-close ──────────────────────────────────────────────────
+        This step used to open the OTT group and assert the Category group shut.
+        With one group left, the surviving half of that same logic is that a
+        second click on the open trigger closes it. The click above already
+        re-opened the menu, so this must NOT click again before asserting. */
+    ok('the menu is open again after re-clicking its trigger',
+      win.getComputedStyle(dropMenu).display !== 'none',
+      win.getComputedStyle(dropMenu).display);
+    dropTrigger.click();
+    ok('clicking the open trigger closes its own menu',
+      win.getComputedStyle(dropMenu).display === 'none'
+        && dropTrigger.getAttribute('aria-expanded') === 'false',
+      win.getComputedStyle(dropMenu).display + ' aria=' + dropTrigger.getAttribute('aria-expanded'));
+    // Leave it open for the Escape check below.
+    dropTrigger.click();
 
     // ── 7. Escape closes ────────────────────────────────────────────────
     doc.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     ok('Escape closes the open menu',
-      win.getComputedStyle(genreMenu).display === 'none');
+      win.getComputedStyle(dropMenu).display === 'none');
 
     // ── 8. outside click closes ─────────────────────────────────────────
-    ottTrigger.click();
+    dropTrigger.click();
     doc.body.click();
     ok('an outside click closes the menu',
-      win.getComputedStyle(ottMenu).display === 'none');
+      win.getComputedStyle(dropMenu).display === 'none');
 
     // ── 9. picking a platform filters, marks the trigger and closes ──────
-    ottTrigger.click();
-    var zee5 = catTabFor(doc, 'zee5');
-    ok('Zee5 lives inside the OTT menu', !!zee5 && !!zee5.closest('.cat-group-menu'));
-    zee5.click();
+    dropTrigger.click();
+    var picked = catTabFor(doc, 'action');
+    ok('Action lives inside the Category menu', !!picked && !!picked.closest('.cat-group-menu'));
+    picked.click();
 
-    ok('selected item becomes the active tab', zee5.classList.contains('active'));
+    ok('selected item becomes the active tab', picked.classList.contains('active'));
     ok('menu closes after picking an item',
-      win.getComputedStyle(ottMenu).display === 'none');
+      win.getComputedStyle(dropMenu).display === 'none');
     ok('trigger is marked while its child is the active filter',
-      ottTrigger.classList.contains('has-active'));
+      dropTrigger.classList.contains('has-active'));
     var heading = doc.getElementById('sectionHeading');
-    ok('heading switched to the Zee5 label',
-      heading && /ZEE5/i.test(heading.textContent), heading ? heading.textContent : '');
+    ok('heading switched to the Action label',
+      heading && /ACTION/i.test(heading.textContent), heading ? heading.textContent : '');
 
     // ── 10. THE INFINITE-SCROLL DEPENDENCY ──────────────────────────────
     // loadMoreMoviesAction() resolves the category to page next by reading
@@ -229,11 +245,11 @@
     // inside a display:none menu, so this asserts the lookup still works.
     var activeTab = doc.querySelector('.cat-tab.active');
     ok('active tab is still queryable inside the closed menu',
-      activeTab === zee5,
+      activeTab === picked,
       activeTab ? (activeTab.getAttribute('onclick') || activeTab.textContent) : 'null');
     var parsed = activeTab && /'([^']+)'/.exec(activeTab.getAttribute('onclick') || '');
     ok('infinite scroll can recover the category from it',
-      parsed && parsed[1] === 'zee5', parsed ? parsed[1] : 'unparsable');
+      parsed && parsed[1] === 'action', parsed ? parsed[1] : 'unparsable');
 
     ok('exactly one tab is active at a time',
       doc.querySelectorAll('.cat-tab.active').length === 1,
@@ -241,19 +257,19 @@
 
     // ── 11. switching to a direct tab clears the group marker ────────────
     catTabFor(doc, 'bollywood').click();
-    ok('group marker clears when a direct tab is chosen',
-      !ottTrigger.classList.contains('has-active'));
+    ok('dropdown marker clears when a direct tab is chosen',
+      !dropTrigger.classList.contains('has-active'));
     ok('direct tab becomes active', catTabFor(doc, 'bollywood').classList.contains('active'));
 
     // ── 12. genre inside the dropdown still filters ─────────────────────
-    genreTrigger.click();
+    dropTrigger.click();
     var horror = catTabFor(doc, 'horror');
     horror.click();
     ok('a genre inside the dropdown filters correctly',
       horror.classList.contains('active')
         && /HORROR/i.test(doc.getElementById('sectionHeading').textContent));
-    ok('genre trigger marked after selection',
-      genreTrigger.classList.contains('has-active'));
+    ok('dropdown trigger marked after selection',
+      dropTrigger.classList.contains('has-active'));
 
     // ── 13. watchlist via the navbar; paging must be disabled for it ──────
     var navWatchlist = doc.querySelector('#navLinks a[onclick*="showWatchlist"]');
@@ -261,8 +277,8 @@
     ok('navbar watchlist switches the heading',
       /WATCHLIST/i.test(doc.getElementById('sectionHeading').textContent));
     ok('group markers clear on the watchlist view',
-      !genreTrigger.classList.contains('has-active')
-        && !ottTrigger.classList.contains('has-active'));
+      !dropTrigger.classList.contains('has-active')
+        && !dropTrigger.classList.contains('has-active'));
     // Removing the Watchlist pill broke the old guard, which inferred the mode
     // from the active tab's onclick. The sentinel must now be hidden outright so
     // "all" movies cannot be paged into the watchlist grid.
@@ -318,16 +334,15 @@
           tdoc.documentElement.getAttribute('data-mz-tv') === 'true',
           String(tdoc.documentElement.getAttribute('data-mz-tv')));
 
-        var tvOtt = tdoc.getElementById('catGroupOttMenu');
-        var tvGenre = tdoc.getElementById('catGroupGenreMenu');
-        ok('TV: OTT menu starts collapsed, same as the laptop',
-          tvOtt && twin.getComputedStyle(tvOtt).display === 'none',
-          tvOtt ? twin.getComputedStyle(tvOtt).display : 'n/a');
+        var tvDrop = tdoc.getElementById('catGroupGenreMenu');
+        ok('TV: dropdown menu starts collapsed, same as the laptop',
+          tvDrop && twin.getComputedStyle(tvDrop).display === 'none',
+          tvDrop ? twin.getComputedStyle(tvDrop).display : 'n/a');
         ok('TV: genre menu starts collapsed, same as the laptop',
-          tvGenre && twin.getComputedStyle(tvGenre).display === 'none',
-          tvGenre ? twin.getComputedStyle(tvGenre).display : 'n/a');
+          tvDrop && twin.getComputedStyle(tvDrop).display === 'none',
+          tvDrop ? twin.getComputedStyle(tvDrop).display : 'n/a');
 
-        var tvTrigger = tdoc.getElementById('catGroupOttBtn');
+        var tvTrigger = tdoc.getElementById('catGroupGenreBtn');
         ok('TV: the dropdown trigger is visible (there is something to open)',
           tvTrigger && twin.getComputedStyle(tvTrigger).display !== 'none',
           tvTrigger ? twin.getComputedStyle(tvTrigger).display : 'n/a');
@@ -335,9 +350,9 @@
         // The row must stay one line of chips, not a wrapped cloud.
         var tvVisible = Array.prototype.filter.call(tdoc.querySelectorAll('.cat-tab'),
           function (el) { return el.offsetParent !== null; });
-        ok('TV: only the direct chips + 2 triggers are on the strip',
-          tvVisible.length === DIRECT.length + 2,
-          'visible .cat-tab = ' + tvVisible.length + ', expected ' + (DIRECT.length + 2));
+        ok('TV: only the direct chips + 1 trigger are on the strip',
+          tvVisible.length === DIRECT.length + 1,
+          'visible .cat-tab = ' + tvVisible.length + ', expected ' + (DIRECT.length + 1));
 
         var items = tdoc.querySelectorAll('.cat-group-item');
         ok('TV: pills are keyboard reachable (tabIndex not negative)',
@@ -349,18 +364,18 @@
 
         setTimeout(function () {
           ok('TV: OK on the trigger opens the panel',
-            twin.getComputedStyle(tvOtt).display === 'flex',
-            twin.getComputedStyle(tvOtt).display);
+            twin.getComputedStyle(tvDrop).display === 'flex',
+            twin.getComputedStyle(tvDrop).display);
 
           ok('TV: the highlight moves into the panel',
-            tvOtt.contains(tdoc.activeElement) &&
+            tvDrop.contains(tdoc.activeElement) &&
             tdoc.activeElement.classList.contains('cat-group-item'),
             tdoc.activeElement ? (tdoc.activeElement.className || tdoc.activeElement.tagName) : 'none');
 
           // Every open pill needs a real box or tv-mode's isVisibleRect skips it.
           var zeroSized = [];
           for (var i = 0; i < items.length; i++) {
-            if (!tvOtt.contains(items[i])) continue;
+            if (!tvDrop.contains(items[i])) continue;
             var r = items[i].getBoundingClientRect();
             if (r.width < 2 || r.height < 2) zeroSized.push(items[i].textContent.trim());
           }
@@ -373,7 +388,7 @@
 
           setTimeout(function () {
             ok('TV: D-pad moves between panel items (focus cache refreshed)',
-              tdoc.activeElement !== firstItem && tvOtt.contains(tdoc.activeElement),
+              tdoc.activeElement !== firstItem && tvDrop.contains(tdoc.activeElement),
               'activeElement = ' + (tdoc.activeElement ? tdoc.activeElement.textContent.trim() : 'none'));
 
             // Back must dismiss the panel instead of exiting the app.
@@ -381,8 +396,8 @@
 
             setTimeout(function () {
               ok('TV: Back closes the panel',
-                twin.getComputedStyle(tvOtt).display === 'none',
-                twin.getComputedStyle(tvOtt).display);
+                twin.getComputedStyle(tvDrop).display === 'none',
+                twin.getComputedStyle(tvDrop).display);
               ok('TV: Back returns the highlight to the trigger (remote not stranded)',
                 tdoc.activeElement === tvTrigger,
                 tdoc.activeElement ? (tdoc.activeElement.id || tdoc.activeElement.tagName) : 'none');

@@ -284,25 +284,6 @@ if (!isMzTV() && !isTouchOnly && !isMobile) {
   });
 }
 
-// -- SERVER PRECONNECT (FAST STREAMING, LCP-SAFE) --
-// Pehle ye function turant 7 servers se preconnect (DNS+TCP+TLS) karta tha. Wo
-// 7 handshakes first poster download se compete karte the aur LCP (Google ka
-// Core Web Vitals ranking factor) late ho jata tha.
-// Ab: DNS resolve turant (sasta hai), TLS handshake page interactive hone ke
-// baad idle time me. Playback speed same, LCP fast. Movie khulte waqt
-// openModal() already preconnectPlayerHosts(4) call karta hai.
-//
-// The host list is no longer written out here. It was a copy of the provider
-// list that had gone stale in both directions — it warmed cinextream.net (dead
-// domain, DNS record gone), 2embed.stream, vidsrc.sbs and multiembed.mov, none
-// of which the player uses any more, while vidfast.pro, flicky.host,
-// 111movies.com, vidrock.net, vidlink.pro and vidsrc.pm — all live servers —
-// stayed cold. Now it reads playerHostOrigins(), which is derived from
-// playerSources itself, so the two can never disagree again.
-//
-// playerSources is declared much further down the file, so the list is read from
-// a timer rather than inline: a 0ms timeout runs after this script finishes
-// parsing, which is still long before a user can open a title.
 (function preconnectServers() {
   const addHint = (rel, url, crossOrigin) => {
     const link = document.createElement('link');
@@ -663,7 +644,7 @@ let abortControllers = new Map(); // Track controllers to cancel stale requests
 
 /*  ══════════════════════════════════════════════════════════════════════
  *  DEFERRED CACHE WRITES
- *  ══════════════════════════════════════════════════════════════════════
+ *  ══════════════════════════════════════════════════════════════��═══════
  *  localStorage is synchronous: setItem blocks the main thread until the
  *  write lands. The SWR cache below used to call it inline in every response
  *  handler, and a cold homepage fires 15-20 TMDB requests at once — so the
@@ -1332,7 +1313,7 @@ const MZ_TMDB_SWR_FRESH_MS = 12 * 60 * 60 * 1000;
 
 /*  ══════════════════════════════════════════════════════════════════════
  *  AUTO-UPDATE: FRESHNESS IS PER ENDPOINT, NOT ONE NUMBER
- *  ══════════════════════════════════════════════════════════════════════
+ *  ═══════════════════════════════════════════════════════════════���══════
  *  A single 12h window is right for a title's own record - Interstellar's runtime
  *  and cast do not change - and wrong for the lists the home page is built from.
  *  /trending/movie/week, /movie/now_playing and every /discover query are the
@@ -2439,6 +2420,75 @@ function interleaveFeedByType(pool) {
     }
   }
   return output;
+}
+
+/*  ── OTT TABS USE THE ALL-FEED PRIORITY ────────────────────────────────────
+ *
+ *  fetchOttMovies() ranks by PLATFORM relevance: verified-trending on this
+ *  service, popularity, votes, plus a freshness bonus. That answers "what is
+ *  big on Netflix", which is the right signal for deciding what to keep and
+ *  what to verify, but it is not the order the rest of the site presents a
+ *  catalogue in.
+ *
+ *  So the platform tabs finish with exactly the ALL feed's ordering: newest
+ *  relevant releases first, then recent print upgrades, then trending series
+ *  and anime, then the back catalogue — language-balanced within a group and
+ *  type-interleaved at the end.
+ *
+ *  ── how the head of the grid is chosen ──
+ *  The requirement is that a platform's POPULAR, TRENDING and NEW titles all sit
+ *  at the top, so the tiebreak inside a group is a blend rather than a hierarchy.
+ *
+ *  A strict recency key was tried first and was wrong in the other direction: it
+ *  bucketed by year ahead of relevance, which let an obscure new release outrank a
+ *  title the platform is actually known for. A pure _ottScore was wrong too —
+ *  measured against the live API, SonyLIV, MX Player and Crunchyroll put
+ *  everything in the back priority groups (allFeedPriorityGroup needs a release
+ *  inside LATEST_WINDOW_DAYS and freshnessTier needs a popularity/vote floor), so
+ *  the only remaining key was popularity and a 1997 title ranked above a 2022 one.
+ *
+ *  So: group and tier still decide first, then _ottScore + a recency premium.
+ *  _ottScore already carries the platform's own signals — popularity, vote weight,
+ *  and a 'trend'/'latest' boost from the query that surfaced the title. The
+ *  premium adds up to ~3200 for something released today, decaying to zero over
+ *  about five years. That is deliberately smaller than the 'trend' tag boost
+ *  (6000), so a genuine hit is never buried by a newer nobody, while between two
+ *  comparably relevant titles the newer one wins.
+ *
+ *  ── the premium is GATED, and it has to be ──
+ *  Without a gate this was measurably wrong. On MX Player the top card became
+ *  "正义必胜" (2026-09-03, popularity 1, ZERO votes) while Bleach (popularity 145,
+ *  2261 votes) sat at position 23. A brand-new title was collecting _ottScore's own
+ *  freshness bonus (+2500 under 30 days) AND this premium (+3200) — 5700 points for
+ *  being new, with no evidence anyone wants to watch it.
+ *
+ *  So the premium requires a minimum sign of life first, the same idea as
+ *  freshnessTier's relevance floor. A new release with an audience gets promoted;
+ *  a new release nobody has rated stays where its own score puts it.
+ */
+const OTT_RECENCY_MIN_VOTES = 12;
+const OTT_RECENCY_MIN_POPULARITY = 8;
+
+function ottRankLikeAllFeed(items) {
+  if (!Array.isArray(items) || items.length < 2) return items || [];
+  const now = Date.now();
+  rankByFreshness(items);
+  items.forEach(m => {
+    const d = m.release_date || m.first_air_date;
+    const t = d ? new Date(d).getTime() : NaN;
+    const relevant = (m.vote_count || 0) >= OTT_RECENCY_MIN_VOTES
+      || (m.popularity || 0) >= OTT_RECENCY_MIN_POPULARITY;
+    // Undated or unproven titles get no premium rather than jumping the queue.
+    const yearsOld = isNaN(t) ? 99 : Math.max(0, (now - t) / 31557600000);
+    const premium = relevant ? Math.max(0, 3200 - (yearsOld * 620)) : 0;
+    m._ottFinal = (m._ottScore || 0) + premium;
+  });
+  items.sort((a, b) =>
+    (a._priorityGroup - b._priorityGroup)
+    || (a._freshTier - b._freshTier)
+    || (b._ottFinal - a._ottFinal)
+    || (a._eventAgeDays - b._eventAgeDays));
+  return interleaveFeedByType(diversifyByLanguageWithinPriority(items));
 }
 
 /** IST calendar date, optionally shifted back by N days — used to build the
@@ -3600,7 +3650,7 @@ async function loadCarousel() {
     } else if (lang === 'hi' && m.vote_average >= 7.0) {
       m._badge = '🎬 BOLLYWOOD HIT';
     } else if (lang === 'hi') {
-      m._badge = '🎬 BOLLYWOOD TRENDING';
+      m._badge = '�� BOLLYWOOD TRENDING';
     } else if (category === 'tollywood') {
       /*  Category, not language. A pinned title is placed into the bucket the pin
        *  names rather than the one its language implies, so reading `lang` here
@@ -3967,7 +4017,7 @@ function renderTop10(list) {
       '<div class="top10-card" data-rank="' + rank + '" data-id="' + m.id + '" data-type="movie"' +
         ' tabindex="0" role="button" aria-label="' + title + ', ranked number ' + rank + '"' +
         ' style="animation-delay:' + delay.toFixed(3) + 's">' +
-        '<span class="top10-rank" aria-hidden="true">' + rank + '</span>' +
+        '<span class="top10-rank' + (rank > 3 ? ' top10-rank--outline' : '') + '" aria-hidden="true">' + rank + '</span>' +
         '<div class="top10-poster">' +
           '<img src="' + p342 + '"' +
             ' srcset="' + p185 + ' 185w, ' + p342 + ' 342w, ' + p500 + ' 500w"' +
@@ -4521,7 +4571,7 @@ function refreshSlideQuality(index) {
   });
 }
  
-/* ── AUTOPLAY ─────────────────────────────────────────────────────────────
+/* ── AUTOPLAY ─────────────────────────────────────────────────────────���───
    One constant drives every start/resume path — change the seconds here and
    the progress bar follows.
 
@@ -4674,7 +4724,40 @@ const OTT = {
    *  platform's catalogue actually is.
    */
   zee5:       { provider: '232',  regions: ['IN'],       networks: '2590|526|6989',
-                langs: 'hi|ta|te|kn|ml|bn|mr|pa|gu|or' }
+                langs: 'hi|ta|te|kn|ml|bn|mr|pa|gu|or' },
+
+  /*  ── The five platforms added so their rail cards open a real catalogue ──
+   *
+   *  Every provider id below was READ OFF /watch/providers/{movie,tv}?
+   *  watch_region=IN, not remembered, and every network id was confirmed
+   *  through /network/{id}. That mattered: 2531, which this file's own
+   *  STREAMING_NETWORK_IDS comment still labels "SonyLIV", actually resolves to
+   *  DMAX Spain, and 4238 ("MX Player") is a 404. Both are therefore absent
+   *  here — an unverified with_networks id costs a request and returns nothing.
+   *
+   *  `networks` is only present where the id was confirmed to be the platform's
+   *  own originals channel: 2552 = Apple TV+ (Cupertino), 1112 = Crunchyroll.
+   *  SonyLIV, MX Player and aha get no originals query, because their popular
+   *  TMDB series carry third-party networks (SonyLIV's top series in India are
+   *  anime on TV Tokyo / TV Aichi), so there is no single channel to intersect.
+   *
+   *  Measured catalogue depth for region IN (movies / series):
+   *    apple 350        106 /  216      sonyliv 237      336 /  978
+   *    mxplayer 1898    731 /  566      aha 532          199 /   14
+   *    crunchyroll 283   52 /  947
+   *  aha's series library really is ~14 titles — see the per-platform floor in
+   *  ott-sections-check.js rather than assuming that is a bug.
+   */
+  apple:       { provider: '350',  regions: ['IN', 'US'], networks: '2552' },
+  sonyliv:     { provider: '237',  regions: ['IN'] },
+  /*  MX Player is free/ad-funded, so the default flatrate-only gate hides most
+   *  of it: 575 movies + 208 series under `flatrate`, versus 731 + 566 once
+   *  free and ad-supported tiers are included. ottIsOnPlatform() already
+   *  accepts the free and ads tiers when verifying, so widening the gate keeps
+   *  the fetch and the verification describing the same catalogue. */
+  mxplayer:    { provider: '1898', regions: ['IN'], monetization: 'flatrate|free|ads' },
+  aha:         { provider: '532',  regions: ['IN'] },
+  crunchyroll: { provider: '283',  regions: ['IN', 'US'], networks: '1112' }
 };
 
 /*  Networks that are genuinely streaming platforms, for the "Web Series" tab.
@@ -4708,15 +4791,16 @@ const LINEAR_TV_EXCLUDE_IDS = '71|105|70|118|194|2584|3294';
  */
 
 // ══════════════════════════════════════════════════════════════════════════
-// OTT SUB-FILTER: Web Series & Movies (like Cartoons sub-tabs)
+// OTT CONTENT MODE
 // ══════════════════════════════════════════════════════════════════════════
-const OTT_MODES = [
-  { id: 'all',       label: 'All',          icon: '🎬' },
-  { id: 'webseries', label: 'Web Series',   icon: '📺' },
-  { id: 'movies',    label: 'Movies',       icon: '🍿' }
-];
-
-let currentOttMode = 'all';
+/*  The All / Web Series / Movies chip bar is gone. A provider card now opens the
+ *  platform's whole catalogue directly, so the sub-mode was an extra choice the
+ *  user never asked to make. buildOttModeQueries() still accepts the three modes
+ *  and the check suites still exercise 'webseries' and 'movies' against the live
+ *  API — only the UI and the mutable state were removed. Hence a const: the mode
+ *  can no longer be changed at runtime, but the name is preserved so the query
+ *  plan and the prefetch keep reading the same thing. */
+const currentOttMode = 'all';
 
 /*  ══════════════════════════════════════════════════════════════════════
  *  PLATFORM ACCURACY RULES — why every query below is provider-filtered
@@ -4754,7 +4838,17 @@ const OTT_ALT_PROVIDERS = {
   netflix:    ['8', '1796'],   // Netflix, Netflix Standard with Ads
   prime:      ['119', '9'],    // Prime Video IN, Prime Video US
   jiohotstar: ['2336'],        // 122 is deliberately absent: retired, not offered in IN
-  zee5:       ['232']
+  zee5:       ['232'],
+  /*  Apple TV+ is 350. Provider 2 ("Apple TV") is the rent/buy storefront and is
+   *  deliberately absent — accepting it would pass a rental off as a subscription. */
+  apple:       ['350'],
+  sonyliv:     ['237'],
+  /*  Both ids are live in TMDB for the same rebranded service: 515 "MX Player"
+   *  and 1898 "Amazon MX Player". A title may be filed under either, so
+   *  verification has to accept both or it would reject titles it just fetched. */
+  mxplayer:    ['1898', '515'],
+  aha:         ['532'],
+  crunchyroll: ['283']
 };
 
 /** IST-anchored yyyy-mm-dd, optionally shifted by days. */
@@ -4780,7 +4874,11 @@ function buildOttModeQueries(key, mode, page) {
   const gate = {
     with_watch_providers: cfg.provider,
     watch_region: 'IN',
-    with_watch_monetization_types: OTT_MONETIZATION,
+    /*  Per-platform, defaulting to flatrate. A free/ad-funded service filed
+     *  under flatrate only exposes a fraction of its library, so those get a
+     *  wider gate (see `monetization` in the OTT table). Rent and buy are never
+     *  included by any platform — that is the whole point of gating at all. */
+    with_watch_monetization_types: cfg.monetization || OTT_MONETIZATION,
     language: 'en-US'
   };
   // Platforms whose subscription catalogue is language-scoped (see OTT table).
@@ -4991,48 +5089,7 @@ async function ottIsOnPlatform(key, type, id) {
   return p;
 }
 
-/*  Which global trending lists ottVerifiedTrending() reads for this mode.
- *  Shared with the prefetch in fetchOttMovies so the two cannot drift — if they
- *  disagreed the batch would warm URLs nobody asks for while the real requests
- *  still went out one at a time, which is the bug this whole path just fixed. */
-function ottTrendingWants(mode) {
-  const wants = [];
-  if (mode !== 'movies') wants.push({ endpoint: '/trending/tv/week', type: 'tv' });
-  if (mode !== 'webseries') wants.push({ endpoint: '/trending/movie/week', type: 'movie' });
-  return wants;
-}
-
 /** Global trending, filtered down to titles verified on this platform. */
-async function ottVerifiedTrending(key, mode, page) {
-  const pg = String(page);
-  const wants = ottTrendingWants(mode);
-
-  const res = await Promise.allSettled(
-    wants.map(w => tmdb(w.endpoint, { language: 'en-US', page: pg }))
-  );
-
-  const candidates = [];
-  res.forEach((r, i) => {
-    const list = (r.status === 'fulfilled' && r.value && r.value.results) ? r.value.results : [];
-    // Top slice only — the tail of the trending list is not worth verifying.
-    list.slice(0, 10).forEach(raw => {
-      if (!raw || !raw.poster_path || !raw.id) return;
-      const item = Object.assign({}, raw);
-      item.media_type = wants[i].type;
-      candidates.push(item);
-    });
-  });
-
-  // One request for every provider record this pass needs, before asking for
-  // the verdicts — otherwise these are up to 20 individual round trips.
-  await _ottPrimeProviders(key, candidates);
-
-  const verdicts = await Promise.all(
-    candidates.map(c => ottIsOnPlatform(key, c.media_type, c.id))
-  );
-  return candidates.filter((c, i) => verdicts[i]);
-}
-
 /*  Adaptive accuracy guard.
  *  The provider gate plus the per-platform language scope measures 100%
  *  accurate today, so verifying every card would be wasted requests. But TMDB
@@ -5046,6 +5103,10 @@ async function ottVerifiedTrending(key, mode, page) {
 const OTT_SAMPLE_SIZE = 10;
 const OTT_SAMPLE_MIN_PASS = 0.9;
 const OTT_DEEP_VERIFY_CAP = 90;
+
+/*  Platforms whose provider gate has already been audited this session. See the
+ *  comment at the end of fetchOttMovies for why this is once-per-platform. */
+const _ottAudited = new Set();
 
 async function ottEnforceAccuracy(key, items) {
   if (items.length < 4) return items;
@@ -5085,18 +5146,41 @@ async function fetchOttMovies(key, mode, page) {
   if (!plan.length) return [];
 
   /*  Everything the first render needs, in ONE request: the provider-gated
-   *  catalogue pages and the two global trending lists the overlay reads. Only
-   *  primes the cache — the calls below are unchanged and now hit memory. */
-  await _ottPrimeBatch([].concat(
-    plan.map(p => [p.endpoint, p.params]),
-    ottTrendingWants(mode).map(w => [w.endpoint, { language: 'en-US', page: String(page) }])
-  ));
+   *  catalogue pages. Only primes the cache — the calls below are unchanged and
+   *  now hit memory. */
+  await _ottPrimeBatch(plan.map(p => [p.endpoint, p.params]));
 
-  // Provider-gated catalogue and the verified-trending overlay, in parallel.
-  const [res, verifiedTrending] = await Promise.all([
-    Promise.allSettled(plan.map(p => tmdb(p.endpoint, p.params))),
-    ottVerifiedTrending(key, mode, page).catch(() => [])
-  ]);
+  /*  ── WHY THERE IS NO GLOBAL-TRENDING OVERLAY HERE ANY MORE ──
+   *
+   *  This used to also await ottVerifiedTrending(), which read /trending/tv/week
+   *  and /trending/movie/week and then checked each candidate against its own
+   *  /watch/providers record. Measured, that was the whole performance problem:
+   *
+   *    buildOttModeQueries        1 ms
+   *    _ottPrimeBatch          5604 ms
+   *    ottVerifiedTrending     9986 ms   <-- and no single request was slow
+   *    the 6 discover calls       0 ms   (already primed)
+   *
+   *  A platform click was issuing ~50 requests, of which only 6 were catalogue
+   *  and ~44 were verification, against a deliberate client cap of 30 requests
+   *  per 10 seconds (MZ_RATE_LIMIT). The requests were not slow; they were
+   *  QUEUED. Proof: requests per 10s window came out as [30, 20] — exactly the
+   *  cap — for a 14s paint.
+   *
+   *  The overlay was also the only provider-BLIND source in this function. Its
+   *  job was to catch a platform hit that TMDB's discover index missed, but if a
+   *  title really is on the platform then the plan's own popularity.desc query —
+   *  which is provider-gated and tagged 'trend' — already returns it. So it was
+   *  paying ~44 requests to duplicate what 2 gated requests give for free, and
+   *  the verification that made up most of those requests existed only because
+   *  the overlay's own results could not be trusted.
+   *
+   *  Dropping it takes a cold click from ~50 requests to ~16 and, because the
+   *  remaining pool is gated end to end, costs nothing in accuracy:
+   *  ott-sections-check re-checks a sample of what this returns against each
+   *  title's own /watch/providers record and all nine platforms measure 100%.
+   */
+  const res = await Promise.allSettled(plan.map(p => tmdb(p.endpoint, p.params)));
 
   const TAG_BOOST = { trend: 6000, latest: 4200, top: 1200, core: 0 };
   const picked = new Map();
@@ -5137,64 +5221,42 @@ async function fetchOttMovies(key, mode, page) {
     list.forEach(raw => consider(raw, src.type, src.tag));
   });
 
-  // Verified trending sits above everything else — it is both confirmed on
-  // the platform and confirmed hot right now.
-  verifiedTrending.forEach(item => consider(item, item.media_type, 'trend', 4000));
+  // The plan's own popularity.desc queries are tagged 'trend' and are already
+  // provider-gated, so this platform's hot titles are in `picked` above.
 
   const ranked = Array.from(picked.values()).sort((a, b) => b._ottScore - a._ottScore);
-  return ottEnforceAccuracy(key, ranked);
-}
 
-// ── OTT SUB-FILTER BAR (chips under category tabs) ──
-function renderOttFilterBar() {
-  const catTabs = document.getElementById('catTabs');
-  if (!catTabs) return;
-  let bar = document.getElementById('ottFilterBar');
-  if (!bar) {
-    bar = document.createElement('div');
-    bar.id = 'ottFilterBar';
-    bar.className = 'anime-filter-bar ott-filter-bar';
-    bar.setAttribute('role', 'tablist');
-    bar.setAttribute('aria-label', 'OTT content filters');
-    catTabs.insertAdjacentElement('afterend', bar);
+  /*  ── ACCURACY IS AUDITED ONCE PER PLATFORM, NOT PER CLICK ──
+   *
+   *  ottEnforceAccuracy samples the head and re-checks each title against its own
+   *  /watch/providers record. That mattered when this function also merged the
+   *  global-trending overlay, because the overlay was provider-BLIND and could
+   *  genuinely return titles that are not on the platform. The overlay is gone, so
+   *  every title in `ranked` arrived through with_watch_providers already.
+   *
+   *  Two changes, both forced by the same measurement. Against a 30-request per
+   *  10-second client cap (MZ_RATE_LIMIT), a 10-request sample on the blocking path
+   *  was enough on its own to push the next click into a queue:
+   *    - it is no longer awaited, so it cannot delay the grid;
+   *    - it runs at most once per platform per session, because re-auditing the
+   *      same provider gate on every click spends a third of the rate budget to
+   *      re-confirm something that has not changed.
+   *  It still warms _ottVerifyCache and still logs a platform that goes bad, and
+   *  ott-sections-check re-checks a live sample of exactly what is returned here
+   *  and fails below 90% — currently 100% on all nine platforms.
+   */
+  if (!_ottAudited.has(key)) {
+    _ottAudited.add(key);
+    ottEnforceAccuracy(key, ranked.slice(0, OTT_SAMPLE_SIZE)).catch(() => {});
   }
-  bar.innerHTML = OTT_MODES.map(m => {
-    const active = m.id === currentOttMode;
-    return `<button type="button" class="anime-chip${active ? ' active' : ''}" role="tab" tabindex="0" aria-selected="${active}" onclick="setOttMode('${m.id}')"><span class="anime-chip-icon" aria-hidden="true">${m.icon}</span><span>${m.label}</span></button>`;
-  }).join('');
-  bar.style.display = 'flex';
-}
-
-function hideOttFilterBar() {
-  const bar = document.getElementById('ottFilterBar');
-  if (bar) bar.style.display = 'none';
+  return ranked;
 }
 
 function updateOttHeading(cat) {
   const h = document.getElementById('sectionHeading');
   if (!h) return;
-  const platformName = CAT_HEADINGS[cat] || cat.toUpperCase();
-  const m = OTT_MODES.find(x => x.id === currentOttMode) || OTT_MODES[0];
-  if (currentOttMode === 'all') {
-    h.textContent = platformName;
-  } else {
-    h.textContent = platformName + ' • ' + m.label.toUpperCase();
-  }
-}
-
-function setOttMode(mode) {
-  if (!OTT_MODES.some(m => m.id === mode)) mode = 'all';
-  currentOttMode = mode;
-  renderOttFilterBar();
-  // Find which OTT platform is currently active
-  const activeTab = document.querySelector('.cat-tab.active');
-  let ottCat = 'netflix';
-  if (activeTab) {
-    const match = (activeTab.getAttribute('onclick') || '').match(/'([^']+)'/);
-    if (match && OTT[match[1]]) ottCat = match[1];
-  }
-  updateOttHeading(ottCat);
-  loadMovies(ottCat);
+  // One mode only now, so no " • WEB SERIES" suffix to append.
+  h.textContent = CAT_HEADINGS[cat] || cat.toUpperCase();
 }
 
 // -- BACKGROUND PREFETCH HELPERS (For Instant "Load More") --
@@ -5286,8 +5348,18 @@ function prefetchMoviesPage(cat, pageNum) {
     tmdb('/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
   }
   else if (OTT[cat]) {
-    // Netflix / Prime / JioHotstar / Zee5 — use active OTT mode for prefetch
-    buildOttModeQueries(cat, currentOttMode, pageNum).forEach(q => tmdb(q.endpoint, q.params));
+    /*  Deliberately NOT prefetched.
+     *
+     *  Every other category warms its next page here, and for them that is free
+     *  headroom. For a platform it is not: MZ_RATE_LIMIT allows 30 requests per 10
+     *  seconds, a platform page costs ~7, and spending another ~7 on a page the
+     *  user may never scroll to is what made the NEXT platform click queue behind
+     *  it. Measured, this and the per-click accuracy audit were the whole remaining
+     *  cost once the global-trending overlay was removed.
+     *
+     *  Paging is unaffected in behaviour: goToFeedPage() serves any page already in
+     *  the pool with no network at all, and calls loadMovies(cat, true) on demand
+     *  for the rest. It is the speculative half that is gone, not the capability. */
   }
   else {
     const base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: 'en-US' });
@@ -6357,10 +6429,17 @@ async function loadMovies(cat, isLoadMore = false) {
       const seen = new Set();
       combined.forEach(m => { if (m && m.id && !seen.has(m.id)) { seen.add(m.id); movies.push(m); } });
     } else if (OTT[cat]) {
-      // ── PLATFORM TABS: Netflix / Prime Video / JioHotstar / Zee5 ──
-      // Uses OTT sub-filter mode (all / webseries / movies) to decide queries.
-      // Trending/latest content is boosted to the top via scoring.
-      movies = movies.concat(await fetchOttMovies(cat, currentOttMode, currentMoviePage));
+      // ── PLATFORM TABS: every entry in the OTT table ──
+      // Uses the OTT sub-filter mode (all / webseries / movies) to decide
+      // queries, so this one branch serves Netflix, Prime, JioHotstar, Zee5,
+      // Apple TV+, SonyLIV, MX Player, aha and Crunchyroll alike.
+      //
+      // fetchOttMovies ranks by platform relevance and drops titles that are
+      // not really on the service; ottRankLikeAllFeed then applies the SAME
+      // product priority as the ALL feed, so newest releases lead and movies
+      // and web series interleave the way they do everywhere else.
+      movies = movies.concat(
+        ottRankLikeAllFeed(await fetchOttMovies(cat, currentOttMode, currentMoviePage)));
     } else {
       const base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: 'en-US' });
       const res = await Promise.all([
@@ -6598,7 +6677,7 @@ function _mzCardPrefetch(card) {
 
 /*  ══════════════════════════════════════════════════════════════════════
  *  DETAIL REQUEST PARAMS  (single source of truth)
- *  ══════════════════════════════════════════════════════════════════════
+ *  ═══════════════════════════════════════════════════════��══════════════
  *  TMDB applies `language` to the videos it appends as well, so
  *  `language=en-US` alone returns ONLY videos tagged English. That is why the
  *  hover trailer worked on Hollywood titles and silently did nothing on much of
@@ -6822,6 +6901,8 @@ const CAT_HEADINGS = {
   trending:'🔥 TRENDING NOW', uhd4k:'💎 4K ULTRA HD', toprated:'⭐ TOP RATED',
   kdrama:'K-DRAMA & KOREAN', netflix:'NETFLIX ORIGINALS',
   prime:'AMAZON PRIME VIDEO', jiohotstar:'JIOHOTSTAR', zee5:'ZEE5 MOVIES & WEB SERIES',
+  apple:'APPLE TV+', sonyliv:'SONYLIV', mxplayer:'AMAZON MX PLAYER',
+  aha:'AHA', crunchyroll:'CRUNCHYROLL ANIME',
   adventure:'ADVENTURE', fantasy:'FANTASY', crime:'CRIME', documentary:'DOCUMENTARY', family:'FAMILY'
 };
 /*  ══════════════════════════════════════════════════════════════════════
@@ -6834,10 +6915,14 @@ const CAT_HEADINGS = {
  *  Menu items keep class="cat-tab" deliberately. Two existing functions
  *  depend on it and would break silently otherwise:
  *    • filterCat() marks the active filter by scanning .cat-tab elements
- *    • loadMoreMoviesAction() reads .cat-tab.active's onclick to decide which
- *      category the infinite scroll should page next
+ *    • currentFeedCategory() falls back to .cat-tab.active's onclick before the
+ *      first load has recorded a category
  *  A closed menu is display:none, but querySelector still finds elements
  *  inside it, so paging keeps working while the menu is shut.
+ *
+ *  The nine OTT platforms are NOT in a menu any more — they are reached only from
+ *  the Top Providers rail and have no .cat-tab at all. That is exactly why
+ *  currentFeedCategory() prefers mzFeedPagerCategory over this scrape.
  */
 function closeCatGroups(except) {
   document.querySelectorAll('.cat-group.is-open').forEach(group => {
@@ -7036,6 +7121,88 @@ document.addEventListener('keydown', (e) => {
   closeCatGroups();
 });
 
+(function initProviderCarousel() {
+  function mount() {
+    const section = document.getElementById('top-providers');
+    if (!section) return;
+    const rail = section.querySelector('#providersRail');
+    const controls = section.querySelector('.providers-controls');
+    const previous = section.querySelector('[data-provider-scroll="-1"]');
+    const next = section.querySelector('[data-provider-scroll="1"]');
+    const cards = Array.from(rail.querySelectorAll('.provider-card'));
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let scrollFrame = 0;
+
+    function updateControls() {
+      scrollFrame = 0;
+      const maximum = rail.scrollWidth - rail.clientWidth;
+      const overflows = maximum > 2;
+      controls.hidden = !overflows;
+      const atStart = rail.scrollLeft <= 2;
+      const atEnd = rail.scrollLeft >= maximum - 2;
+      previous.disabled = atStart;
+      next.disabled = atEnd;
+      //  The native scrollbar is hidden, so the only remaining cue that the row
+      //  continues is the edge fade. CSS cannot measure overflow, hence the
+      //  attribute: providers.css maps it to a mask-image on the rail.
+      rail.dataset.edge = !overflows ? 'none' : atStart ? 'end' : atEnd ? 'start' : 'both';
+    }
+
+    section.addEventListener('click', function (event) {
+      const scrollButton = event.target.closest('[data-provider-scroll]');
+      if (scrollButton && !scrollButton.disabled) {
+        rail.scrollBy({
+          left: Number(scrollButton.dataset.providerScroll) * rail.clientWidth * 0.85,
+          behavior: reducedMotion.matches ? 'instant' : 'smooth'
+        });
+      }
+      const provider = event.target.closest('[data-provider-cat]');
+      if (provider && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey && event.button === 0) {
+        event.preventDefault();
+        filterCat(provider.dataset.providerCat);
+        const heading = document.getElementById('sectionHeading');
+        if (heading) {
+          heading.setAttribute('tabindex', '-1');
+          heading.focus({ preventScroll: true });
+        }
+      }
+    });
+
+    rail.addEventListener('keydown', function (event) {
+      if (event.isComposing || event.keyCode === 229 || event.altKey || event.ctrlKey || event.metaKey) return;
+      const index = cards.indexOf(event.target.closest('.provider-card'));
+      if (index < 0) return;
+      let target = index;
+      if (event.key === 'ArrowRight') target = Math.min(index + 1, cards.length - 1);
+      else if (event.key === 'ArrowLeft') target = Math.max(index - 1, 0);
+      else if (event.key === 'Home') target = 0;
+      else if (event.key === 'End') target = cards.length - 1;
+      else return;
+      event.preventDefault();
+      cards[target].focus({ preventScroll: true });
+      cards[target].scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: reducedMotion.matches ? 'instant' : 'smooth' });
+    });
+
+    rail.addEventListener('scroll', function () {
+      if (!scrollFrame) scrollFrame = requestAnimationFrame(updateControls);
+    }, { passive: true });
+
+    /*  There was a hover warm-up here that called prefetchMoviesPage(cat, 1) after a
+     *  180ms dwell. It has been removed on purpose. It existed to hide a cold click
+     *  that cost ~50 requests, and that cost is now ~7 — the global-trending overlay
+     *  and the blocking accuracy sample are both gone from fetchOttMovies. Against a
+     *  30-request-per-10-second client cap, speculatively spending 7 more requests on
+     *  a platform the user may never open now makes the click they DO make slower,
+     *  not faster. The fix belongs at the source, and that is where it is. */
+
+    if (typeof ResizeObserver === 'function') new ResizeObserver(updateControls).observe(rail);
+    else window.addEventListener('resize', updateControls, { passive: true });
+    updateControls();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true });
+  else mount();
+})();
+
 function filterCat(cat, e) {
   if (e) e.preventDefault();
   isSearchResultsMode = false;
@@ -7053,7 +7220,7 @@ function filterCat(cat, e) {
   // Cartoons ke liye apna sub-filter bar (Trending / Famous / Hindi / Doraemon & Co ...)
   if (cat === 'kids') { renderCartoonFilterBar(); updateCartoonHeading(); } else { hideCartoonFilterBar(); }
   // OTT platforms ke liye Web Series & Movies sub-filter bar
-  if (OTT[cat]) { renderOttFilterBar(); updateOttHeading(cat); } else { hideOttFilterBar(); }
+  if (OTT[cat]) updateOttHeading(cat);
   const sec = document.getElementById('movies-section');
   if (sec) sec.scrollIntoView({ behavior: isMzTVMode() ? 'auto' : 'smooth' });
   loadMovies(cat);
@@ -7290,14 +7457,31 @@ function goToFeedPage(page) {
 }
 window.goToFeedPage = goToFeedPage;
 
-function loadMoreMoviesAction() {
+/*  The single source of truth for "which category is on screen".
+ *
+ *  This used to be recovered by reading .cat-tab.active's onclick. That worked
+ *  only while every category had a tab — and the nine OTT platforms no longer do,
+ *  because the OTT Platform dropdown was removed in favour of the Top Providers
+ *  rail. Left as it was, paging or a refresh on a platform feed would find no
+ *  active tab, silently fall back to 'all', and throw the user out of Netflix
+ *  back into the general feed.
+ *
+ *  loadMovies() assigns mzFeedPagerCategory on every load, including OTT loads, so
+ *  it is already authoritative. The tab scrape is kept only as a fallback for the
+ *  very first interaction, before any load has happened. */
+function currentFeedCategory() {
+  if (mzFeedPagerCategory) return mzFeedPagerCategory;
   const activeTab = document.querySelector('.cat-tab.active');
-  let cat = 'all';
-  if (activeTab && activeTab.getAttribute('onclick')?.includes('filterCat')) {
-    const match = activeTab.getAttribute('onclick').match(/'([^']+)'/);
-    if (match) cat = match[1];
+  const onclick = activeTab && activeTab.getAttribute('onclick');
+  if (onclick && onclick.includes('filterCat')) {
+    const match = onclick.match(/'([^']+)'/);
+    if (match) return match[1];
   }
-  loadMovies(cat, true);
+  return 'all';
+}
+
+function loadMoreMoviesAction() {
+  loadMovies(currentFeedCategory(), true);
 }
  
 // -- WATCHLIST LOGIC --
@@ -7334,7 +7518,7 @@ function showWatchlist(e) {
   isSearchResultsMode = false;
   isWatchlistMode = true;
   hideAnimeFilterBar();
-  hideOttFilterBar();
+  // No hideOttFilterBar() any more — the OTT chip bar no longer exists.
   // Nothing to page here, so take the sentinel out of the viewport entirely
   // rather than relying on the observer callback to bail.
   const scrollTrigger = document.getElementById('infiniteScrollTrigger');
@@ -7792,7 +7976,6 @@ let _lastSearchQuery = '';
 let _searchAbortController = null;
 let searchRequestId = 0;
 let searchActiveIndex = -1;
-let searchCatalogPromise = null;
 let searchLastScrollY = 0;
 const intelligentSearchCache = new Map();
 const searchInput = document.getElementById('searchInput');
@@ -8129,42 +8312,6 @@ function highlightSearchMatch(title, query) {
 }
 
 const SEARCH_POSTER_FALLBACK = 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2260%22><rect width=%2242%22 height=%2260%22 rx=%228%22 fill=%22%23181828%22/><text x=%2221%22 y=%2234%22 text-anchor=%22middle%22 fill=%22%23f5c518%22 font-size=%2214%22>MZ</text></svg>';
-
-async function loadSearchCatalog() {
-  if (searchCatalogPromise) return searchCatalogPromise;
-  searchCatalogPromise = (async () => {
-    const sources = [
-      [tmdb('/trending/all/week', { language: 'en-US', page: '1' }), null],
-      [tmdb('/movie/popular', { language: 'en-US', page: '1' }), 'movie'],
-      [tmdb('/movie/popular', { language: 'en-US', page: '2' }), 'movie'],
-      [tmdb('/tv/popular', { language: 'en-US', page: '1' }), 'tv'],
-      [tmdb('/movie/top_rated', { language: 'en-US', page: '1' }), 'movie'],
-      [tmdb('/discover/movie', { language: 'en-US', with_original_language: 'hi', sort_by: 'popularity.desc', page: '1' }), 'movie'],
-      [tmdb('/discover/movie', { language: 'en-US', with_original_language: 'ta', sort_by: 'popularity.desc', page: '1' }), 'movie'],
-      [tmdb('/discover/movie', { language: 'en-US', with_original_language: 'te', sort_by: 'popularity.desc', page: '1' }), 'movie'],
-      [tmdb('/person/popular', { language: 'en-US', page: '1' }), 'person'],
-      [tmdb('/person/popular', { language: 'en-US', page: '2' }), 'person']
-    ];
-    const settled = await Promise.allSettled(sources.map(source => source[0]));
-    const media = [];
-    const people = [];
-    settled.forEach((result, index) => {
-      if (result.status !== 'fulfilled') return;
-      const forcedType = sources[index][1];
-      (result.value?.results || []).forEach(item => {
-        const type = item.media_type || forcedType || (item.name ? 'tv' : 'movie');
-        if (type === 'person') people.push({ ...item, media_type: 'person' });
-        else media.push({ ...item, media_type: type });
-      });
-    });
-    return { media, people };
-  })().catch(error => {
-    searchCatalogPromise = null;
-    console.warn('[MovieZone] Search catalog failed:', error);
-    return { media: [], people: [] };
-  });
-  return searchCatalogPromise;
-}
 
 /**
  * The suggestion + results brain.
@@ -8913,6 +9060,16 @@ async function openModal(id, type = 'movie', activationEvent) {
     const pb = document.getElementById('playBigBtn');
     if (pb) pb.addEventListener('click', playMovie);
 
+    /*  Resume path: a Continue Watching card sets _mzAutoPlayOnOpen, and this is the
+     *  first point at which playback can actually start — the details are loaded, so
+     *  the runtime and (for a series) the saved season/episode are known, which is
+     *  exactly what the watch session and the resume offset need. One-shot: cleared
+     *  immediately so a later modal opened normally does not auto-play. */
+    if (window._mzAutoPlayOnOpen) {
+      window._mzAutoPlayOnOpen = false;
+      setTimeout(() => { try { playMovie(); } catch (e) {} }, 0);
+    }
+
     // ⚡ INSTANT PLAY: stream ko background me abhi resolve karna shuru kar do
     // (anime ke liye pehle AniList id, taaki double-load na ho)
     try {
@@ -9656,7 +9813,22 @@ const playerSources = [
   }},
   { name: 'Pro Stream', dubbed: true, url: (id, lang, type, s, e) => {
     // #4: VidLink Pro — Clean interface with settings
-    return (type === 'tv' ? `https://vidlink.pro/tv/${id}/${s}/${e}` : 'https://vidlink.pro/movie/' + id) + `?lang=${lang}`;
+    /*  startAt is the ONE resume parameter in this list that its provider actually
+     *  documents (vidlink.pro publishes it, in seconds, alongside the postMessage
+     *  progress contract this app now listens to). The other nine servers document
+     *  nothing of the sort, so they get no offset: inventing a parameter name would
+     *  only append a query string they ignore, while still changing the URL string
+     *  that takePrewarmedFrame() matches on.
+     *
+     *  The typeof guard is not paranoia. A URL builder must never be able to throw:
+     *  playerHostOrigins() runs every builder inside a try/catch and simply SKIPS
+     *  the ones that fail, so a missing dependency here would quietly drop
+     *  vidlink.pro out of the preconnect list with no error anywhere. That is also
+     *  precisely how player-health.test.js caught this — it evaluates playerSources
+     *  in an isolated sandbox where only the array exists. */
+    const at = (typeof mzResumeSec === 'function') ? mzResumeSec(id, type, s, e) : 0;
+    return (type === 'tv' ? `https://vidlink.pro/tv/${id}/${s}/${e}` : 'https://vidlink.pro/movie/' + id)
+      + `?lang=${lang}` + (at ? '&startAt=' + at : '');
   }},
 
   { name: 'Premium Mirror', dubbed: true, url: (id, lang, type, s, e) => {
@@ -10192,6 +10364,38 @@ function currentEpisodeSelection() {
   };
 }
 
+/*  ── RESUME OFFSET ─────────────────────────────────────────────────────────
+ *
+ *  Seconds to start playback at for a given title, read straight out of the
+ *  Continue Watching entry. Zero when there is nothing worth resuming.
+ *
+ *  This exists as ONE function on purpose. loadPlayer() and prewarmPlayer() both
+ *  build their URL through the same source builders, and takePrewarmedFrame()
+ *  decides whether a prewarmed iframe is reusable by comparing the two URLs as
+ *  STRINGS (`st.realUrl !== src`). If the offset were computed independently in
+ *  each path, a one-second drift between them would silently disable prewarming
+ *  and nobody would notice — the player would just get slower.
+ *
+ *  Only `positionSec` is used, never `watchedSec`. They are different things: for a
+ *  provider that reports its playhead, positionSec is where the viewer actually is;
+ *  watchedSec is how long the tab was open and focused, which is a fine progress
+ *  estimate but a bad place to jump to. So a title only resumes when the position
+ *  is genuinely known.
+ *
+ *  TV resumes per episode, because a season-2 episode-3 position is meaningless in
+ *  season 1 episode 1.
+ */
+function mzResumeSec(id, type, s, e) {
+  try {
+    const list = JSON.parse(localStorage.getItem('mz_continue_watching')) || [];
+    const key = (type === 'tv') ? (Number(id) + ':' + s + ':' + e) : String(Number(id));
+    const entry = list.find(item => item && String(item.key || item.id) === key);
+    const at = entry && Number(entry.positionSec);
+    // Under half a minute is not a resume, it is a restart.
+    return (Number.isFinite(at) && at > 30) ? Math.floor(at) : 0;
+  } catch (err) { return 0; }
+}
+
 function buildPlayerUrl(id, type, srcIdx, lang) {
   const sel = currentEpisodeSelection();
   try {
@@ -10637,12 +10841,6 @@ function tryAllDubbedServers() {
   tryNext();
 }
  
-function togglePlayerLang() {
-  if (!currentModalMovie) return;
-  const nextLang = getSelectedLang() === 'hi' ? 'en' : 'hi';
-  setSelectedLang(nextLang);
-  loadPlayer(currentModalMovie.id, currentSourceIdx, nextLang, getSelectedQuality(), currentModalMovie.media_type);
-}
  
 async function downloadMovie() {
   if (!currentModalMovie) return;
@@ -10774,7 +10972,9 @@ document.addEventListener('DOMContentLoaded', () => {
    *  A safety sweep instead: if markup ever regresses and a category ends up
    *  missing, log it rather than silently dropping the filter. */
   (function verifyCategoryTabs() {
-    const required = ['kids', 'anime', 'adult', 'tv', 'zee5', 'netflix', 'prime', 'jiohotstar'];
+    // The nine OTT platforms are deliberately absent: they are reached from the
+    // Top Providers rail and have no .cat-tab of their own.
+    const required = ['kids', 'anime', 'adult', 'tv'];
     const missing = required.filter(c =>
       !document.querySelector('.cat-tab[onclick*="filterCat(\'' + c + '\')"]'));
     if (missing.length) {
@@ -10973,13 +11173,9 @@ function goHome(e) {
     if (scrollTrigger) scrollTrigger.style.display = 'none';
     renderMovies(watchlist);
   } else {
-    const activeTab = document.querySelector('.cat-tab.active');
-    let currentCat = 'all';
-    if (activeTab && activeTab.getAttribute('onclick')?.includes('filterCat')) {
-      const match = activeTab.getAttribute('onclick').match(/'([^']+)'/);
-      if (match) currentCat = match[1];
-    }
-    loadMovies(currentCat);
+    // Same reason as loadMoreMoviesAction: a platform feed has no .cat-tab to
+    // read back, so the category comes from the loader's own state.
+    loadMovies(currentFeedCategory());
   }
   loadUpcoming();
   
@@ -11214,18 +11410,25 @@ init();
     try { return new Set(JSON.parse(localStorage.getItem(DONE_KEY)) || []); }
     catch { return new Set(); }
   }
-  function markDone(id) {
+  /*  Finished rows are remembered by the SAME key the rail uses, so finishing
+   *  season 1 episode 1 hides only that episode and not the whole series. Legacy
+   *  entries were bare numeric ids, so isDone still accepts those for movies. */
+  function markDone(key) {
     const set = getDoneSet();
-    set.add(Number(id));
+    set.add(String(key));
     // Cap the done-list so it cannot grow forever; keep the most recent 300.
     const arr = Array.from(set).slice(-300);
     try { localStorage.setItem(DONE_KEY, JSON.stringify(arr)); } catch (e) {}
   }
-  function isDone(id) { return getDoneSet().has(Number(id)); }
-  window.mzClearWatched = function (id) {
+  function isDone(key) {
+    const set = getDoneSet();
+    return set.has(String(key)) || set.has(Number(key));
+  }
+  window.mzClearWatched = function (key) {
     // Lets a "watch again" flow resurrect a finished title.
     const set = getDoneSet();
-    set.delete(Number(id));
+    set.delete(String(key));
+    set.delete(Number(key));
     try { localStorage.setItem(DONE_KEY, JSON.stringify(Array.from(set))); } catch (e) {}
   };
 
@@ -11249,7 +11452,13 @@ init();
   function accrue() {
     if (!session) return;
     const t = nowSec();
-    if (document.visibilityState === 'visible') {
+    /*  Both gates. visibilityState catches a hidden tab; hasFocus() catches a tab
+     *  that is on screen but behind another window, which visibilityState reports
+     *  as "visible" and which used to be counted as watching. Providers that report
+     *  a real playhead make this moot — but nine of the ten do not. */
+    const watching = document.visibilityState === 'visible'
+      && (typeof document.hasFocus !== 'function' || document.hasFocus());
+    if (watching) {
       const delta = t - session.lastTick;
       // Guard against a machine that slept: a 4h "tick" is not 4h of watching.
       if (delta > 0 && delta < 90) session.watchedSec += delta;
@@ -11260,10 +11469,11 @@ init();
   function persistSessionProgress() {
     if (!session) return;
     const pct = currentProgressPct();
+    const key = entryKey(session, session.season, session.episode);
     if (pct >= COMPLETE_AT) {
-      // Finished — drop it from the rail and remember it so it never returns.
-      markDone(session.id);
-      const list = getCWList().filter(item => Number(item.id) !== Number(session.id));
+      // Finished — drop this row from the rail and remember it so it never returns.
+      markDone(key);
+      const list = getCWList().filter(item => String(item.key || item.id) !== key);
       saveCWList(list);
       renderContinueWatching();
       stopWatchSession();   // nothing left to track
@@ -11271,32 +11481,61 @@ init();
     }
     upsertEntry(mkEntry(session, null, pct, Math.round(session.watchedSec), Math.round(session.runtimeSec)));
     // Cheap live update of the on-screen bar without a full re-render.
-    liveUpdateCard(session.id, pct);
+    liveUpdateCard(key, pct);
   }
 
   /*  One entry shape, three call sites. `src` is either the running session or a
    *  TMDB movie object; `prior` (may be null) supplies resume fields when src is
    *  a bare movie. Collapsing the three literals into this saved the bulk of the
-   *  feature's byte cost. */
+   *  feature's byte cost.
+   *
+   *  `key` identifies the ROW, and for a series it includes season and episode.
+   *  Before this, upsertEntry matched on id alone, so starting S1E2 overwrote the
+   *  S1E1 row and its progress — one series could only ever occupy one slot and
+   *  the percentage jumped around as you moved through episodes.
+   *
+   *  `positionSec` and `watchedSec` are deliberately separate. watchedSec is how
+   *  long the player was open and focused: a reasonable progress estimate, and a
+   *  terrible place to seek to. positionSec is the real playhead, and it is only
+   *  ever set from a provider that reports one (see onPlayerMessage). Resume reads
+   *  positionSec, so a title never jumps to a fabricated timestamp. */
+  function entryKey(src, s, e) {
+    const type = src.media_type || (src.name && !src.title ? 'tv' : 'movie');
+    if (type !== 'tv') return String(Number(src.id));
+    return Number(src.id) + ':' + (s || src.season || 1) + ':' + (e || src.episode || 1);
+  }
+
   function mkEntry(src, prior, pct, watchedSec, runtimeSec) {
+    const type = src.media_type || (src.name && !src.title ? 'tv' : 'movie');
+    const season = src.season || (prior && prior.season) || (type === 'tv' ? 1 : 0);
+    const episode = src.episode || (prior && prior.episode) || (type === 'tv' ? 1 : 0);
     return {
       id: src.id,
+      key: entryKey(src, season, episode),
       title: src.title || src.name || (prior && prior.title) || '',
       backdrop: src.backdrop || src.backdrop_path || (prior && prior.backdrop) || '',
       poster: src.poster || src.poster_path || (prior && prior.poster) || '',
-      media_type: src.media_type || (src.name && !src.title ? 'tv' : 'movie'),
+      media_type: type,
+      season: season,
+      episode: episode,
       vote_average: src.vote_average || (prior && prior.vote_average) || 0,
       progress: pct,
       watchedSec: watchedSec || 0,
       runtimeSec: runtimeSec || 0,
+      // Only present once a provider has reported a real playhead.
+      positionSec: Number.isFinite(src.positionSec) ? Math.floor(src.positionSec)
+        : (prior && Number.isFinite(prior.positionSec) ? prior.positionSec : 0),
+      // True when `progress` came from the player rather than from the estimate.
+      exact: !!(src.exact || (prior && prior.exact)),
       timestamp: Date.now()
     };
   }
 
-  // Insert or move-to-front an entry, preserving resume fields.
+  // Insert or move-to-front an entry, preserving resume fields. Matched on `key`,
+  // so each episode of a series keeps its own row.
   function upsertEntry(entry) {
     const list = getCWList();
-    const at = list.findIndex(item => Number(item.id) === Number(entry.id));
+    const at = list.findIndex(item => String(item.key || item.id) === String(entry.key));
     if (at > -1) list.splice(at, 1);
     list.unshift(entry);
     saveCWList(list);
@@ -11304,23 +11543,76 @@ init();
 
   function onVisibility() { accrue(); persistSessionProgress(); }
 
+  /*  ── TRUE PROGRESS, WHEN THE PLAYER PUBLISHES IT ───────────────────────────
+   *
+   *  The estimate above measures how long the player was open and focused. It is
+   *  the best a parent page can do unaided, because a cross-origin iframe will not
+   *  expose currentTime — but it counts a paused player as watching and it cannot
+   *  see a seek.
+   *
+   *  One of the servers in playerSources does publish its playhead. vidlink.pro
+   *  documents a PLAYER_EVENT postMessage carrying { event, currentTime, duration },
+   *  where `event` includes a periodic 'timeupdate'. When it arrives it REPLACES the
+   *  estimate for this session: real seconds, real duration, and a real position to
+   *  resume from. Anything else keeps the estimate, so nothing regresses for the
+   *  nine servers that publish nothing. (vidlink also emits a MEDIA_DATA payload
+   *  with the same numbers; listening to one of the two is enough.)
+   *
+   *  Origin is checked against playerHostOrigins() — the app's own list, derived
+   *  from playerSources — so an unrelated embedded frame cannot write to the rail.
+   */
+  function onPlayerMessage(event) {
+    if (!session) return;
+    let allowed;
+    try { allowed = playerHostOrigins(); } catch (e) { return; }
+    if (!allowed || allowed.indexOf(event.origin) === -1) return;
+
+    const payload = event.data;
+    if (!payload || payload.type !== 'PLAYER_EVENT' || !payload.data) return;
+    const watched = Number(payload.data.currentTime);
+    const duration = Number(payload.data.duration);
+    if (!Number.isFinite(watched) || !(duration > 0)) return;
+
+    session.watchedSec = Math.max(0, Math.min(watched, duration));
+    session.runtimeSec = duration;
+    session.positionSec = session.watchedSec;
+    session.exact = true;
+    persistSessionProgress();
+  }
+
   window._mzStartWatchSession = function (movie, runtimeMinutes) {
     if (!movie || !movie.id) return;
     stopWatchSession();   // never run two at once
 
-    // A freshly-restarted finished title is watchable again.
-    if (isDone(movie.id)) window.mzClearWatched(movie.id);
-
     // Runtime: prefer the real TMDB value; fall back to a sane default so the
-    // percentage still advances for titles TMDB has no runtime for.
+    // percentage still advances for titles TMDB has no runtime for. A provider
+    // that reports its own duration overwrites this within a few seconds.
     let runSec = 0;
     const rt = Number(runtimeMinutes || movie.runtime ||
       (movie.episode_run_time && movie.episode_run_time[0]) || 0);
     if (rt > 0) runSec = rt * 60;
     else runSec = (movie.media_type === 'tv' ? 45 : 120) * 60;   // fallback estimate
 
-    // Resume: if this title is already in the rail, continue from where it was.
-    const prior = getCWList().find(item => Number(item.id) === Number(movie.id));
+    /*  Which episode is on screen. A series entry is per-episode now, so the
+     *  session has to carry season/episode or it would resume, and complete,
+     *  against the wrong row. Read from the modal's own inputs, which is what
+     *  loadPlayer builds its URL from. */
+    const type = movie.media_type || (movie.name && !movie.title ? 'tv' : 'movie');
+    let season = 0;
+    let episode = 0;
+    if (type === 'tv') {
+      const sel = (typeof currentEpisodeSelection === 'function') ? currentEpisodeSelection() : null;
+      season = sel ? parseInt(sel.s, 10) || 1 : 1;
+      episode = sel ? parseInt(sel.e, 10) || 1 : 1;
+    }
+
+    // Resume: if this exact row is already in the rail, continue from where it was.
+    const wantKey = entryKey({ id: movie.id, media_type: type }, season, episode);
+    /*  A finished row that is being started again is watchable again. Keyed, and
+     *  therefore only possible once the episode is known — which is why this sits
+     *  here rather than at the top of the function. */
+    if (isDone(wantKey)) window.mzClearWatched(wantKey);
+    const prior = getCWList().find(item => String(item.key || item.id) === wantKey);
     const priorSec = prior && Number.isFinite(prior.watchedSec) ? prior.watchedSec : 0;
 
     session = {
@@ -11328,10 +11620,14 @@ init();
       title: movie.title || movie.name || (prior && prior.title) || '',
       backdrop: movie.backdrop_path || (prior && prior.backdrop) || '',
       poster: movie.poster_path || (prior && prior.poster) || '',
-      media_type: movie.media_type || (movie.name && !movie.title ? 'tv' : 'movie'),
+      media_type: type,
+      season: season,
+      episode: episode,
       vote_average: movie.vote_average || (prior && prior.vote_average) || 0,
-      runtimeSec: runSec,
+      runtimeSec: (prior && prior.exact && prior.runtimeSec > 0) ? prior.runtimeSec : runSec,
       watchedSec: priorSec,
+      positionSec: (prior && Number.isFinite(prior.positionSec)) ? prior.positionSec : 0,
+      exact: !!(prior && prior.exact),
       lastTick: nowSec(),
       timer: null
     };
@@ -11345,7 +11641,18 @@ init();
     // Tick every 5s: accrue visible time, persist, refresh the bar.
     session.timer = setInterval(() => { accrue(); persistSessionProgress(); }, 5000);
     document.addEventListener('visibilitychange', onVisibility);
+    /*  blur/focus as well as visibilitychange. A tab that is still VISIBLE but not
+     *  focused — another window on top, a second monitor — kept accruing "watch
+     *  time" under visibilitychange alone, because the page never hides. */
+    window.addEventListener('blur', onVisibility);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('message', onPlayerMessage);
   };
+
+  /*  On regaining focus, reset the clock WITHOUT crediting the gap. accrue() is
+   *  deliberately not called first: the elapsed time belongs to whatever the user
+   *  was doing in the other window. */
+  function onFocus() { if (session) session.lastTick = nowSec(); }
 
   function stopWatchSession() {
     if (!session) return;
@@ -11355,6 +11662,9 @@ init();
       clearInterval(session.timer);
     }
     document.removeEventListener('visibilitychange', onVisibility);
+    window.removeEventListener('blur', onVisibility);
+    window.removeEventListener('focus', onFocus);
+    window.removeEventListener('message', onPlayerMessage);
     session = null;
   }
   window._mzStopWatchSession = stopWatchSession;
@@ -11364,40 +11674,55 @@ init();
    *  started" marker and lets the live session drive the rest. */
   window.saveWatchProgress = function (movie, progress) {
     if (!movie || !movie.id) return;
-    if (isDone(movie.id) && !(progress > 0 && progress < COMPLETE_AT)) return;
-    const prior = getCWList().find(item => Number(item.id) === Number(movie.id));
+    const key = entryKey(movie, movie.season, movie.episode);
+    if (isDone(key) && !(progress > 0 && progress < COMPLETE_AT)) return;
+    const prior = getCWList().find(item => String(item.key || item.id) === key);
     const pct = Number.isFinite(progress) ? Math.max(0, Math.min(100, Math.round(progress)))
       : (prior ? prior.progress : 1);
-    if (pct >= COMPLETE_AT) { markDone(movie.id); window.removeCW(movie.id); return; }
+    if (pct >= COMPLETE_AT) { markDone(key); window.removeCW(key); return; }
     upsertEntry(mkEntry(movie, prior, pct,
       prior && Number.isFinite(prior.watchedSec) ? prior.watchedSec : 0,
       prior && Number.isFinite(prior.runtimeSec) ? prior.runtimeSec : 0));
     renderContinueWatching();
   };
 
-  // Remove from continue watching (does NOT mark as finished — an explicit
-  // "not interested" that should not resurrect on the next play either).
-  window.removeCW = function(id) {
-    const list = getCWList().filter(item => Number(item.id) !== Number(id));
+  // Remove one ROW from continue watching (does NOT mark as finished — an explicit
+  // "not interested" that should not resurrect on the next play either). Keyed, so
+  // dismissing one episode leaves the rest of the series alone.
+  window.removeCW = function(key) {
+    const k = String(key);
+    const list = getCWList().filter(item => String(item.key || item.id) !== k);
     saveCWList(list);
-    if (session && Number(session.id) === Number(id)) { clearInterval(session.timer); session = null; }
+    if (session && entryKey(session, session.season, session.episode) === k) {
+      clearInterval(session.timer); session = null;
+    }
     renderContinueWatching();
   };
 
   // Live-patch one card's bar + label without re-rendering the whole rail, so a
   // 5s tick does not flicker the images.
-  function liveUpdateCard(id, pct) {
+  function liveUpdateCard(key, pct) {
     const grid = document.getElementById('continueWatchingGrid');
     if (!grid) return;
-    const card = grid.querySelector('.cw-card[data-id="' + Number(id) + '"]');
+    const card = grid.querySelector('.cw-card[data-key="' + String(key) + '"]');
     if (!card) { renderContinueWatching(); return; }
     const fill = card.querySelector('.cw-progress-fill');
     if (fill) fill.style.width = pct + '%';
     const meta = card.querySelector('.cw-card-meta');
     if (meta) {
-      const entry = getCWList().find(e => Number(e.id) === Number(id));
-      if (entry) meta.textContent = getTimeAgo(entry.timestamp) + ' • ' + pct + '% watched';
+      const entry = getCWList().find(e => String(e.key || e.id) === String(key));
+      if (entry) meta.textContent = cwMetaText(entry, pct);
     }
+  }
+
+  /*  The card's second line: how much is watched, plus which episode it was, now
+   *  that a series occupies one row per episode. */
+  function cwMetaText(entry, pctOverride) {
+    const pct = Number.isFinite(pctOverride) ? pctOverride
+      : Math.max(0, Math.min(100, Number(entry.progress) || 0));
+    const ep = (entry.media_type === 'tv' && entry.season)
+      ? ' • S' + entry.season + 'E' + entry.episode : '';
+    return getTimeAgo(entry.timestamp) + ep + ' • ' + pct + '% watched';
   }
 
   // Render the continue watching section
@@ -11406,8 +11731,8 @@ init();
     const grid = document.getElementById('continueWatchingGrid');
     if (!section || !grid) return;
 
-    // Never show finished titles, even if a stale entry lingers.
-    const list = getCWList().filter(item => item && !isDone(item.id));
+    // Never show finished rows, even if a stale entry lingers.
+    const list = getCWList().filter(item => item && !isDone(item.key || item.id));
 
     if (list.length === 0) {
       section.style.display = 'none';
@@ -11419,18 +11744,20 @@ init();
       const img = item.backdrop
         ? `https://image.tmdb.org/t/p/w500${item.backdrop}`
         : (item.poster ? `https://image.tmdb.org/t/p/w342${item.poster}` : '');
-      const timeAgo = getTimeAgo(item.timestamp);
       const pct = Math.max(0, Math.min(100, Number(item.progress) || 0));
+      const key = String(item.key || item.id);
+      /*  Clicking the card RESUMES: openCWMovie starts playback rather than only
+       *  opening the detail modal, and the player is handed the saved position. */
       return `
-        <div class="cw-card" data-id="${Number(item.id)}" onclick="openCWMovie(${item.id}, '${item.media_type}', event)" tabindex="0">
+        <div class="cw-card" data-key="${escapeHTML(key)}" data-id="${Number(item.id)}" onclick="openCWMovie(${item.id}, '${item.media_type}', event)" tabindex="0">
           <img class="cw-card-img" src="${img}" alt="${escapeHTML(item.title || '')}" width="280" height="158" loading="lazy" decoding="async">
           <div class="cw-play-icon">
             <svg viewBox="0 0 24 24" width="22" height="22" fill="#000"><path d="M8 5v14l11-7z"/></svg>
           </div>
-          <button class="cw-remove-btn" onclick="event.stopPropagation(); removeCW(${item.id})" aria-label="Remove"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          <button class="cw-remove-btn" onclick="event.stopPropagation(); removeCW('${escapeHTML(key)}')" aria-label="Remove"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
           <div class="cw-card-info">
             <div class="cw-card-title">${escapeHTML(item.title || '')}</div>
-            <div class="cw-card-meta">${timeAgo} • ${pct}% watched</div>
+            <div class="cw-card-meta">${escapeHTML(cwMetaText(item, pct))}</div>
             <div class="cw-progress-bar"><div class="cw-progress-fill" style="width:${pct}%"></div></div>
           </div>
         </div>
@@ -11452,7 +11779,11 @@ init();
 
   // Open a continue watching movie
   window.openCWMovie = function(id, mediaType, activationEvent) {
-    // Reuse existing openModal function, preserving the explicit click/remote event.
+    /*  A Continue Watching card is a RESUME control — it carries a play icon and a
+     *  progress bar — so it starts playback instead of stopping at the detail modal.
+     *  The flag is consumed by openModal once the title's details have loaded and
+     *  the play button exists; doing it here would race the fetch. */
+    window._mzAutoPlayOnOpen = true;
     if (typeof openModal === 'function') openModal(id, mediaType, activationEvent);
   };
 

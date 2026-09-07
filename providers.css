@@ -1,0 +1,182 @@
+/*  TOP PROVIDERS RAIL
+ *
+ *  Two deliberate removals, both requested and both defensible:
+ *
+ *  1. The per-card caption ("Explore catalogue →" / "Official site ↗") is gone.
+ *     It was the same six words on nine tiles, and it ate a third of the card
+ *     while the logo — the only thing a user actually scans for — was squeezed
+ *     into the rest. Nothing accessible was lost: every <a> already carries a
+ *     full aria-label ("Netflix — browse movies and shows", "Apple TV+ —
+ *     official site, opens in a new tab"), so screen readers still announce the
+ *     provider AND where the link goes.
+ *
+ *  2. The native horizontal scrollbar is hidden (scrollbar-width + the WebKit
+ *     pseudo-element; both are needed, neither alone covers every engine).
+ *     The rail still scrolls: touch swipe, trackpad, shift+wheel, arrow keys,
+ *     and the two header buttons. The bottom padding that used to reserve room
+ *     for the scrollbar now serves the hover lift instead.
+ *
+ *  What replaced them is a logo-first tile: a layered dark surface with a
+ *  hairline top highlight, a gold ring + sheen + lift on hover, and a fade on the
+ *  rail's trailing edge so the row dissolves instead of being guillotined
+ *  mid-card.
+ *  The fade is TRAILING-EDGE ONLY. A leading fade was tried and reverted: at any
+ *  scrollLeft above zero it washed the black gradient straight over the first
+ *  card, and Netflix — dark red on near-black — became unreadable. There is also
+ *  nothing to hint at on the left; the disabled state of the "previous" arrow
+ *  already says "you are at the start". So [data-edge] still reports all four
+ *  states, and only "end"/"both" paint a mask.
+ */
+
+.providers-section {
+  /*  This block sits directly under the hero carousel now, so it carries its own
+   *  breathing room from it — the carousel ends flush and without this the logos
+   *  crowded straight up against the slide. The bottom stays tight because the
+   *  Top 10 rail follows and brings its own top spacing. */
+  padding: 3.25rem 4% 2rem;
+  color: var(--text); background: var(--bg); visibility: visible;
+}
+
+/* ── header ───────────────────────────────────────────────────────────── */
+.providers-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: 1.35rem; }
+.providers-heading { display: flex; align-items: center; gap: .8rem; margin: 0; font: 650 clamp(1.35rem, 2vw, 1.85rem)/1.4 'Outfit', sans-serif; letter-spacing: -.025em; color: var(--text); }
+.providers-heading::before {
+  content: '';
+  width: 4px; height: .82em; flex: none;
+  border-radius: 4px;
+  background: linear-gradient(180deg, var(--red2, #ff4d5e), var(--red, #e63946));
+  box-shadow: 0 0 14px var(--red-glow, rgba(230, 57, 70, .25));
+}
+.providers-subtitle { margin: .45rem 0 0 calc(4px + .8rem); font-size: 14px; line-height: 1.5; color: var(--text2); }
+
+.providers-controls { display: flex; flex: none; gap: .5rem; }
+.providers-controls[hidden] { display: none; }
+.providers-arrow {
+  display: grid; place-items: center;
+  width: 42px; height: 42px; padding: 0;
+  border: 1px solid var(--border2); border-radius: 50%;
+  background: linear-gradient(180deg, var(--card2, #13131f), var(--card, #0d0d1a));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05);
+  color: var(--text2); cursor: pointer;
+  transition: border-color 180ms ease, color 180ms ease, box-shadow 180ms ease, transform 180ms ease, opacity 180ms ease;
+}
+.providers-arrow:disabled { opacity: .28; cursor: default; }
+.providers-arrow:not(:disabled):hover {
+  color: var(--gold); border-color: var(--border-gold, rgba(245, 197, 24, .18));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 0 0 1px rgba(245, 197, 24, .22), 0 6px 18px -10px var(--gold-glow, rgba(245, 197, 24, .22));
+}
+.providers-arrow:not(:disabled):active { transform: scale(.94); }
+
+/* ── rail ─────────────────────────────────────────────────────────────── */
+.providers-rail {
+  --provider-fade: 64px;
+  display: flex; gap: 1rem;
+  overflow-x: auto; overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  list-style: none; margin: 0;
+  /* Vertical padding is headroom for the hover lift and its glow — the rail is
+     an overflow container, so anything outside the padding box is clipped. */
+  padding: 10px 2px 16px;
+  /* Scrollbar suppressed on all three engines. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.providers-rail::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+.providers-rail[data-edge="end"],
+.providers-rail[data-edge="both"] {
+  -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - var(--provider-fade)), transparent 100%);
+          mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - var(--provider-fade)), transparent 100%);
+}
+
+.providers-rail > li { flex: 0 0 clamp(190px, 15vw, 228px); min-width: 0; scroll-snap-align: start; }
+
+/* ── tile ─────────────────────────────────────────────────────────────── */
+.provider-card {
+  position: relative;
+  display: grid; place-items: center;
+  height: 142px; padding: 1rem 1.15rem;
+  border: 1px solid var(--border2); border-radius: 18px;
+  background:
+    radial-gradient(125% 100% at 50% 0%, rgba(255, 255, 255, .055) 0%, rgba(255, 255, 255, 0) 62%),
+    linear-gradient(180deg, var(--card2, #13131f) 0%, var(--card, #0d0d1a) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .045), 0 2px 6px -3px rgba(0, 0, 0, .6);
+  color: var(--text); text-decoration: none;
+  transition: transform 220ms var(--ease-smooth, cubic-bezier(.25, .46, .45, .94)), border-color 220ms ease, box-shadow 220ms ease;
+}
+
+/* Gold sheen along the top edge — appears with the hover ring, reads as light
+   catching a bevel rather than as a border colour change. */
+.provider-card::after {
+  content: '';
+  position: absolute; top: 0; left: 15%; right: 15%; height: 1px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, transparent, rgba(245, 197, 24, .8), transparent);
+  opacity: 0; transition: opacity 220ms ease;
+  pointer-events: none;
+}
+
+.provider-logo { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 0; transition: transform 220ms var(--ease-smooth, cubic-bezier(.25, .46, .45, .94)); }
+.provider-logo img {
+  width: 100%; max-width: 172px; height: 68px; max-height: 100%;
+  object-fit: contain;
+  content-visibility: visible;
+  opacity: .86;
+  transition: opacity 220ms ease;
+}
+.provider-logo--square img { width: 78px; height: 78px; border-radius: 12px; }
+.provider-logo--aha img { max-width: 104px; }
+.provider-logo--apple img { width: 100px; max-width: 100px; height: 100px; }
+.provider-logo--apple > span { font: 400 44px/1 'Outfit', sans-serif; }
+
+/* These are legibility treatments, not effects: retain them in low-end mode. */
+#top-providers .provider-logo--apple img,
+#top-providers [data-provider-cat="jiohotstar"] img { filter: brightness(0) invert(1) !important; }
+#top-providers [data-provider-cat="prime"] img { filter: brightness(2) !important; }
+
+/* Hover is gated behind (hover: hover) so a tap on a phone does not leave a
+   tile stuck in the lifted state. */
+@media (hover: hover) {
+  .provider-card:hover {
+    transform: translateY(-4px);
+    border-color: var(--border-gold, rgba(245, 197, 24, .18));
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, .08),
+      0 0 0 1px rgba(245, 197, 24, .26),
+      0 16px 34px -14px rgba(0, 0, 0, .8),
+      0 10px 28px -16px var(--gold-glow, rgba(245, 197, 24, .22));
+  }
+  .provider-card:hover::after { opacity: 1; }
+  .provider-card:hover .provider-logo { transform: scale(1.05); }
+  .provider-card:hover img { opacity: 1; }
+}
+.provider-card:active { transform: translateY(-1px) scale(.985); }
+
+.provider-card:focus-visible {
+  outline: 2px solid var(--gold); outline-offset: -3px;
+  border-color: var(--border-gold, rgba(245, 197, 24, .18));
+}
+.provider-card:focus-visible::after { opacity: 1; }
+.provider-card:focus-visible img { opacity: 1; }
+.providers-arrow:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+@media (max-width: 600px) {
+  .providers-section { padding: 1.75rem 4% 1.25rem; }
+  .providers-header { align-items: flex-start; margin-bottom: 1rem; }
+  .providers-subtitle { max-width: 220px; }
+  .providers-rail { --provider-fade: 40px; gap: .85rem; padding: 8px 2px 12px; }
+  .providers-rail > li { flex-basis: 170px; }
+  .provider-card { height: 120px; padding: .85rem .9rem; border-radius: 16px; }
+  .provider-logo img { max-width: 148px; height: 58px; }
+  .provider-logo--square img { width: 68px; height: 68px; }
+  .provider-logo--aha img { max-width: 94px; }
+  .provider-logo--apple img { width: 82px; max-width: 82px; height: 82px; }
+  .provider-logo--apple > span { font-size: 34px; }
+  .providers-arrow { width: 38px; height: 38px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .provider-card, .provider-card::after, .provider-logo, .provider-logo img, .providers-arrow { transition: none; }
+  .provider-card:hover, .provider-card:active { transform: none; }
+  .provider-card:hover .provider-logo { transform: none; }
+}

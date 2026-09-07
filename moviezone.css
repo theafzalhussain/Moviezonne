@@ -2669,7 +2669,8 @@ body {
   background: linear-gradient(135deg, #ff4d5e 0%, var(--red) 100%);
 }
 
-.section-title .title-line {
+.section-title .title-line,
+.top10-heading .title-line {
   width: 5px;
   height: 36px;
   border-radius: 999px;
@@ -7465,7 +7466,7 @@ html[data-mz-tv="true"] .cat-group-menu {
 
 /* ═══════════════════════════════════════════════════════════════
    SERVER SECTIONS — SMALL SCREEN CENTERING
-   ═══════════════════════════════════════════════════════════════ */
+   ════════════════════��══════════════════════════════════════════ */
 
 @media (max-width: 768px) {
   .srv-container {
@@ -12122,6 +12123,12 @@ img { content-visibility: auto; }
    size, and they overlap their poster more deeply so the rail reads as
    one composed object.
    ═══════════════════════════════════════════════════════════════ */
+/* Reserve this below-fold rail while its non-blocking stylesheet loads. */
+.providers-section { min-height: 336px; visibility: hidden; }
+@media (max-width: 600px) {
+  .providers-section { min-height: 312px; }
+}
+
 .top10-section {
   /*  One knob drives poster size, numeral size and the overlap.
    *
@@ -12137,6 +12144,24 @@ img { content-visibility: auto; }
                                                          Smaller than the glyph on
                                                          purpose — the difference is
                                                          how far it tucks behind. */
+  /*  The numeral ramp and its bevel, declared once each. .top10-rank uses both, and
+   *  the outlined 4-10 variant restores both on hover — copies would drift.
+   *  Zero blur radius on every shadow is the whole trick: an offset with no spread
+   *  reads as a crisp bevel, while any blur value softens the glyph. */
+  --t10-gold: linear-gradient(177deg,
+      #fffbe8 0%,
+      #ffeeae 10%,
+      #ffd85e 26%,
+      #ffc61f 40%,
+      #f5c518 48%,
+      #e0ac14 56%,
+      #c08d0d 72%,
+      #9c7008 88%,
+      #7d5a04 100%);
+  --t10-bevel:
+    drop-shadow(0 2px 0 rgba(0, 0, 0, 0.55))
+    drop-shadow(2px 0 0 rgba(0, 0, 0, 0.3))
+    drop-shadow(0 -1px 0 rgba(255, 255, 255, 0.16));
   position: relative;
   /*  Top padding is small because the toggle now sits IN FLOW at the top of the
    *  section (see .top10-toggle) and contributes its own height. */
@@ -12157,29 +12182,45 @@ img { content-visibility: auto; }
   gap: 0.55rem 1rem;
   margin: 0 0 0.35rem;
 }
-/*  "TOP 10" is Bebas Neue in the same poured-gold gradient as the rank numerals
- *  (.top10-rank) so the title reads as part of the same object, and it is the
- *  same zero-blur bevel trick — a blur radius here would soften the glyph edge.
- *  "TRENDING MOVIES" is the Outfit UI face, uppercase and tracked, at a smaller
- *  size: two weights of the same idea rather than two competing titles. */
+/*  ── HEADING: the site's own title language, at a smaller size ──
+ *
+ *  This used to be Bebas Neue carrying the same nine-stop poured-gold gradient as
+ *  the rank numerals, clipped to the text. It read as its own product. Every other
+ *  section says the same thing a different way: a solid title beside a rounded
+ *  accent bar — CONTINUE WATCHING and ALL MOVIES & SHOWS through .section-title,
+ *  Top Providers through .providers-heading. So this now speaks that language, with
+ *  the same gold->red->accent bar .title-line uses.
+ *
+ *  Deliberately SMALLER than .section-title h2 (2.3rem) and smaller than it was
+ *  before: it sits directly above a rail of big posters and oversized numerals, and
+ *  the brief was for it to stay compact rather than compete with them.
+ *
+ *  Losing background-clip:text also removes the reason the child span needed
+ *  -webkit-text-fill-color, so the span is plain `color` again. */
 .top10-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
   margin: 0;
-  font: 400 clamp(1.55rem, 2.6vw, 2.2rem)/1 'Bebas Neue', sans-serif;
-  letter-spacing: 0.045em;
-  background: linear-gradient(177deg, #fffbe8, #ffd85e 30%, #f5c518 52%, #8a6205);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.5));
+  font: 400 clamp(1.3rem, 1.85vw, 1.68rem)/1.1 'Bebas Neue', sans-serif;
+  letter-spacing: 2px;
+  color: var(--text);
+  text-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
-/*  -webkit-text-fill-color, not color: the parent's background-clip:text is
- *  inherited by the span, so plain color would still paint transparent. */
-.top10-heading span {
-  margin-left: 0.5rem;
-  font: 700 clamp(0.92rem, 1.35vw, 1.12rem)/1 'Outfit', sans-serif;
+/*  The accent bar is .title-line — the SAME class CONTINUE WATCHING and ALL MOVIES
+ *  & SHOWS use. The bar rule is a DESCENDANT selector (.section-title .title-line),
+ *  so .top10-heading had to be added to it: as a bare class the span inherited
+ *  nothing and rendered 0px wide, which is exactly what it did on first attempt.
+ *  Extending that selector reuses the one gradient in the bundle instead of adding
+ *  a second copy, and keeps the three headings from drifting apart. Only the height
+ *  is overridden here — .title-line ships a fixed 36px sized for a 2.3rem title,
+ *  which is too tall beside this smaller one. Declared after it, so it wins. */
+.top10-heading .title-line { height: 1.15em; }
+.top10-heading .t10-sub {
+  font: 700 clamp(0.7rem, 1vw, 0.84rem)/1 'Outfit', sans-serif;
   letter-spacing: 0.13em;
   text-transform: uppercase;
-  -webkit-text-fill-color: rgba(255, 255, 255, 0.8);
+  color: var(--text2);
 }
 
 /*  MOBILE HEADER — the Today / This Week pill is HIDDEN below 768px on purpose.
@@ -12197,7 +12238,7 @@ img { content-visibility: auto; }
 
     With the pill gone the title gets the whole row back, so "TOP 10" and
     "TRENDING MOVIES" sit on ONE line again instead of being stacked to make
-    room, and both step up in size. */
+    room. */
 @media (max-width: 768px) {
   /*  Descendant selector, not a bare `.top10-toggle`: the base pill rule is
       declared FURTHER DOWN this file, so an equal-specificity `display: none`
@@ -12207,14 +12248,16 @@ img { content-visibility: auto; }
     gap: 0.45rem;
     margin-bottom: 0.4rem;
   }
+  /*  No font-weight here. This is Bebas Neue and the only face shipped is
+      bebas-neue-latin-400.woff2, so the 800 that used to be on this rule bought a
+      synthetically-smeared glyph, not a bolder one. */
   .top10-heading {
-    font-size: clamp(1.7rem, 8vw, 2.2rem);
-    letter-spacing: 0.035em;
-    font-weight: 800;
+    font-size: clamp(1.24rem, 5vw, 1.5rem);
+    letter-spacing: 1.5px;
+    gap: 0.55rem;
   }
-  .top10-heading span {
-    margin-left: 0.45rem;
-    font-size: 1.35rem;
+  .top10-heading .t10-sub {
+    font-size: 0.74rem;
     letter-spacing: 0.1em;
   }
 }
@@ -12408,27 +12451,15 @@ img { content-visibility: auto; }
   font-weight: 400;
   /* Polished-metal gold: bright crown, a fast mid-band like a specular
      highlight on brushed metal, then a deep base. Fully opaque — an alpha
-     stop here is what made the earlier version look washed out. */
-  background: linear-gradient(177deg,
-      #fffbe8 0%,
-      #ffeeae 10%,
-      #ffd85e 26%,
-      #ffc61f 40%,
-      #f5c518 48%,
-      #e0ac14 56%,
-      #c08d0d 72%,
-      #9c7008 88%,
-      #7d5a04 100%);
+     stop here is what made the earlier version look washed out.
+     Held in a custom property because the outline variant below has to restore
+     this exact ramp on hover, and two copies would drift. */
+  background: var(--t10-gold);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
   color: var(--gold);
-  /* Zero blur radius on every shadow — this is the whole trick. An offset with
-     no spread reads as a crisp bevel; any blur value here softens the glyph. */
-  filter:
-    drop-shadow(0 2px 0 rgba(0, 0, 0, 0.55))
-    drop-shadow(2px 0 0 rgba(0, 0, 0, 0.3))
-    drop-shadow(0 -1px 0 rgba(255, 255, 255, 0.16));
+  filter: var(--t10-bevel);
   text-rendering: geometricPrecision;
   -webkit-font-smoothing: antialiased;
   pointer-events: none;
@@ -12443,6 +12474,56 @@ img { content-visibility: auto; }
 }
 .top10-card:hover .top10-rank,
 .top10-card:focus-visible .top10-rank { transform: translateY(-4px); }
+
+/*  ── RANKS 4-10: OUTLINE, FILLING ON HOVER ──
+ *
+ *  The podium keeps the poured-gold fill; everything below it is drawn as an
+ *  outline and only fills when the card is hovered or focused. That gives the rail
+ *  a clear hierarchy at a glance and makes hover feel like it rewards you, instead
+ *  of ten identical slabs of gold competing with the posters.
+ *
+ *  The class is added by renderTop10() rather than selected here with
+ *  :not([data-rank="1"]):not([data-rank="2"]):not([data-rank="3"]), which would be
+ *  both longer and slower to match.
+ *
+ *  How the outline is made: keep -webkit-text-fill-color transparent (already set
+ *  on .top10-rank) and drop the background, so nothing paints inside the glyph,
+ *  then draw the edge with -webkit-text-stroke. The file header above notes a
+ *  stroke was once REMOVED from these numerals — that was a stroke layered on top
+ *  of the gold fill, which muddied the ink. A stroke with NO fill is the opposite
+ *  case: it is the only thing painting, so there is nothing to muddy.
+ *
+ *  Stroke width scales with the numeral (it is set from --t10-poster-w) or a fixed
+ *  1.5px hairline would vanish on a 300px glyph and overwhelm a 90px one.
+ *
+ *  The bevel drop-shadows are dropped here: three zero-blur offsets around a
+ *  hollow glyph read as a smeared double outline, not as a bevel.
+ */
+.top10-rank--outline {
+  background: none;
+  -webkit-text-stroke: clamp(1.4px, calc(var(--t10-poster-w) * 0.0115), 3.2px)
+                       rgba(245, 197, 24, 0.6);
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.55));
+  transition:
+    transform 0.35s var(--ease-spring, ease),
+    -webkit-text-stroke-color 0.3s ease,
+    filter 0.3s ease;
+}
+/*  Fill on hover: restore the ramp and take the stroke to transparent, so the
+ *  glyph gains its interior instead of gaining an outline AND an interior. */
+.top10-card:hover .top10-rank--outline,
+.top10-card:focus-visible .top10-rank--outline {
+  background: var(--t10-gold);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-stroke-color: transparent;
+  filter: var(--t10-bevel);
+}
+/*  Touch devices never hover, so the fill would be unreachable. Give them a
+ *  brighter outline instead of a state they cannot enter. */
+@media (hover: none) {
+  .top10-rank--outline { -webkit-text-stroke-color: rgba(245, 197, 24, 0.72); }
+}
 
 /* ── Poster: the luxury surface ── */
 .top10-poster {
@@ -12787,7 +12868,11 @@ img { content-visibility: auto; }
 @media (max-width: 768px) {
   .top10-section {
     --t10-poster-w: clamp(112px, min(43vw, 34vh), 230px);
-    --t10-rank-scale: 1.08;
+    /*  Numerals step DOWN on phones, not up. At 1.08 the glyph was taller than the
+     *  poster on a 390px screen and dominated the rail; the posters are the content
+     *  and the rank is the label. The outlined 4-10 numerals also need less size to
+     *  stay legible than filled ones do. */
+    --t10-rank-scale: 0.88;
     padding: 1.35rem 0 0.9rem;
   }
   .top10-arrow { display: none; }
@@ -12802,7 +12887,7 @@ img { content-visibility: auto; }
     padding: 0.7rem 4vw 1.1rem;
     scroll-padding-inline: 4vw;
   }
-  .top10-card[data-rank="10"] { --t10-rank-scale: 0.68; }
+  .top10-card[data-rank="10"] { --t10-rank-scale: 0.56; }
   .top10-poster { border-radius: 15px; }
   .top10-name { font-size: 0.86rem; }
   .top10-meta { font-size: 0.68rem; gap: 0.28rem; }
@@ -12819,7 +12904,8 @@ img { content-visibility: auto; }
   /*  42vw, was 47vw: at 390px that is a 164px poster instead of 183px, so the
    *  next card peeks in and the rail reads as a rail. The width it gives up
    *  pays for the larger name/meta below. */
-  .top10-section { --t10-poster-w: clamp(112px, min(42vw, 32vh), 200px); }
+  .top10-section { --t10-poster-w: clamp(112px, min(42vw, 32vh), 200px); --t10-rank-scale: 0.8; }
+  .top10-card[data-rank="10"] { --t10-rank-scale: 0.52; }
   .top10-rail { gap: 0.4rem; }
   .top10-name { font-size: 0.86rem; -webkit-line-clamp: 2; }
   .top10-meta { font-size: 0.7rem; }
@@ -12837,9 +12923,9 @@ img { content-visibility: auto; }
     /* 46vw, was 53vw: at 360px one card plus its numeral was the entire
        screen, so the rail did not read as scrollable. */
     --t10-poster-w: min(46vw, 30vh);
-    --t10-rank-scale: 1;
+    --t10-rank-scale: 0.72;
   }
-  .top10-card[data-rank="10"] { --t10-rank-scale: 0.62; }
+  .top10-card[data-rank="10"] { --t10-rank-scale: 0.48; }
   .top10-info { padding: 0.6rem 0.55rem 0.6rem; }
   .top10-info::before { left: 0.55rem; }
   .top10-play { display: none; }   /* no hover on touch — reclaim the paint */
@@ -12865,6 +12951,7 @@ img { content-visibility: auto; }
   .top10-card { animation: none; opacity: 1; transform: none; }
   .top10-poster,
   .top10-rank,
+  .top10-rank--outline,
   .top10-play span { transition: none; }
   .top10-card:hover .top10-poster,
   .top10-card:focus-visible .top10-poster,

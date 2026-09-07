@@ -13,9 +13,9 @@
 <link rel="preconnect" href="https://image.tmdb.org" crossorigin>
 <link rel="dns-prefetch" href="https://image.tmdb.org">
 
-<link rel="stylesheet" href="/moviezone.min.css?v=8.7">
+<link rel="stylesheet" href="/moviezone.min.css?v=8.9">
 <!--MZ_PERF_HEAD-->
-<link rel="preload" href="/moviezone.min.css?v=8.7" as="style" fetchpriority="high">
+<link rel="preload" href="/moviezone.min.css?v=8.9" as="style" fetchpriority="high">
 <link rel="preload" as="image" media="(max-width: 1024px)" href="https://image.tmdb.org/t/p/w780/qeQJx07rK2xm8SD2sJxFKhE7gs0.jpg" fetchpriority="high">
 <link rel="preload" as="image" media="(min-width: 1025px)" href="https://image.tmdb.org/t/p/w1280/qeQJx07rK2xm8SD2sJxFKhE7gs0.jpg" fetchpriority="high">
 <meta name="mz-hero-backdrop" content="/qeQJx07rK2xm8SD2sJxFKhE7gs0.jpg">
@@ -28,17 +28,13 @@
 </script>
 <!--/MZ_PERF_HEAD-->
 
-
-
-
 <link rel="stylesheet" href="/tv-mode.min.css?v=1.3" media="print" onload="this.media='all';this.onload=null">
 
 <link rel="preload" href="/moviezone-logo.webp" as="image" type="image/webp" fetchpriority="high">
 <link rel="preload" href="/fonts/outfit-latin-var.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/bebas-neue-latin-400.woff2" as="font" type="font/woff2" crossorigin>
 
-<link rel="preload" href="/moviezone.min.js?v=11.7" as="script">
-
+<link rel="preload" href="/moviezone.min.js?v=12.4" as="script">
 
 <style id="mz-fonts">
 @font-face{font-family:'Outfit';font-style:normal;font-weight:300 900;font-display:swap;src:url(/fonts/outfit-latin-var.woff2) format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
@@ -1005,7 +1001,7 @@ html.mz-no-ads .mz-ad-slot{display:none}
 <!-- ── MOBILE NAV OVERLAY ── -->
 <div class="mobile-nav-overlay" id="mobileNavOverlay"></div>
 
-<!-- â”€â”€ NAVBAR â”€â”€ -->
+<!-- â��€â”€ NAVBAR â”€â”€ -->
 <nav id="navbar" role="navigation" aria-label="Main navigation">
   <div class="nav-brand">
     <a class="nav-logo" href="#" aria-label="MovieZone home">
@@ -1062,12 +1058,76 @@ html.mz-no-ads .mz-ad-slot{display:none}
   <div class="carousel-thumbs" id="carouselThumbs"></div>
 </section>
 
-
 <!-- ── TOP 10 TRENDING (premium, numbered — live from TMDB) ──
      Header row: the gold "TOP 10 / TRENDING MOVIES" title on the left, the
      Today / This Week switch on the right, both above the rail rather than over
      it — the giant gold rank numerals stay the section's real identity.
      Ranking is TMDB's own trending order for the selected window. -->
+<!-- CONTINUE WATCHING
+     No inline style="display:none" here any more: it beat every stylesheet rule,
+     so the section could only be revealed from JS on DOMContentLoaded — after
+     first paint — and that reveal shifted the entire page down. Hiding is now
+     done in mz-cwv-critical, and the pre-paint head script un-hides it for
+     visitors who have a list. renderContinueWatching() still has the final say
+     via element.style, which now correctly overrides the stylesheet. -->
+<section id="continue-watching" class="continue-watching-section">
+  <div class="section-header">
+    <div class="section-title">
+      <div class="title-line"></div>
+      <h2>CONTINUE WATCHING</h2>
+    </div>
+  </div>
+  <div class="continue-watching-grid" id="continueWatchingGrid"></div>
+</section>
+
+<link rel="stylesheet" href="/providers.css?v=6" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="/providers.css?v=6"></noscript>
+<section id="top-providers" class="providers-section" aria-labelledby="providersHeading">
+  <div class="providers-header">
+    <div>
+      <h2 id="providersHeading" class="providers-heading">Top Providers</h2>
+      <p class="providers-subtitle">Find your next watch on your favourite platform.</p>
+    </div>
+    <div class="providers-controls" role="group" aria-label="Provider carousel" hidden>
+      <button class="providers-arrow" type="button" data-provider-scroll="-1" aria-label="Previous providers" aria-controls="providersRail" disabled>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg>
+      </button>
+      <button class="providers-arrow" type="button" data-provider-scroll="1" aria-label="Next providers" aria-controls="providersRail">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+      </button>
+    </div>
+  </div>
+  <ul id="providersRail" class="providers-rail" aria-label="Streaming providers">
+    <li><a class="provider-card" href="#movies-section" data-provider-cat="netflix" aria-label="Netflix — browse movies and shows">
+      <span class="provider-logo"><img src="/provider-netflix.svg" alt="Netflix" width="160" height="64" loading="lazy" decoding="async"></span>
+    </a></li>
+    <li><a class="provider-card" href="#movies-section" data-provider-cat="prime" aria-label="Prime Video — browse movies and shows">
+      <span class="provider-logo"><img src="/provider-prime.svg" alt="Prime Video" width="160" height="64" loading="lazy" decoding="async"></span>
+    </a></li>
+    <li><a class="provider-card" href="#movies-section" data-provider-cat="jiohotstar" aria-label="JioHotstar — browse movies and shows">
+      <span class="provider-logo"><img src="/provider-jiohotstar.png" alt="JioHotstar" width="160" height="64" loading="lazy" decoding="async"></span>
+    </a></li>
+    <li><a class="provider-card" href="#movies-section" data-provider-cat="apple" aria-label="Apple TV+ — browse movies and shows">
+      <span class="provider-logo provider-logo--apple"><img src="/provider-apple.svg" alt="Apple TV" width="100" height="100" loading="lazy" decoding="async"><span aria-hidden="true">+</span></span>
+    </a></li>
+    <li><a class="provider-card" href="#movies-section" data-provider-cat="zee5" aria-label="ZEE5 — browse movies and shows">
+      <span class="provider-logo"><img src="/provider-zee5.svg" alt="ZEE5" width="160" height="64" loading="lazy" decoding="async"></span>
+    </a></li>
+    <li><a class="provider-card" href="#movies-section" data-provider-cat="sonyliv" aria-label="SonyLIV — browse movies and shows">
+      <span class="provider-logo provider-logo--square"><img src="/provider-sonyliv.png" alt="SonyLIV" width="78" height="78" loading="lazy" decoding="async"></span>
+    </a></li>
+    <li><a class="provider-card" href="#movies-section" data-provider-cat="mxplayer" aria-label="Amazon MX Player — browse movies and shows">
+      <span class="provider-logo"><img src="/provider-mxplayer.png" alt="Amazon MX Player" width="160" height="64" loading="lazy" decoding="async"></span>
+    </a></li>
+    <li><a class="provider-card" href="#movies-section" data-provider-cat="aha" aria-label="aha — browse movies and shows">
+      <span class="provider-logo provider-logo--aha"><img src="/provider-aha.svg" alt="aha" width="100" height="64" loading="lazy" decoding="async"></span>
+    </a></li>
+    <li><a class="provider-card" href="#movies-section" data-provider-cat="crunchyroll" aria-label="Crunchyroll — browse movies and shows">
+      <span class="provider-logo"><img src="/provider-crunchyroll.svg" alt="Crunchyroll" width="160" height="64" loading="lazy" decoding="async"></span>
+    </a></li>
+  </ul>
+</section>
+
 <section id="top10-trending" class="top10-section" aria-labelledby="top10Heading" hidden>
   <div class="top10-head">
     <!--  The window word is screen-reader-only on purpose: sighted users read it
@@ -1076,7 +1136,7 @@ html.mz-no-ads .mz-ad-slot{display:none}
           "Top 10 Trending Movies Today", which is what aria-labelledby names the
           landmark. #top10HeadWin is the ONLY part JS rewrites, so the visible
           markup here survives a window switch. -->
-    <h2 id="top10Heading" class="top10-heading">Top 10 <span>Trending Movies</span><span id="top10HeadWin" class="visually-hidden"> Today</span></h2>
+    <h2 id="top10Heading" class="top10-heading"><span class="title-line" aria-hidden="true"></span>Top 10 <span class="t10-sub">Trending Movies</span><span id="top10HeadWin" class="visually-hidden"> Today</span></h2>
 
     <!-- Today / This Week window switch. Picks the TMDB trending feed the rail is
          built from: /trending/movie/day for Today, /trending/movie/week for This
@@ -1110,25 +1170,6 @@ html.mz-no-ads .mz-ad-slot{display:none}
   </div>
 </section>
 
-
-<!-- CONTINUE WATCHING
-     No inline style="display:none" here any more: it beat every stylesheet rule,
-     so the section could only be revealed from JS on DOMContentLoaded — after
-     first paint — and that reveal shifted the entire page down. Hiding is now
-     done in mz-cwv-critical, and the pre-paint head script un-hides it for
-     visitors who have a list. renderContinueWatching() still has the final say
-     via element.style, which now correctly overrides the stylesheet. -->
-<section id="continue-watching" class="continue-watching-section">
-  <div class="section-header">
-    <div class="section-title">
-      <div class="title-line"></div>
-      <h2>CONTINUE WATCHING</h2>
-    </div>
-  </div>
-  <div class="continue-watching-grid" id="continueWatchingGrid"></div>
-</section>
-
-
 <!-- â”€â”€ MAIN MOVIES SECTION â”€â”€ -->
 <div class="main-content" id="movies-section">
   <div class="section-header">
@@ -1158,21 +1199,13 @@ html.mz-no-ads .mz-ad-slot{display:none}
          by scanning .cat-tab elements, and loadMoreMoviesAction() reads the
          active tab's onclick to know which category to page. Renaming the class
          here would silently break infinite scroll inside these menus. -->
-    <div class="cat-group" data-cat-group="ott">
-      <button class="cat-tab cat-group-trigger" type="button" id="catGroupOttBtn"
-              aria-expanded="false" aria-controls="catGroupOttMenu" aria-haspopup="true">
-        <span>OTT Platform</span>
-        <svg class="cat-group-chevron" viewBox="0 0 24 24" width="13" height="13" fill="none"
-             stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"
-             aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
-      </button>
-      <div class="cat-group-menu" id="catGroupOttMenu" role="menu" aria-labelledby="catGroupOttBtn">
-        <button class="cat-tab cat-group-item" role="menuitem" onclick="filterCat('netflix')">Netflix</button>
-        <button class="cat-tab cat-group-item" role="menuitem" onclick="filterCat('prime')">Prime Video</button>
-        <button class="cat-tab cat-group-item" role="menuitem" onclick="filterCat('jiohotstar')">JioHotstar</button>
-        <button class="cat-tab cat-group-item" role="menuitem" onclick="filterCat('zee5')">Zee5</button>
-      </div>
-    </div>
+
+    <!-- The "OTT Platform" dropdown used to live here. It is gone on purpose: the
+         Top Providers rail above is now the only way into a platform, so this was
+         a second control for the same thing. Because a platform therefore has NO
+         .cat-tab any more, loadMoreMoviesAction() and the refresh path can no
+         longer recover the category by scraping .cat-tab.active — they read
+         mzFeedPagerCategory instead. See currentFeedCategory() in moviezone.js. -->
 
     <!-- ── GENRES & MORE (dropdown) ── -->
     <div class="cat-group" data-cat-group="genre">
@@ -1375,8 +1408,6 @@ html.mz-no-ads .mz-ad-slot{display:none}
   </div>
 </div>
 
-
-
 <!-- â”€â”€ FOOTER â”€â”€ -->
 <!-- ════════════════════════════════════════════════════════════════════
      CRAWLABLE SEO CONTENT + FAQ
@@ -1476,20 +1507,6 @@ html.mz-no-ads .mz-ad-slot{display:none}
 </noscript>
 
 </main>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 <!--MZ_SSR_LINKS_START--><div class="mz-ssr-index"><style>.mz-ssr-index{max-width:1140px;margin:40px auto 0;padding:0 20px;content-visibility:auto;contain-intrinsic-size:0 1400px}.mz-ssr-sec{margin:0 0 34px}.mz-ssr-index h2{font-size:1.2rem;margin:0 0 6px}.mz-ssr-blurb{opacity:.62;margin:0 0 14px;font-size:.92rem;max-width:78ch}.mz-ssr-links,.mz-ssr-cats{columns:3 210px;column-gap:24px;padding:0;margin:0;list-style:none}.mz-ssr-links li,.mz-ssr-cats li{break-inside:avoid;margin-bottom:8px;font-size:.9rem}.mz-ssr-az{display:flex;flex-wrap:wrap;gap:7px;padding:0;margin:0;list-style:none}.mz-ssr-az a{display:inline-block;min-width:36px;text-align:center;padding:6px 9px;border:1px solid rgba(255,255,255,.14);border-radius:8px;text-transform:uppercase;font-weight:700;font-size:.82rem}</style><section class="mz-ssr-sec" aria-labelledby="mz-ssr-trending"><h2 id="mz-ssr-trending">Trending movies this week</h2><p class="mz-ssr-blurb">The titles people are watching on MovieZone right now. Each one opens a full page with cast, ratings and streaming availability.</p><ul class="mz-ssr-links"><li><a href="/movie/969681-spider-man-brand-new-day">Spider-Man: Brand New Day <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1084244-toy-story-5">Toy Story 5 <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1368337-the-odyssey">The Odyssey <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1315772-minions-and-monsters">Minions &amp; Monsters <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1101383-the-end-of-oak-street">The End of Oak Street <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/950028-the-invite">The Invite <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1339713-obsession">Obsession <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1284041-the-last-house">The Last House <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1003596-avengers-doomsday">Avengers: Doomsday <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1504358-dont-say-good-luck">Don&#39;t Say Good Luck <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1493400-camp-rock-3">Camp Rock 3 <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1081003-supergirl">Supergirl <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1275779-disclosure-day">Disclosure Day <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1083381-backrooms">Backrooms <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/687163-project-hail-mary">Project Hail Mary <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1308767-young-washington">Young Washington <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1291595-insidious-out-of-the-further">Insidious: Out of the Further <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1280738-the-furious">The Furious <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1612018-jackass-best-and-last">Jackass: Best and Last <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1212763-evil-dead-burn">Evil Dead Burn <span style="opacity:.45">(2026)</span></a></li></ul></section><section class="mz-ssr-sec" aria-labelledby="mz-ssr-popular"><h2 id="mz-ssr-popular">Popular movies right now</h2><p class="mz-ssr-blurb">Broadly popular films across Bollywood, Hollywood and South Indian cinema.</p><ul class="mz-ssr-links"><li><a href="/movie/969681-spider-man-brand-new-day">Spider-Man: Brand New Day <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1368337-the-odyssey">The Odyssey <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/634649-spider-man-no-way-home">Spider-Man: No Way Home <span style="opacity:.45">(2021)</span></a></li><li><a href="/movie/1315772-minions-and-monsters">Minions &amp; Monsters <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1284041-the-last-house">The Last House <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1323244-rage-of-stars">Rage of Stars <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1084244-toy-story-5">Toy Story 5 <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1339713-obsession">Obsession <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1375646-colony">Colony <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1284465-the-death-of-robin-hood">The Death of Robin Hood <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1101383-the-end-of-oak-street">The End of Oak Street <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1108427-moana">Moana <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1212763-evil-dead-burn">Evil Dead Burn <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1275779-disclosure-day">Disclosure Day <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1081003-supergirl">Supergirl <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/315635-spider-man-homecoming">Spider-Man: Homecoming <span style="opacity:.45">(2017)</span></a></li><li><a href="/movie/1307118-soulm8te">Soulm8te <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1083381-backrooms">Backrooms <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/1273221-scary-movie">Scary Movie <span style="opacity:.45">(2026)</span></a></li><li><a href="/movie/82023-hotel-desire">Hotel Desire <span style="opacity:.45">(2011)</span></a></li></ul></section><section class="mz-ssr-sec" aria-labelledby="mz-ssr-tv"><h2 id="mz-ssr-tv">Popular web series and shows</h2><p class="mz-ssr-blurb">Web series, K-drama and anime currently drawing the most viewers.</p><ul class="mz-ssr-links"><li><a href="/tv/108978-reacher">Reacher <span style="opacity:.45">(2022)</span></a></li><li><a href="/tv/67707-paradise-hotel">Paradise Hotel <span style="opacity:.45">(2005)</span></a></li><li><a href="/tv/94997-house-of-the-dragon">House of the Dragon <span style="opacity:.45">(2022)</span></a></li><li><a href="/tv/113962-lioness">Lioness <span style="opacity:.45">(2023)</span></a></li><li><a href="/tv/5920-the-mentalist">The Mentalist <span style="opacity:.45">(2008)</span></a></li><li><a href="/tv/51025-paradise-hotel">Paradise Hotel <span style="opacity:.45">(2005)</span></a></li><li><a href="/tv/310518-hockey-psychology">Hockey Psychology <span style="opacity:.45">(2021)</span></a></li><li><a href="/tv/95350-lanterns">Lanterns <span style="opacity:.45">(2026)</span></a></li><li><a href="/tv/37528-gran-hermano">Gran hermano <span style="opacity:.45">(2001)</span></a></li><li><a href="/tv/2734-law-and-order-special-victims-unit">Law &amp; Order: Special Victims Unit <span style="opacity:.45">(1999)</span></a></li><li><a href="/tv/59941-the-tonight-show-starring-jimmy-fallon">The Tonight Show Starring Jimmy Fallon <span style="opacity:.45">(2014)</span></a></li><li><a href="/tv/227292-capitao-furacao">Capitão Furacão <span style="opacity:.45">(1965)</span></a></li><li><a href="/tv/125988-silo">Silo <span style="opacity:.45">(2023)</span></a></li><li><a href="/tv/1416-greys-anatomy">Grey&#39;s Anatomy <span style="opacity:.45">(2005)</span></a></li><li><a href="/tv/79744-the-rookie">The Rookie <span style="opacity:.45">(2018)</span></a></li><li><a href="/tv/456-the-simpsons">The Simpsons <span style="opacity:.45">(1989)</span></a></li><li><a href="/tv/22980-watch-what-happens-live-with-andy-cohen">Watch What Happens Live with Andy Cohen <span style="opacity:.45">(2009)</span></a></li><li><a href="/tv/46271-secret-story">Secret Story <span style="opacity:.45">(2007)</span></a></li><li><a href="/tv/549-law-and-order">Law &amp; Order <span style="opacity:.45">(1990)</span></a></li><li><a href="/tv/1434-family-guy">Family Guy <span style="opacity:.45">(1999)</span></a></li></ul></section><section class="mz-ssr-sec" aria-labelledby="mz-ssr-cats-h"><h2 id="mz-ssr-cats-h">Browse MovieZone by category</h2><ul class="mz-ssr-cats"><li><a href="/movies/trending">Trending Movies</a></li><li><a href="/movies/top-rated">Top Rated Movies</a></li><li><a href="/movies/popular">Popular Movies</a></li><li><a href="/movies/now-playing">Movies In Cinemas Now</a></li><li><a href="/movies/upcoming">Upcoming Movies</a></li><li><a href="/movies/hollywood">Hollywood Movies</a></li><li><a href="/movies/bollywood">Bollywood Movies</a></li><li><a href="/movies/south">South Indian Movies</a></li><li><a href="/movies/tollywood">Tollywood Movies</a></li><li><a href="/movies/action">Action Movies</a></li><li><a href="/movies/comedy">Comedy Movies</a></li><li><a href="/movies/horror">Horror Movies</a></li><li><a href="/movies/thriller">Thriller Movies</a></li><li><a href="/movies/romance">Romance Movies</a></li><li><a href="/movies/scifi">Sci-Fi Movies</a></li><li><a href="/movies/adventure">Adventure Movies</a></li><li><a href="/movies/fantasy">Fantasy Movies</a></li><li><a href="/movies/crime">Crime Movies</a></li><li><a href="/movies/documentary">Documentary Films</a></li><li><a href="/movies/family">Family Movies</a></li><li><a href="/movies/animation">Animated Movies</a></li><li><a href="/movies/4k">4K Ultra HD Movies</a></li><li><a href="/movies/netflix">Netflix Movies</a></li><li><a href="/movies/prime-video">Amazon Prime Video Movies</a></li><li><a href="/movies/jiohotstar">JioHotstar Movies</a></li><li><a href="/movies/zee5">Zee5 Movies</a></li><li><a href="/series/web-series">Web Series</a></li><li><a href="/series/top-rated-series">Top Rated Series</a></li><li><a href="/series/trending-series">Trending Series</a></li><li><a href="/series/anime">Anime</a></li><li><a href="/series/kdrama">Korean Drama</a></li><li><a href="/series/kids">Cartoons</a></li><li><a href="/series/zee5-series">Zee5 Web Series</a></li><li><a href="/series/jiohotstar-series">JioHotstar Web Series</a></li><li><a href="/series/netflix-series">Netflix Series</a></li></ul></section><section class="mz-ssr-sec" aria-labelledby="mz-ssr-az-h"><h2 id="mz-ssr-az-h">Browse the full catalogue A-Z</h2><p class="mz-ssr-blurb">Every title on MovieZone, indexed alphabetically.</p><ul class="mz-ssr-az"><li><a href="/browse/a">a</a></li><li><a href="/browse/b">b</a></li><li><a href="/browse/c">c</a></li><li><a href="/browse/d">d</a></li><li><a href="/browse/e">e</a></li><li><a href="/browse/f">f</a></li><li><a href="/browse/g">g</a></li><li><a href="/browse/h">h</a></li><li><a href="/browse/i">i</a></li><li><a href="/browse/j">j</a></li><li><a href="/browse/k">k</a></li><li><a href="/browse/l">l</a></li><li><a href="/browse/m">m</a></li><li><a href="/browse/n">n</a></li><li><a href="/browse/o">o</a></li><li><a href="/browse/p">p</a></li><li><a href="/browse/q">q</a></li><li><a href="/browse/r">r</a></li><li><a href="/browse/s">s</a></li><li><a href="/browse/t">t</a></li><li><a href="/browse/u">u</a></li><li><a href="/browse/v">v</a></li><li><a href="/browse/w">w</a></li><li><a href="/browse/x">x</a></li><li><a href="/browse/y">y</a></li><li><a href="/browse/z">z</a></li><li><a href="/browse/0-9">0-9</a></li></ul></section></div><!--MZ_SSR_LINKS_END-->
 <footer class="site-footer" role="contentinfo">
@@ -1730,7 +1747,7 @@ html.mz-no-ads .mz-ad-slot{display:none}
       unstyled text. A leading slash is the whole fix. -->
 <script src="/tv-mode.min.js?v=1.4" defer></script>
 <script src="/search-engine.min.js?v=2.1" defer></script>
-<script src="/moviezone.min.js?v=11.7" defer></script>
+<script src="/moviezone.min.js?v=12.4" defer></script>
 <script>
 /*  ── pwa-install.min.js is NOT loaded with the others ─────────────────────────
  *  It was a fourth `defer` script, so its 30 KB was parsed and executed inside

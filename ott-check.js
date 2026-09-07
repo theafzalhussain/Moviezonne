@@ -68,6 +68,16 @@ function api(server, endpoint, params) {
 
 let pass = 0;
 let fail = 0;
+
+/*  Combined movie+series catalogue size a provider must expose to be worth
+ *  shipping a tab for. Held at the original 200 for every platform: measured
+ *  today the thinnest of the nine is aha at 213 (199 movies + 14 series), so
+ *  this still passes on real data while catching a provider id that has been
+ *  retired or was never right — which is exactly how 122 was caught. Note the
+ *  probes below are provider-only, with no monetization gate, so a platform's
+ *  wider `monetization` setting does not flatter this number. */
+const CATALOGUE_FLOOR = 200;
+
 function check(label, fn) {
   try { fn(); pass++; console.log('    PASS  ' + label); }
   catch (e) { fail++; console.log('    FAIL  ' + label + '\n            ' + e.message); }
@@ -95,7 +105,7 @@ function check(label, fn) {
       + ' pages, ' + mvDepth.total_results + ' movies over ' + mvDepth.total_pages + ' pages');
 
     check('provider returns a non-trivial catalogue', () => {
-      assert.ok(tvDepth.total_results + mvDepth.total_results > 200,
+      assert.ok(tvDepth.total_results + mvDepth.total_results > CATALOGUE_FLOOR,
         'only ' + (tvDepth.total_results + mvDepth.total_results) + ' titles total');
     });
 
@@ -157,9 +167,12 @@ function check(label, fn) {
     assert.ok(/zee5:\s*\{/.test(src), 'zee5 missing from the OTT table');
     assert.ok(/zee5:'ZEE5/.test(src), 'zee5 missing from CAT_HEADINGS');
   });
-  check('zee5 tab present in index.html', () => {
+  /*  The OTT Platform dropdown was removed; the Top Providers rail is the only
+   *  route into a platform now, so the card is what has to exist. */
+  check('zee5 reachable from the provider rail in index.html', () => {
     const html = require('fs').readFileSync('index.html', 'utf8');
-    assert.ok(/filterCat\('zee5'\)/.test(html), 'no Zee5 tab button');
+    assert.ok(/data-provider-cat="zee5"/.test(html), 'no Zee5 provider card');
+    assert.ok(!/filterCat\('zee5'\)/.test(html), 'Zee5 still has a cat-tab');
   });
 
   await new Promise((r) => server.close(r));

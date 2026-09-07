@@ -12,7 +12,7 @@
 //     Now 7.6 on both sides.
 //   * Versioned same-origin assets became CACHE-FIRST (see below).
 //   * TMDB images get their own stale-while-revalidate cache.
-const CACHE_NAME = 'moviezone-v114';
+const CACHE_NAME = 'moviezone-v116';
 
 // Separate cache for TMDB posters/backdrops. Kept apart from the shell so the
 // activate handler can wipe an old shell without throwing away hundreds of
@@ -26,10 +26,10 @@ const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/tv-mode.min.css?v=1.3',
-  '/moviezone.min.css?v=8.7',
+  '/moviezone.min.css?v=8.9',
   '/tv-mode.min.js?v=1.4',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=11.7',
+  '/moviezone.min.js?v=12.4',
   '/manifest.json',
   '/moviezone-logo.png?v=2',
   '/icon-192.png?v=2',
@@ -46,6 +46,16 @@ const STATIC_ASSETS = [
 // Large/feature-specific data should never block a new service worker from
 // installing. It is cached opportunistically and fetched from the network if absent.
 const OPTIONAL_ASSETS = [
+  '/providers.css?v=6',
+  '/provider-netflix.svg',
+  '/provider-prime.svg',
+  '/provider-jiohotstar.png',
+  '/provider-apple.svg',
+  '/provider-zee5.svg',
+  '/provider-sonyliv.png',
+  '/provider-mxplayer.png',
+  '/provider-aha.svg',
+  '/provider-crunchyroll.svg',
   '/collections-catalog.json?v=2',
   // pwa-install.min.js moved off the critical path: index.html no longer ships a
   // <script> tag for it, it is injected on idle / on demand. Still worth having

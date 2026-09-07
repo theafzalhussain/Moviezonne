@@ -7,7 +7,7 @@
 <body>
 <h1>Mobile category dropdown harness</h1>
 <p>Loads the real index.html in phone-sized, same-origin iframes and drives the
-   actual OTT Platform / Category dropdowns: production markup, CSS and
+   actual Category dropdown: production markup, CSS and
    moviezone.js, not a copy.</p>
 
 <script>
@@ -102,13 +102,16 @@
     }
 
     var strip = doc.getElementById('catTabs');
-    var ottBtn = doc.getElementById('catGroupOttBtn');
-    var genBtn = doc.getElementById('catGroupGenreBtn');
-    var ottMenu = doc.getElementById('catGroupOttMenu');
-    var genMenu = doc.getElementById('catGroupGenreMenu');
+    /*  One dropdown now: the OTT Platform menu was removed and platforms are
+        reached from the Top Providers rail, so Category is the only group left.
+        Every mechanics check below is generic to .cat-group and simply runs
+        against it. */
+    var dropBtn = doc.getElementById('catGroupGenreBtn');
+    var dropMenu = doc.getElementById('catGroupGenreMenu');
 
-    ok(P + 'strip and both dropdowns exist', !!(strip && ottBtn && genBtn && ottMenu && genMenu));
-    if (!strip || !ottBtn || !genMenu) { done(); return; }
+    ok(P + 'strip and the Category dropdown exist', !!(strip && dropBtn && dropMenu));
+    ok(P + 'the OTT Platform dropdown is gone', !doc.getElementById('catGroupOttBtn'));
+    if (!strip || !dropBtn || !dropMenu) { done(); return; }
 
     ok(P + 'viewport really is phone-sized', win.innerWidth === device.w,
       win.innerWidth + 'x' + win.innerHeight);
@@ -121,7 +124,7 @@
       'scrollW=' + strip.scrollWidth + ' clientW=' + strip.clientWidth);
 
     // ── REGRESSION 1: the group wrapper must not shrink ─────────────────────
-    var groupStyle = win.getComputedStyle(ottBtn.closest('.cat-group'));
+    var groupStyle = win.getComputedStyle(dropBtn.closest('.cat-group'));
     ok(P + '.cat-group cannot shrink below its trigger', groupStyle.flexShrink === '0',
       'flex-shrink=' + groupStyle.flexShrink);
 
@@ -135,60 +138,66 @@
         strip.scrollIntoView({ block: 'center', inline: 'nearest' });
         strip.scrollLeft = strip.scrollWidth;
       },
-      function () { checkPills(P, doc, win, strip, ottBtn, genBtn); },
-      function () { ok(P + 'menus start closed', win.getComputedStyle(ottMenu).display === 'none'
-        && win.getComputedStyle(genMenu).display === 'none'); },
+      function () { checkPills(P, doc, win, strip, dropBtn); },
+      function () { ok(P + 'menu starts closed', win.getComputedStyle(dropMenu).display === 'none'); },
 
       // ── REGRESSION 2: the panel must survive the scroll container ─────────
-      function () { tap(ottBtn); },
-      function () { checkOpenPanel(P + 'OTT', doc, win, ottMenu, ottBtn); },
+      function () { tap(dropBtn); },
+      function () { checkOpenPanel(P + 'dropdown', doc, win, dropMenu, dropBtn); },
 
       // A fixed panel does not travel with the pill on its own.
       function () { strip.scrollLeft = Math.max(0, strip.scrollLeft - 70); },
-      function () { checkOpenPanel(P + 'OTT after the strip scrolls', doc, win, ottMenu, ottBtn); },
+      function () { checkOpenPanel(P + 'dropdown after the strip scrolls', doc, win, dropMenu, dropBtn); },
 
-      function () { tap(genBtn); },
+      /*  There used to be a second group here (OTT Platform) and this step tapped
+          it to prove opening one closed the other. With only the Category group
+          left, the equivalent guarantee is that tapping the SAME trigger toggles
+          it shut — the other half of the same close-on-open logic. */
+      function () { tap(dropBtn); },
       function () {
-        checkOpenPanel(P + 'Category', doc, win, genMenu, genBtn);
-        ok(P + 'opening one group closes the other', win.getComputedStyle(ottMenu).display === 'none',
-          win.getComputedStyle(ottMenu).display);
+        ok(P + 'tapping the open trigger closes its own panel',
+          win.getComputedStyle(dropMenu).display === 'none',
+          win.getComputedStyle(dropMenu).display);
+        ok(P + 'aria-expanded returns to false on self-close',
+          dropBtn.getAttribute('aria-expanded') === 'false',
+          dropBtn.getAttribute('aria-expanded'));
       },
 
       // ── no room below: the panel has to flip above the pill ───────────────
       function () {
         win.scrollTo(0, Math.max(0, strip.getBoundingClientRect().top + win.scrollY - (win.innerHeight - 120)));
       },
-      function () { tap(ottBtn); },
+      function () { tap(dropBtn); },
       function () {
-        var mb = box(ottMenu), tb = box(ottBtn);
+        var mb = box(dropMenu), tb = box(dropBtn);
         ok(P + 'with no room below, the panel flips above the pill',
-          win.getComputedStyle(ottMenu).display !== 'none'
+          win.getComputedStyle(dropMenu).display !== 'none'
             && mb.t >= 0 && mb.b <= win.innerHeight && mb.b <= tb.t + 1,
           'menu=' + JSON.stringify(mb) + ' trigger=' + JSON.stringify(tb) + ' vh=' + win.innerHeight);
       },
 
-      // ── picking a platform still filters, and the panel is cleaned up ─────
+      // ── picking an item still filters, and the panel is cleaned up ────────
       function () { strip.scrollIntoView({ block: 'center', inline: 'nearest' }); },
-      function () { tap(ottBtn); },
-      function () { doc.querySelector('.cat-tab[onclick*="filterCat(\'netflix\')"]').click(); },
+      function () { tap(dropBtn); },
+      function () { doc.querySelector('.cat-tab[onclick*="filterCat(\'action\')"]').click(); },
       function () {
-        var netflix = doc.querySelector('.cat-tab[onclick*="filterCat(\'netflix\')"]');
-        ok(P + 'picking a platform filters', netflix.classList.contains('active'));
-        ok(P + 'panel closes after picking', win.getComputedStyle(ottMenu).display === 'none');
-        ok(P + 'inline coordinates are cleared on close', !ottMenu.style.top && !ottMenu.style.left,
-          'top=' + ottMenu.style.top + ' left=' + ottMenu.style.left);
+        var picked = doc.querySelector('.cat-tab[onclick*="filterCat(\'action\')"]');
+        ok(P + 'picking a category filters', picked.classList.contains('active'));
+        ok(P + 'panel closes after picking', win.getComputedStyle(dropMenu).display === 'none');
+        ok(P + 'inline coordinates are cleared on close', !dropMenu.style.top && !dropMenu.style.left,
+          'top=' + dropMenu.style.top + ' left=' + dropMenu.style.left);
         ok(P + 'trigger is marked while its child is the active filter',
-          ottBtn.classList.contains('has-active'));
+          dropBtn.classList.contains('has-active'));
         var heading = doc.getElementById('sectionHeading');
-        ok(P + 'heading switched to the Netflix label',
-          heading && /NETFLIX/i.test(heading.textContent), heading ? heading.textContent : '');
+        ok(P + 'heading switched to the Action label',
+          heading && /ACTION/i.test(heading.textContent), heading ? heading.textContent : '');
       },
 
       // Escape and outside taps still work at this size.
-      function () { tap(genBtn); },
+      function () { tap(dropBtn); },
       function () { doc.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); },
       function () {
-        ok(P + 'Escape closes the panel', win.getComputedStyle(genMenu).display === 'none');
+        ok(P + 'Escape closes the panel', win.getComputedStyle(dropMenu).display === 'none');
         ok(P + 'no uncaught error surfaced in the app frame',
           !win.__mzHarnessError, win.__mzHarnessError || '');
       }
@@ -197,8 +206,8 @@
 
   /*  The pills themselves: no trigger may render wider than the flex item that
    *  holds it, and no pill may overlap another.  */
-  function checkPills(P, doc, win, strip, ottBtn, genBtn) {
-    [['OTT', ottBtn], ['Category', genBtn]].forEach(function (pair) {
+  function checkPills(P, doc, win, strip, dropBtn) {
+    [['Category', dropBtn]].forEach(function (pair) {
       var trigger = box(pair[1]);
       var group = box(pair[1].closest('.cat-group'));
       ok(P + pair[0] + ' trigger fits inside its own .cat-group',

@@ -88,7 +88,9 @@ const SW_MARKS = [
   ['TMDB image cache',                   /IMAGE_CACHE/, true],
   ['cache-first for versioned assets',   /isVersionedAsset/, true],
   ['fonts precached',                    /fonts\/outfit-latin-var\.woff2/, true],
-  ['cache version >= v60',               /moviezone-v(6[0-9]|[7-9][0-9])/, true],
+  // Three-digit-safe: the original /v(6[0-9]|[7-9][0-9])/ stopped matching at v100,
+  // so a perfectly current moviezone-v115 was reported as "absent".
+  ['cache version >= v60',               /moviezone-v(?:6[0-9]|[7-9][0-9]|[1-9][0-9]{2,})/, true],
   ['stale 7.2 pin removed',              /moviezone\.min\.js\?v=7\.2/, false]
 ];
 
