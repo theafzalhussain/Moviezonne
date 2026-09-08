@@ -679,45 +679,181 @@ function cronAuthorised(request, env) {
  *  the same title fetched inside a batch share one KV entry instead of storing
  *  the response twice.
  */
-async function fetchTmdbJson(path, env, ctx) {
-  const cacheKey = '/api/tmdb' + path;
+/*  ══════════════════════════════════════════════════════════════════════════
+ *  NOBODY WAITS FOR TMDB TWICE
+ *  ══════════════════════════════════════════════════════════════════════════
+ *  The KV entry used to be a plain expiry: fresh until the TTL, then gone. So
+ *  every TTL boundary handed one unlucky visitor the full upstream round-trip —
+ *  ~136ms on a good day, seconds when TMDB is slow — and there was no timeout at
+ *  all, so a connection that opened and then stalled held the request open
+ *  indefinitely and the section it fed never resolved.
+ *
+ *  Three changes, all of them about who is made to wait:
+ *
+ *  1. STALE-WHILE-REVALIDATE. The entry is now kept on disk far longer than it
+ *     is considered fresh, and the store timestamp travels in KV metadata rather
+ *     than in the body (so the body stays byte-identical and nothing has to be
+ *     re-encoded). Past the freshness window we answer with the copy we already
+ *     have and refresh behind the response via waitUntil. After the very first
+ *     fill of a path, no visitor is ever blocked on TMDB again — and the next
+ *     one gets the new body. Freshness is unchanged: the same 3h/7d windows
+ *     decide when a refresh is triggered, only the waiting is gone.
+ *
+ *  2. SINGLE-FLIGHT. A cold plan fans out 16-40 paths and popular paths repeat
+ *     across concurrent visitors; each miss used to open its own upstream
+ *     connection because the KV write lands asynchronously and cannot dedupe
+ *     them. One in-flight promise per path per isolate now serves every caller.
+ *
+ *  3. A HARD TIMEOUT, so a stalled upstream fails in 8s instead of hanging.
+ *
+ *  Legacy entries written before this carry no metadata. Their own expirationTtl
+ *  WAS the freshness window, so a hit on one is treated as fresh — the cache
+ *  warms over into the new shape without a flush.
+ */
 
-  if (env.TMDB_CACHE) {
-    const cached = await env.TMDB_CACHE.get(cacheKey, { cacheTtl: 300 });
-    if (cached) return { status: 200, text: cached, cache: 'HIT' };
-  }
+/** How much longer than its freshness window an entry is kept, for the SWR read. */
+const TMDB_STALE_MULT = 8;
 
+/** Hard ceiling on retention, so the 7-day paths do not sit in KV for two months. */
+const TMDB_MAX_RETENTION = 2592000;   // 30 days
+
+/** A stalled upstream connection must fail, not hang. Two attempts, so 12s worst
+ *  case — deliberately inside the client's own 15s per-attempt timeout, or the
+ *  retry would land after the browser had already given up on it. */
+const TMDB_UPSTREAM_TIMEOUT_MS = 6000;
+
+/*  Per-isolate, per-path in-flight map. Deliberately not persisted anywhere:
+ *  it exists to collapse a burst, and a burst is by definition inside one
+ *  isolate's lifetime. */
+const _tmdbInFlight = new Map();
+
+async function tmdbUpstream(path, env) {
   const headers = new Headers();
   headers.set('Authorization', `Bearer ${env.TMDB_TOKEN}`);
   headers.set('accept', 'application/json');
 
-  const response = await fetch(`https://api.themoviedb.org/3${path}`, {
-    headers,
-    cf: { cacheEverything: true, cacheTtl: 300 }
-  });
-  const text = await response.text();
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await fetch(`https://api.themoviedb.org/3${path}`, {
+        headers,
+        signal: AbortSignal.timeout(TMDB_UPSTREAM_TIMEOUT_MS),
+        cf: { cacheEverything: true, cacheTtl: 300 }
+      });
+      /*  One immediate retry for a 5xx, because a retry HERE costs the ~130ms
+       *  TMDB takes while a retry from the browser costs a full round-trip plus
+       *  its 500ms backoff. 429 is deliberately NOT retried — being told to slow
+       *  down and immediately asking again is how a rate limit turns into a ban —
+       *  and 4xx is an answer, not a fault. */
+      if (attempt === 0 && response.status >= 500) {
+        lastError = new Error('TMDB responded ' + response.status);
+        continue;
+      }
+      return { status: response.status, text: await response.text() };
+    } catch (err) {
+      // Timeout or transport fault. Worth exactly one more try.
+      lastError = err;
+    }
+  }
+  throw lastError || new Error('TMDB request abandoned');
+}
 
-  if (env.TMDB_CACHE && response.status === 200) {
-    ctx.waitUntil(env.TMDB_CACHE.put(cacheKey, text, { expirationTtl: tmdbCacheTtl(path) }));
+/** One upstream request per path, however many callers ask for it at once. */
+function tmdbOnce(path, env) {
+  const pending = _tmdbInFlight.get(path);
+  if (pending) return pending;
+  const started = tmdbUpstream(path, env);
+  _tmdbInFlight.set(path, started);
+  // Cleared on both outcomes: a failure must not pin a rejected promise as the
+  // answer for every later caller.
+  started.then(() => {}, () => {}).then(() => { _tmdbInFlight.delete(path); });
+  return started;
+}
+
+function putTmdb(cacheKey, text, softTtl, env) {
+  return env.TMDB_CACHE.put(cacheKey, text, {
+    expirationTtl: Math.min(softTtl * TMDB_STALE_MULT, TMDB_MAX_RETENTION),
+    metadata: { t: Date.now() }
+  });
+}
+
+/*  Background refresh for a stale entry. Never throws: the stale copy has
+ *  already gone out to the visitor, so a failed refresh just means the next
+ *  request tries again. */
+async function refreshTmdb(path, cacheKey, softTtl, env) {
+  try {
+    const res = await tmdbOnce(path, env);
+    if (res.status === 200) await putTmdb(cacheKey, res.text, softTtl, env);
+  } catch (err) {
+    console.log('[tmdb] background refresh failed for ' + path + ': ' + (err && err.message));
+  }
+}
+
+async function fetchTmdbJson(path, env, ctx) {
+  const cacheKey = '/api/tmdb' + path;
+  const softTtl = tmdbCacheTtl(path);
+
+  if (env.TMDB_CACHE) {
+    /*  cacheTtl is 60 rather than 300 because the colo cache sits IN FRONT of
+     *  the staleness check: a background refresh that has already landed in KV
+     *  would otherwise keep being masked by a colo copy for five minutes, and
+     *  the refresh would be re-triggered on every request in that window. */
+    const hit = await env.TMDB_CACHE.getWithMetadata(cacheKey, { type: 'text', cacheTtl: 60 });
+    if (hit && hit.value) {
+      const storedAt = hit.metadata && hit.metadata.t;
+      if (!storedAt || Date.now() - storedAt < softTtl * 1000) {
+        return { status: 200, text: hit.value, cache: 'HIT' };
+      }
+      ctx.waitUntil(refreshTmdb(path, cacheKey, softTtl, env));
+      return { status: 200, text: hit.value, cache: 'STALE' };
+    }
   }
 
-  return { status: response.status, text, cache: 'MISS' };
+  const res = await tmdbOnce(path, env);
+  if (env.TMDB_CACHE && res.status === 200) {
+    ctx.waitUntil(putTmdb(cacheKey, res.text, softTtl, env));
+  }
+  return { status: res.status, text: res.text, cache: 'MISS' };
+}
+
+/*  Shared-cache freshness for a TMDB path.
+ *
+ *  max-age (the browser's own copy) keeps the split it always had. What is new is
+ *  everything after it: s-maxage lets the Cloudflare cache hold the body far
+ *  longer than a browser should, and stale-while-revalidate lets that cache
+ *  answer instantly from an expired copy while it refreshes underneath. Without
+ *  those two, every s-maxage boundary reached the Worker and — before the SWR
+ *  read above existed — TMDB. stale-if-error is the outage behaviour the Express
+ *  implementation had and this one did not: a week-old body beats an error page.
+ */
+function tmdbCacheControl(path) {
+  const volatile = isVolatileTmdbPath(path);
+  return 'public'
+    + ', max-age=' + (volatile ? 1800 : 21600)
+    + ', s-maxage=' + (volatile ? 3600 : 86400)
+    + ', stale-while-revalidate=' + (volatile ? 86400 : 604800)
+    + ', stale-if-error=604800';
 }
 
 async function handleTmdbProxy(request, env, ctx, url) {
   const path = url.pathname.replace('/api/tmdb', '') + url.search;
-  const result = await fetchTmdbJson(path, env, ctx);
+
+  let result;
+  try {
+    result = await fetchTmdbJson(path, env, ctx);
+  } catch (err) {
+    /*  Reachable now that the upstream fetch has a timeout. Answered explicitly
+     *  rather than left to become a 500, and never cached, so the retry the
+     *  client makes a moment later is not served this same body. */
+    return json({ error: 'upstream unavailable', detail: String(err && err.message).slice(0, 120) }, 503);
+  }
 
   return new Response(result.text, {
     status: result.status,
     headers: {
       'content-type': 'application/json',
       'x-cache': result.cache,
-      /*  Browser/CDN freshness follows the same split as the KV entry. Six hours
-       *  on a discovery list means a visitor can be answered from their own HTTP
-       *  cache with a body that predates today's releases, which defeats the
-       *  point of shortening the KV TTL at all. */
-      'cache-control': 'public, max-age=' + (isVolatileTmdbPath(path) ? 1800 : 21600)
+      'cache-control': result.status === 200 ? tmdbCacheControl(path) : 'no-store'
     }
   });
 }
@@ -840,6 +976,48 @@ async function readBatchPlan(request, url) {
   return parsed;
 }
 
+/*  The fan-out itself, lifted out of handleTmdbBatch so the background refresh
+ *  below can reuse it verbatim. One dead source must never fail the whole first
+ *  screen, which is why every path is individually caught and the
+ *  Promise.allSettled shape the client used to build itself is preserved exactly.
+ */
+function runBatchPlan(paths, env, ctx) {
+  return Promise.all(paths.map(async (path) => {
+    try {
+      const result = await fetchTmdbJson(path, env, ctx);
+      if (result.status !== 200) {
+        return { status: 'rejected', reason: `TMDB responded ${result.status}` };
+      }
+      return { status: 'fulfilled', value: JSON.parse(result.text) };
+    } catch (err) {
+      return { status: 'rejected', reason: err.message };
+    }
+  }));
+}
+
+function putBatch(planKey, body, env) {
+  return env.TMDB_CACHE.put(planKey, body, {
+    // Kept well past its freshness window so the SWR read has something to
+    // answer with; the metadata timestamp, not the expiry, decides freshness.
+    expirationTtl: Math.min(BATCH_CACHE_TTL * TMDB_STALE_MULT, TMDB_MAX_RETENTION),
+    metadata: { t: Date.now() }
+  });
+}
+
+/*  Rebuilds a stale plan after its stale copy has already been sent. Cheap by
+ *  construction: every path inside it is itself SWR-cached, so this is normally
+ *  a handful of KV reads rather than a round of upstream requests. */
+async function refreshBatch(paths, planKey, env, ctx) {
+  try {
+    const settled = await runBatchPlan(paths, env, ctx);
+    if (settled.every((r) => r.status === 'fulfilled')) {
+      await putBatch(planKey, JSON.stringify({ results: settled }), env);
+    }
+  } catch (err) {
+    console.log('[batch] background refresh failed: ' + (err && err.message));
+  }
+}
+
 async function handleTmdbBatch(request, env, ctx, url) {
   let paths;
   try {
@@ -866,13 +1044,21 @@ async function handleTmdbBatch(request, env, ctx, url) {
   ).slice(0, 32);
 
   if (env.TMDB_CACHE) {
-    const cached = await env.TMDB_CACHE.get(planKey, { cacheTtl: 300 });
-    if (cached) {
-      return new Response(cached, {
+    /*  Same stale-while-revalidate read as fetchTmdbJson, and for a bigger
+     *  reason: this entry IS the first screen. Every BATCH_CACHE_TTL boundary
+     *  used to hand one visitor the whole fan-out — 16 to 40 paths — before a
+     *  single card could paint. Now that visitor is answered from the assembled
+     *  copy in one KV read and the fan-out happens behind the response. */
+    const hit = await env.TMDB_CACHE.getWithMetadata(planKey, { type: 'text', cacheTtl: 60 });
+    if (hit && hit.value) {
+      const storedAt = hit.metadata && hit.metadata.t;
+      const fresh = !storedAt || Date.now() - storedAt < BATCH_CACHE_TTL * 1000;
+      if (!fresh) ctx.waitUntil(refreshBatch(paths, planKey, env, ctx));
+      return new Response(hit.value, {
         status: 200,
         headers: {
           'content-type': 'application/json',
-          'x-cache': 'HIT',
+          'x-cache': fresh ? 'HIT' : 'STALE',
           'x-batch-size': String(paths.length),
           'cache-control': 'no-store'
         }
@@ -880,20 +1066,7 @@ async function handleTmdbBatch(request, env, ctx, url) {
     }
   }
 
-  const settled = await Promise.all(paths.map(async (path) => {
-    try {
-      const result = await fetchTmdbJson(path, env, ctx);
-      if (result.status !== 200) {
-        return { status: 'rejected', reason: `TMDB responded ${result.status}` };
-      }
-      return { status: 'fulfilled', value: JSON.parse(result.text) };
-    } catch (err) {
-      // One dead source must never fail the whole first screen. This mirrors the
-      // Promise.allSettled the client used to do itself, which is why the shape
-      // is preserved exactly.
-      return { status: 'rejected', reason: err.message };
-    }
-  }));
+  const settled = await runBatchPlan(paths, env, ctx);
 
   const body = JSON.stringify({ results: settled });
 
@@ -901,7 +1074,7 @@ async function handleTmdbBatch(request, env, ctx, url) {
   // for 30 minutes would turn one bad moment into a lasting one.
   const allOk = settled.every((r) => r.status === 'fulfilled');
   if (env.TMDB_CACHE && allOk) {
-    ctx.waitUntil(env.TMDB_CACHE.put(planKey, body, { expirationTtl: BATCH_CACHE_TTL }));
+    ctx.waitUntil(putBatch(planKey, body, env));
   }
 
   return new Response(body, {
@@ -1512,10 +1685,18 @@ export default {
 
     const apiResponse = await routeApi(request, env, ctx, url);
     if (apiResponse) {
-      // ✅ Cache TMDB proxy GET responses only (not batch, not push endpoints)
+      /*  Cache TMDB proxy GET responses only — not batch (POST, per-plan) and not
+       *  the push endpoints (per-subscriber).
+       *
+       *  A STALE body is deliberately NOT stored. It was served from an expired KV
+       *  entry and a refresh is already running behind this response, so pinning
+       *  it here for the full s-maxage would mask the fresher copy that lands a
+       *  moment later. Skipping the put costs one extra Worker invocation on the
+       *  next request and buys the newest body. */
       if (request.method === 'GET' && apiResponse.status === 200
           && url.pathname.startsWith('/api/tmdb/')
-          && !url.pathname.includes('/batch')) {
+          && !url.pathname.includes('/batch')
+          && apiResponse.headers.get('x-cache') !== 'STALE') {
         ctx.waitUntil(edgeCache.put(request, apiResponse.clone()));
       }
       return apiResponse;
@@ -1543,12 +1724,44 @@ export default {
     newHeaders.set('X-Frame-Options', 'SAMEORIGIN');
     newHeaders.set('Referrer-Policy', 'strict-origin-when-cross-origin');
 
-    if (url.pathname.match(/\.(js|css|woff2|woff|png|jpg|jpeg|webp|avif|svg|ico)$/)) {
-      newHeaders.set('Cache-Control', 'public, max-age=2592000, immutable');
-    }
+    const path = url.pathname;
 
-    if (url.pathname.endsWith('.html') || url.pathname === '/') {
-      newHeaders.set('Cache-Control', 'public, max-age=3600');
+    if (path === '/sw.js') {
+      /*  MUST come before the .js branch below, which was giving the service
+       *  worker `max-age=2592000, immutable`. The browser is shielded from that
+       *  by updateViaCache:'none' in the registration, but the Cloudflare cache
+       *  is not — so a deployed worker update could sit behind a month-old copy
+       *  at the edge and never reach anyone. */
+      newHeaders.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+      newHeaders.set('Service-Worker-Allowed', '/');
+    } else if (path === '/manifest.json' || path === '/manifest.webmanifest') {
+      newHeaders.set('Cache-Control', 'public, max-age=0, must-revalidate');
+    } else if (/\.(js|css|woff2|woff|png|jpg|jpeg|webp|avif|svg|ico)$/.test(path)) {
+      /*  A year, not a month, for anything whose URL cannot change meaning.
+       *
+       *  asset-seal.js already guarantees that every ?v= bundle is byte-stable
+       *  for its version — that is the whole point of the seal — and the font
+       *  files are content-final. Those are exactly the conditions `immutable`
+       *  describes, and vercel.json/netlify.toml have granted them a year for the
+       *  same files all along; only this path was still handing out 30 days, so
+       *  the live deployment had the weakest static caching of the three.
+       *  Unversioned assets keep the month, since their bytes can change. */
+      const stable = url.searchParams.has('v') || path.startsWith('/fonts/');
+      newHeaders.set('Cache-Control', stable
+        ? 'public, max-age=31536000, immutable'
+        : 'public, max-age=2592000, immutable');
+    } else if (path.endsWith('.html') || path === '/') {
+      /*  Was a flat max-age=3600, which meant a visitor could hold an hour-old
+       *  shell with no way to revalidate and the edge had to re-fetch on every
+       *  boundary. s-maxage + stale-while-revalidate moves the long hold to the
+       *  shared cache, where it can be refreshed underneath a request instead of
+       *  in front of one, and shortens what the browser pins. */
+      newHeaders.set('Cache-Control', 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400');
+      /*  Consumed by Cloudflare Early Hints: the browser can open the TLS
+       *  connection to the poster/backdrop host while the HTML is still being
+       *  assembled, which is earlier than the <link rel=preconnect> in <head>
+       *  can possibly fire. Ignored harmlessly where Early Hints is off. */
+      newHeaders.append('Link', '<https://image.tmdb.org>; rel=preconnect');
     }
 
     const finalResponse = new Response(assetResponse.body, {
@@ -1558,7 +1771,7 @@ export default {
     });
 
     // ✅ Cache static assets (200 only)
-    if (request.method === 'GET' && finalResponse.status === 200) {
+    if (request.method === 'GET' && finalResponse.status === 200 && path !== '/sw.js') {
       ctx.waitUntil(edgeCache.put(request, finalResponse.clone()));
     }
 

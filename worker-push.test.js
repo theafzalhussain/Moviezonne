@@ -83,13 +83,27 @@ async function hkdfBytes(ikm, salt, info, length) {
  *  the tests need to be able to ask. */
 function fakeKV(seed = {}) {
   const data = new Map(Object.entries(seed));
+  const meta = new Map();
   const counters = { writes: 0 };
   return {
     data,
+    meta,
     counters,
     async get(key) { return data.has(key) ? data.get(key) : null; },
-    async put(key, value) { counters.writes++; data.set(key, String(value)); },
-    async delete(key) { data.delete(key); },
+    /*  Real KV entries carry metadata, and the TMDB cache now keeps its write
+     *  timestamp there so the stale-while-revalidate read can tell a fresh entry
+     *  from one worth refreshing behind the response. A double without this
+     *  method made every one of those reads throw. */
+    async getWithMetadata(key) {
+      if (!data.has(key)) return { value: null, metadata: null };
+      return { value: data.get(key), metadata: meta.has(key) ? meta.get(key) : null };
+    },
+    async put(key, value, options) {
+      counters.writes++;
+      data.set(key, String(value));
+      if (options && options.metadata) meta.set(key, options.metadata);
+    },
+    async delete(key) { data.delete(key); meta.delete(key); },
     async list({ prefix = '', cursor } = {}) {
       const names = [...data.keys()].filter((k) => k.startsWith(prefix)).sort();
       const start = cursor ? Number(cursor) : 0;

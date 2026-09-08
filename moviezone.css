@@ -2616,23 +2616,40 @@ body {
   z-index: 1;
 }
 
-/* ══ ANIME SUB-FILTER BAR (Trending / Latest / Airing / Top Rated ...) ══ */
+/*  ══ SUB-FILTER BARS — Anime, Cartoons, and the OTT platform types ══
+ *
+ *  ONE style for all three, because they are the same control in the same place
+ *  doing the same job: a second row of chips under the category strip that
+ *  narrows whatever the strip just selected.
+ *
+ *  They had drifted into three looks — the anime and cartoon bars carried a
+ *  gold/pink/purple gradient pill on a tinted glass rail, the OTT bar a gold one
+ *  — so they now all share the treatment the franchise pages already use for
+ *  All / Movies / TV Series (.ch-dtab): a dark rail, dark pills, one gold pill.
+ *
+ *  Why gold and not the gradient: the active chip has to be the loudest thing in
+ *  its row, and this row sits directly beneath the category strip, whose own
+ *  active tab is ALREADY a gradient. Two gradients stacked read as two competing
+ *  selections; a solid gold pill under a gradient tab reads as a sub-choice of
+ *  it, which is exactly what it is.
+ */
 .anime-filter-bar {
   display: none;
-  gap: 0.5rem;
+  gap: 0.55rem;
   align-items: center;
   flex-wrap: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 0.55rem 0.6rem;
+  padding: 0.6rem 0.75rem;
   margin: -1.2rem 0 2rem;
-  border-radius: 16px;
-  border: 1px solid rgba(245, 197, 24, 0.14);
-  background:
-    linear-gradient(120deg, rgba(245, 197, 24, 0.07), rgba(124, 58, 237, 0.07) 60%, rgba(6, 182, 212, 0.05)),
-    rgba(10, 10, 20, 0.6);
-  backdrop-filter: blur(16px) saturate(150%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 10px 28px rgba(0, 0, 0, 0.25);
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  /*  Neutral, near-black rail: the chips are the colour in this row, not the
+   *  container. Same base as .ch-detail-tabs so the two controls match. */
+  background: linear-gradient(180deg, rgba(9, 9, 18, 0.96), rgba(5, 5, 13, 0.88));
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 12px 30px rgba(0, 0, 0, 0.35);
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
 }
@@ -2645,19 +2662,22 @@ body {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 0.38rem;
-  padding: 0.48rem 0.95rem;
+  gap: 0.42rem;
+  padding: 0.62rem 1.25rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--ch-glass);
   color: var(--text2);
   font-family: 'Outfit', sans-serif;
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   font-weight: 600;
   letter-spacing: 0.2px;
   white-space: nowrap;
   cursor: pointer;
-  transition: all 0.25s var(--ease-smooth);
+  /*  Named properties rather than `all`: `all` also transitions the gradient
+   *  background on the active pill, which cannot interpolate and flickers. */
+  transition: transform 0.3s var(--ch-spring), color 0.3s ease, background 0.3s ease,
+              border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 .anime-chip .anime-chip-icon {
@@ -2667,9 +2687,13 @@ body {
 
 .anime-chip:hover {
   color: var(--text);
-  border-color: rgba(245, 197, 24, 0.3);
-  background: rgba(245, 197, 24, 0.09);
-  transform: translateY(-2px);
+  border-color: rgba(245, 197, 24, 0.28);
+  background: rgba(255, 255, 255, 0.08);
+  transform: translate3d(0, -2px, 0);
+}
+
+.anime-chip:active {
+  transform: scale(0.96);
 }
 
 .anime-chip:focus-visible {
@@ -2677,54 +2701,71 @@ body {
   outline-offset: 2px;
 }
 
+/*  The one gold pill. Dark ink on purpose: white text on this gradient fails
+ *  contrast, #12100a on it measures ~11:1. */
 .anime-chip.active {
-  color: #fff;
+  color: #12100a;
   font-weight: 700;
-  border-color: transparent;
-  background: linear-gradient(135deg, rgba(245, 197, 24, 0.95), rgba(236, 72, 153, 0.85) 55%, rgba(124, 58, 237, 0.9));
-  box-shadow: 0 10px 26px rgba(124, 58, 237, 0.28), 0 0 18px rgba(245, 197, 24, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  background: var(--grad-gold);
+  border-color: rgba(245, 197, 24, 0.7);
+  box-shadow: 0 10px 26px rgba(245, 197, 24, 0.22), 0 0 18px rgba(245, 197, 24, 0.16),
+              inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
-/* ── OTT FILTER BAR (Web Series / Movies sub-tabs) ── */
+/*  Hover must not undo the selection: without this the generic :hover above
+ *  paints the active pill back to translucent grey under the cursor. */
+.anime-chip.active:hover {
+  color: #12100a;
+  background: var(--grad-gold);
+  border-color: rgba(245, 197, 24, 0.8);
+}
+
+/*  Emoji ignore `color`, so on the gold pill they keep their own palette. Most
+ *  read fine; the ones carrying a pale plate (🆕, 📺, 🎬) lose their edge against
+ *  gold. A 1px dark rim restores it without touching the glyph itself. */
+.anime-chip.active .anime-chip-icon {
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.55));
+}
+
+/* ── OTT bar: identical rail, no icons, so the pills carry the width instead ── */
 .ott-filter-bar {
-  border-color: rgba(6, 182, 212, 0.18);
-  background:
-    linear-gradient(120deg, rgba(6, 182, 212, 0.08), rgba(124, 58, 237, 0.07) 60%, rgba(245, 197, 24, 0.05)),
-    rgba(10, 10, 20, 0.6);
   margin-top: 0.5rem;
 }
 
-.ott-filter-bar .anime-chip.active {
-  background: linear-gradient(135deg, rgba(6, 182, 212, 0.95), rgba(99, 102, 241, 0.88) 55%, rgba(124, 58, 237, 0.92));
-  box-shadow: 0 10px 26px rgba(6, 182, 212, 0.25), 0 0 18px rgba(99, 102, 241, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+.ott-filter-bar .ott-chip {
+  padding: 0.62rem 1.45rem;
 }
 
-.ott-filter-bar .anime-chip:hover {
-  border-color: rgba(6, 182, 212, 0.35);
-  background: rgba(6, 182, 212, 0.1);
-}
-
-/* Responsive: stack nicely on mobile */
+/*  Phones: the rail scrolls horizontally rather than wrapping, so what has to
+ *  give is chip size and padding, not the row. Scoped to .anime-filter-bar so all
+ *  three bars shrink together — these rules used to name .ott-filter-bar only,
+ *  which left the anime and cartoon bars at desktop metrics on a 360px screen. */
 @media (max-width: 480px) {
-  .ott-filter-bar {
+  .anime-filter-bar {
     padding: 0.4rem 0.45rem;
-    margin: 0.3rem 0 1.2rem;
     gap: 0.35rem;
+    border-radius: 14px;
   }
-  .ott-filter-bar .anime-chip {
-    padding: 0.4rem 0.72rem;
+  .anime-chip {
+    padding: 0.42rem 0.8rem;
     font-size: 0.72rem;
+  }
+  .ott-filter-bar .ott-chip {
+    padding: 0.42rem 0.95rem;
   }
 }
 
 @media (max-width: 360px) {
-  .ott-filter-bar {
+  .anime-filter-bar {
     padding: 0.35rem 0.35rem;
     gap: 0.3rem;
   }
-  .ott-filter-bar .anime-chip {
-    padding: 0.35rem 0.6rem;
+  .anime-chip {
+    padding: 0.36rem 0.66rem;
     font-size: 0.68rem;
+  }
+  .ott-filter-bar .ott-chip {
+    padding: 0.36rem 0.8rem;
   }
 }
 

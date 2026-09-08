@@ -69,7 +69,7 @@ var require_seo_ssr = __commonJS({
     __name(heroBgPicture, "heroBgPicture");
     var DETAIL_CACHE = "public, max-age=1800, s-maxage=86400, stale-while-revalidate=604800";
     var CATEGORY_CACHE = "public, max-age=900, s-maxage=21600, stale-while-revalidate=86400";
-    var SITEMAP_CACHE = "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800";
+    var SITEMAP_CACHE2 = "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800";
     var HOME_CACHE = "public, max-age=600, s-maxage=3600, stale-while-revalidate=86400";
     var BROWSE_CACHE = "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800";
     var SITEMAP_FALLBACK_DATE = process.env.SITEMAP_LASTMOD || "2026-08-10";
@@ -823,6 +823,20 @@ nav.top a:hover{color:#f5c518}
 .srv a:hover{border-color:rgba(245,197,24,.45);background:rgba(245,197,24,.12);color:#fff}
 .srv span{border-color:#f5c518;background:rgba(245,197,24,.16);color:#f5c518}
 .watch-note{color:#a9a9bb;font-size:.86rem;margin:12px 0 0;line-height:1.6}
+/* \u2500\u2500 Ad slot \u2500\u2500
+   min-height is reserved up front for the same reason the SPA reserves it: the
+   widget is written in by a third-party script seconds later, and an unreserved
+   insert of that size would shove everything below it down while someone is
+   reading. Collapsed to nothing for visitors the gate turns ads off for.
+   The 30px top margin is not cosmetic \u2014 it keeps the banner off the server
+   pills and the episode form. An ad touching a control farms misclicks, which
+   reads as revenue for a week and then costs CPM. */
+.ad-slot{margin:30px 0 0;min-height:300px}
+.ad-label{display:block;font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;opacity:0;height:18px;line-height:18px;color:#8b8b9c}
+.ad-slot.is-filled .ad-label{opacity:1}
+@media (max-width:1024px){.ad-slot{min-height:360px}}
+@media (max-width:640px){.ad-slot{min-height:440px}}
+html.mz-no-ads .ad-slot{display:none}
 .ep-form{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin:14px 0 0;color:#c9c9d6;font-size:.86rem}
 .ep-form input{width:74px;padding:7px 10px;border-radius:9px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.05);color:#fff;font:inherit}
 .ep-form button{padding:8px 16px;border-radius:999px;border:1px solid rgba(245,197,24,.5);background:rgba(245,197,24,.16);color:#f5c518;font-weight:700;cursor:pointer;font:inherit}
@@ -902,6 +916,92 @@ footer.foot h3{font-size:.74rem;letter-spacing:1.4px;text-transform:uppercase;co
   nav.top{display:none}
 }
 `.replace(/\n\s*/g, "");
+    var AD_NATIVE_CONTAINER = "container-6c53da276868df37c1f0c6fc771e2d97";
+    var AD_NATIVE_SRC = "https://pl30971625.profitableratecpmnetwork.com/6c53da276868df37c1f0c6fc771e2d97/invoke.js";
+    var AD_POPUNDER_SRC = "https://pl30971623.profitableratecpmnetwork.com/c7/2e/b8/c72eb8605ed50b20e9de4938ed2680fe.js";
+    var AD_POP_CAP_KEY = "mz_ad_pop_at";
+    var AD_POP_CAP_MS = 30 * 60 * 1e3;
+    function adSlot() {
+      return '<aside class="ad-slot" aria-label="Advertisement"><span class="ad-label">Sponsored</span><div id="' + AD_NATIVE_CONTAINER + '"></div></aside>';
+    }
+    __name(adSlot, "adSlot");
+    function adLoaderScript() {
+      return '<script data-mz-ads="1">' + String.raw`
+(function(){
+  var ua = navigator.userAgent || '', host = location.hostname, d = document;
+  var CRAWLER_RE = /googlebot|bingbot|yandex(?:bot|images)|duckduckbot|baiduspider|applebot|facebookexternalhit|twitterbot|linkedinbot|slackbot|telegrambot|ahrefsbot|semrushbot|mj12bot|dotbot|petalbot|bytespider|uptimerobot|pingdom|statuscake/i;
+  var TV_UA_RE = /\b(?:smart-?tv|smarttv|googletv|android\s*tv|appletv|tvos|crkey|roku|web0?s|tizen|vidaa|hbbtv|netcast|viera|bravia|aquos)\b|\bAFT[A-Z0-9]/i;
+  var local = /^(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)$/.test(host)
+    || /^(?:192\.168\.|10\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(host);
+  // TEMPORARY MASTER PAUSE — flip to true to turn ads OFF on the SSR
+  // watch/detail pages. Mirrors MZ_ADS_PAUSED in index.html; set BOTH to pause
+  // the whole site, set BOTH back to false to re-enable. When paused the slot
+  // collapses via mz-no-ads and nothing is injected.
+  var PAUSED = true;
+  var enabled = !PAUSED && !local && !CRAWLER_RE.test(ua) && !TV_UA_RE.test(ua);
+  window.__mzAds = { enabled: enabled, injected: [], blocked: [], capped: [] };
+  if (!enabled) { d.documentElement.className += ' mz-no-ads'; return; }
+
+  function add(src, cfasync, name) {
+    var s = d.createElement('script');
+    s.src = src; s.async = true;
+    if (cfasync === false) s.setAttribute('data-cfasync', 'false');
+    s.onerror = function () { window.__mzAds.blocked.push(name); };
+    (d.body || d.head).appendChild(s);
+    window.__mzAds.injected.push(name);
+  }
+
+  // Native banner: only once its slot is close, so the impression is one a
+  // human could actually see.
+  function watch() {
+    var slot = d.querySelector('.ad-slot');
+    if (!slot) return;
+    var box = d.getElementById('${AD_NATIVE_CONTAINER}');
+    var fill = function () {
+      add('${AD_NATIVE_SRC}', false, 'native');
+      if (!box) return;
+      if (box.childElementCount > 0) { slot.className += ' is-filled'; return; }
+      if (!window.MutationObserver) return;
+      var mo = new MutationObserver(function () {
+        if (box.childElementCount > 0) { mo.disconnect(); slot.className += ' is-filled'; }
+      });
+      mo.observe(box, { childList: true });
+    };
+    if (!('IntersectionObserver' in window)) { fill(); return; }
+    var io = new IntersectionObserver(function (e) {
+      for (var i = 0; i < e.length; i++) {
+        if (e[i].isIntersecting) { io.disconnect(); fill(); return; }
+      }
+    }, { rootMargin: '400px' });
+    io.observe(slot);
+  }
+  if (d.readyState === 'loading') d.addEventListener('DOMContentLoaded', watch, { once: true });
+  else watch();
+
+  // Popunder: once per visit, shared with the SPA. Fails open if storage throws
+  // (Safari private mode) — storage must never decide whether an ad loads.
+  var popDone = false;
+  function pop() {
+    if (popDone) return;
+    popDone = true;
+    try {
+      var at = Number(localStorage.getItem('${AD_POP_CAP_KEY}') || 0);
+      if (at > 0 && (Date.now() - at) < ${AD_POP_CAP_MS}) {
+        window.__mzAds.capped.push('popunder');
+        return;
+      }
+      localStorage.setItem('${AD_POP_CAP_KEY}', String(Date.now()));
+    } catch (e) {}
+    add('${AD_POPUNDER_SRC}', undefined, 'popunder');
+  }
+  var EV = ['pointerdown', 'keydown', 'touchstart'];
+  function once() { EV.forEach(function (t) { window.removeEventListener(t, once, true); }); pop(); }
+  EV.forEach(function (t) { window.addEventListener(t, once, { capture: true, passive: true, once: true }); });
+  setTimeout(pop, 3000);
+})();
+` + "<\/script>";
+    }
+    __name(adLoaderScript, "adLoaderScript");
     function renderShell(opts) {
       const {
         title,
@@ -912,7 +1012,8 @@ footer.foot h3{font-size:.74rem;letter-spacing:1.4px;text-transform:uppercase;co
         schemas = [],
         breadcrumbs = [],
         body,
-        robots = "index, follow, max-image-preview:large"
+        robots = "index, follow, max-image-preview:large",
+        ads = false
       } = opts;
       const canonical = SITE_URL + canonicalPath;
       const image = ogImage || LOGO_URL;
@@ -959,6 +1060,7 @@ footer.foot h3{font-size:.74rem;letter-spacing:1.4px;text-transform:uppercase;co
 <link rel="preconnect" href="https://image.tmdb.org" crossorigin>
 <link rel="dns-prefetch" href="https://image.tmdb.org">
 <style>${BASE_CSS}</style>
+${ads ? adLoaderScript() : ""}
 ${allSchemas.map((s) => '<script type="application/ld+json">' + jsonLdScript(s) + "<\/script>").join("\n")}
 </head>
 <body>
@@ -1358,6 +1460,14 @@ ${body}
     </ul>
   </section>` : ""}
 
+  <!-- Ad slot: after the content the visitor came for (facts, synopsis, cast) and
+       before "More like this". A search visitor reads down to here, so it is seen
+       without pushing anything they wanted further down. Deliberately NOT next to
+       the related-titles grid's links or the Play CTA \u2014 an ad against a control
+       harvests misclicks, which costs CPM once the advertiser sees the bounce.
+       Height is reserved in BASE_CSS, so it cannot shift the grid below it. -->
+  ${adSlot()}
+
   ${related.length ? `<section>
     <h2>More like ${esc(title)}</h2>
     <p class="lede">Titles that share a genre, cast or tone with ${esc(title)} \u2014 each one opens its own page with full details.</p>
@@ -1379,6 +1489,7 @@ ${body}
         canonicalPath,
         ogImage: posterLg || (backdrop || LOGO_URL),
         ogType: "video.movie",
+        ads: true,
         schemas: faqSchema ? [schema, faqSchema] : [schema],
         breadcrumbs,
         body
@@ -1946,6 +2057,16 @@ ${body}
     <p class="watch-note">If the player stays blank or says the video is unavailable, pick a
       different server above \u2014 availability differs by network and region. Audio language and
       quality are chosen inside the player.</p>
+
+    <!-- Ad slot: BELOW the player and below the server switcher, never above and
+         never between them. Above the player it would delay the one thing the
+         visitor came for; wedged between the player and the server pills it would
+         collect the taps of everyone whose stream did not start. Down here it is
+         seen by someone who is already watching, and misses nobody's controls.
+         Its height is reserved in BASE_CSS, so it cannot shove the back-link and
+         footer around when it arrives. -->
+    ${adSlot()}
+
     <p class="watch-note"><a href="${esc(detail)}">&larr; Back to ${esc(title)} details</a></p>
   </section>
 </div>`;
@@ -1956,6 +2077,7 @@ ${body}
         // the detail page is the canonical surface
         ogImage: item.poster_path ? IMG_POSTER_LG + item.poster_path : "",
         robots: "noindex, follow",
+        ads: true,
         breadcrumbs: [
           { name: "Home", path: "/" },
           { name: isTv ? "Web Series" : "Movies", path: isTv ? "/series/web-series" : "/movies/popular" },
@@ -1995,7 +2117,14 @@ ${body}
           try {
             item = await tmdb("/" + kind + "/" + parsed.id, {
               language: "en-US",
-              append_to_response: "credits,similar,recommendations,videos,watch/providers,release_dates,content_ratings"
+              append_to_response: "credits,similar,recommendations,videos,watch/providers,release_dates,content_ratings",
+              /*  Without this, TMDB applies `language` to the appended videos too and
+               *  returns only English-tagged ones — so trailerOf() found nothing for
+               *  Hindi, Tamil or Telugu titles and the trailer link silently vanished
+               *  on exactly the pages that most need it. Same list moviezone.js uses;
+               *  `null` covers videos with no language tag, which is what regional
+               *  distributors usually upload. */
+              include_video_language: "en,hi,ta,te,ml,kn,mr,bn,pa,ja,ko,null"
             });
           } catch (err) {
             const status = err && (err.tmdbStatus || err.status);
@@ -2099,16 +2228,16 @@ ${body}
       app.get("/series", (req, res) => res.redirect(301, "/series/web-series"));
       const sendXml = /* @__PURE__ */ __name((res, xml) => {
         res.set("Content-Type", "application/xml; charset=utf-8");
-        res.set("Cache-Control", SITEMAP_CACHE);
+        res.set("Cache-Control", SITEMAP_CACHE2);
         return res.status(200).send(xml);
       }, "sendXml");
-      const browseEntries = /* @__PURE__ */ __name(() => {
+      const browseEntries2 = /* @__PURE__ */ __name(() => {
         const cache2 = readSitemapCache();
         if (!cache2) return null;
         return cache2.movie.map((m) => Object.assign({ media_type: "movie" }, m)).concat(cache2.tv.map((t) => Object.assign({ media_type: "tv" }, t)));
       }, "browseEntries");
       app.get("/browse", (req, res, next) => {
-        const all = browseEntries();
+        const all = browseEntries2();
         if (!all) return next();
         const counts = {};
         all.forEach((e) => {
@@ -2123,7 +2252,7 @@ ${body}
       app.get("/browse/:letter", (req, res, next) => {
         const letter = String(req.params.letter || "").toLowerCase();
         if (BROWSE_LETTERS.indexOf(letter) === -1) return next();
-        const all = browseEntries();
+        const all = browseEntries2();
         if (!all) return next();
         const entries = all.filter((e) => browseLetterOf(titleOf(e)) === letter).sort((a, b) => titleOf(a).localeCompare(titleOf(b), "en"));
         const totalPages = Math.max(1, Math.ceil(entries.length / BROWSE_PER_PAGE));
@@ -2313,6 +2442,10 @@ ${body}
       registerHomeSsr,
       renderBrowseIndexPage,
       renderWatchPage,
+      // Exposed for ad-gate-check.js: the container id invoke.js looks up, so the
+      // test asserts against the real value instead of a copy of it.
+      AD_NATIVE_CONTAINER,
+      adSlot,
       WATCH_SOURCES,
       renderBrowseLetterPage,
       renderHomeLinkBlock,
@@ -2328,6 +2461,7 @@ ${body}
       buildFaq,
       BROWSE_LETTERS,
       BROWSE_PER_PAGE,
+      SITEMAP_CHUNK_SIZE,
       SITEMAP_FALLBACK_DATE,
       SITEMAP_MIN_LASTMOD,
       isCalendarDate: isCalendarDate2,
@@ -2613,7 +2747,7 @@ function subsStore(env) {
 }
 __name(subsStore, "subsStore");
 async function readJson(store, key) {
-  const raw = await store.get(key);
+  const raw = await store.get(key, { cacheTtl: 300 });
   if (!raw) return null;
   try {
     return JSON.parse(raw);
@@ -2672,15 +2806,24 @@ async function handleSubscribe(request, env) {
   }
   const id = await endpointId(subscription.endpoint);
   const existing = await readJson(store, subKey(id));
+  const unchanged = existing && existing.active === true && existing.endpoint === subscription.endpoint && existing.keys && existing.keys.p256dh === keys.p256dh && existing.keys.auth === keys.auth;
+  if (unchanged) {
+    return json({ success: true, endpoint: subscription.endpoint, unchanged: true });
+  }
   const now = (/* @__PURE__ */ new Date()).toISOString();
-  await store.put(subKey(id), JSON.stringify({
-    endpoint: subscription.endpoint,
-    expirationTime: subscription.expirationTime || null,
-    keys: { p256dh: keys.p256dh, auth: keys.auth },
-    active: true,
-    createdAt: existing && existing.createdAt || now,
-    updatedAt: now
-  }));
+  try {
+    await store.put(subKey(id), JSON.stringify({
+      endpoint: subscription.endpoint,
+      expirationTime: subscription.expirationTime || null,
+      keys: { p256dh: keys.p256dh, auth: keys.auth },
+      active: true,
+      createdAt: existing && existing.createdAt || now,
+      updatedAt: now
+    }));
+  } catch (err) {
+    console.error("[push] could not store subscription:", err && err.message || err);
+    return json({ error: "Subscription storage is temporarily unavailable" }, 503);
+  }
   return json({ success: true, endpoint: subscription.endpoint });
 }
 __name(handleSubscribe, "handleSubscribe");
@@ -2711,18 +2854,26 @@ async function handleNotifyMovieSave(request, env) {
   const existing = await readJson(store, notifyKey(id, movieId));
   const notifyUrl = safeNotifyUrl(url);
   const safeTitle = String(title).slice(0, 200);
-  await store.put(notifyKey(id, movieId), JSON.stringify({
-    endpoint: subscription.endpoint,
-    endpointId: id,
-    movieId,
-    title: safeTitle,
-    releaseDate,
-    url: notifyUrl,
-    active: true,
-    notifiedAt: null,
-    createdAt: existing && existing.createdAt || now,
-    updatedAt: now
-  }));
+  if (existing && existing.active === true && existing.movieId === movieId && existing.endpoint === subscription.endpoint) {
+    return json({ success: true, saved: true, confirmationSent: false, unchanged: true }, 200);
+  }
+  try {
+    await store.put(notifyKey(id, movieId), JSON.stringify({
+      endpoint: subscription.endpoint,
+      endpointId: id,
+      movieId,
+      title: safeTitle,
+      releaseDate,
+      url: notifyUrl,
+      active: true,
+      notifiedAt: null,
+      createdAt: existing && existing.createdAt || now,
+      updatedAt: now
+    }));
+  } catch (err) {
+    console.error("[push] could not store movie notification:", err && err.message || err);
+    return json({ error: "Could not save movie notification" }, 503);
+  }
   let confirmationSent = false;
   if (confirm !== false) {
     const confirmation = await sendPushToSubscription(subscription, {
@@ -2751,7 +2902,7 @@ async function handleNotifyMovieRemove(request, env) {
   }
   const id = await endpointId(value.endpoint);
   const key = notifyKey(id, movieId);
-  const existed = Boolean(await store.get(key));
+  const existed = Boolean(await store.get(key, { cacheTtl: 300 }));
   if (existed) await store.delete(key);
   return json({ success: true, removed: existed });
 }
@@ -2800,13 +2951,7 @@ async function processDueNotifications(env) {
     }, env);
     if (result.sent) {
       sent++;
-      const now = (/* @__PURE__ */ new Date()).toISOString();
-      await store.put(key, JSON.stringify({
-        ...record,
-        active: false,
-        notifiedAt: now,
-        updatedAt: now
-      }));
+      await store.delete(key);
     } else {
       failed++;
       if (result.expired) await dropSubscription(store, id);
@@ -2822,39 +2967,120 @@ function cronAuthorised(request, env) {
   return supplied === env.CRON_SECRET;
 }
 __name(cronAuthorised, "cronAuthorised");
-async function fetchTmdbJson(path, env, ctx) {
-  const cacheKey = "/api/tmdb" + path;
-  if (env.TMDB_CACHE) {
-    const cached = await env.TMDB_CACHE.get(cacheKey);
-    if (cached) return { status: 200, text: cached, cache: "HIT" };
-  }
+var TMDB_STALE_MULT = 8;
+var TMDB_MAX_RETENTION = 2592e3;
+var TMDB_UPSTREAM_TIMEOUT_MS = 6e3;
+var _tmdbInFlight = /* @__PURE__ */ new Map();
+async function tmdbUpstream(path, env) {
   const headers = new Headers();
   headers.set("Authorization", `Bearer ${env.TMDB_TOKEN}`);
   headers.set("accept", "application/json");
-  const response = await fetch(`https://api.themoviedb.org/3${path}`, { headers });
-  const text = await response.text();
-  if (env.TMDB_CACHE && response.status === 200) {
-    ctx.waitUntil(env.TMDB_CACHE.put(cacheKey, text, { expirationTtl: TMDB_CACHE_TTL }));
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await fetch(`https://api.themoviedb.org/3${path}`, {
+        headers,
+        signal: AbortSignal.timeout(TMDB_UPSTREAM_TIMEOUT_MS),
+        cf: { cacheEverything: true, cacheTtl: 300 }
+      });
+      if (attempt === 0 && response.status >= 500) {
+        lastError = new Error("TMDB responded " + response.status);
+        continue;
+      }
+      return { status: response.status, text: await response.text() };
+    } catch (err) {
+      lastError = err;
+    }
   }
-  return { status: response.status, text, cache: "MISS" };
+  throw lastError || new Error("TMDB request abandoned");
+}
+__name(tmdbUpstream, "tmdbUpstream");
+function tmdbOnce(path, env) {
+  const pending = _tmdbInFlight.get(path);
+  if (pending) return pending;
+  const started = tmdbUpstream(path, env);
+  _tmdbInFlight.set(path, started);
+  started.then(() => {
+  }, () => {
+  }).then(() => {
+    _tmdbInFlight.delete(path);
+  });
+  return started;
+}
+__name(tmdbOnce, "tmdbOnce");
+function putTmdb(cacheKey, text, softTtl, env) {
+  return env.TMDB_CACHE.put(cacheKey, text, {
+    expirationTtl: Math.min(softTtl * TMDB_STALE_MULT, TMDB_MAX_RETENTION),
+    metadata: { t: Date.now() }
+  });
+}
+__name(putTmdb, "putTmdb");
+async function refreshTmdb(path, cacheKey, softTtl, env) {
+  try {
+    const res = await tmdbOnce(path, env);
+    if (res.status === 200) await putTmdb(cacheKey, res.text, softTtl, env);
+  } catch (err) {
+    console.log("[tmdb] background refresh failed for " + path + ": " + (err && err.message));
+  }
+}
+__name(refreshTmdb, "refreshTmdb");
+async function fetchTmdbJson(path, env, ctx) {
+  const cacheKey = "/api/tmdb" + path;
+  const softTtl = tmdbCacheTtl(path);
+  if (env.TMDB_CACHE) {
+    const hit = await env.TMDB_CACHE.getWithMetadata(cacheKey, { type: "text", cacheTtl: 60 });
+    if (hit && hit.value) {
+      const storedAt = hit.metadata && hit.metadata.t;
+      if (!storedAt || Date.now() - storedAt < softTtl * 1e3) {
+        return { status: 200, text: hit.value, cache: "HIT" };
+      }
+      ctx.waitUntil(refreshTmdb(path, cacheKey, softTtl, env));
+      return { status: 200, text: hit.value, cache: "STALE" };
+    }
+  }
+  const res = await tmdbOnce(path, env);
+  if (env.TMDB_CACHE && res.status === 200) {
+    ctx.waitUntil(putTmdb(cacheKey, res.text, softTtl, env));
+  }
+  return { status: res.status, text: res.text, cache: "MISS" };
 }
 __name(fetchTmdbJson, "fetchTmdbJson");
+function tmdbCacheControl(path) {
+  const volatile = isVolatileTmdbPath(path);
+  return "public, max-age=" + (volatile ? 1800 : 21600) + ", s-maxage=" + (volatile ? 3600 : 86400) + ", stale-while-revalidate=" + (volatile ? 86400 : 604800) + ", stale-if-error=604800";
+}
+__name(tmdbCacheControl, "tmdbCacheControl");
 async function handleTmdbProxy(request, env, ctx, url) {
   const path = url.pathname.replace("/api/tmdb", "") + url.search;
-  const result = await fetchTmdbJson(path, env, ctx);
+  let result;
+  try {
+    result = await fetchTmdbJson(path, env, ctx);
+  } catch (err) {
+    return json({ error: "upstream unavailable", detail: String(err && err.message).slice(0, 120) }, 503);
+  }
   return new Response(result.text, {
     status: result.status,
     headers: {
       "content-type": "application/json",
       "x-cache": result.cache,
-      "cache-control": "public, max-age=3600"
+      "cache-control": result.status === 200 ? tmdbCacheControl(path) : "no-store"
     }
   });
 }
 __name(handleTmdbProxy, "handleTmdbProxy");
 var MAX_BATCH_PATHS = 40;
-var TMDB_CACHE_TTL = 3600;
-var BATCH_CACHE_TTL = 1800;
+var TMDB_CACHE_TTL = 604800;
+var TMDB_VOLATILE_CACHE_TTL = 10800;
+var BATCH_CACHE_TTL = 10800;
+var VOLATILE_TMDB_PATH_RE = /^\/(?:trending|discover)\/|^\/movie\/(?:popular|now_playing|upcoming)\b|^\/tv\/(?:popular|airing_today|on_the_air)\b/;
+function isVolatileTmdbPath(path) {
+  return VOLATILE_TMDB_PATH_RE.test(String(path || ""));
+}
+__name(isVolatileTmdbPath, "isVolatileTmdbPath");
+function tmdbCacheTtl(path) {
+  return isVolatileTmdbPath(path) ? TMDB_VOLATILE_CACHE_TTL : TMDB_CACHE_TTL;
+}
+__name(tmdbCacheTtl, "tmdbCacheTtl");
 var SAFE_TMDB_PATH = /^\/[A-Za-z0-9][A-Za-z0-9._\-/]*(\?[A-Za-z0-9._~%\-=&+,|:]*)?$/;
 function validBatchPath(path) {
   return typeof path === "string" && path.length <= 512 && SAFE_TMDB_PATH.test(path) && !path.includes("..") && !path.includes("//");
@@ -2874,6 +3100,40 @@ async function readBatchPlan(request, url) {
   return parsed;
 }
 __name(readBatchPlan, "readBatchPlan");
+function runBatchPlan(paths, env, ctx) {
+  return Promise.all(paths.map(async (path) => {
+    try {
+      const result = await fetchTmdbJson(path, env, ctx);
+      if (result.status !== 200) {
+        return { status: "rejected", reason: `TMDB responded ${result.status}` };
+      }
+      return { status: "fulfilled", value: JSON.parse(result.text) };
+    } catch (err) {
+      return { status: "rejected", reason: err.message };
+    }
+  }));
+}
+__name(runBatchPlan, "runBatchPlan");
+function putBatch(planKey, body, env) {
+  return env.TMDB_CACHE.put(planKey, body, {
+    // Kept well past its freshness window so the SWR read has something to
+    // answer with; the metadata timestamp, not the expiry, decides freshness.
+    expirationTtl: Math.min(BATCH_CACHE_TTL * TMDB_STALE_MULT, TMDB_MAX_RETENTION),
+    metadata: { t: Date.now() }
+  });
+}
+__name(putBatch, "putBatch");
+async function refreshBatch(paths, planKey, env, ctx) {
+  try {
+    const settled = await runBatchPlan(paths, env, ctx);
+    if (settled.every((r) => r.status === "fulfilled")) {
+      await putBatch(planKey, JSON.stringify({ results: settled }), env);
+    }
+  } catch (err) {
+    console.log("[batch] background refresh failed: " + (err && err.message));
+  }
+}
+__name(refreshBatch, "refreshBatch");
 async function handleTmdbBatch(request, env, ctx, url) {
   let paths;
   try {
@@ -2895,34 +3155,27 @@ async function handleTmdbBatch(request, env, ctx, url) {
     await crypto.subtle.digest("SHA-256", TE.encode(paths.join("\n")))
   ).slice(0, 32);
   if (env.TMDB_CACHE) {
-    const cached = await env.TMDB_CACHE.get(planKey);
-    if (cached) {
-      return new Response(cached, {
+    const hit = await env.TMDB_CACHE.getWithMetadata(planKey, { type: "text", cacheTtl: 60 });
+    if (hit && hit.value) {
+      const storedAt = hit.metadata && hit.metadata.t;
+      const fresh = !storedAt || Date.now() - storedAt < BATCH_CACHE_TTL * 1e3;
+      if (!fresh) ctx.waitUntil(refreshBatch(paths, planKey, env, ctx));
+      return new Response(hit.value, {
         status: 200,
         headers: {
           "content-type": "application/json",
-          "x-cache": "HIT",
+          "x-cache": fresh ? "HIT" : "STALE",
           "x-batch-size": String(paths.length),
           "cache-control": "no-store"
         }
       });
     }
   }
-  const settled = await Promise.all(paths.map(async (path) => {
-    try {
-      const result = await fetchTmdbJson(path, env, ctx);
-      if (result.status !== 200) {
-        return { status: "rejected", reason: `TMDB responded ${result.status}` };
-      }
-      return { status: "fulfilled", value: JSON.parse(result.text) };
-    } catch (err) {
-      return { status: "rejected", reason: err.message };
-    }
-  }));
+  const settled = await runBatchPlan(paths, env, ctx);
   const body = JSON.stringify({ results: settled });
   const allOk = settled.every((r) => r.status === "fulfilled");
   if (env.TMDB_CACHE && allOk) {
-    ctx.waitUntil(env.TMDB_CACHE.put(planKey, body, { expirationTtl: BATCH_CACHE_TTL }));
+    ctx.waitUntil(putBatch(planKey, body, env));
   }
   return new Response(body, {
     status: 200,
@@ -2978,9 +3231,9 @@ async function routeApi(request, env, ctx, url) {
 }
 __name(routeApi, "routeApi");
 var SSR_DETAIL_CACHE = "public, max-age=1800, s-maxage=86400, stale-while-revalidate=604800";
-var SSR_CATEGORY_CACHE = "public, max-age=900, s-maxage=21600, stale-while-revalidate=86400";
+var SSR_CATEGORY_CACHE = "public, max-age=1800, s-maxage=86400, stale-while-revalidate=604800";
 var SSR_WATCH_CACHE = "public, max-age=300, s-maxage=900";
-var SSR_DETAIL_APPEND = "credits,similar,recommendations,videos,watch/providers,release_dates,content_ratings";
+var SSR_DETAIL_APPEND = "credits,similar,recommendations,videos,watch/providers";
 function ssrTmdb(env, ctx) {
   return async (apiPath, params) => {
     const query = new URLSearchParams(params || {}).toString();
@@ -3093,12 +3346,244 @@ async function ssrWatchPage(kind, rawSlug, url, env, ctx) {
   return ssrHtml(html, SSR_WATCH_CACHE, "noindex, follow");
 }
 __name(ssrWatchPage, "ssrWatchPage");
+var SITEMAP_KV_TTL = 86400;
+var SITEMAP_CHUNK = 2e3;
+var SITEMAP_LIVE_PAGES = 3;
+var SITEMAP_CATALOG_KV_KEY = "sitemap:catalog";
+var sitemapItemsKvKey = /* @__PURE__ */ __name((kind) => "sitemap:items:" + kind, "sitemapItemsKvKey");
+var SITEMAP_CACHE = "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800";
+var SSR_BROWSE_CACHE = "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800";
+var SITEMAP_MEMO_MS = 3e5;
+var sitemapMemo = /* @__PURE__ */ new WeakMap();
+function sitemapMemoFor(env) {
+  if (!env || typeof env !== "object") return null;
+  let byKind = sitemapMemo.get(env);
+  if (!byKind) {
+    byKind = /* @__PURE__ */ new Map();
+    sitemapMemo.set(env, byKind);
+  }
+  return byKind;
+}
+__name(sitemapMemoFor, "sitemapMemoFor");
+function seoStore(env) {
+  return env && (env.SEO_CACHE || env.TMDB_CACHE) || null;
+}
+__name(seoStore, "seoStore");
+function xmlResponse(xml, cacheControl) {
+  return new Response(xml, {
+    status: 200,
+    headers: {
+      "content-type": "application/xml; charset=utf-8",
+      "cache-control": cacheControl || SITEMAP_CACHE
+    }
+  });
+}
+__name(xmlResponse, "xmlResponse");
+async function assetJson(pathname, env) {
+  if (!env || !env.ASSETS || typeof env.ASSETS.fetch !== "function") return null;
+  try {
+    const res = await env.ASSETS.fetch(new Request(import_seo_ssr.default.SITE_URL + pathname));
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    return null;
+  }
+}
+__name(assetJson, "assetJson");
+async function collectionsCatalogItems(kind, env) {
+  const data = await assetJson("/collections-catalog.json", env);
+  const universes = data && data.universes || {};
+  const out = [];
+  for (const key of Object.keys(universes)) {
+    const universe = universes[key] || {};
+    const list = (kind === "tv" ? universe.tv : universe.movies) || [];
+    for (const item of list) if (item && item.id) out.push(item);
+  }
+  return out;
+}
+__name(collectionsCatalogItems, "collectionsCatalogItems");
+async function getSitemapItems(kind, env, ctx) {
+  const wanted = kind === "tv" ? "tv" : "movie";
+  const memoStore = sitemapMemoFor(env);
+  const memo = memoStore && memoStore.get(wanted);
+  if (memo && memo.expires > Date.now()) return memo.value;
+  const store = seoStore(env);
+  let result = null;
+  if (store) {
+    try {
+      const raw = await store.get(SITEMAP_CATALOG_KV_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      const items = parsed && Array.isArray(parsed[wanted]) ? parsed[wanted] : null;
+      if (items && items.length) {
+        const generated = String(parsed && parsed.generated || "").slice(0, 10);
+        result = {
+          items,
+          generated: /^\d{4}-\d{2}-\d{2}$/.test(generated) ? generated : import_seo_ssr.default.SITEMAP_FALLBACK_DATE,
+          source: "kv-catalog"
+        };
+      }
+    } catch (err) {
+      console.warn("[ssr] sitemap catalogue unreadable:", err && err.message);
+    }
+  }
+  if (!result && store) {
+    try {
+      const raw = await store.get(sitemapItemsKvKey(wanted));
+      const items = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(items) && items.length) {
+        result = { items, generated: import_seo_ssr.default.SITEMAP_FALLBACK_DATE, source: "kv-live" };
+      }
+    } catch (err) {
+      console.warn("[ssr] sitemap live cache unreadable:", err && err.message);
+    }
+  }
+  if (!result) {
+    let items = [];
+    try {
+      items = await import_seo_ssr.default.collectSitemapItems(ssrTmdb(env, ctx), wanted, SITEMAP_LIVE_PAGES);
+    } catch (err) {
+      console.warn("[ssr] sitemap " + wanted + " live build failed:", err && err.message);
+    }
+    const seen = new Set(items.map((item) => String(item && item.id)));
+    for (const item of await collectionsCatalogItems(wanted, env)) {
+      if (!seen.has(String(item.id))) {
+        seen.add(String(item.id));
+        items.push(item);
+      }
+    }
+    result = { items, generated: import_seo_ssr.default.SITEMAP_FALLBACK_DATE, source: "live" };
+    if (store && items.length && ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(store.put(
+        sitemapItemsKvKey(wanted),
+        JSON.stringify(items),
+        { expirationTtl: SITEMAP_KV_TTL }
+      ));
+    }
+  }
+  if (memoStore) {
+    memoStore.set(wanted, { expires: Date.now() + SITEMAP_MEMO_MS, value: result });
+  }
+  return result;
+}
+__name(getSitemapItems, "getSitemapItems");
+function sitemapShardPaths(kind, count) {
+  const plural = kind === "tv" ? "tv" : "movies";
+  const first = "/sitemap-" + plural + ".xml";
+  if (!count) return [first];
+  const shards = Math.ceil(count / SITEMAP_CHUNK);
+  const out = [first];
+  for (let i = 2; i <= shards; i++) out.push("/sitemap-" + plural + "-" + i + ".xml");
+  return out;
+}
+__name(sitemapShardPaths, "sitemapShardPaths");
+async function buildSitemapIndexXml(env, ctx) {
+  const [movie, tv] = await Promise.all([
+    getSitemapItems("movie", env, ctx),
+    getSitemapItems("tv", env, ctx)
+  ]);
+  const lastmod = movie.generated || tv.generated || import_seo_ssr.default.SITEMAP_FALLBACK_DATE;
+  const children = ["/sitemap-static.xml", "/sitemap-browse.xml"].concat(sitemapShardPaths("movie", movie.items.length)).concat(sitemapShardPaths("tv", tv.items.length));
+  return '<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + children.map((child) => "<sitemap><loc>" + import_seo_ssr.default.escXml(import_seo_ssr.default.SITE_URL + child) + "</loc><lastmod>" + import_seo_ssr.default.escXml(lastmod) + "</lastmod></sitemap>").join("\n") + "\n</sitemapindex>\n";
+}
+__name(buildSitemapIndexXml, "buildSitemapIndexXml");
+async function serveMediaSitemap(kind, chunkStr, env, ctx) {
+  const { items } = await getSitemapItems(kind, env, ctx);
+  if (!items.length) {
+    return new Response(null, {
+      status: 503,
+      headers: { "retry-after": "3600", "cache-control": "no-store" }
+    });
+  }
+  const shards = Math.max(1, Math.ceil(items.length / SITEMAP_CHUNK));
+  const index = chunkStr === void 0 || chunkStr === null || chunkStr === "" ? 1 : parseInt(chunkStr, 10);
+  if (!Number.isFinite(index) || index < 1 || index > shards) {
+    return new Response(null, { status: 404, headers: { "cache-control": "no-store" } });
+  }
+  const slice = shards > 1 ? items.slice((index - 1) * SITEMAP_CHUNK, index * SITEMAP_CHUNK) : items;
+  return xmlResponse(import_seo_ssr.default.buildMediaSitemap(slice, kind));
+}
+__name(serveMediaSitemap, "serveMediaSitemap");
+async function browseEntries(env, ctx) {
+  const store = seoStore(env);
+  if (store) {
+    try {
+      const raw = await store.get(SITEMAP_CATALOG_KV_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const movies = Array.isArray(parsed.movie) ? parsed.movie : [];
+        const tv2 = Array.isArray(parsed.tv) ? parsed.tv : [];
+        return movies.map((m) => Object.assign({ media_type: "movie" }, m)).concat(tv2.map((t) => Object.assign({ media_type: "tv" }, t)));
+      }
+    } catch (err) {
+      console.warn("[ssr] browseEntries catalog fallback:", err && err.message);
+    }
+  }
+  const [movie, tv] = await Promise.all([
+    getSitemapItems("movie", env, ctx),
+    getSitemapItems("tv", env, ctx)
+  ]);
+  return movie.items.map((m) => Object.assign({ media_type: "movie" }, m)).concat(tv.items.map((t) => Object.assign({ media_type: "tv" }, t)));
+}
+__name(browseEntries, "browseEntries");
+function browseHtml(html) {
+  return ssrHtml(html, SSR_BROWSE_CACHE, "index, follow");
+}
+__name(browseHtml, "browseHtml");
+async function serveBrowseIndex(env, ctx) {
+  const all = await browseEntries(env, ctx);
+  if (!all.length) return null;
+  const counts = {};
+  for (const entry of all) {
+    const letter = import_seo_ssr.default.browseLetterOf(ssrTitleOf(entry));
+    counts[letter] = (counts[letter] || 0) + 1;
+  }
+  return browseHtml(import_seo_ssr.default.renderBrowseIndexPage(counts));
+}
+__name(serveBrowseIndex, "serveBrowseIndex");
+async function serveBrowseLetter(letter, url, env, ctx) {
+  if (import_seo_ssr.default.BROWSE_LETTERS.indexOf(letter) === -1) return null;
+  const all = await browseEntries(env, ctx);
+  if (!all.length) return null;
+  const entries = all.filter((entry) => import_seo_ssr.default.browseLetterOf(ssrTitleOf(entry)) === letter).sort((a, b) => ssrTitleOf(a).localeCompare(ssrTitleOf(b), "en"));
+  const perPage = import_seo_ssr.default.BROWSE_PER_PAGE;
+  const totalPages = Math.max(1, Math.ceil(entries.length / perPage));
+  let page = parseInt(url.searchParams.get("page"), 10);
+  if (!Number.isFinite(page) || page < 1) page = 1;
+  if (page > totalPages) return ssrRedirect("/browse/" + letter, SSR_BROWSE_CACHE);
+  const slice = entries.slice((page - 1) * perPage, page * perPage);
+  return browseHtml(import_seo_ssr.default.renderBrowseLetterPage(letter, slice, page, totalPages));
+}
+__name(serveBrowseLetter, "serveBrowseLetter");
 async function ssrResponse(request, env, ctx, url) {
   if (request.method !== "GET" && request.method !== "HEAD") return null;
   const pathname = url.pathname.length > 1 ? url.pathname.replace(/\/+$/, "") : url.pathname;
   if (pathname === "/" || pathname === "") return null;
   if (pathname === "/movies") return ssrRedirect("/movies/popular", SSR_CATEGORY_CACHE);
   if (pathname === "/series") return ssrRedirect("/series/web-series", SSR_CATEGORY_CACHE);
+  if (pathname === "/sitemap.xml") {
+    return xmlResponse(await buildSitemapIndexXml(env, ctx));
+  }
+  if (pathname === "/sitemap-static.xml") return xmlResponse(import_seo_ssr.default.buildStaticSitemap());
+  if (pathname === "/sitemap-browse.xml") return xmlResponse(import_seo_ssr.default.buildBrowseSitemap());
+  const mediaSitemap = /^\/sitemap-(movies|tv)(?:-(\d+))?\.xml$/.exec(pathname);
+  if (mediaSitemap) {
+    return serveMediaSitemap(
+      mediaSitemap[1] === "tv" ? "tv" : "movie",
+      mediaSitemap[2],
+      env,
+      ctx
+    );
+  }
+  if (pathname === "/browse") return serveBrowseIndex(env, ctx);
+  const browseLetter = /^\/browse\/([^/]+)$/.exec(pathname);
+  if (browseLetter) {
+    return serveBrowseLetter(
+      decodeURIComponent(browseLetter[1]).toLowerCase(),
+      url,
+      env,
+      ctx
+    );
+  }
   const category = /^\/(movies|series)\/([^/]+)$/.exec(pathname);
   if (category) {
     return ssrCategoryPage(category[1], decodeURIComponent(category[2]), url, env, ctx);
@@ -3120,28 +3605,57 @@ var worker_default = {
     if (url.hostname === "www.moviezone.dev") {
       return Response.redirect(`https://moviezone.dev${url.pathname}${url.search}`, 301);
     }
+    const edgeCache = caches.default;
+    if (request.method === "GET") {
+      const cached = await edgeCache.match(request);
+      if (cached) return cached;
+    }
     const apiResponse = await routeApi(request, env, ctx, url);
-    if (apiResponse) return apiResponse;
+    if (apiResponse) {
+      if (request.method === "GET" && apiResponse.status === 200 && url.pathname.startsWith("/api/tmdb/") && !url.pathname.includes("/batch") && apiResponse.headers.get("x-cache") !== "STALE") {
+        ctx.waitUntil(edgeCache.put(request, apiResponse.clone()));
+      }
+      return apiResponse;
+    }
     let ssr = null;
     try {
       ssr = await ssrResponse(request, env, ctx, url);
     } catch (err) {
       console.error("[ssr] " + url.pathname + " failed:", err && err.stack);
     }
-    if (ssr) return ssr;
+    if (ssr) {
+      if (ssr.status === 200) {
+        ctx.waitUntil(edgeCache.put(request, ssr.clone()));
+      }
+      return ssr;
+    }
     const assetResponse = await env.ASSETS.fetch(request);
     const newHeaders = new Headers(assetResponse.headers);
     newHeaders.set("X-Content-Type-Options", "nosniff");
     newHeaders.set("X-Frame-Options", "SAMEORIGIN");
     newHeaders.set("Referrer-Policy", "strict-origin-when-cross-origin");
-    if (url.pathname.endsWith(".html") || url.pathname === "/") {
-      newHeaders.set("Cache-Control", "public, max-age=3600");
+    const path = url.pathname;
+    if (path === "/sw.js") {
+      newHeaders.set("Cache-Control", "no-cache, no-store, must-revalidate");
+      newHeaders.set("Service-Worker-Allowed", "/");
+    } else if (path === "/manifest.json" || path === "/manifest.webmanifest") {
+      newHeaders.set("Cache-Control", "public, max-age=0, must-revalidate");
+    } else if (/\.(js|css|woff2|woff|png|jpg|jpeg|webp|avif|svg|ico)$/.test(path)) {
+      const stable = url.searchParams.has("v") || path.startsWith("/fonts/");
+      newHeaders.set("Cache-Control", stable ? "public, max-age=31536000, immutable" : "public, max-age=2592000, immutable");
+    } else if (path.endsWith(".html") || path === "/") {
+      newHeaders.set("Cache-Control", "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400");
+      newHeaders.append("Link", "<https://image.tmdb.org>; rel=preconnect");
     }
-    return new Response(assetResponse.body, {
+    const finalResponse = new Response(assetResponse.body, {
       status: assetResponse.status,
       statusText: assetResponse.statusText,
       headers: newHeaders
     });
+    if (request.method === "GET" && finalResponse.status === 200 && path !== "/sw.js") {
+      ctx.waitUntil(edgeCache.put(request, finalResponse.clone()));
+    }
+    return finalResponse;
   },
   async scheduled(event, env, ctx) {
     ctx.waitUntil(processDueNotifications(env).then(
@@ -3150,24 +3664,39 @@ var worker_default = {
     ));
   }
 };
+function pushLimits() {
+  return { RECORD_SIZE, MAX_BATCH_PATHS };
+}
+__name(pushLimits, "pushLimits");
+function seoLimits() {
+  return { SITEMAP_CHUNK, SITEMAP_KV_TTL, SITEMAP_LIVE_PAGES };
+}
+__name(seoLimits, "seoLimits");
 export {
-  MAX_BATCH_PATHS,
-  RECORD_SIZE,
   b64urlToBytes,
+  buildSitemapIndexXml,
   bytesToB64url,
   concatBytes,
   worker_default as default,
   encryptPushPayload,
   endpointId,
+  getSitemapItems,
   hkdf,
   importVapidSigningKey,
   isCalendarDate,
   processDueNotifications,
+  pushLimits,
   routeApi,
   safeNotifyUrl,
   sendPushToSubscription,
+  seoLimits,
+  serveBrowseIndex,
+  serveBrowseLetter,
+  serveMediaSitemap,
+  sitemapShardPaths,
   ssrResponse,
   validBatchPath,
-  vapidAuthorization
+  vapidAuthorization,
+  xmlResponse
 };
 //# sourceMappingURL=worker.js.map

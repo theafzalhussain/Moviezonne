@@ -592,9 +592,19 @@
       if (document.activeElement !== el) return; // moved on already
       el.setAttribute('data-mztv-prefetched', '1');
       try {
-        // Synthetic, so it never affects :hover styling — it only triggers the
-        // prefetch listener moviezone.js attached to each card.
-        el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false, cancelable: false }));
+        /*  `mouseover`, bubbling, not `mouseenter`.
+         *
+         *  moviezone.js used to attach a prefetch listener to every card; it now
+         *  delegates from the grid container instead (1200 listeners were a
+         *  measured regression), and it listens for `mouseover` and `focusin`.
+         *  A `mouseenter` with bubbles:false reaches nothing under delegation, so
+         *  this dwell throttle had quietly become a no-op — the prefetch still
+         *  happened on TV, but instantly via focusin, which is exactly the
+         *  behaviour the 650-900ms rest was added to prevent while the user
+         *  D-pads across a row.
+         *
+         *  Still synthetic, so it never affects :hover styling. */
+        el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: false }));
       } catch (err) {}
     }, PREFETCH_REST_MS);
   }

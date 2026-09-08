@@ -57,11 +57,22 @@ function equal(label, actual, expected) {
 /** A KV namespace with just enough behaviour for the sitemap paths. */
 function fakeKV(seed = {}) {
   const data = new Map(Object.entries(seed));
+  const meta = new Map();
   return {
     data,
     async get(key) { return data.has(key) ? data.get(key) : null; },
-    async put(key, value) { data.set(key, String(value)); return undefined; },
-    async delete(key) { data.delete(key); },
+    // Mirrors the real binding: the TMDB cache stores its write timestamp in
+    // metadata so a stale entry can be served and refreshed behind the response.
+    async getWithMetadata(key) {
+      if (!data.has(key)) return { value: null, metadata: null };
+      return { value: data.get(key), metadata: meta.has(key) ? meta.get(key) : null };
+    },
+    async put(key, value, options) {
+      data.set(key, String(value));
+      if (options && options.metadata) meta.set(key, options.metadata);
+      return undefined;
+    },
+    async delete(key) { data.delete(key); meta.delete(key); },
     async list() { return { keys: [...data.keys()].map((name) => ({ name })), list_complete: true }; }
   };
 }

@@ -344,6 +344,77 @@ const GENRE_MAP = {
 };
  
 let allMovies = [];
+
+/*  ══════════════════════════════════════════════════════════════════════
+ *  ONE POOL PER CATEGORY, KEPT FOR THE SESSION
+ *  ══════════════════════════════════════════════════════════════════════
+ *  loadMovies() cleared allMovies and wiped the grid to skeletons on every
+ *  category change, so Trending → Horror → Trending rebuilt Trending's ~200-title
+ *  pool from nothing: 16 responses re-read out of localStorage and JSON.parsed,
+ *  deduped, rankByFreshness'd, diversified, interleaved and re-rendered. Not one
+ *  byte crossed the network — every response was already cached — and the user
+ *  still watched a skeleton flash and got dropped back onto page 1 of a feed they
+ *  had scrolled four pages into.
+ *
+ *  The finished pool is now kept, so returning to a category is a slice and a
+ *  render: no fetch, no parse, no re-rank, no skeleton, and the page position is
+ *  where the user left it.
+ *
+ *  ── WHY THIS DOES NOT GO STALE ──
+ *  The pool is a *ranked view* of responses that are themselves cached for 3h
+ *  (discovery lists) to 12h (per-title records), so re-ranking sooner than the
+ *  data underneath can change would produce an identical list at full CPU cost.
+ *  15 minutes is short enough that a release landing mid-session still surfaces
+ *  on the next visit to the tab, and long enough to cover the tab-hopping this
+ *  exists for.
+ *
+ *  ── MEMORY ──
+ *  Entries hold REFERENCES to the same objects tmdbCache already holds, so a
+ *  pool costs ~200 array slots, not ~200 movie records. The cap is there to
+ *  bound the map itself, not the payload; oldest-first because the most recently
+ *  used categories are the ones worth keeping.
+ */
+const _mzFeedPools = new Map();
+const MZ_POOL_FRESH_MS = 15 * 60 * 1000;
+const MZ_POOL_MAX = 14;
+
+/*  Sub-filters are separate pools, not variants of one.
+ *
+ *  Anime's mode, Cartoons' mode and a platform's All/Movies/Web-Series chip each
+ *  produce a genuinely different list from the same category name. Keying on the
+ *  name alone would hand the user the previous mode's grid. */
+function _mzPoolKey(cat) {
+  if (cat === 'anime') return 'anime|' + currentAnimeMode;
+  if (cat === 'kids') return 'kids|' + currentCartoonMode;
+  if (OTT[cat]) return cat + '|' + currentOttMode;
+  return cat;
+}
+
+/** The usable pool for this category, or null if there is none worth reusing. */
+function _mzReadPool(cat) {
+  const pool = _mzFeedPools.get(_mzPoolKey(cat));
+  if (!pool || !pool.movies.length) return null;
+  if (Date.now() - pool.at >= MZ_POOL_FRESH_MS) return null;
+  return pool;
+}
+
+function _mzSavePool(cat) {
+  const key = _mzPoolKey(cat);
+  // Re-inserted rather than mutated so the Map's own iteration order stays
+  // least-recently-used first, which is what the eviction below relies on.
+  _mzFeedPools.delete(key);
+  _mzFeedPools.set(key, {
+    movies: allMovies,
+    page: mzFeedPage,
+    tmdbPage: currentMoviePage,
+    exhausted: mzFeedPoolExhausted,
+    at: Date.now()
+  });
+  while (_mzFeedPools.size > MZ_POOL_MAX) {
+    _mzFeedPools.delete(_mzFeedPools.keys().next().value);
+  }
+}
+
 let currentSlide = 0;
 let carouselMovies = [];
 let autoSlideTimer = null;
@@ -1730,6 +1801,7 @@ async function init() {
 
   setupInfiniteScroll();
   setupUpcomingInfiniteScroll();
+  ensureTabPrefetch();
 }
 
 function setupInfiniteScroll() {
@@ -4813,11 +4885,14 @@ const OTT = {
    *
    *  `catalogue` makes that explicit instead of leaving it to be discovered as
    *  an empty half-grid. buildOttModeQueries() reads it and builds the
-   *  single-type plan for 'all', which is the only mode the UI opens — so the
+   *  single-type plan for 'all', which is the mode a rail card opens on — so the
    *  73 and 67 cards above are what the rail card actually delivers. That is
    *  not cosmetic: without it a discovery+ click spent three of its six requests
    *  on movie pages that return one title between them, and the grid was then
    *  filled from three tv queries instead of the five the webseries plan uses.
+   *
+   *  ottModesFor() reads the same field, so these two platforms also do not get
+   *  offered a type chip that has nothing behind it.
    *
    *  ott-sections-check.js does not take this field on trust — it re-measures
    *  the missing side against TMDB and fails if a catalogue declared empty is
@@ -4866,14 +4941,38 @@ const LINEAR_TV_EXCLUDE_IDS = '71|105|70|118|194|2584|3294';
 // ══════════════════════════════════════════════════════════════════════════
 // OTT CONTENT MODE
 // ══════════════════════════════════════════════════════════════════════════
-/*  The All / Web Series / Movies chip bar is gone. A provider card now opens the
- *  platform's whole catalogue directly, so the sub-mode was an extra choice the
- *  user never asked to make. buildOttModeQueries() still accepts the three modes
- *  and the check suites still exercise 'webseries' and 'movies' against the live
- *  API — only the UI and the mutable state were removed. Hence a const: the mode
- *  can no longer be changed at runtime, but the name is preserved so the query
- *  plan and the prefetch keep reading the same thing. */
-const currentOttMode = 'all';
+/*  ── ALL / MOVIES / WEB SERIES SUB-TABS ──
+ *
+ *  A provider card opens the platform on `all`, i.e. the whole catalogue exactly
+ *  as it arrived before this bar existed. The two type chips then re-run the
+ *  plans buildOttModeQueries() has always had for 'movies' and 'webseries', so
+ *  every platform gets the same three views from the one query builder.
+ *
+ *  That is a REFETCH, not a client-side filter of the `all` pool, and the
+ *  difference is the point. The single-type plans spend the whole request budget
+ *  on one endpoint — five /discover/movie pages instead of two, plus the US
+ *  subscription page for the global platforms — so Netflix > Movies is a deep
+ *  film catalogue rather than whichever half of a mixed pool happens to be films.
+ *  It costs no extra requests either: ~6 per page in every mode.
+ *
+ *  Single-type platforms only get the chip that has something behind it. See
+ *  `catalogue` in the OTT table: discovery+ has 1 film for watch_region=IN and
+ *  ShemarooMe has 0 series, so offering the empty side would offer an empty grid.
+ */
+const OTT_MODES = [
+  { id: 'all',       label: 'All',        type: null    },
+  { id: 'movies',    label: 'Movies',     type: 'movie' },
+  { id: 'webseries', label: 'Web Series', type: 'tv'    }
+];
+let currentOttMode = 'all';
+
+/** The chips this platform can honestly offer. */
+function ottModesFor(key) {
+  const cfg = OTT[key];
+  if (!cfg) return [];
+  if (!cfg.catalogue) return OTT_MODES;
+  return OTT_MODES.filter(m => !m.type || m.type === cfg.catalogue);
+}
 
 /*  ══════════════════════════════════════════════════════════════════════
  *  PLATFORM ACCURACY RULES — why every query below is provider-filtered
@@ -5355,117 +5454,322 @@ async function fetchOttMovies(key, mode, page) {
 function updateOttHeading(cat) {
   const h = document.getElementById('sectionHeading');
   if (!h) return;
-  // One mode only now, so no " • WEB SERIES" suffix to append.
-  h.textContent = CAT_HEADINGS[cat] || cat.toUpperCase();
+  const base = CAT_HEADINGS[cat] || cat.toUpperCase();
+  const mode = OTT_MODES.find(m => m.id === currentOttMode);
+  h.textContent = (mode && mode.id !== 'all') ? base + ' • ' + mode.label.toUpperCase() : base;
+}
+
+/*  ── OTT SUB-FILTER BAR (All / Movies / Web Series) ──
+ *
+ *  Same host and geometry as the anime and cartoon bars: injected once, right
+ *  after #catTabs, so the chips sit under the category strip and above the grid.
+ *  It reuses .anime-chip so there is one chip style to maintain rather than
+ *  three, with .ott-filter-bar carrying only the colour difference.
+ *
+ *  Only one of the three sub-bars is ever visible, because filterCat() hides the
+ *  other two on every category change.
+ */
+function renderOttFilterBar(cat) {
+  const catTabs = document.getElementById('catTabs');
+  if (!catTabs) return;
+  let bar = document.getElementById('ottFilterBar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'ottFilterBar';
+    bar.className = 'anime-filter-bar ott-filter-bar';
+    bar.setAttribute('role', 'tablist');
+    bar.setAttribute('aria-label', 'Platform content type');
+    catTabs.insertAdjacentElement('afterend', bar);
+  }
+  const modes = ottModesFor(cat);
+  //  Fewer than two chips means there is nothing to choose between — a
+  //  single-type platform, where "All" and its one type are the same grid.
+  if (modes.length < 2) { bar.style.display = 'none'; return; }
+  bar.innerHTML = modes.map(m => {
+    const active = m.id === currentOttMode;
+    return '<button type="button" class="anime-chip ott-chip' + (active ? ' active' : '') +
+      '" role="tab" tabindex="0" aria-selected="' + active +
+      '" onclick="setOttMode(\'' + m.id + '\')">' + m.label + '</button>';
+  }).join('');
+  bar.style.display = 'flex';
+}
+
+function hideOttFilterBar() {
+  const bar = document.getElementById('ottFilterBar');
+  if (bar) bar.style.display = 'none';
+}
+
+/*  Switching type is a different pool, so loadMovies() is called WITHOUT
+ *  isLoadMore: that clears allMovies and resets the pager to page 1. Without the
+ *  reset the user would land on page 4 of a catalogue that may not have four
+ *  pages, and the pool would hold both types at once.
+ *
+ *  The category comes from mzFeedPagerCategory rather than a captured argument,
+ *  for the same reason currentFeedCategory() prefers it: a platform has no
+ *  .cat-tab, so that variable is the only authoritative record of what is open.
+ */
+function setOttMode(mode) {
+  const cat = mzFeedPagerCategory;
+  if (!OTT[cat]) return;
+  if (!ottModesFor(cat).some(m => m.id === mode)) mode = 'all';
+  if (mode === currentOttMode) return;
+  currentOttMode = mode;
+  renderOttFilterBar(cat);
+  updateOttHeading(cat);
+  loadMovies(cat);
+}
+
+/*  ══════════════════════════════════════════════════════════════════════
+ *  ONE PLAN PER CATEGORY, IN ONE PLACE
+ *  ══════════════════════════════════════════════════════════════════════
+ *  The set of TMDB sources a category needs used to be written out twice: once
+ *  inside loadMovies() as Promise.all([tmdb(...), ...]) and once here as a
+ *  fire-and-forget prefetch. Two copies drift, and both had — `dubbed`
+ *  prefetched four sources while loadMovies asked for five, so its second
+ *  English page was never actually warm, and the ALL plan was ordered
+ *  differently in the two places.
+ *
+ *  One builder now returns the endpoint+params pairs, and three callers use it:
+ *
+ *    • loadMovies() sends the whole plan to /api/tmdb/batch as ONE request.
+ *      Only the ALL feed was batched before; every other tab issued 2-8
+ *      individual requests through the 8-lane concurrency gate, and on mobile
+ *      each lane-round costs a full radio round-trip before a card can paint.
+ *    • prefetchMoviesPage() warms the next page — also one request now, instead
+ *      of spending up to 16 of the 30-per-10s rate budget on individual calls.
+ *    • _mzPrefetchCategory() warms a tab on hover/touch, which is only possible
+ *      at all because a plan is now addressable by category name.
+ *
+ *  ── ORDER AND KEY ORDER ARE BOTH LOAD-BEARING ──
+ *  _mzTmdbUrl() builds the cache key with Object.entries(params), so the
+ *  INSERTION ORDER of every params object decides the URL and therefore the
+ *  cache key. The orders here are the ones the old call sites used, character
+ *  for character; changing one silently orphans every cached copy of it.
+ *  Array order matters too — see TV_SOURCE_FROM in loadMovies.
+ *
+ *  Returns null for the categories that own their own fan-out (the OTT
+ *  platforms, which prime through _ottPrimeBatch and are deliberately never
+ *  speculatively warmed).
+ */
+function _mzCatPlan(cat, pageNum) {
+  const pageStr = String(pageNum);
+  const p1 = String(pageNum * 2 - 1);
+  const p2 = String(pageNum * 2);
+  const L = 'en-US';
+  const POP = 'popularity.desc';
+
+  if (cat === 'all') {
+    // NETFLIX-STYLE DISCOVERY: diverse sources for maximum content freshness.
+    //   • LATEST WINDOWS — the most popular movies (last ~5 weeks), web series
+    //     (~6 weeks) and anime seasons (~2 months), so whatever just released is
+    //     in the pool rather than whatever /movie/popular happens to return.
+    //   • INDUSTRY WINDOWS — the same window per industry, because a single
+    //     global popularity sort is always won by Hollywood.
+    //   • PRINT-UPGRADE WINDOWS — the cohorts that just crossed a real print
+    //     stage, so a four-month-old film whose HD print just dropped can
+    //     surface at all.
+    return [
+      ['/movie/now_playing', { language: L, page: pageStr }],
+      ['/trending/movie/week', { language: L, page: pageStr }],
+      ['/trending/movie/day', { language: L, page: pageStr }],
+      ['/movie/popular', { language: L, page: pageStr }],
+      ['/discover/movie', { with_original_language: 'ko', sort_by: POP, page: pageStr, language: L }],
+      ['/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: POP, page: pageStr, language: L }],
+      ['/discover/movie', latestWindowQuery(pageStr)],
+      ['/discover/movie', printUpgradeWindowQuery(pageStr)],
+      ['/discover/movie', latestIndianWindowQuery(pageStr)],
+      ['/discover/movie', latestBollywoodWindowQuery(pageStr)],
+      ['/discover/movie', indianUpgradeWindowQuery(pageStr)],
+      ['/discover/movie', indianCatalogueQuery(pageStr)],
+      // ── index 12 onward is TV; TV_SOURCE_FROM in loadMovies must match ──
+      ['/trending/tv/week', { language: L, page: pageStr }],
+      ['/discover/tv', latestSeriesWindowQuery(pageStr)],
+      ['/discover/tv', seriesUpgradeWindowQuery(pageStr)],
+      ['/discover/tv', latestAnimeWindowQuery(pageStr)]
+    ];
+  }
+
+  if (cat === 'tv') {
+    // Web series only: streaming networks in, traditional Indian TV channels out.
+    const N = STREAMING_NETWORK_IDS;
+    const X = LINEAR_TV_EXCLUDE_IDS;
+    return [
+      ['/discover/tv', { with_networks: N, without_networks: X, with_original_language: 'hi', sort_by: POP, page: pageStr, language: L }],
+      ['/discover/tv', { with_networks: N, without_networks: X, with_original_language: 'en', sort_by: POP, page: pageStr, language: L }],
+      ['/discover/tv', { with_networks: N, without_networks: X, with_original_language: 'ko', sort_by: POP, page: pageStr, language: L }],
+      ['/discover/tv', { with_networks: N, without_networks: X, sort_by: POP, page: pageStr, language: L }]
+    ];
+  }
+
+  if (cat === 'hollywood') {
+    return [
+      ['/discover/movie', { with_original_language: 'en', sort_by: POP, language: L, page: p1 }],
+      ['/discover/movie', { with_original_language: 'en', sort_by: POP, language: L, page: p2 }]
+    ];
+  }
+
+  // Both engines own their own source lists; the plan is taken from the very
+  // same builder they use so the cache keys match byte for byte.
+  if (cat === 'kids') return buildCartoonQueries(currentCartoonMode, pageNum).map(q => [q.endpoint, q.params]);
+  if (cat === 'anime') return buildAnimeQueries(currentAnimeMode, pageNum).map(q => [q.endpoint, q.params]);
+
+  if (cat === 'horror') {
+    return [
+      ['/discover/movie', { with_genres: '27', sort_by: POP, page: p1, language: L }],                                 // Global
+      ['/discover/movie', { with_genres: '27', with_original_language: 'hi', sort_by: POP, page: p1, language: L }],   // Bollywood
+      ['/discover/movie', { with_genres: '27', with_original_language: 'ta', sort_by: POP, page: p1, language: L }],   // Tamil
+      ['/discover/movie', { with_genres: '27', with_original_language: 'te', sort_by: POP, page: p1, language: L }]    // Telugu
+    ];
+  }
+
+  if (cat === 'dubbed') {
+    // Hindi-dubbed ki supply Hollywood + Tamil + Telugu + Japanese anime se aati
+    // hai, so those are the four industries worth asking for.
+    return [
+      ['/discover/movie', { with_original_language: 'en', sort_by: POP, language: L, page: p1 }],
+      ['/discover/movie', { with_original_language: 'en', sort_by: POP, language: L, page: p2 }],
+      ['/discover/movie', { with_original_language: 'ta', sort_by: POP, language: L, page: p1 }],
+      ['/discover/movie', { with_original_language: 'te', sort_by: POP, language: L, page: p1 }],
+      ['/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: POP, language: L, page: p1 }]
+    ];
+  }
+
+  if (cat === 'adult') {
+    const KW = '9799|195669|156321';
+    const NO_MOVIE = '16,10751,28,12,35,878';
+    return [
+      ['/discover/movie', { include_adult: 'true', with_keywords: KW, without_genres: NO_MOVIE, sort_by: POP, page: p1, language: L }],
+      ['/discover/tv', { include_adult: 'true', with_keywords: KW, without_genres: '16,10751,10759,10762,35', sort_by: POP, page: p1, language: L }],
+      ['/discover/movie', { include_adult: 'true', with_keywords: KW, with_original_language: 'hi', without_genres: NO_MOVIE, sort_by: POP, page: p1, language: L }],
+      ['/discover/movie', { include_adult: 'true', with_keywords: KW, with_original_language: 'ta', without_genres: NO_MOVIE, sort_by: POP, page: p1, language: L }],
+      ['/discover/movie', { include_adult: 'true', with_keywords: KW, with_original_language: 'te', without_genres: NO_MOVIE, sort_by: POP, page: p1, language: L }],
+      ['/discover/movie', { include_adult: 'true', certification_country: 'US', certification: 'NC-17', sort_by: POP, page: p1, language: L }]
+    ];
+  }
+
+  if (cat === 'trending') {
+    return [
+      ['/trending/movie/week', { language: L, page: p1 }],
+      ['/trending/movie/day', { language: L, page: pageStr }],
+      ['/trending/tv/week', { language: L, page: pageStr }],
+      ['/discover/movie', { with_original_language: 'hi', sort_by: POP, 'vote_count.gte': '50', page: pageStr, language: L }]
+    ];
+  }
+
+  if (cat === 'uhd4k') {
+    /*  In this app "quality" is decided by release date: a title 240+ days old
+     *  with a real rating cannot still be a CAM/TS print. Eight languages so the
+     *  round-robin below has something to mix. */
+    const uhdCutoff = new Date(Date.now() - 240 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const B = { sort_by: POP, 'primary_release_date.lte': uhdCutoff, 'vote_average.gte': '7', language: L };
+    return [
+      ['/discover/movie', Object.assign({}, B, { with_original_language: 'en', 'vote_count.gte': '300', page: p1 })],
+      ['/discover/movie', Object.assign({}, B, { with_original_language: 'en', 'vote_count.gte': '300', page: p2 })],
+      ['/discover/movie', Object.assign({}, B, { with_original_language: 'hi', 'vote_count.gte': '40', page: p1 })],
+      ['/discover/movie', Object.assign({}, B, { with_original_language: 'hi', 'vote_count.gte': '40', page: p2 })],
+      ['/discover/movie', Object.assign({}, B, { with_original_language: 'te', 'vote_count.gte': '30', page: p1 })],
+      ['/discover/movie', Object.assign({}, B, { with_original_language: 'ta', 'vote_count.gte': '30', page: p1 })],
+      ['/discover/movie', Object.assign({}, B, { with_original_language: 'ko', 'vote_count.gte': '60', page: p1 })],
+      ['/discover/movie', Object.assign({}, B, { with_original_language: 'ml', 'vote_count.gte': '25', page: p1 })]
+    ];
+  }
+
+  if (cat === 'toprated') {
+    return [
+      ['/movie/top_rated', { language: L, page: p1 }],
+      ['/movie/top_rated', { language: L, page: p2 }],
+      ['/discover/movie', { with_original_language: 'hi', sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: p1, language: L }],
+      ['/discover/tv', { sort_by: 'vote_average.desc', 'vote_count.gte': '300', page: p1, language: L }]
+    ];
+  }
+
+  if (cat === 'kdrama') {
+    return [
+      ['/discover/tv', { with_original_language: 'ko', sort_by: POP, page: p1, language: L }],
+      ['/discover/tv', { with_original_language: 'ko', sort_by: POP, page: p2, language: L }],
+      ['/discover/movie', { with_original_language: 'ko', sort_by: POP, page: p1, language: L }]
+    ];
+  }
+
+  /*  Platforms have no plan here on purpose.
+   *
+   *  fetchOttMovies() does its own two-stage prime (_ottPrimeBatch, then memory
+   *  reads) and ranks by platform relevance, and a platform page costs ~7
+   *  requests — spending those speculatively is what made the NEXT platform
+   *  click queue behind the previous one. Paging is unaffected: goToFeedPage()
+   *  serves any page already in the pool with no network at all. */
+  if (OTT[cat]) return null;
+
+  const base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: L });
+  return [
+    ['/discover/movie', Object.assign({}, base, { page: p1 })],
+    ['/discover/movie', Object.assign({}, base, { page: p2 })]
+  ];
 }
 
 // -- BACKGROUND PREFETCH HELPERS (For Instant "Load More") --
 function prefetchMoviesPage(cat, pageNum) {
-  const pageStr = String(pageNum);
-  const p1 = String(pageNum * 2 - 1);
-  const p2 = String(pageNum * 2);
-  if (cat === 'all') {
-    tmdb('/trending/movie/week', { language: 'en-US', page: pageStr });
-    tmdb('/trending/movie/day', { language: 'en-US', page: pageStr });
-    tmdb('/movie/popular', { language: 'en-US', page: pageStr });
-    tmdb('/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
-    tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
-    tmdb('/movie/now_playing', { language: 'en-US', page: pageStr });
-    // Same freshness windows loadMovies('all') uses — identical params so the
-    // prefetch actually warms the cache instead of missing it.
-    tmdb('/discover/movie', latestWindowQuery(pageStr));
-    tmdb('/discover/movie', printUpgradeWindowQuery(pageStr));
-    tmdb('/discover/movie', latestIndianWindowQuery(pageStr));
-    tmdb('/discover/movie', latestBollywoodWindowQuery(pageStr));
-    tmdb('/discover/movie', indianUpgradeWindowQuery(pageStr));
-    tmdb('/discover/movie', indianCatalogueQuery(pageStr));
-    tmdb('/trending/tv/week', { language: 'en-US', page: pageStr });
-    tmdb('/discover/tv', latestSeriesWindowQuery(pageStr));
-    tmdb('/discover/tv', seriesUpgradeWindowQuery(pageStr));
-    tmdb('/discover/tv', latestAnimeWindowQuery(pageStr));
-  } else if (cat === 'hollywood') {
-    tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p1 });
-    tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p2 });
-  } else if (cat === 'tv') {
-    const STREAMING_NETWORKS = STREAMING_NETWORK_IDS;
-    const TV_CHANNELS_TO_EXCLUDE = LINEAR_TV_EXCLUDE_IDS;
-    tmdb('/discover/tv', { with_networks: STREAMING_NETWORKS, without_networks: TV_CHANNELS_TO_EXCLUDE, with_original_language: 'hi', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
-    tmdb('/discover/tv', { with_networks: STREAMING_NETWORKS, without_networks: TV_CHANNELS_TO_EXCLUDE, with_original_language: 'en', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
-    tmdb('/discover/tv', { with_networks: STREAMING_NETWORKS, without_networks: TV_CHANNELS_TO_EXCLUDE, with_original_language: 'ko', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
-    tmdb('/discover/tv', { with_networks: STREAMING_NETWORKS, without_networks: TV_CHANNELS_TO_EXCLUDE, sort_by: 'popularity.desc', page: pageStr, language: 'en-US' });
-  } else if (cat === 'kids') {
-    // Cartoon engine ke active-mode sources chupke se warm kar do
-    buildCartoonQueries(currentCartoonMode, pageNum).forEach(q => tmdb(q.endpoint, q.params));
-  } else if (cat === 'anime') {
-    // Anime engine ke saare active-mode sources ko chupke se warm kar do
-    buildAnimeQueries(currentAnimeMode, pageNum).forEach(q => tmdb(q.endpoint, q.params));
-  } else if (cat === 'adult') {
-    tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799|195669|156321', without_genres: '16,10751,28,12,35,878', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-    tmdb('/discover/tv', { include_adult: 'true', with_keywords: '9799|195669|156321', without_genres: '16,10751,10759,10762,35', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-    tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799|195669|156321', with_original_language: 'hi', without_genres: '16,10751,28,12,35,878', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-    tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799|195669|156321', with_original_language: 'ta', without_genres: '16,10751,28,12,35,878', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-    tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799|195669|156321', with_original_language: 'te', without_genres: '16,10751,28,12,35,878', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-    tmdb('/discover/movie', { include_adult: 'true', certification_country: 'US', certification: 'NC-17', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-  } else if (cat === 'horror') {
-    tmdb('/discover/movie', { with_genres: '27', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-    tmdb('/discover/movie', { with_genres: '27', with_original_language: 'hi', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-    tmdb('/discover/movie', { with_genres: '27', with_original_language: 'ta', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-    tmdb('/discover/movie', { with_genres: '27', with_original_language: 'te', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-  } else if (cat === 'dubbed') {
-    tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p1 });
-    tmdb('/discover/movie', { with_original_language: 'ta', sort_by: 'popularity.desc', language: 'en-US', page: p1 });
-    tmdb('/discover/movie', { with_original_language: 'te', sort_by: 'popularity.desc', language: 'en-US', page: p1 });
-    tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', language: 'en-US', page: p1 });
-  
-  }
-  else if (cat === 'trending') {
-    tmdb('/trending/movie/week', { language: 'en-US', page: p1 });
-    tmdb('/trending/movie/day', { language: 'en-US', page: pageStr });
-    tmdb('/trending/tv/week', { language: 'en-US', page: pageStr });
-    tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', 'vote_count.gte': '50', page: pageStr, language: 'en-US' });
-  }
-  else if (cat === 'uhd4k') {
-    const uhdCutoff = new Date(Date.now() - 240 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    const uhdBase = { sort_by: 'popularity.desc', 'primary_release_date.lte': uhdCutoff, 'vote_average.gte': '7', language: 'en-US' };
-    tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'en', 'vote_count.gte': '300', page: p1 }));
-    tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'en', 'vote_count.gte': '300', page: p2 }));
-    tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'hi', 'vote_count.gte': '40', page: p1 }));
-    tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'hi', 'vote_count.gte': '40', page: p2 }));
-    tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'te', 'vote_count.gte': '30', page: p1 }));
-    tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'ta', 'vote_count.gte': '30', page: p1 }));
-    tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'ko', 'vote_count.gte': '60', page: p1 }));
-    tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'ml', 'vote_count.gte': '25', page: p1 }));
-  }
-  else if (cat === 'toprated') {
-    tmdb('/movie/top_rated', { language: 'en-US', page: p1 });
-    tmdb('/movie/top_rated', { language: 'en-US', page: p2 });
-    tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: p1, language: 'en-US' });
-    tmdb('/discover/tv', { sort_by: 'vote_average.desc', 'vote_count.gte': '300', page: p1, language: 'en-US' });
-  }
-  else if (cat === 'kdrama') {
-    tmdb('/discover/tv', { with_original_language: 'ko', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-    tmdb('/discover/tv', { with_original_language: 'ko', sort_by: 'popularity.desc', page: p2, language: 'en-US' });
-    tmdb('/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', page: p1, language: 'en-US' });
-  }
-  else if (OTT[cat]) {
-    /*  Deliberately NOT prefetched.
-     *
-     *  Every other category warms its next page here, and for them that is free
-     *  headroom. For a platform it is not: MZ_RATE_LIMIT allows 30 requests per 10
-     *  seconds, a platform page costs ~7, and spending another ~7 on a page the
-     *  user may never scroll to is what made the NEXT platform click queue behind
-     *  it. Measured, this and the per-click accuracy audit were the whole remaining
-     *  cost once the global-trending overlay was removed.
-     *
-     *  Paging is unaffected in behaviour: goToFeedPage() serves any page already in
-     *  the pool with no network at all, and calls loadMovies(cat, true) on demand
-     *  for the rest. It is the speculative half that is gone, not the capability. */
-  }
-  else {
-    const base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: 'en-US' });
-    tmdb('/discover/movie', Object.assign({}, base, { page: p1 }));
-    tmdb('/discover/movie', Object.assign({}, base, { page: p2 }));
-  }
+  const plan = _mzCatPlan(cat, pageNum);
+  if (plan) tmdbBatch(plan);   // never rejects; fire and forget
+}
+
+/*  ══════════════════════════════════════════════════════════════════════
+ *  A TAB IS WARM BEFORE IT IS CLICKED
+ *  ══════════════════════════════════════════════════════════════════════
+ *  Clicking a category the session has not seen yet was the one remaining place
+ *  where the user waited on the network: the grid went to skeletons and stayed
+ *  there for a round-trip. Nothing could be done about that while the source
+ *  list lived inside loadMovies' if/else chain — there was no way to ask "what
+ *  would this tab need?" without running it.
+ *
+ *  With _mzCatPlan() the answer is one call, so the plan is sent the moment the
+ *  user shows intent — pointer over the tab, keyboard focus on it, or finger
+ *  down on it — which on a touch screen is ~100ms before the click event and on
+ *  a pointer device is usually several hundred. One batched request, and by the
+ *  time filterCat() runs, tmdbBatch() finds every URL already cached and skips
+ *  the network entirely.
+ *
+ *  Bounded on purpose: eight categories per session, never under Data Saver, and
+ *  never for a category whose pool is already built. A tab the user re-hovers
+ *  costs nothing after the first time.
+ */
+const MZ_TAB_PREFETCH_MAX = 8;
+const _mzTabPrefetched = new Set();
+
+/** The category a .cat-tab opens, read off its inline handler. */
+function _mzTabCat(el) {
+  const m = /filterCat\('([^']+)'/.exec((el && el.getAttribute('onclick')) || '');
+  return m ? m[1] : '';
+}
+
+function _mzPrefetchCategory(cat) {
+  if (!cat || _mzTabPrefetched.has(cat)) return;
+  if (_mzTabPrefetched.size >= MZ_TAB_PREFETCH_MAX) return;
+  if (typeof isDataSaver === 'function' && isDataSaver()) return;
+  if (_mzReadPool(cat)) return;   // pool already built and still fresh
+  const plan = _mzCatPlan(cat, 1);
+  if (!plan) return;
+  _mzTabPrefetched.add(cat);
+  tmdbBatch(plan);
+}
+
+/*  One set of listeners on the document, not one per tab: the category strip is
+ *  re-rendered by the group menus, and per-tab handlers would leak a set every
+ *  time. All three are passive — none of them can cancel the gesture they ride
+ *  on, and touchstart in particular must never delay a tap. */
+let _mzTabPrefetchWired = false;
+function ensureTabPrefetch() {
+  if (_mzTabPrefetchWired) return;
+  _mzTabPrefetchWired = true;
+  const onIntent = (event) => {
+    const target = event.target;
+    if (!target || !target.closest) return;
+    const tab = target.closest('.cat-tab');
+    if (tab) _mzPrefetchCategory(_mzTabCat(tab));
+  };
+  document.addEventListener('mouseover', onIntent, { passive: true });
+  document.addEventListener('focusin', onIntent, { passive: true });
+  document.addEventListener('touchstart', onIntent, { passive: true });
 }
  
 function prefetchUpcomingPage(pageNum) {
@@ -6162,6 +6466,61 @@ function renderFeedError(cat) {
  *        covers; it never appends to the DOM, it grows allMovies and then repaints
  *        the current page out of it.
  */
+/*  ── SHAPING A MULTI-SOURCE GATHER ─────────────────────────────────────────
+ *  Every category that merges several industries, languages or media types ended
+ *  up writing one of two loops by hand, and the copies had drifted apart. Both
+ *  now live here, and both take the plain response array _mzCatPlan/tmdbBatch
+ *  produce.
+ */
+
+/*  Round-robin: source A's first title, then B's first, then C's… then A's
+ *  second. A plain concat lets the first source own the entire first screen,
+ *  which is how the Horror tab ended up all-Hollywood above the fold and the 4K
+ *  tab all-English.
+ *
+ *  With no callback it returns the flat list. With one, the callback decides what
+ *  to keep and receives the SOURCE INDEX, because for several categories that
+ *  index is the only thing that says whether a row is a movie or a series —
+ *  /discover/tv results carry no media_type of their own.
+ */
+function mzInterleave(buckets, onItem) {
+  const out = [];
+  let max = 0;
+  buckets.forEach(v => { const n = (v.results || []).length; if (n > max) max = n; });
+  for (let i = 0; i < max; i++) {
+    buckets.forEach((v, idx) => {
+      const item = v.results && v.results[i];
+      if (!item) return;
+      if (onItem) onItem(item, idx);
+      else out.push(item);
+    });
+  }
+  return out;
+}
+
+/*  Sources concatenated in plan order, then deduplicated by TMDB id with the
+ *  first occurrence winning. `tag` runs on every item before the dedupe and also
+ *  receives the source index.
+ *
+ *  Deliberately keyed on id alone, not type+id, because these categories fetch
+ *  one media type per source and tag it from the index — so the collision the
+ *  ALL feed guards against cannot arise here.
+ */
+function mzDedupeById(buckets, tag) {
+  const seen = new Set();
+  const out = [];
+  buckets.forEach((v, idx) => {
+    (v.results || []).forEach(item => {
+      if (!item) return;
+      if (tag) tag(item, idx);
+      if (!item.id || seen.has(item.id)) return;
+      seen.add(item.id);
+      out.push(item);
+    });
+  });
+  return out;
+}
+
 async function loadMovies(cat, isLoadMore = false) {
   const grid = document.getElementById('movieGrid');
   if (!grid) return;
@@ -6181,6 +6540,27 @@ async function loadMovies(cat, isLoadMore = false) {
     if (indicator) indicator.style.display = 'block';
     currentMoviePage++;
   } else {
+    /*  ── INSTANT RE-ENTRY ────────────────────────────────────────────────
+     *  Checked BEFORE the grid is wiped, which is the whole point. The skeleton
+     *  write below used to happen unconditionally, so even a category whose
+     *  every response was already in memory flashed skeletons for as long as the
+     *  re-rank took. If the pool is still good there is nothing to fetch, nothing
+     *  to rank and nothing to wait for — restore the user's page and paint. */
+    const pool = _mzReadPool(cat);
+    if (pool) {
+      allMovies = pool.movies;
+      currentMoviePage = pool.tmdbPage;
+      mzFeedPage = pool.page;
+      mzFeedPoolExhausted = pool.exhausted;
+      _mzFeedRetryState(cat).attempts = 0;
+      if (MZ_FEED_PAGED && !isFullViewMovies) renderCurrentFeedPage();
+      else renderMovies(isFullViewMovies ? allMovies : allMovies.slice(0, MZ_FEED_PAGE_SIZE), false);
+      renderFeedPager();
+      const warmIndicator = document.getElementById('loadingIndicator');
+      if (warmIndicator) warmIndicator.style.display = 'none';
+      return;
+    }
+
     currentMoviePage = 1;
     mzFeedPage = 1;
     mzFeedPoolExhausted = false;
@@ -6189,9 +6569,6 @@ async function loadMovies(cat, isLoadMore = false) {
   }
  
   let movies = [];
-  const pageStr = String(currentMoviePage);
-  const p1 = String(currentMoviePage * 2 - 1);
-  const p2 = String(currentMoviePage * 2);
 
   /*  tmdb() deliberately never rejects — 40-odd call sites read `r.results || []`
    *  and would all need try/catch otherwise. The cost is that a fetch failure and
@@ -6209,63 +6586,40 @@ async function loadMovies(cat, isLoadMore = false) {
   const _mzFeedFailureMark = _mzFetchFailureCount;
 
   try {
+    /*  ── ONE ROUND-TRIP, WHATEVER THE CATEGORY ─────────────────────────────
+     *  Every source this category needs goes to /api/tmdb/batch together and the
+     *  Worker fans out at the edge, next to TMDB and its KV cache. Before this
+     *  only the ALL feed was batched; a Horror or 4K tab sent 4-8 separate
+     *  requests through the 8-lane client gate, and on mobile each lane-round is
+     *  a full radio round-trip before anything can paint.
+     *
+     *  `vals` is the plain response array in plan order. tmdbBatch never rejects
+     *  and reports per-source outcomes, so one dead source contributes an empty
+     *  list instead of emptying the whole screen — which is what the mix of
+     *  Promise.all and Promise.allSettled here used to do, now uniform.
+     *
+     *  A null plan means the category owns its own fan-out: see _mzCatPlan.
+     */
+    const plan = _mzCatPlan(cat, currentMoviePage);
+    const vals = plan
+      ? (await tmdbBatch(plan)).map(r => (r.status === 'fulfilled' && r.value) ? r.value : { results: [] })
+      : null;
+
     if (cat === 'all') {
-      // NETFLIX-STYLE DISCOVERY: Fetch diverse sources for maximum content freshness
-      //
-      // The last six queries exist for the freshness ranking below and are the
-      // reason it can actually work:
-      //   • LATEST WINDOWS — the most popular movies (last ~5 weeks), web series
-      //     (last ~6 weeks) and anime seasons (last ~2 months), so whatever just
-      //     released is always in the candidate pool rather than whatever
-      //     /movie/popular happens to return.
-      //   • INDUSTRY WINDOWS — the same release window asked per industry
-      //     (all Indian origins together, plus Bollywood on its own) because a
-      //     single global popularity sort is always won by Hollywood, so no
-      //     Bollywood/South/Tollywood release ever reached the pool.
-      //   • PRINT-UPGRADE WINDOWS — the cohorts that just crossed a real print
-      //     stage: movies at the HD/FHD marks (globally and for Indian titles),
-      //     series at their clean-encode and BD/4K marks. Without deliberately
-      //     fetching them, a four-month-old film whose HD print just dropped
-      //     would never appear in the pool, so no amount of re-ranking could
-      //     surface it.
-      //
-      // Series and anime are also the only way TV reaches this feed at all —
-      // before this it fetched movies exclusively.
-      const res = await tmdbBatch([
-        ['/movie/now_playing', { language: 'en-US', page: pageStr }],
-        ['/trending/movie/week', { language: 'en-US', page: pageStr }],
-        ['/trending/movie/day', { language: 'en-US', page: pageStr }],
-        ['/movie/popular', { language: 'en-US', page: pageStr }],
-        ['/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }],
-        ['/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', page: pageStr, language: 'en-US' }],
-        ['/discover/movie', latestWindowQuery(pageStr)],
-        ['/discover/movie', printUpgradeWindowQuery(pageStr)],
-        ['/discover/movie', latestIndianWindowQuery(pageStr)],
-        ['/discover/movie', latestBollywoodWindowQuery(pageStr)],
-        ['/discover/movie', indianUpgradeWindowQuery(pageStr)],
-        ['/discover/movie', indianCatalogueQuery(pageStr)],
-        ['/trending/tv/week', { language: 'en-US', page: pageStr }],
-        ['/discover/tv', latestSeriesWindowQuery(pageStr)],
-        ['/discover/tv', seriesUpgradeWindowQuery(pageStr)],
-        ['/discover/tv', latestAnimeWindowQuery(pageStr)]
-      ]);
-      
-      // /discover/tv results carry no media_type, so tag them here instead of
-      // relying on the name-vs-title guess further down the pipeline.
-      // Index of the first TV source above — must move whenever a movie source
-      // is added or removed, or series would be tagged as movies and vice versa.
+      /*  /discover/tv results carry no media_type, so tag them by position.
+       *  TV_SOURCE_FROM is an index into the ALL plan in _mzCatPlan and must move
+       *  with it, or series would be tagged as movies and vice versa. */
       const TV_SOURCE_FROM = 12;
       const combinedMovies = [];
-      res.forEach((r, idx) => {
-        if (r.status === 'fulfilled' && r.value && r.value.results) {
-          r.value.results.forEach(item => {
-            if (!item) return;
-            if (idx >= TV_SOURCE_FROM && !item.media_type) item.media_type = 'tv';
-            combinedMovies.push(item);
-          });
-        }
+      vals.forEach((v, idx) => {
+        if (!v.results) return;
+        v.results.forEach(item => {
+          if (!item) return;
+          if (idx >= TV_SOURCE_FROM && !item.media_type) item.media_type = 'tv';
+          combinedMovies.push(item);
+        });
       });
-      
+
       // INTELLIGENT DEDUPLICATION: Keep the highest-popularity version.
       // Keyed by type+id, not id alone: TMDB numbers movies and series in
       // separate namespaces, so a movie and a series can share an id and one
@@ -6280,7 +6634,7 @@ async function loadMovies(cat, isLoadMore = false) {
         }
       }
       const uniqueMovies = Array.from(movieMap.values());
-      
+
       // STRICT PRIORITY RANKING: latest movie releases first, recent movie
       // quality updates second, then the trending/latest web series and anime,
       // and only then the remaining catalogue movies.
@@ -6297,57 +6651,8 @@ async function loadMovies(cat, isLoadMore = false) {
       // priority group, and it never reorders within a lane.
       movies.push(...interleaveFeedByType(ranked));
     } else if (cat === 'tv') {
-      // EXPANDED OTT LIST: see STREAMING_NETWORK_IDS — every id in it was
-      // resolved through /network/{id} before being kept.
-      const STREAMING_NETWORKS = STREAMING_NETWORK_IDS;
-      // EXCLUSION LIST: Traditional Indian TV channels to strictly remove from Web Series section
-      const TV_CHANNELS_TO_EXCLUDE = LINEAR_TV_EXCLUDE_IDS;
-
-      // Fetch a diverse set of web series from major streaming platforms, removing traditional TV shows.
-      const res = await Promise.allSettled([
-        // Top Hindi Web Series from streaming platforms
-        tmdb('/discover/tv', {
-            with_networks: STREAMING_NETWORKS,
-            without_networks: TV_CHANNELS_TO_EXCLUDE,
-            with_original_language: 'hi',
-            sort_by: 'popularity.desc',
-            page: pageStr,
-            language: 'en-US'
-        }),
-        // Top English Web Series from streaming platforms
-        tmdb('/discover/tv', {
-            with_networks: STREAMING_NETWORKS,
-            without_networks: TV_CHANNELS_TO_EXCLUDE,
-            with_original_language: 'en',
-            sort_by: 'popularity.desc',
-            page: pageStr,
-            language: 'en-US'
-        }),
-        // Top Korean Web Series from streaming platforms
-        tmdb('/discover/tv', {
-            with_networks: STREAMING_NETWORKS,
-            without_networks: TV_CHANNELS_TO_EXCLUDE,
-            with_original_language: 'ko',
-            sort_by: 'popularity.desc',
-            page: pageStr,
-            language: 'en-US'
-        }),
-        // General popular shows from these platforms as a fallback
-        tmdb('/discover/tv', { 
-            with_networks: STREAMING_NETWORKS, 
-            without_networks: TV_CHANNELS_TO_EXCLUDE,
-            sort_by: 'popularity.desc', 
-            page: pageStr, 
-            language: 'en-US' 
-        })
-      ]);
-
       const combinedShows = [];
-      res.forEach(r => {
-        if (r.status === 'fulfilled' && r.value.results) {
-          combinedShows.push(...r.value.results);
-        }
-      });
+      vals.forEach(v => { if (v.results) combinedShows.push(...v.results); });
 
       // Remove duplicates, keeping the first occurrence
       const uniqueShows = [];
@@ -6367,168 +6672,58 @@ async function loadMovies(cat, isLoadMore = false) {
       });
 
       movies.push(...uniqueShows);
-    } else if (cat === 'hollywood') {
-      const res = await Promise.all([
-        tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p1 }),
-        tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p2 })
-      ]);
-      res.forEach(r => { movies = movies.concat(r.results||[]); });
     } else if (cat === 'kids') {
-      // POWERFUL CARTOON ENGINE: strictly animated content only, famous first
+      // POWERFUL CARTOON ENGINE: strictly animated content only, famous first.
+      // The batch above already primed every source this asks for, so its own
+      // tmdb() calls are memory hits rather than 4-9 gated requests.
       movies = movies.concat(await fetchCartoonMovies(currentCartoonMode, currentMoviePage));
     } else if (cat === 'anime') {
-      // POWERFUL ANIME ENGINE: mode ke hisaab se 4-9 sources parallel fetch
+      // POWERFUL ANIME ENGINE: mode ke hisaab se 4-9 sources — all primed above.
       movies = movies.concat(await fetchAnimeMovies(currentAnimeMode, currentMoviePage));
-    } else if (cat === 'horror') {
-      const res = await Promise.all([
-        tmdb('/discover/movie', { with_genres: '27', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Global Horror Movies
-        tmdb('/discover/movie', { with_genres: '27', with_original_language: 'hi', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Bollywood Horror
-        tmdb('/discover/movie', { with_genres: '27', with_original_language: 'ta', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Tamil Horror
-        tmdb('/discover/movie', { with_genres: '27', with_original_language: 'te', sort_by: 'popularity.desc', page: p1, language: 'en-US' })  // Telugu Horror
-      ]);
-      let maxLength = 0;
-      res.forEach(r => { if (r.results && r.results.length > maxLength) maxLength = r.results.length; });
-      for (let i = 0; i < maxLength; i++) {
-        res.forEach(r => {
-          if (r.results && i < r.results.length) {
-            movies.push(r.results[i]);
-          }
-        });
-      }
-    } else if (cat === 'dubbed') {
-      // Hindi Dubbed ke liye: Hollywood + Tamil + Telugu + Anime Movies (Kyunki yahi sab dub hoti hain)
-      const res = await Promise.all([
-        tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p1 }),
-        tmdb('/discover/movie', { with_original_language: 'en', sort_by: 'popularity.desc', language: 'en-US', page: p2 }),
-        tmdb('/discover/movie', { with_original_language: 'ta', sort_by: 'popularity.desc', language: 'en-US', page: p1 }),
-        tmdb('/discover/movie', { with_original_language: 'te', sort_by: 'popularity.desc', language: 'en-US', page: p1 }),
-        tmdb('/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: 'popularity.desc', language: 'en-US', page: p1 })
-      ]);
-      let maxLength = 0;
-      res.forEach(r => { if (r.results && r.results.length > maxLength) maxLength = r.results.length; });
-      for (let i = 0; i < maxLength; i++) {
-        res.forEach(r => {
-          if (r.results && i < r.results.length) {
-            movies.push(r.results[i]);
-          }
-        });
-      }
-
+    } else if (cat === 'horror' || cat === 'dubbed') {
+      /*  Round-robin, so no single industry owns the top of the grid.
+       *  horror = global + Hindi + Tamil + Telugu.
+       *  dubbed = Hollywood (2 pages) + Tamil + Telugu + Japanese anime, because
+       *  those are the industries Hindi dubs actually come from. */
+      movies.push(...mzInterleave(vals));
     } else if (cat === 'adult') {
-      const res = await Promise.all([
-        tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799|195669|156321', without_genres: '16,10751,28,12,35,878', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Global 18+
-        tmdb('/discover/tv', { include_adult: 'true', with_keywords: '9799|195669|156321', without_genres: '16,10751,10759,10762,35', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // 18+ Web Series
-        tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799|195669|156321', with_original_language: 'hi', without_genres: '16,10751,28,12,35,878', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Bollywood 18+
-        tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799|195669|156321', with_original_language: 'ta', without_genres: '16,10751,28,12,35,878', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Tamil 18+
-        tmdb('/discover/movie', { include_adult: 'true', with_keywords: '9799|195669|156321', with_original_language: 'te', without_genres: '16,10751,28,12,35,878', sort_by: 'popularity.desc', page: p1, language: 'en-US' }), // Telugu 18+
-        tmdb('/discover/movie', { include_adult: 'true', certification_country: 'US', certification: 'NC-17', sort_by: 'popularity.desc', page: p1, language: 'en-US' }) // NC-17
-      ]);
-      let maxLength = 0;
-      res.forEach(r => { if (r.results && r.results.length > maxLength) maxLength = r.results.length; });
-      for (let i = 0; i < maxLength; i++) {
-        res.forEach((r, idx) => {
-          if (r.results && i < r.results.length) {
-            const item = r.results[i];
-            item.media_type = idx === 1 ? 'tv' : 'movie';
-            
-            // Local Double-Check: Brutally eliminate normal family/action/comedy movies
-            const badGenres = [16, 10751, 28, 12, 878, 10762, 10759, 35]; // Animation, Family, Action, Adventure, SciFi, Kids, Action&Adventure, Comedy
-            let isBad = false;
-            if (item.genre_ids) isBad = item.genre_ids.some(gid => badGenres.includes(gid));
-            
-            // Allow only if NOT bad genre OR if TMDB officially marked it as explicitly Adult
-            if (!isBad || item.adult === true) {
-              movies.push(item);
-            }
-          }
-        });
-      }
-    } else if (cat === 'trending') {
-      // 🔥 TRENDING NOW: Global trending movies + shows, interleaved
-      const res = await Promise.allSettled([
-        tmdb('/trending/movie/week', { language: 'en-US', page: p1 }),
-        tmdb('/trending/movie/day', { language: 'en-US', page: pageStr }),
-        tmdb('/trending/tv/week', { language: 'en-US', page: pageStr }),
-        tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'popularity.desc', 'vote_count.gte': '50', page: pageStr, language: 'en-US' })
-      ]);
-      const combined = [];
-      res.forEach((r, idx) => {
-        if (r.status === 'fulfilled' && r.value && r.value.results) {
-          r.value.results.forEach(item => { if (idx === 2) item.media_type = 'tv'; combined.push(item); });
-        }
+      mzInterleave(vals, (item, idx) => {
+        item.media_type = idx === 1 ? 'tv' : 'movie';
+
+        // Local Double-Check: Brutally eliminate normal family/action/comedy movies
+        const badGenres = [16, 10751, 28, 12, 878, 10762, 10759, 35]; // Animation, Family, Action, Adventure, SciFi, Kids, Action&Adventure, Comedy
+        let isBad = false;
+        if (item.genre_ids) isBad = item.genre_ids.some(gid => badGenres.includes(gid));
+
+        // Allow only if NOT bad genre OR if TMDB officially marked it as explicitly Adult
+        if (!isBad || item.adult === true) movies.push(item);
       });
-      const seen = new Set();
-      combined.forEach(m => { if (m && m.id && !seen.has(m.id)) { seen.add(m.id); movies.push(m); } });
+    } else if (cat === 'trending') {
+      // 🔥 TRENDING NOW: Global trending movies + shows; source 2 is the TV one.
+      movies.push(...mzDedupeById(vals, (item, idx) => { if (idx === 2) item.media_type = 'tv'; }));
     } else if (cat === 'uhd4k') {
-      // 💎 4K ULTRA HD: is app me "quality" release-date se decide hoti hai.
-      // CAM/TS/HD movies (0-120 din purani) yahan na aa saken, isliye sirf
-      // 240+ din purani, high-rated (>=7) movies fetch karte hain — badge 4K.
-      // UNLIMITED volume ke liye 8 languages + do pages har load par,
-      // aur infinite scroll page aage badhata rehta hai.
-      const uhdCutoff = new Date(Date.now() - 240 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-      const uhdBase = { sort_by: 'popularity.desc', 'primary_release_date.lte': uhdCutoff, 'vote_average.gte': '7', language: 'en-US' };
-      const res = await Promise.allSettled([
-        tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'en', 'vote_count.gte': '300', page: p1 })),
-        tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'en', 'vote_count.gte': '300', page: p2 })),
-        tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'hi', 'vote_count.gte': '40', page: p1 })),
-        tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'hi', 'vote_count.gte': '40', page: p2 })),
-        tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'te', 'vote_count.gte': '30', page: p1 })),
-        tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'ta', 'vote_count.gte': '30', page: p1 })),
-        tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'ko', 'vote_count.gte': '60', page: p1 })),
-        tmdb('/discover/movie', Object.assign({}, uhdBase, { with_original_language: 'ml', 'vote_count.gte': '25', page: p1 }))
-      ]);
-      const buckets = res.map(r => (r.status === 'fulfilled' && r.value && r.value.results) ? r.value.results : []);
-      let maxLen = 0; buckets.forEach(b => { if (b.length > maxLen) maxLen = b.length; });
+      /*  💎 4K ULTRA HD: in this app "quality" is inferred from release date, so
+       *  the round-robin is filtered rather than taken whole — 200+ days old and
+       *  rated >= 7 means no CAM/TS print can still be in circulation for it. */
       const seen = new Set();
       const nowMs = Date.now();
-      // Round-robin interleave taaki har language mix hoke aaye
-      for (let i = 0; i < maxLen; i++) {
-        buckets.forEach(b => {
-          const m = b[i];
-          if (!m || !m.id || seen.has(m.id) || !m.poster_path) return;
-          const rd = m.release_date;
-          if (!rd) return;
-          const daysOld = (nowMs - new Date(rd).getTime()) / 86400000;
-          // 4K-era guarantee: 200+ din purani + rating >=7 (koi CAM/TS possible nahi)
-          if (daysOld > 200 && (m.vote_average || 0) >= 7) {
-            seen.add(m.id);
-            m.media_type = 'movie';
-            m._force4K = true; // badge guaranteed 4K (movie genuinely 4K-era hai)
-            movies.push(m);
-          }
-        });
-      }
+      mzInterleave(vals, (m) => {
+        if (!m.id || seen.has(m.id) || !m.poster_path) return;
+        const rd = m.release_date;
+        if (!rd) return;
+        if ((nowMs - new Date(rd).getTime()) / 86400000 > 200 && (m.vote_average || 0) >= 7) {
+          seen.add(m.id);
+          m.media_type = 'movie';
+          m._force4K = true;   // genuinely 4K-era, so the badge is guaranteed
+          movies.push(m);
+        }
+      });
     } else if (cat === 'toprated') {
       // ⭐ TOP RATED: IMDb-style highest rated, min vote threshold ताकि reliable ho
-      const res = await Promise.allSettled([
-        tmdb('/movie/top_rated', { language: 'en-US', page: p1 }),
-        tmdb('/movie/top_rated', { language: 'en-US', page: p2 }),
-        tmdb('/discover/movie', { with_original_language: 'hi', sort_by: 'vote_average.desc', 'vote_count.gte': '150', page: p1, language: 'en-US' }),
-        tmdb('/discover/tv', { sort_by: 'vote_average.desc', 'vote_count.gte': '300', page: p1, language: 'en-US' })
-      ]);
-      const combined = [];
-      res.forEach((r, idx) => {
-        if (r.status === 'fulfilled' && r.value && r.value.results) {
-          r.value.results.forEach(item => { if (idx === 3) item.media_type = 'tv'; combined.push(item); });
-        }
-      });
-      const seen = new Set();
-      combined.forEach(m => { if (m && m.id && !seen.has(m.id)) { seen.add(m.id); movies.push(m); } });
+      movies.push(...mzDedupeById(vals, (item, idx) => { if (idx === 3) item.media_type = 'tv'; }));
     } else if (cat === 'kdrama') {
-      // 🇰🇷 K-DRAMA: Korean web series + movies
-      const res = await Promise.allSettled([
-        tmdb('/discover/tv', { with_original_language: 'ko', sort_by: 'popularity.desc', page: p1, language: 'en-US' }),
-        tmdb('/discover/tv', { with_original_language: 'ko', sort_by: 'popularity.desc', page: p2, language: 'en-US' }),
-        tmdb('/discover/movie', { with_original_language: 'ko', sort_by: 'popularity.desc', page: p1, language: 'en-US' })
-      ]);
-      const combined = [];
-      res.forEach((r, idx) => {
-        if (r.status === 'fulfilled' && r.value && r.value.results) {
-          r.value.results.forEach(item => { item.media_type = idx === 2 ? 'movie' : 'tv'; combined.push(item); });
-        }
-      });
-      const seen = new Set();
-      combined.forEach(m => { if (m && m.id && !seen.has(m.id)) { seen.add(m.id); movies.push(m); } });
+      // 🇰🇷 K-DRAMA: Korean web series (sources 0-1) + movies (source 2)
+      movies.push(...mzDedupeById(vals, (item, idx) => { item.media_type = idx === 2 ? 'movie' : 'tv'; }));
     } else if (OTT[cat]) {
       // ── PLATFORM TABS: every entry in the OTT table ──
       // Uses the OTT sub-filter mode (all / webseries / movies) to decide
@@ -6542,14 +6737,27 @@ async function loadMovies(cat, isLoadMore = false) {
       movies = movies.concat(
         ottRankLikeAllFeed(await fetchOttMovies(cat, currentOttMode, currentMoviePage)));
     } else {
-      const base = Object.assign({}, CAT_PARAMS[cat] || {}, { language: 'en-US' });
-      const res = await Promise.all([
-        tmdb('/discover/movie', Object.assign({}, base, { page: p1 })),
-        tmdb('/discover/movie', Object.assign({}, base, { page: p2 }))
-      ]);
-      res.forEach(r => { movies = movies.concat(r.results||[]); });
+      // hollywood and every CAT_PARAMS genre/industry tab: two pages, in order.
+      vals.forEach(v => { movies = movies.concat(v.results || []); });
     }
   } catch(e) { console.warn(e); }
+
+  /*  ── A SUPERSEDED GATHER MUST NOT WRITE INTO THE NEW CATEGORY ─────────────
+   *  Everything below mutates allMovies and, now, stores it as this category's
+   *  pool. If the user changed tab while this gather was in flight, allMovies is
+   *  already the NEW category's list — so these results would be concatenated
+   *  into it and then saved under the OLD category's key, leaving both wrong.
+   *  Before pools were kept this only caused a flash of the wrong grid; now it
+   *  would persist for the rest of the session. mzFeedPagerCategory is assigned
+   *  synchronously at the top of every call, so the newest caller always owns it. */
+  if (cat !== mzFeedPagerCategory) {
+    if (isLoadMore) {
+      isLoadingMore = false;
+      const supersededIndicator = document.getElementById('loadingIndicator');
+      if (supersededIndicator) supersededIndicator.style.display = 'none';
+    }
+    return;
+  }
  
   const realToday = new Date(Date.now() + (5.5 * 60 * 60 * 1000)).toISOString().split('T')[0]; // IST date for accurate filtering
   // LATEST MOVIES ONLY & BLOCK UPCOMING GLOBALLY
@@ -6720,6 +6928,12 @@ async function loadMovies(cat, isLoadMore = false) {
   // Drawn after the grid so the button row cannot appear before the cards it
   // pages through, which looked broken while the skeletons were still up.
   renderFeedPager();
+
+  /*  Keep the finished pool. This is what makes the NEXT visit to this category
+   *  a slice and a render instead of a full re-gather — see _mzFeedPools. Saved
+   *  on the load-more path too, because the extension replaced allMovies with a
+   *  new array and the stored reference would otherwise be the shorter one. */
+  _mzSavePool(cat);
  
   // Har load ke baad agle page ko chupke se fetch karke ready rakho
   if (!isMzTV()) {
@@ -7314,7 +7528,7 @@ function filterCat(cat, e) {
   if (scrollTrigger) scrollTrigger.style.display = '';
   document.querySelectorAll('.cat-tab').forEach(t => { t.classList.remove('active'); });
   const tabs = document.querySelectorAll('.cat-tab');
-  tabs.forEach(t => { if ((t.getAttribute('onclick')||'').indexOf("'"+cat+"'") !== -1) t.classList.add('active'); });
+  tabs.forEach(t => { if (_mzTabCat(t) === cat) t.classList.add('active'); });
   syncCatGroupTriggers();
   const h = document.getElementById('sectionHeading');
   if (h) h.textContent = CAT_HEADINGS[cat] || 'MOVIES';
@@ -7322,7 +7536,12 @@ function filterCat(cat, e) {
   if (cat === 'anime') { renderAnimeFilterBar(); updateAnimeHeading(); } else { hideAnimeFilterBar(); }
   // Cartoons ke liye apna sub-filter bar (Trending / Famous / Hindi / Doraemon & Co ...)
   if (cat === 'kids') { renderCartoonFilterBar(); updateCartoonHeading(); } else { hideCartoonFilterBar(); }
-  // OTT platforms ke liye Web Series & Movies sub-filter bar
+  // OTT platforms ke liye All / Movies / Web Series sub-filter bar.
+  //  A platform is always ENTERED on 'all': filterCat is only reached from the
+  //  provider rail (and the genre tabs), so the previous platform's chip must not
+  //  carry over into the next one. setOttMode() changes the mode from then on and
+  //  calls loadMovies directly, so it never passes through here.
+  if (OTT[cat]) { currentOttMode = 'all'; renderOttFilterBar(cat); } else { hideOttFilterBar(); }
   if (OTT[cat]) updateOttHeading(cat);
   const sec = document.getElementById('movies-section');
   if (sec) sec.scrollIntoView({ behavior: isMzTVMode() ? 'auto' : 'smooth' });
@@ -7458,6 +7677,17 @@ function renderCurrentFeedPage() {
     if ('requestIdleCallback' in window) requestIdleCallback(paintTail, { timeout: 1500 });
     else setTimeout(paintTail, 300);
   }
+
+  /*  Record where the user now is, AFTER the paint so this never sits between a
+   *  click and its first frame.
+   *
+   *  The pager and load-more both move mzFeedPage without going back through
+   *  loadMovies, so the stored pool would otherwise remember a page the user left
+   *  long ago and drop them back onto it when they return to the category. This
+   *  is the one function every page change goes through. */
+  const pool = _mzFeedPools.get(_mzPoolKey(mzFeedPagerCategory));
+  if (pool) { pool.page = mzFeedPage; pool.exhausted = mzFeedPoolExhausted; }
+
   return slice.length;
 }
 

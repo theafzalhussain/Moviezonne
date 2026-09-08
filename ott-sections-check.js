@@ -427,20 +427,43 @@ async function catalogueSize(platform, type) {
     });
   });
 
-  /*  The OTT sub-filter bar and the OTT Platform dropdown were removed: a provider
-   *  card opens the platform's whole catalogue directly. Guard that they do not
-   *  creep back, and that the single remaining mode is not mutable. */
-  check('the OTT sub-mode UI is gone and the mode is fixed to "all"', () => {
-    assert.ok(/const currentOttMode = 'all';/.test(src),
-      'currentOttMode is not a fixed const — a sub-mode toggle has come back');
-    ['renderOttFilterBar', 'setOttMode', 'OTT_MODES'].forEach((n) => {
-      assert.ok(!new RegExp('function ' + n + '\\b|const ' + n + '\\s*=').test(src),
-        n + ' is back in moviezone.js');
+  /*  The All / Movies / Web Series bar is back, on request: a provider card opens
+   *  the platform on `all` and the two type chips re-run the single-type plans
+   *  buildOttModeQueries() already had. What is guarded here is the WIRING, because
+   *  the mode is what every platform request is built from — if a chip stops
+   *  reaching the fetcher the grid silently keeps showing the mixed catalogue.
+   *
+   *  The OTT Platform dropdown stays gone: the rail is still the only way in. */
+  check('the All / Movies / Web Series sub-tabs are wired to the fetcher', () => {
+    assert.ok(/let currentOttMode = 'all';/.test(src),
+      'currentOttMode is not mutable — the type chips could not change it');
+    ['ottModesFor', 'renderOttFilterBar', 'hideOttFilterBar', 'setOttMode'].forEach((n) => {
+      assert.ok(new RegExp('function ' + n + '\\(').test(src),
+        n + ' is missing from moviezone.js');
     });
+    // The chip ids must be exactly the modes buildOttModeQueries understands,
+    // otherwise a chip falls through to the 'all' branch and does nothing.
+    ['all', 'movies', 'webseries'].forEach((id) => {
+      assert.ok(new RegExp("id: '" + id + "'").test(src), id + ' is not an OTT_MODES entry');
+    });
+    const setter = block('function setOttMode(');
+    assert.ok(/currentOttMode = mode;/.test(setter), 'setOttMode does not record the mode');
+    assert.ok(/loadMovies\(cat\);/.test(setter),
+      'setOttMode does not reload the feed, so the chip would do nothing');
+    assert.ok(!/loadMovies\(cat,\s*true\)/.test(setter),
+      'setOttMode appends to the existing pool instead of starting a fresh one');
+    // A single-type platform must not offer the side it has nothing on.
+    assert.ok(/cfg\.catalogue/.test(block('function ottModesFor(')),
+      'ottModesFor ignores the single-type catalogue declaration');
+    // Entering a platform must show the bar and start it on 'all'.
+    const fc = block('function filterCat(');
+    assert.ok(/renderOttFilterBar\(cat\)/.test(fc) && /hideOttFilterBar\(\)/.test(fc),
+      'filterCat does not show and hide the OTT bar with the category');
+    assert.ok(/currentOttMode = 'all'/.test(fc),
+      'filterCat does not reset the type chip when entering a platform');
     const html = fs.readFileSync('index.html', 'utf8');
     assert.ok(!/catGroupOttMenu|catGroupOttBtn/.test(html),
       'the OTT Platform dropdown is back in index.html');
-    assert.ok(!/ottFilterBar/.test(html), 'the OTT chip bar is back in index.html');
   });
 
   /*  No provider-blind source may return: the global-trending overlay was removed
