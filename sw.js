@@ -54,7 +54,7 @@ const STATIC_ASSETS = [
 // Large/feature-specific data should never block a new service worker from
 // installing. It is cached opportunistically and fetched from the network if absent.
 const OPTIONAL_ASSETS = [
-  '/providers.css?v=7',
+  '/providers.css?v=8',
   '/provider-netflix.svg',
   '/provider-prime.svg',
   '/provider-jiohotstar.png',
