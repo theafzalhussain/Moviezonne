@@ -61,6 +61,30 @@ const NOTIFY_ICON = '/icon-192.png?v=2';
 
 const TE = new TextEncoder();
 
+/*  ══════════════════════════════════════════════════════════════════════════
+ *  TUNABLES
+ *  ══════════════════════════════════════════════════════════════════════════
+ *  Timeouts and cache lifetimes are read from env, so they can be changed from
+ *  wrangler.jsonc "vars" or the dashboard without a code deploy. That matters
+ *  most in exactly the situation you would want to change them: the site is
+ *  timing out and you need the timeout shorter NOW, not after a build.
+ *
+ *  Every read goes through envInt(), which means:
+ *    • a missing var falls back to the compiled-in default, so the Worker cannot
+ *      be broken by forgetting to set one;
+ *    • a malformed var ("5s", "", "abc") falls back too, rather than turning a
+ *      timeout into NaN — which would disable it silently;
+ *    • the value is clamped, so a typo of 60000 cannot reintroduce the hang this
+ *      whole layer exists to prevent.
+ */
+function envInt(env, name, fallback, min, max) {
+  const raw = env && env[name];
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(Math.max(Math.trunc(n), min), max);
+}
+
 // ── Small helpers ───────────────────────────────────────────────────────────
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -326,6 +350,9 @@ async function encryptPushPayload(plaintext, p256dh, auth) {
  *  subscription is permanently gone, which is the one error worth acting on —
  *  see the callers, which drop the record.
  */
+/** How long a push service gets to accept one message. */
+const PUSH_TIMEOUT_MS = 8000;
+
 async function sendPushToSubscription(subscription, payload, env) {
   if (!vapidConfigured(env)) {
     return { sent: false, expired: false, error: 'Push notifications are not configured' };
@@ -339,6 +366,16 @@ async function sendPushToSubscription(subscription, payload, env) {
     const body = await encryptPushPayload(JSON.stringify(payload), keys.p256dh, keys.auth);
     const response = await fetch(subscription.endpoint, {
       method: 'POST',
+      /*  THE LAST UNBOUNDED FETCH IN THIS FILE.
+       *
+       *  Without this, a push service that accepts the connection and then stalls
+       *  holds the whole request open with nothing to end it. That is not a
+       *  background-only concern: POST /api/notify-movies sends its confirmation
+       *  push INLINE, so a user tapping "Notify Me" would sit on a spinner until
+       *  the platform gave up on the Worker — a 504 the user caused by using a
+       *  feature. It also meant one dead endpoint could stall a process-due sweep
+       *  and every reminder queued behind it. */
+      signal: AbortSignal.timeout(envInt(env, 'PUSH_TIMEOUT_MS', PUSH_TIMEOUT_MS, 1000, 20000)),
       headers: {
         Authorization: await vapidAuthorization(subscription.endpoint, env),
         'Content-Encoding': 'aes128gcm',
@@ -605,7 +642,24 @@ async function handleNotifyMovieList(request, env) {
  *  Driven by the cron trigger in wrangler.jsonc, and reachable over HTTP for a
  *  manual run. On Render this was a setInterval inside a long-lived process;
  *  a Worker has no such process, which is why the trigger exists.
+ *
+ *  ── WHY THIS IS NOT ONE SEQUENTIAL LOOP ANY MORE ──
+ *  It used to await, per reminder: one KV read for the record, one KV read for
+ *  the subscription, and one POST to the push service. At MAX_DUE_PER_RUN that is
+ *  1500 round-trips end to end — and since the push POST had no timeout, a single
+ *  unresponsive push service stalled every reminder queued behind it. A busy
+ *  release day would simply never finish, and because the sweep dies partway the
+ *  reminders it did not reach are silently carried to the next hour.
+ *
+ *  The records are now read in one Promise.all (they are independent), and the
+ *  sends run in small fixed-size waves. Bounded rather than unbounded on purpose:
+ *  firing hundreds of simultaneous POSTs at Mozilla's or Google's push service is
+ *  how you get rate-limited, and Workers caps concurrent subrequests anyway.
+ *  Counting is unchanged — same checked/sent/failed semantics, same drop-on-410
+ *  behaviour — so this is a scheduling change, not a behavioural one.
  */
+const PUSH_WAVE_SIZE = 10;
+
 async function processDueNotifications(env) {
   const store = subsStore(env);
   if (!store) return { checked: 0, sent: 0, failed: 0 };
@@ -613,23 +667,26 @@ async function processDueNotifications(env) {
   const today = new Date().toISOString().slice(0, 10);
   const keys = await listKeys(store, 'notify:', MAX_DUE_PER_RUN);
 
-  let checked = 0;
+  // One round-trip for every record instead of one each.
+  const records = await Promise.all(keys.map(async (key) => ({ key, record: await readJson(store, key) })));
+
+  const due = records.filter(({ record }) =>
+    record
+    && record.active !== false
+    && !record.notifiedAt
+    && isCalendarDate(record.releaseDate)
+    && record.releaseDate <= today);
+
+  const checked = due.length;
   let sent = 0;
   let failed = 0;
 
-  for (const key of keys) {
-    const record = await readJson(store, key);
-    if (!record || record.active === false) continue;
-    if (record.notifiedAt) continue;
-    if (!isCalendarDate(record.releaseDate) || record.releaseDate > today) continue;
-
-    checked++;
-
+  async function deliver({ key, record }) {
     const id = record.endpointId || await endpointId(record.endpoint);
     const subscription = await loadActiveSubscription(store, id);
     if (!subscription) {
       failed++;
-      continue;
+      return;
     }
 
     const result = await sendPushToSubscription(subscription, {
@@ -647,10 +704,13 @@ async function processDueNotifications(env) {
       // ✅ Delete instead of write-back — saves a KV write
       await store.delete(key);
     } else {
-
       failed++;
       if (result.expired) await dropSubscription(store, id);
     }
+  }
+
+  for (let i = 0; i < due.length; i += PUSH_WAVE_SIZE) {
+    await Promise.all(due.slice(i, i + PUSH_WAVE_SIZE).map(deliver));
   }
 
   return { checked, sent, failed };
@@ -732,12 +792,14 @@ async function tmdbUpstream(path, env) {
   headers.set('Authorization', `Bearer ${env.TMDB_TOKEN}`);
   headers.set('accept', 'application/json');
 
+  const timeout = envInt(env, 'TMDB_TIMEOUT_MS', TMDB_UPSTREAM_TIMEOUT_MS, 1000, 20000);
+
   let lastError = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const response = await fetch(`https://api.themoviedb.org/3${path}`, {
         headers,
-        signal: AbortSignal.timeout(TMDB_UPSTREAM_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeout),
         cf: { cacheEverything: true, cacheTtl: 300 }
       });
       /*  One immediate retry for a 5xx, because a retry HERE costs the ~130ms
@@ -791,7 +853,7 @@ async function refreshTmdb(path, cacheKey, softTtl, env) {
 
 async function fetchTmdbJson(path, env, ctx) {
   const cacheKey = '/api/tmdb' + path;
-  const softTtl = tmdbCacheTtl(path);
+  const softTtl = tmdbCacheTtl(path, env);
 
   if (env.TMDB_CACHE) {
     /*  cacheTtl is 60 rather than 300 because the colo cache sits IN FRONT of
@@ -920,8 +982,18 @@ function isVolatileTmdbPath(path) {
 }
 
 /** KV lifetime for one TMDB path. */
-function tmdbCacheTtl(path) {
-  return isVolatileTmdbPath(path) ? TMDB_VOLATILE_CACHE_TTL : TMDB_CACHE_TTL;
+function tmdbCacheTtl(path, env) {
+  /*  TWO NUMBERS, NOT ONE — ON PURPOSE.
+   *
+   *  A single TMDB_CACHE_TTL is the obvious config knob and the wrong one. Set it
+   *  short and /movie/{id} — runtime, cast, overview, none of which change — gets
+   *  re-fetched all day for nothing, which is the TMDB load you were trying to
+   *  reduce. Set it long and /trending, /movie/now_playing and the /discover
+   *  queries the home page is assembled from freeze, so a Friday release first
+   *  appears the following Friday. Both halves are overridable, separately. */
+  return isVolatileTmdbPath(path)
+    ? envInt(env, 'TMDB_VOLATILE_CACHE_TTL', TMDB_VOLATILE_CACHE_TTL, 60, 604800)
+    : envInt(env, 'TMDB_CACHE_TTL', TMDB_CACHE_TTL, 60, TMDB_MAX_RETENTION);
 }
 
 

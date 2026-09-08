@@ -2507,6 +2507,14 @@ var MAX_DUE_PER_RUN = 500;
 var DEFAULT_VAPID_SUBJECT = "mailto:admin@moviezone.dev";
 var NOTIFY_ICON = "/icon-192.png?v=2";
 var TE = new TextEncoder();
+function envInt(env, name, fallback, min, max) {
+  const raw = env && env[name];
+  if (raw === void 0 || raw === null || raw === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(Math.max(Math.trunc(n), min), max);
+}
+__name(envInt, "envInt");
 var json = /* @__PURE__ */ __name((body, status = 200) => new Response(JSON.stringify(body), {
   status,
   headers: {
@@ -2708,6 +2716,7 @@ async function encryptPushPayload(plaintext, p256dh, auth) {
   );
 }
 __name(encryptPushPayload, "encryptPushPayload");
+var PUSH_TIMEOUT_MS = 8e3;
 async function sendPushToSubscription(subscription, payload, env) {
   if (!vapidConfigured(env)) {
     return { sent: false, expired: false, error: "Push notifications are not configured" };
@@ -2720,6 +2729,16 @@ async function sendPushToSubscription(subscription, payload, env) {
     const body = await encryptPushPayload(JSON.stringify(payload), keys.p256dh, keys.auth);
     const response = await fetch(subscription.endpoint, {
       method: "POST",
+      /*  THE LAST UNBOUNDED FETCH IN THIS FILE.
+       *
+       *  Without this, a push service that accepts the connection and then stalls
+       *  holds the whole request open with nothing to end it. That is not a
+       *  background-only concern: POST /api/notify-movies sends its confirmation
+       *  push INLINE, so a user tapping "Notify Me" would sit on a spinner until
+       *  the platform gave up on the Worker — a 504 the user caused by using a
+       *  feature. It also meant one dead endpoint could stall a process-due sweep
+       *  and every reminder queued behind it. */
+      signal: AbortSignal.timeout(envInt(env, "PUSH_TIMEOUT_MS", PUSH_TIMEOUT_MS, 1e3, 2e4)),
       headers: {
         Authorization: await vapidAuthorization(subscription.endpoint, env),
         "Content-Encoding": "aes128gcm",
@@ -2920,25 +2939,23 @@ async function handleNotifyMovieList(request, env) {
   return json({ movies });
 }
 __name(handleNotifyMovieList, "handleNotifyMovieList");
+var PUSH_WAVE_SIZE = 10;
 async function processDueNotifications(env) {
   const store = subsStore(env);
   if (!store) return { checked: 0, sent: 0, failed: 0 };
   const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
   const keys = await listKeys(store, "notify:", MAX_DUE_PER_RUN);
-  let checked = 0;
+  const records = await Promise.all(keys.map(async (key) => ({ key, record: await readJson(store, key) })));
+  const due = records.filter(({ record }) => record && record.active !== false && !record.notifiedAt && isCalendarDate(record.releaseDate) && record.releaseDate <= today);
+  const checked = due.length;
   let sent = 0;
   let failed = 0;
-  for (const key of keys) {
-    const record = await readJson(store, key);
-    if (!record || record.active === false) continue;
-    if (record.notifiedAt) continue;
-    if (!isCalendarDate(record.releaseDate) || record.releaseDate > today) continue;
-    checked++;
+  async function deliver({ key, record }) {
     const id = record.endpointId || await endpointId(record.endpoint);
     const subscription = await loadActiveSubscription(store, id);
     if (!subscription) {
       failed++;
-      continue;
+      return;
     }
     const result = await sendPushToSubscription(subscription, {
       title: "Now available on MovieZone",
@@ -2956,6 +2973,10 @@ async function processDueNotifications(env) {
       failed++;
       if (result.expired) await dropSubscription(store, id);
     }
+  }
+  __name(deliver, "deliver");
+  for (let i = 0; i < due.length; i += PUSH_WAVE_SIZE) {
+    await Promise.all(due.slice(i, i + PUSH_WAVE_SIZE).map(deliver));
   }
   return { checked, sent, failed };
 }
@@ -2975,12 +2996,13 @@ async function tmdbUpstream(path, env) {
   const headers = new Headers();
   headers.set("Authorization", `Bearer ${env.TMDB_TOKEN}`);
   headers.set("accept", "application/json");
+  const timeout = envInt(env, "TMDB_TIMEOUT_MS", TMDB_UPSTREAM_TIMEOUT_MS, 1e3, 2e4);
   let lastError = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const response = await fetch(`https://api.themoviedb.org/3${path}`, {
         headers,
-        signal: AbortSignal.timeout(TMDB_UPSTREAM_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeout),
         cf: { cacheEverything: true, cacheTtl: 300 }
       });
       if (attempt === 0 && response.status >= 500) {
@@ -3026,7 +3048,7 @@ async function refreshTmdb(path, cacheKey, softTtl, env) {
 __name(refreshTmdb, "refreshTmdb");
 async function fetchTmdbJson(path, env, ctx) {
   const cacheKey = "/api/tmdb" + path;
-  const softTtl = tmdbCacheTtl(path);
+  const softTtl = tmdbCacheTtl(path, env);
   if (env.TMDB_CACHE) {
     const hit = await env.TMDB_CACHE.getWithMetadata(cacheKey, { type: "text", cacheTtl: 60 });
     if (hit && hit.value) {
@@ -3077,8 +3099,8 @@ function isVolatileTmdbPath(path) {
   return VOLATILE_TMDB_PATH_RE.test(String(path || ""));
 }
 __name(isVolatileTmdbPath, "isVolatileTmdbPath");
-function tmdbCacheTtl(path) {
-  return isVolatileTmdbPath(path) ? TMDB_VOLATILE_CACHE_TTL : TMDB_CACHE_TTL;
+function tmdbCacheTtl(path, env) {
+  return isVolatileTmdbPath(path) ? envInt(env, "TMDB_VOLATILE_CACHE_TTL", TMDB_VOLATILE_CACHE_TTL, 60, 604800) : envInt(env, "TMDB_CACHE_TTL", TMDB_CACHE_TTL, 60, TMDB_MAX_RETENTION);
 }
 __name(tmdbCacheTtl, "tmdbCacheTtl");
 var SAFE_TMDB_PATH = /^\/[A-Za-z0-9][A-Za-z0-9._\-/]*(\?[A-Za-z0-9._~%\-=&+,|:]*)?$/;

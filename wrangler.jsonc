@@ -3,7 +3,39 @@
   "name": "moviezonne",
   "main": "worker.js",
   "compatibility_date": "2026-08-17",
-  "observability": { "enabled": true },
+
+  /*  head_sampling_rate, not "sampling" — that is the key the runtime reads, and
+   *  an unknown field here is silently ignored, so a typo looks like it worked.
+   *  1 = keep every invocation, which is also the default; stated explicitly so
+   *  nobody has to guess whether logs are being dropped while debugging. */
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+
+  /*  ── TUNABLES, READABLE WITHOUT A DEPLOY ──
+   *  worker.js reads each of these through envInt(), which clamps the value and
+   *  falls back to the compiled-in default if it is missing or malformed. So they
+   *  are safe to change from the dashboard mid-incident, and deleting one restores
+   *  the default rather than breaking the Worker.
+   *
+   *  TMDB_TIMEOUT_MS   per-attempt ceiling on the upstream TMDB call, two attempts
+   *                    max. Kept under the browser's own 15s per-attempt timeout,
+   *                    or the edge retry would land after the client gave up.
+   *                    Before any timeout existed, a stalled TMDB connection held
+   *                    the request open forever — that is what produced 504s.
+   *  PUSH_TIMEOUT_MS   same idea for the push services.
+   *
+   *  There is deliberately NO single TMDB_CACHE_TTL. One number cannot be right
+   *  for both halves: /movie/{id} does not change (7 days), while /trending,
+   *  /movie/now_playing and the /discover queries the home feed is built from ARE
+   *  the "what is out now" answer (3 hours). A flat 3600 would re-fetch the
+   *  unchanging majority all day AND still be the shortest link in the chain.
+   *  Both are separately overridable below.
+   */
+  "vars": {
+    "TMDB_TIMEOUT_MS": "6000",
+    "PUSH_TIMEOUT_MS": "8000",
+    "TMDB_VOLATILE_CACHE_TTL": "10800",
+    "TMDB_CACHE_TTL": "604800"
+  },
 
   // A Worker has no long-lived process, so the setInterval that used to drive
   // release reminders on Render has nowhere to live. This trigger calls
