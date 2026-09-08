@@ -39,7 +39,19 @@
 
 /* ── header ───────────────────────────────────────────────────────────── */
 .providers-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: 1.35rem; }
-.providers-heading { display: flex; align-items: center; gap: .8rem; margin: 0; font: 650 clamp(1.35rem, 2vw, 1.85rem)/1.4 'Outfit', sans-serif; letter-spacing: -.025em; color: var(--text); }
+.providers-heading {
+  display: flex; align-items: center; gap: .85rem; margin: 0;
+  font: 750 clamp(1.45rem, 2.1vw, 2rem)/1.32 'Outfit', sans-serif;
+  letter-spacing: -.03em;
+  /*  Solid fallback first — engines without background-clip:text keep this colour
+      instead of rendering an invisible heading. */
+  color: var(--text);
+  background-image: linear-gradient(176deg, #ffffff 0%, #ffe9ec 60%, #ffc7ce 118%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  /*  Soft red bloom, matching this rail's accent bar. Composited, no layout. */
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, .35)) drop-shadow(0 3px 20px rgba(230, 57, 70, .22));
+}
 .providers-heading::before {
   content: '';
   width: 4px; height: .82em; flex: none;

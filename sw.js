@@ -12,7 +12,15 @@
 //     Now 7.6 on both sides.
 //   * Versioned same-origin assets became CACHE-FIRST (see below).
 //   * TMDB images get their own stale-while-revalidate cache.
-const CACHE_NAME = 'moviezone-v122';
+//
+// v125: provider-shemaroo.png and provider-discoveryplus.png were replaced —
+// both were square app icons ("me" tile, bare D tile) and are now the full brand
+// lockups with wordmarks. Those two URLs carry no ?v=, and an <img> lands in the
+// final cache-first branch of the fetch handler with no revalidation, so without
+// this bump a returning visitor would keep being served the old square tiles
+// forever. The activate handler deletes every cache that is not CACHE_NAME, so
+// renaming the shell is what forces the re-download.
+const CACHE_NAME = 'moviezone-v125';
 
 // Separate cache for TMDB posters/backdrops. Kept apart from the shell so the
 // activate handler can wipe an old shell without throwing away hundreds of
@@ -26,10 +34,10 @@ const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/tv-mode.min.css?v=1.3',
-  '/moviezone.min.css?v=9.3',
+  '/moviezone.min.css?v=9.4',
   '/tv-mode.min.js?v=1.4',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=12.8',
+  '/moviezone.min.js?v=12.9',
   '/manifest.json',
   '/moviezone-logo.png?v=2',
   '/icon-192.png?v=2',
@@ -46,7 +54,7 @@ const STATIC_ASSETS = [
 // Large/feature-specific data should never block a new service worker from
 // installing. It is cached opportunistically and fetched from the network if absent.
 const OPTIONAL_ASSETS = [
-  '/providers.css?v=6',
+  '/providers.css?v=7',
   '/provider-netflix.svg',
   '/provider-prime.svg',
   '/provider-jiohotstar.png',
@@ -56,12 +64,17 @@ const OPTIONAL_ASSETS = [
   '/provider-mxplayer.png',
   '/provider-aha.svg',
   '/provider-crunchyroll.svg',
+  '/provider-sunnxt.png',
+  '/provider-lionsgate.png',
+  '/provider-discoveryplus.png',
+  '/provider-shemaroo.png',
+  '/provider-vi.png',
   '/collections-catalog.json?v=3',
   // The Cinematic Universe rail on the homepage. Both are optional for the same
   // reason the catalogue above is: the row is below the fold and built lazily, so
   // a 404 on either must not be able to fail the whole service-worker install.
-  '/universes.css?v=2',
-  '/universes-rail.js?v=2',
+  '/universes.css?v=3',
+  '/universes-rail.js?v=3',
   // pwa-install.min.js moved off the critical path: index.html no longer ships a
   // <script> tag for it, it is injected on idle / on demand. Still worth having
   // offline so the install popup works, but it must not be able to fail a

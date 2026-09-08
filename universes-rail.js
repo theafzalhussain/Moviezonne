@@ -144,7 +144,6 @@
           '<span class="uv-mark">' + esc(lockup.mark) + '</span>' +
           (lockup.sub ? '<span class="uv-sub">' + esc(lockup.sub) + '</span>' : '') +
         '</span>' +
-        (total ? '<span class="uv-count">' + total + ' Titles</span>' : '') +
       '</a>';
 
     /*  Fade the art in only once it has decoded. Cached images can complete

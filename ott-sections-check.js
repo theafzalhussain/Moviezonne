@@ -150,15 +150,17 @@ const MODES = ['webseries', 'movies'];
 const PLATFORM_LABEL = {
   netflix: 'NETFLIX', prime: 'PRIME VIDEO', jiohotstar: 'JIOHOTSTAR', zee5: 'ZEE5',
   apple: 'APPLE TV+', sonyliv: 'SONYLIV', mxplayer: 'AMAZON MX PLAYER',
-  aha: 'AHA', crunchyroll: 'CRUNCHYROLL'
+  aha: 'AHA', crunchyroll: 'CRUNCHYROLL',
+  sunnxt: 'SUN NXT', lionsgate: 'LIONSGATE PLAY', vi: 'VI MOVIES & TV',
+  discoveryplus: 'DISCOVERY+', shemaroo: 'SHEMAROOME'
 };
 
 /*  Depth floors, per platform and mode.
  *
  *  24 is the grid size and stays the default, because for a full-catalogue
- *  service anything less means the query plan is broken. But two platforms
- *  genuinely do not have 24 titles in TMDB's Indian data, and asserting they do
- *  would be asserting facts about the API rather than about this code:
+ *  service anything less means the query plan is broken. But one platform
+ *  genuinely does not have 24 titles in TMDB's Indian data, and asserting it
+ *  does would be asserting facts about the API rather than about this code:
  *
  *    aha         — 199 movies but only ~14 SERIES for watch_region=IN. aha is a
  *                  Telugu/Tamil film service; the series library is that small.
@@ -166,6 +168,11 @@ const PLATFORM_LABEL = {
  *
  *  crunchyroll's movie library is also thin in absolute terms (52 titles), but
  *  the query plan still yields 57 usable cards, so it keeps the default floor.
+ *
+ *  Platforms with a declared single-type `catalogue` are NOT listed here. They
+ *  are handled by skipMode() below, which re-measures the missing side against
+ *  TMDB instead of granting it a lowered floor — a floor of 0 would pass
+ *  whether the catalogue was empty by nature or empty because the plan broke.
  *
  *  The floor below is set under the measured number so normal TMDB churn does
  *  not flip the suite, while still catching a plan that returns nothing. Raise
@@ -180,6 +187,37 @@ const depthFloor = (platform, mode) =>
     ? DEPTH_FLOORS[platform + ':' + mode]
     : DEPTH_FLOOR_DEFAULT;
 
+/*  Single-type platforms: prove the declaration, then skip the absent mode.
+ *
+ *  discovery+ has 1 movie and ShemarooMe has 0 series for watch_region=IN, so
+ *  running the movies / webseries mode against them would test nothing except
+ *  TMDB's inventory. The declaration in the shipped OTT table is what lets the
+ *  fetcher spend its whole request budget on the type that exists — so what
+ *  this checks is the DECLARATION, against the live API:
+ *
+ *    - the declared-present type must be a full catalogue (>= 200 titles), or
+ *      `catalogue` is throttling a platform that should be fetching both;
+ *    - the declared-absent type must really be absent (< 25 titles, i.e. it
+ *      could not fill even one grid), or the platform has grown a library that
+ *      the shipped plan is now silently discarding.
+ *
+ *  Either way this fails loudly instead of quietly skipping, which is the whole
+ *  difference between this and a hardcoded exemption list.
+ */
+const CATALOGUE_PRESENT_MIN = 200;
+const CATALOGUE_ABSENT_MAX = 25;
+
+async function catalogueSize(platform, type) {
+  const cfg = OTT[platform];
+  const d = await api('/discover/' + type, {
+    with_watch_providers: cfg.provider,
+    watch_region: 'IN',
+    with_watch_monetization_types: cfg.monetization || OTT_MONETIZATION,
+    sort_by: 'popularity.desc'
+  });
+  return (d && d.total_results) || 0;
+}
+
 (async () => {
   server = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
   const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
@@ -187,6 +225,42 @@ const depthFloor = (platform, mode) =>
   for (const platform of Object.keys(OTT)) {
     for (const mode of MODES) {
       console.log('\n=== ' + PLATFORM_LABEL[platform] + '  >  ' + mode.toUpperCase() + ' ===');
+
+      /*  Single-type platforms: the absent mode is not run, but the claim that
+       *  it is absent IS tested, against the live API. */
+      const declared = OTT[platform].catalogue;
+      if (declared) {
+        const presentMode = declared === 'tv' ? 'webseries' : 'movies';
+        const absentType = declared === 'tv' ? 'movie' : 'tv';
+        if (mode !== presentMode) {
+          const [presentN, absentN] = await Promise.all([
+            catalogueSize(platform, declared), catalogueSize(platform, absentType)
+          ]);
+          console.log('  declared "' + declared + ' only" — TMDB IN has '
+            + declared + ' ' + presentN + ' / ' + absentType + ' ' + absentN);
+          check('the ' + absentType + ' library really is absent (<' + CATALOGUE_ABSENT_MAX + ')', () => {
+            assert.ok(absentN < CATALOGUE_ABSENT_MAX, absentN + ' ' + absentType
+              + ' titles now exist for ' + platform + ' — it is no longer a '
+              + declared + '-only catalogue, and the shipped plan is discarding them');
+          });
+          check('the ' + declared + ' library is a full catalogue (>=' + CATALOGUE_PRESENT_MIN + ')', () => {
+            assert.ok(presentN >= CATALOGUE_PRESENT_MIN, 'only ' + presentN + ' ' + declared
+              + ' titles — catalogue:"' + declared + '" is throttling a platform that has neither side');
+          });
+          /*  The point of the declaration is that the shipped 'all' mode — the
+           *  only mode the UI opens — spends every request on the type that
+           *  exists. Assert the remap, or the field is documentation only. */
+          check('the shipped "all" plan queries only /' + declared + ' endpoints', () => {
+            const allPlan = buildOttModeQueries(platform, 'all', 1);
+            assert.ok(allPlan.length >= 4, 'all plan has only ' + allPlan.length + ' queries');
+            const strays = allPlan.filter((q) => q.type !== declared);
+            assert.strictEqual(strays.length, 0, strays.length + ' of ' + allPlan.length
+              + ' queries hit /' + absentType + ', which has ' + absentN + ' titles: '
+              + strays.map((s) => s.endpoint).join(', '));
+          });
+          continue;
+        }
+      }
 
       // 1. STRUCTURAL: the plan itself must be provider-gated end to end.
       const plan = buildOttModeQueries(platform, mode, 1);
@@ -262,7 +336,21 @@ const depthFloor = (platform, mode) =>
         console.log('  NOT on platform: ' + offPlatform.map(titleOf).join(', '));
       }
       check('sampled titles are genuinely on ' + PLATFORM_LABEL[platform] + ' (>=90%)', () => {
-        assert.ok(known.length >= 8, 'only ' + known.length + ' titles could be verified');
+        /*  Sample adequacy scales with the catalogue, for exactly the reason the
+         *  depth floor and headSize above already do: aha's Indian series
+         *  library yields 12 titles and a thinner one could yield fewer, so a
+         *  flat 8-title sample would assert a fact about TMDB rather than about
+         *  this code. The guarantee is unchanged where there is a catalogue to
+         *  sample — 8 is still required of every platform/mode pair that has 8
+         *  titles, which is every one except the thin cases documented at
+         *  DEPTH_FLOORS. The 90% rate never moves, and the hard floor of 3 keeps
+         *  a provider id that has been retired (and now returns one or two stray
+         *  titles) from passing on a sample too small to mean anything. */
+        const wantSample = Math.min(8, items.length);
+        assert.ok(known.length >= 3,
+          'only ' + known.length + ' titles could be verified — too few to judge');
+        assert.ok(known.length >= wantSample, 'only ' + known.length
+          + ' of ' + items.length + ' titles could be verified, needed ' + wantSample);
         assert.ok(rate >= 90, rate + '% verified; off-platform: '
           + (offPlatform.map(titleOf).join(', ') || 'n/a'));
       });
@@ -333,7 +421,8 @@ const depthFloor = (platform, mode) =>
     assert.ok(/if \(OTT\[cat\]\) updateOttHeading\(cat\);/.test(src),
       'filterCat does not set the platform heading');
     ['netflix', 'prime', 'jiohotstar', 'zee5',
-      'apple', 'sonyliv', 'mxplayer', 'aha', 'crunchyroll'].forEach((p) => {
+      'apple', 'sonyliv', 'mxplayer', 'aha', 'crunchyroll',
+      'sunnxt', 'lionsgate', 'vi', 'discoveryplus', 'shemaroo'].forEach((p) => {
       assert.ok(new RegExp(p + ':\\s*\\{').test(src), p + ' missing from the OTT table');
     });
   });

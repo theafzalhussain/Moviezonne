@@ -53,7 +53,20 @@
 
 /* ── header (mirrors .providers-header) ───────────────────────────────── */
 .uv-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: 1.35rem; }
-.uv-heading { display: flex; align-items: center; gap: .8rem; margin: 0; font: 650 clamp(1.35rem, 2vw, 1.85rem)/1.4 'Outfit', sans-serif; letter-spacing: -.025em; color: var(--text); }
+.uv-heading {
+  display: flex; align-items: center; gap: .85rem; margin: 0;
+  font: 750 clamp(1.45rem, 2.1vw, 2rem)/1.32 'Outfit', sans-serif;
+  letter-spacing: -.03em;
+  /*  Solid fallback first — engines without background-clip:text ignore the three
+      properties below and keep this colour, so the heading is never invisible. */
+  color: var(--text);
+  background-image: linear-gradient(176deg, #ffffff 0%, #fff3d0 60%, #ffe08a 118%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  /*  Warm gold bloom under the wordmark — this is what reads as "premium" rather
+      than "bold". Composited, no layout. */
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, .35)) drop-shadow(0 3px 20px rgba(245, 197, 24, .22));
+}
 /*  Gold bar rather than the provider rail's red one: this row leads into the
     premium Collections hub, and gold is what that hub is built out of. */
 .uv-heading::before {
@@ -182,7 +195,7 @@
 .uv-lockup {
   position: absolute; inset: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: .28em; padding: 1rem .9rem 1.7rem;
+  gap: .28em; padding: 1rem .9rem;
   text-align: center;
   transition: transform 220ms var(--ease-smooth, cubic-bezier(.25, .46, .45, .94));
 }
@@ -333,7 +346,7 @@
   .uv-rail { --uv-fade: 40px; gap: .85rem; padding: 8px 2px 12px; min-height: 140px; }
   .uv-rail > li { flex-basis: 170px; }
   .uv-card, .uv-skeleton { height: 120px; border-radius: 16px; }
-  .uv-lockup { padding: .85rem .75rem 1.5rem; }
+  .uv-lockup { padding: .85rem .75rem; }
   .uv-mark { font-size: calc(var(--uv-size, 25px) * .84); }
   .uv-count { bottom: .5rem; font-size: 9px; }
   .uv-arrow { width: 38px; height: 38px; }

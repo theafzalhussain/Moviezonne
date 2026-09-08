@@ -71,8 +71,8 @@ let fail = 0;
 
 /*  Combined movie+series catalogue size a provider must expose to be worth
  *  shipping a tab for. Held at the original 200 for every platform: measured
- *  today the thinnest of the nine is aha at 213 (199 movies + 14 series), so
- *  this still passes on real data while catching a provider id that has been
+ *  today the thinnest of the fourteen is aha at 213 (199 movies + 14 series),
+ *  so this still passes on real data while catching a provider id that has been
  *  retired or was never right — which is exactly how 122 was caught. Note the
  *  probes below are provider-only, with no monetization gate, so a platform's
  *  wider `monetization` setting does not flatter this number. */
@@ -139,11 +139,20 @@ function check(label, fn) {
       assert.ok(perStep[2] >= 15, 'step 3 added only ' + perStep[2]);
     });
 
-    // Spot-check that the catalogue actually looks like this platform.
-    const sample = (tvDepth.results || []).slice(0, 5).map((s) => s.name);
-    console.log('  sample series: ' + sample.join(', '));
+    /*  Spot-check that the catalogue actually looks like this platform.
+     *
+     *  Sampled from the type the platform HAS. Two platforms have a single-type
+     *  Indian catalogue and declare it in the OTT table (`catalogue`) —
+     *  ShemarooMe has 1111 films and zero series, so sampling /discover/tv for
+     *  it was checking TMDB's inventory rather than this code, and failing on
+     *  the honest answer. The assertion itself is unchanged: at least 3 real
+     *  titles, and none of the known junk-network names. */
+    const sampleType = OTT[key].catalogue || 'tv';
+    const sampleSrc = sampleType === 'tv' ? tvDepth : mvDepth;
+    const sample = (sampleSrc.results || []).slice(0, 5).map((s) => s.name || s.title);
+    console.log('  sample ' + (sampleType === 'tv' ? 'series' : 'movies') + ': ' + sample.join(', '));
     check('returns real titles, not an empty or junk list', () => {
-      assert.ok(sample.length >= 3, 'only ' + sample.length + ' series returned');
+      assert.ok(sample.length >= 3, 'only ' + sample.length + ' ' + sampleType + ' returned');
       assert.ok(!sample.some((n) => /PBS|Fishing|Azteca|Imedi/i.test(n)), 'junk network content present: ' + sample.join(', '));
     });
   }

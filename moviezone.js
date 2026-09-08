@@ -4759,7 +4759,78 @@ const OTT = {
    *  the fetch and the verification describing the same catalogue. */
   mxplayer:    { provider: '1898', regions: ['IN'], monetization: 'flatrate|free|ads' },
   aha:         { provider: '532',  regions: ['IN'] },
-  crunchyroll: { provider: '283',  regions: ['IN', 'US'], networks: '1112' }
+  crunchyroll: { provider: '283',  regions: ['IN', 'US'], networks: '1112' },
+
+  /*  ── Five more platforms, chosen on measured data rather than brand recall ──
+   *
+   *  Every id here was read off /watch/providers/{movie,tv}?watch_region=IN and
+   *  then run through the SHIPPED fetcher before being accepted, because the
+   *  provider list is much longer than the list of providers worth a rail card.
+   *  Measured for region IN (movies / series in TMDB's index, then usable cards
+   *  the `all` plan actually returns, then the provider re-check rate):
+   *
+   *    sunnxt 309      2461 /   50   ->  77 cards, 100% verified
+   *    lionsgate 561    388 /   53   ->  81 cards, 100% verified
+   *    vi 614          4301 / 2316   ->  84 cards, 100% verified
+   *    discoveryplus 510   1 / 992   ->  73 cards, 100% verified
+   *    shemaroo 474     1111 /   0   ->  67 cards, 100% verified
+   *
+   *  `networks` is absent from all five deliberately: none of them has a
+   *  confirmed originals channel in TMDB whose id intersects usefully with the
+   *  provider filter, and an unverified with_networks id costs a request and
+   *  returns nothing — the same mistake 2531 and 4238 caused above.
+   *
+   *  Two rejected candidates, recorded so they are not re-tried:
+   *    manoramamax 482  6 usable series, too thin to sample for accuracy
+   *    chaupal 2178 / erosnow 2059  exist for IN only as Amazon/Apple channel
+   *      records, so their logos and catalogues are co-branded storefronts
+   *
+   *  hoichoi (315) and MUBI (11) were both wired here and have been removed on
+   *  request. Their ids and alt-channel ids measured clean, so if either is ever
+   *  wanted back the entries were: hoichoi ['315','2176'] 249/139 -> 79 cards,
+   *  mubi ['11','201'] 509/5 -> 48 cards, both 100% verified, both regions ['IN'].
+   */
+  sunnxt:      { provider: '309',  regions: ['IN'] },
+  lionsgate:   { provider: '561',  regions: ['IN'] },
+  /*  No widened gate for Vi: measured, its flatrate slice is already the whole
+   *  catalogue (4116 of 4301 movies, 2192 of 2316 series), so the default gate
+   *  is what the numbers above were taken with. */
+  vi:          { provider: '614',  regions: ['IN'] },
+
+  /*  ── Two SINGLE-TYPE catalogues, hence the `catalogue` field ──
+   *
+   *  These two are the first platforms here whose Indian library is one media
+   *  type only, and the numbers are not close calls — they were read straight
+   *  off /discover with the platform's own gate:
+   *
+   *    discoveryplus 510    1 movie  /  992 series
+   *    shemaroo 474      1111 movies /    0 series
+   *
+   *  discovery+ India is a factual/reality/kids service (Ben 10, Hell's Kitchen,
+   *  Ancient Aliens, Diners Drive-Ins and Dives) and TMDB files essentially all
+   *  of it as television. ShemarooMe is a Hindi/Gujarati film library and TMDB
+   *  has literally zero series attached to it for IN.
+   *
+   *  `catalogue` makes that explicit instead of leaving it to be discovered as
+   *  an empty half-grid. buildOttModeQueries() reads it and builds the
+   *  single-type plan for 'all', which is the only mode the UI opens — so the
+   *  73 and 67 cards above are what the rail card actually delivers. That is
+   *  not cosmetic: without it a discovery+ click spent three of its six requests
+   *  on movie pages that return one title between them, and the grid was then
+   *  filled from three tv queries instead of the five the webseries plan uses.
+   *
+   *  ott-sections-check.js does not take this field on trust — it re-measures
+   *  the missing side against TMDB and fails if a catalogue declared empty is
+   *  not actually empty, so a platform that later adds films cannot sit here
+   *  silently truncated.
+   */
+  discoveryplus: { provider: '510', regions: ['IN'], catalogue: 'tv' },
+  /*  Widened gate, same reasoning as MX Player: ShemarooMe runs a free
+   *  ad-supported tier, and flatrate-only sees 666 of its 1111 Indian films.
+   *  ottIsOnPlatform() already accepts the free and ads tiers when verifying,
+   *  so the fetch and the verification still describe the same catalogue. */
+  shemaroo:      { provider: '474', regions: ['IN'], catalogue: 'movie',
+                   monetization: 'flatrate|free|ads' }
 };
 
 /*  Networks that are genuinely streaming platforms, for the "Web Series" tab.
@@ -4850,7 +4921,24 @@ const OTT_ALT_PROVIDERS = {
    *  verification has to accept both or it would reject titles it just fetched. */
   mxplayer:    ['1898', '515'],
   aha:         ['532'],
-  crunchyroll: ['283']
+  crunchyroll: ['283'],
+  sunnxt:      ['309'],
+  /*  561 is the direct Lionsgate Play subscription; 2074 and 2053 are the same
+   *  service resold as an Amazon and an Apple TV channel. A title bought through
+   *  a bundle is filed under the channel id only, so all three have to be
+   *  accepted or verification would reject titles the discover filter just
+   *  returned. The rail card still points at the direct service. */
+  lionsgate:   ['561', '2074', '2053'],
+  vi:          ['614'],
+  /*  510 is the direct discovery+ subscription; 584 is the same service resold
+   *  as an Amazon channel, and it actually carries slightly MORE series in
+   *  TMDB's Indian index (1067 vs 992). Verification accepts both for the same
+   *  reason Lionsgate does — a title filed only under the channel record would
+   *  otherwise be rejected right after the discover filter returned it. The
+   *  fetch gate stays on 510 alone, so the rail card opens the direct service's
+   *  own catalogue rather than an Amazon storefront. */
+  discoveryplus: ['510', '584'],
+  shemaroo:      ['474']
 };
 
 /** IST-anchored yyyy-mm-dd, optionally shifted by days. */
@@ -4867,6 +4955,16 @@ function ottISTDate(offsetDays) {
 function buildOttModeQueries(key, mode, page) {
   const cfg = OTT[key];
   if (!cfg) return [];
+  /*  Single-type catalogues (see `catalogue` in the OTT table). The UI only ever
+   *  opens 'all', and for a platform that has no films — or no series — half of
+   *  the 'all' plan is requests that return nothing. Remapping to the
+   *  single-type plan spends the same request budget on the type that exists,
+   *  and it is the plan the check suite already exercises. The explicit
+   *  'webseries' / 'movies' modes are left alone: they are what ott-sections-
+   *  check.js uses to re-measure that the declared-empty side really is empty. */
+  if (mode === 'all' && cfg.catalogue) {
+    mode = cfg.catalogue === 'tv' ? 'webseries' : 'movies';
+  }
   const p1 = String(page * 2 - 1);
   const p2 = String(page * 2);
   const pg = String(page);
@@ -6199,7 +6297,8 @@ async function loadMovies(cat, isLoadMore = false) {
       // priority group, and it never reorders within a lane.
       movies.push(...interleaveFeedByType(ranked));
     } else if (cat === 'tv') {
-      // EXPANDED OTT LIST: Now includes JioCinema, MX Player, HBO, aha, Hoichoi and more major platforms.
+      // EXPANDED OTT LIST: see STREAMING_NETWORK_IDS — every id in it was
+      // resolved through /network/{id} before being kept.
       const STREAMING_NETWORKS = STREAMING_NETWORK_IDS;
       // EXCLUSION LIST: Traditional Indian TV channels to strictly remove from Web Series section
       const TV_CHANNELS_TO_EXCLUDE = LINEAR_TV_EXCLUDE_IDS;
@@ -6905,6 +7004,8 @@ const CAT_HEADINGS = {
   prime:'AMAZON PRIME VIDEO', jiohotstar:'JIOHOTSTAR', zee5:'ZEE5 MOVIES & WEB SERIES',
   apple:'APPLE TV+', sonyliv:'SONYLIV', mxplayer:'AMAZON MX PLAYER',
   aha:'AHA', crunchyroll:'CRUNCHYROLL ANIME',
+  sunnxt:'SUN NXT', lionsgate:'LIONSGATE PLAY', vi:'VI MOVIES & TV',
+  discoveryplus:'DISCOVERY+', shemaroo:'SHEMAROOME',
   adventure:'ADVENTURE', fantasy:'FANTASY', crime:'CRIME', documentary:'DOCUMENTARY', family:'FAMILY'
 };
 /*  ══════════════════════════════════════════════════════════════════════
