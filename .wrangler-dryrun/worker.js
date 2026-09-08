@@ -3508,8 +3508,9 @@ async function buildSitemapIndexXml(env, ctx) {
   return '<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + children.map((child) => "<sitemap><loc>" + import_seo_ssr.default.escXml(import_seo_ssr.default.SITE_URL + child) + "</loc><lastmod>" + import_seo_ssr.default.escXml(lastmod) + "</lastmod></sitemap>").join("\n") + "\n</sitemapindex>\n";
 }
 __name(buildSitemapIndexXml, "buildSitemapIndexXml");
+var SITEMAP_XML_KV_TTL = 86400;
 async function serveMediaSitemap(kind, chunkStr, env, ctx) {
-  const { items } = await getSitemapItems(kind, env, ctx);
+  const { items, generated } = await getSitemapItems(kind, env, ctx);
   if (!items.length) {
     return new Response(null, {
       status: 503,
@@ -3521,8 +3522,20 @@ async function serveMediaSitemap(kind, chunkStr, env, ctx) {
   if (!Number.isFinite(index) || index < 1 || index > shards) {
     return new Response(null, { status: 404, headers: { "cache-control": "no-store" } });
   }
+  const store = seoStore(env);
+  const xmlKey = "sitemap:xml:" + kind + ":" + index + ":" + shards + ":" + (generated || "live");
+  if (store) {
+    try {
+      const cachedXml = await store.get(xmlKey, { type: "text", cacheTtl: 3600 });
+      if (cachedXml) return xmlResponse(cachedXml);
+    } catch (err) {
+      console.log("[sitemap] xml cache read failed: " + (err && err.message));
+    }
+  }
   const slice = shards > 1 ? items.slice((index - 1) * SITEMAP_CHUNK, index * SITEMAP_CHUNK) : items;
-  return xmlResponse(import_seo_ssr.default.buildMediaSitemap(slice, kind));
+  const xml = import_seo_ssr.default.buildMediaSitemap(slice, kind);
+  if (store) ctx.waitUntil(store.put(xmlKey, xml, { expirationTtl: SITEMAP_XML_KV_TTL }));
+  return xmlResponse(xml);
 }
 __name(serveMediaSitemap, "serveMediaSitemap");
 async function browseEntries(env, ctx) {
@@ -3621,6 +3634,22 @@ async function ssrResponse(request, env, ctx, url) {
   return null;
 }
 __name(ssrResponse, "ssrResponse");
+var CACHE_NOISE_PARAM = /^(?:utm_[a-z_]+|fbclid|gclid|gbraid|wbraid|dclid|msclkid|yclid|ttclid|twclid|igshid|igsh|mc_eid|mc_cid|_ga|_gl|ref_src|ref_url|si|at_medium|at_campaign|campaign_id|ad_id|adset_id)$/i;
+function edgeCacheKey(request, url) {
+  if (url.pathname.startsWith("/api/")) return request;
+  if (!url.search) return request;
+  const clean = new URL(url);
+  let dropped = false;
+  for (const name of [...clean.searchParams.keys()]) {
+    if (CACHE_NOISE_PARAM.test(name)) {
+      clean.searchParams.delete(name);
+      dropped = true;
+    }
+  }
+  if (!dropped) return request;
+  return new Request(clean.toString(), { method: request.method, headers: request.headers });
+}
+__name(edgeCacheKey, "edgeCacheKey");
 var worker_default = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -3628,14 +3657,15 @@ var worker_default = {
       return Response.redirect(`https://moviezone.dev${url.pathname}${url.search}`, 301);
     }
     const edgeCache = caches.default;
+    const cacheKey = request.method === "GET" ? edgeCacheKey(request, url) : request;
     if (request.method === "GET") {
-      const cached = await edgeCache.match(request);
+      const cached = await edgeCache.match(cacheKey);
       if (cached) return cached;
     }
     const apiResponse = await routeApi(request, env, ctx, url);
     if (apiResponse) {
       if (request.method === "GET" && apiResponse.status === 200 && url.pathname.startsWith("/api/tmdb/") && !url.pathname.includes("/batch") && apiResponse.headers.get("x-cache") !== "STALE") {
-        ctx.waitUntil(edgeCache.put(request, apiResponse.clone()));
+        ctx.waitUntil(edgeCache.put(cacheKey, apiResponse.clone()));
       }
       return apiResponse;
     }
@@ -3646,8 +3676,8 @@ var worker_default = {
       console.error("[ssr] " + url.pathname + " failed:", err && err.stack);
     }
     if (ssr) {
-      if (ssr.status === 200) {
-        ctx.waitUntil(edgeCache.put(request, ssr.clone()));
+      if (ssr.status === 200 && request.method === "GET") {
+        ctx.waitUntil(edgeCache.put(cacheKey, ssr.clone()));
       }
       return ssr;
     }
@@ -3675,7 +3705,7 @@ var worker_default = {
       headers: newHeaders
     });
     if (request.method === "GET" && finalResponse.status === 200 && path !== "/sw.js") {
-      ctx.waitUntil(edgeCache.put(request, finalResponse.clone()));
+      ctx.waitUntil(edgeCache.put(cacheKey, finalResponse.clone()));
     }
     return finalResponse;
   },
@@ -3700,6 +3730,7 @@ export {
   bytesToB64url,
   concatBytes,
   worker_default as default,
+  edgeCacheKey,
   encryptPushPayload,
   endpointId,
   getSitemapItems,

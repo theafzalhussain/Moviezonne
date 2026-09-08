@@ -31,7 +31,7 @@
    *  Both are separately overridable below.
    */
   "vars": {
-    "TMDB_TIMEOUT_MS": "6000",
+    "TMDB_TIMEOUT_MS": "3000",
     "PUSH_TIMEOUT_MS": "8000",
     "TMDB_VOLATILE_CACHE_TTL": "10800",
     "TMDB_CACHE_TTL": "604800"

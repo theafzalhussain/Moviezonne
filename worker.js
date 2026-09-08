@@ -1580,8 +1580,34 @@ async function buildSitemapIndexXml(env, ctx) {
 /**
  * One media shard. `chunkStr` is the "2" in /sitemap-movies-2.xml, or undefined.
  */
+/*  ── THE ONE PLACE WHERE CACHING RENDERED OUTPUT PAYS FOR ITSELF ────────────
+ *  Measured on a laptop core (so pessimistic against an edge box):
+ *
+ *      renderDetailPage .................  0.58 ms
+ *      renderCategoryPage ...............  0.65 ms
+ *      buildMediaSitemap, one shard ..... 26.16 ms   <-- 2000 URLs of XML
+ *      JSON.parse(catalogue, 506 KB) ....  6.16 ms
+ *
+ *  A free-plan Worker gets 10ms of CPU per invocation and is killed with Error
+ *  1102 past it. So the HTML renderers have 15-100x of headroom and caching their
+ *  output would buy nothing, while a cold sitemap shard is ~32ms — over budget on
+ *  its own, and by far the heaviest thing this Worker does.
+ *
+ *  Caching THIS in KV is cheap in exactly the way caching detail pages is not.
+ *  There are 5003 movies + 3259 series, which is 3 movie shards + 2 TV shards —
+ *  about 8 sitemap URLs in total against 8262 detail URLs. So this costs ~8 KV
+ *  writes a day, against a free-plan allowance of 1000, while per-page HTML
+ *  caching would need ~8262 per refresh cycle and would take the TMDB cache down
+ *  with it when the quota ran out.
+ *
+ *  Keyed on the shard AND the catalogue's generated stamp, so a rebuilt catalogue
+ *  invalidates every shard by simply not matching any more — no purge step to
+ *  forget, and no chance of serving a shard that disagrees with the index.
+ */
+const SITEMAP_XML_KV_TTL = 86400;
+
 async function serveMediaSitemap(kind, chunkStr, env, ctx) {
-  const { items } = await getSitemapItems(kind, env, ctx);
+  const { items, generated } = await getSitemapItems(kind, env, ctx);
 
   /*  No catalogue and no live data. 503 rather than an empty <urlset>: sitemap.xsd
    *  requires at least one <url>, so an empty file is invalid XML and reported as
@@ -1606,11 +1632,29 @@ async function serveMediaSitemap(kind, chunkStr, env, ctx) {
     return new Response(null, { status: 404, headers: { 'cache-control': 'no-store' } });
   }
 
+  const store = seoStore(env);
+  const xmlKey = 'sitemap:xml:' + kind + ':' + index + ':' + shards + ':' + (generated || 'live');
+  if (store) {
+    try {
+      const cachedXml = await store.get(xmlKey, { type: 'text', cacheTtl: 3600 });
+      if (cachedXml) return xmlResponse(cachedXml);
+    } catch (err) {
+      // A KV read failure must not lose the sitemap — fall through and build it.
+      console.log('[sitemap] xml cache read failed: ' + (err && err.message));
+    }
+  }
+
   const slice = shards > 1
     ? items.slice((index - 1) * SITEMAP_CHUNK, index * SITEMAP_CHUNK)
     : items;
 
-  return xmlResponse(seo.buildMediaSitemap(slice, kind));
+  const xml = seo.buildMediaSitemap(slice, kind);
+
+  // waitUntil, so the crawler is never made to wait on the write that only helps
+  // the NEXT request.
+  if (store) ctx.waitUntil(store.put(xmlKey, xml, { expirationTtl: SITEMAP_XML_KV_TTL }));
+
+  return xmlResponse(xml);
 }
 
 /** Every catalogue entry, tagged with the kind its detail URL needs. */
@@ -1739,6 +1783,61 @@ async function ssrResponse(request, env, ctx, url) {
 }
 
 // ── Worker entry points ─────────────────────────────────────────────────────
+
+/*  ══════════════════════════════════════════════════════════════════════════
+ *  ONE CACHE ENTRY PER PAGE, NOT ONE PER CAMPAIGN LINK
+ *  ══════════════════════════════════════════════════════════════════════════
+ *  caches.default keys on the full URL, so
+ *
+ *      /movie/680-pulp-fiction
+ *      /movie/680-pulp-fiction?utm_source=google&utm_medium=cpc
+ *      /movie/680-pulp-fiction?fbclid=IwAR...
+ *
+ *  were three separate entries for one identical response. Every ad click, every
+ *  Facebook or Instagram referral and every WhatsApp forward arrived with its own
+ *  tracking tail and therefore its own MISS — and since those are exactly the
+ *  links that bring first-time visitors, the traffic least likely to be warm was
+ *  guaranteed to be cold. Dropping the tracking tail collapses them onto one.
+ *
+ *  ── WHY THIS IS A DENYLIST AND NOT `search = ''` ──
+ *  Blanket-stripping the query string is the obvious version and it breaks two
+ *  things, both silently:
+ *
+ *    • page — ssrCategoryPage reads it (worker.js: `url.searchParams.get('page')`).
+ *      /movies/action?page=2 would be answered with page 1's cached HTML, and
+ *      every paginated category URL in the sitemap would serve the same document.
+ *    • v — the asset seal. /moviezone.min.js?v=13.1 and ?v=13.0 are DIFFERENT
+ *      bytes by construction, which is the entire point of asset-seal.js. Collapse
+ *      them and the first version cached wins for a month under `immutable`, so a
+ *      deploy ships new HTML pointing at a stale bundle.
+ *
+ *  Also `r` (the batch plan) and `secret` (the cron guard) carry meaning. So an
+ *  unknown parameter is assumed to matter and is kept; only names known to be
+ *  pure attribution are removed.
+ */
+const CACHE_NOISE_PARAM = /^(?:utm_[a-z_]+|fbclid|gclid|gbraid|wbraid|dclid|msclkid|yclid|ttclid|twclid|igshid|igsh|mc_eid|mc_cid|_ga|_gl|ref_src|ref_url|si|at_medium|at_campaign|campaign_id|ad_id|adset_id)$/i;
+
+function edgeCacheKey(request, url) {
+  //  Under /api/ the query string IS the upstream path — /movie/popular?page=2 is
+  //  a different resource, not the same one with a label on it.
+  if (url.pathname.startsWith('/api/')) return request;
+  if (!url.search) return request;
+
+  const clean = new URL(url);          // a copy: the redirect in ssrWatchPage
+  let dropped = false;                 // still needs the caller's original search
+  for (const name of [...clean.searchParams.keys()]) {
+    if (CACHE_NOISE_PARAM.test(name)) {
+      clean.searchParams.delete(name);
+      dropped = true;
+    }
+  }
+  if (!dropped) return request;
+
+  //  Built explicitly rather than `new Request(clean, request)`: only the method
+  //  and headers are wanted, and this is only ever reached for GET.
+  return new Request(clean.toString(), { method: request.method, headers: request.headers });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -1748,10 +1847,14 @@ export default {
       return Response.redirect(`https://moviezone.dev${url.pathname}${url.search}`, 301);
     }
 
-    // ✅ Edge Cache: check before any expensive work (FREE, no KV quota)
+    /*  ✅ Edge Cache: checked before any expensive work (FREE, no KV quota).
+     *  The key is computed ONCE and reused by every put below — a match and a put
+     *  that disagree is worse than no cache at all, because it never hits and
+     *  writes an entry per request. */
     const edgeCache = caches.default;
+    const cacheKey = request.method === 'GET' ? edgeCacheKey(request, url) : request;
     if (request.method === 'GET') {
-      const cached = await edgeCache.match(request);
+      const cached = await edgeCache.match(cacheKey);
       if (cached) return cached;
     }
 
@@ -1769,7 +1872,7 @@ export default {
           && url.pathname.startsWith('/api/tmdb/')
           && !url.pathname.includes('/batch')
           && apiResponse.headers.get('x-cache') !== 'STALE') {
-        ctx.waitUntil(edgeCache.put(request, apiResponse.clone()));
+        ctx.waitUntil(edgeCache.put(cacheKey, apiResponse.clone()));
       }
       return apiResponse;
     }
@@ -1781,9 +1884,14 @@ export default {
       console.error('[ssr] ' + url.pathname + ' failed:', err && err.stack);
     }
     if (ssr) {
-      // ✅ Cache SSR pages (200 only)
-      if (ssr.status === 200) {
-        ctx.waitUntil(edgeCache.put(request, ssr.clone()));
+      /*  ✅ Cache SSR pages (200 only).
+       *  The method guard matters: run_worker_first hands /movies/*, /movie/* and
+       *  friends to this Worker for EVERY method, and the Cache API rejects a
+       *  non-GET key — which would surface as an unhandled waitUntil rejection in
+       *  the observability logs, i.e. noise in the one place you look when
+       *  diagnosing errors. */
+      if (ssr.status === 200 && request.method === 'GET') {
+        ctx.waitUntil(edgeCache.put(cacheKey, ssr.clone()));
       }
       return ssr;
     }
@@ -1844,7 +1952,7 @@ export default {
 
     // ✅ Cache static assets (200 only)
     if (request.method === 'GET' && finalResponse.status === 200 && path !== '/sw.js') {
-      ctx.waitUntil(edgeCache.put(request, finalResponse.clone()));
+      ctx.waitUntil(edgeCache.put(cacheKey, finalResponse.clone()));
     }
 
     return finalResponse;
@@ -1868,6 +1976,7 @@ export {
   bytesToB64url,
   buildSitemapIndexXml,
   concatBytes,
+  edgeCacheKey,
   encryptPushPayload,
   endpointId,
   getSitemapItems,
