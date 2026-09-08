@@ -158,6 +158,28 @@
 .provider-logo--apple img { width: 100px; max-width: 100px; height: 100px; }
 .provider-logo--apple > span { font: 400 44px/1 'Outfit', sans-serif; }
 
+/*  ── the two long lockups get a bigger slot than the shared wide-logo box ──
+ *
+ *  discovery+ is a 5:1 lockup and ShemarooMe a 2.4:1 one — the widest artwork in
+ *  the rail. object-fit: contain scales to whichever axis binds first, so inside
+ *  the shared 172x68 box discovery+ painted at 172x34 and ShemarooMe at 164x68,
+ *  i.e. discovery+ ended up less than half the height of a square mark like
+ *  SonyLIV's 78x78 or Apple's 100x100 and read as the smallest thing in the row.
+ *
+ *  Both are width-bound at the 172px cap, so the fix is width: the horizontal
+ *  padding on just these two tiles is cut to free the card's inner width, and
+ *  `max-width: none` lets the art take it (width: 100% on the img resolves to
+ *  the content box, so it can never overflow the tile). The height ceilings are
+ *  what let ShemarooMe grow on its short axis too; discovery+ stays width-bound
+ *  either way, which is simply the shape of the brand lockup.
+ *
+ *  Measured result at a 225px tile: discovery+ 203x41 (was 172x34), ShemarooMe
+ *  193x80 (was 164x68). */
+#top-providers [data-provider-cat="discoveryplus"],
+#top-providers [data-provider-cat="shemaroo"] { padding-left: .7rem; padding-right: .7rem; }
+.provider-logo--discoveryplus img { max-width: none; height: 44px; }
+.provider-logo--shemaroo img { max-width: none; height: 80px; }
+
 /* These are legibility treatments, not effects: retain them in low-end mode. */
 #top-providers .provider-logo--apple img,
 #top-providers [data-provider-cat="jiohotstar"] img { filter: brightness(0) invert(1) !important; }
@@ -203,6 +225,12 @@
   .provider-logo--aha img { max-width: 94px; }
   .provider-logo--apple img { width: 82px; max-width: 82px; height: 82px; }
   .provider-logo--apple > span { font-size: 34px; }
+  /*  Same reasoning as the desktop rule above, scaled to the 170x120 phone tile:
+      these two are width-bound, so the tile's own padding is what caps them. */
+  #top-providers [data-provider-cat="discoveryplus"],
+  #top-providers [data-provider-cat="shemaroo"] { padding-left: .45rem; padding-right: .45rem; }
+  .provider-logo--discoveryplus img { height: 38px; }
+  .provider-logo--shemaroo img { height: 68px; }
   .providers-arrow { width: 38px; height: 38px; }
 
   /* ── MOBILE: box shown "as hovered" without a hover ──
