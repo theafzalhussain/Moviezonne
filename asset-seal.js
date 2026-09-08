@@ -30,10 +30,18 @@ const crypto = require('crypto');
 
 const SEAL_FILE = 'asset-versions.json';
 const ASSETS = ['moviezone.min.js', 'moviezone.min.css', 'tv-mode.min.js', 'tv-mode.min.css',
-  'search-engine.min.js', 'pwa-install.min.js'];
+  'search-engine.min.js', 'pwa-install.min.js',
+  /*  Not a bundle, but cached harder than one. moviezone.js fetches the catalogue
+   *  with { cache: 'force-cache' } at a ?v= URL and sw.js precaches that same URL,
+   *  so the browser will not even revalidate it — the version string is the only
+   *  way to invalidate a client. Five franchises were once added to it while the
+   *  version stayed at 2, and every returning browser kept rendering the old
+   *  twelve. Same failure mode as the min.js story above, so: same seal. */
+  'collections-catalog.json'];
 
 const html = fs.readFileSync('index.html', 'utf8');
 const sw = fs.readFileSync('sw.js', 'utf8');
+const appJs = fs.readFileSync('moviezone.js', 'utf8');
 
 function sha(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex').slice(0, 16);
@@ -58,6 +66,10 @@ function versionOf(name) {
     const m = re.exec(html);
     if (m) return m[1];
   }
+  /*  Data assets have no tag in index.html — they are requested from the bundle
+   *  source, so that fetch call is where their version actually lives. */
+  const fetched = new RegExp("fetch\\('/?" + escaped + "\\?v=([\\d.]+)'").exec(appJs);
+  if (fetched) return fetched[1];
   return null;
 }
 
@@ -76,7 +88,7 @@ if (process.argv.includes('--write')) {
   fs.writeFileSync(SEAL_FILE, JSON.stringify(current, null, 2) + '\n');
   console.log('Sealed ' + Object.keys(current).length + ' assets into ' + SEAL_FILE + ':');
   for (const name of Object.keys(current)) {
-    console.log('  ' + name.padEnd(24) + 'v' + current[name].version + '  ' + current[name].sha256);
+    console.log('  ' + name.padEnd(26) + 'v' + current[name].version + '  ' + current[name].sha256);
   }
   process.exit(0);
 }
@@ -105,7 +117,8 @@ for (const name of Object.keys(current)) {
     problems.push(name + ' CHANGED but still ships as v' + now.version +
       '\n              sealed ' + was.sha256 + ' -> now ' + now.sha256 +
       '\n              It is served immutable for a year and cache-first by sw.js, so every' +
-      '\n              existing client keeps the OLD file. Bump the ?v= in index.html AND' +
+      '\n              existing client keeps the OLD file. Bump the ?v= where it is referenced' +
+      '\n              (index.html, or the fetch call in moviezone.js for data assets) AND in' +
       '\n              sw.js, bump CACHE_NAME, then run: npm run assets:seal');
   }
   if (now.version !== was.version && now.sha256 === was.sha256) {
@@ -115,7 +128,8 @@ for (const name of Object.keys(current)) {
 }
 
 // index.html and sw.js must agree, or an offline client runs different code.
-for (const name of ['moviezone.min.js', 'moviezone.min.css', 'tv-mode.min.js', 'tv-mode.min.css', 'search-engine.min.js']) {
+for (const name of ['moviezone.min.js', 'moviezone.min.css', 'tv-mode.min.js', 'tv-mode.min.css',
+  'search-engine.min.js', 'collections-catalog.json']) {
   const v = current[name] && current[name].version;
   if (!v) continue;
   if (!sw.includes("'/" + name + '?v=' + v + "'")) {
@@ -126,7 +140,7 @@ for (const name of ['moviezone.min.js', 'moviezone.min.css', 'tv-mode.min.js', '
 console.log('\nimmutable asset seal');
 console.log('-'.repeat(62));
 for (const name of Object.keys(current)) {
-  console.log('  ' + name.padEnd(24) + 'v' + String(current[name].version).padEnd(6) + current[name].sha256);
+  console.log('  ' + name.padEnd(26) + 'v' + String(current[name].version).padEnd(6) + current[name].sha256);
 }
 console.log('-'.repeat(62));
 

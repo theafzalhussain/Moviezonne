@@ -11041,7 +11041,7 @@ window.addEventListener('scroll', () => {
       </div>
       <nav class="mz-mp-links">
         ${Array.from(navLinksOriginal.querySelectorAll('a')).map((a, i) => 
-          `<a href="${a.getAttribute('href') || '#'}" class="mz-mp-link${a.classList.contains('active') ? ' active' : ''}${a.classList.contains('nav-premium') ? ' mz-mp-premium' : ''}" data-idx="${i}"${a.closest('[data-tv-hide]') ? ' data-tv-hide' : ''} style="--i:${i}">${(a.dataset.label || a.textContent).trim()}</a>`
+          `<a href="${a.getAttribute('href') || '#'}" class="mz-mp-link${a.classList.contains('active') ? ' active' : ''}" data-idx="${i}"${a.closest('[data-tv-hide]') ? ' data-tv-hide' : ''} style="--i:${i}">${(a.dataset.label || a.textContent).trim()}</a>`
         ).join('')}
       </nav>
       <div class="mz-mp-footer">
@@ -12177,41 +12177,47 @@ window.handleNotifyMe = async function(btn) {
 
 
 
-// === COLLECTIONS HUB (Premium Cinematic Universes — JioHotstar-level luxury) ===
+// === CINEMATIC UNIVERSES (per-franchise pages, opened from the homepage rail) ===
+/*  There is NO picker/landing page any more. The old #collections grid — 18 cards,
+ *  hero mosaic and category tabs — was a dead stop between the homepage rail and
+ *  the franchise the visitor already chose, so it was removed along with the
+ *  navbar entry that was its only other door. The overlay below now has exactly
+ *  one state: a single universe's page at #collections-<slug>, and Back/Escape
+ *  leaves it for the page underneath instead of stepping to a grid. */
 (function initCollectionsHub() {
-  // Exact title lists and TMDB metadata live in collections-catalog.json.
-  // This array contains presentation metadata only — no broad keyword discovery.
+  /*  Presentation metadata only — exact title lists and TMDB ids live in
+   *  collections-catalog.json. No broad keyword discovery happens here.
+   *
+   *  ORDER IN THIS ARRAY DOES NOT MATTER. The homepage rail is built from
+   *  Object.keys(collections-catalog.json → universes), so THAT file’s key order
+   *  is the rail order. This array is kept in the same sequence purely so the two
+   *  read alike when you edit them together; resorting it changes nothing.
+   *
+   *  There is no `category` field any more. It fed the picker’s Superhero/Sci-Fi/
+   *  Action/Horror tabs and nothing else, so it went when the picker did. */
   const UNIVERSES = [
-    // ── SUPERHERO ──
-    { slug: 'mcu', name: 'Marvel Cinematic Universe', badge: 'MARVEL', tagline: 'The complete MCU timeline — every film and narrative series.', accent: 'marvel', category: 'superhero' },
-    { slug: 'dceu', name: 'DC Universe', badge: 'DC', tagline: 'The DCEU legacy and DC Studios’ interconnected new era.', accent: 'dc', category: 'superhero' },
-    // ── SCI-FI ──
-    { slug: 'terminator', name: 'Terminator', badge: 'TERMINATOR', tagline: 'The complete war between humanity and the machines.', accent: 'terminator', category: 'scifi' },
-    { slug: 'transformers', name: 'Transformers', badge: 'TRANSFORMERS', tagline: 'Robots in disguise — films and animated sagas across generations.', accent: 'transformers', category: 'scifi' },
-    // ── FANTASY ──
-    { slug: 'wizarding-world', name: 'Wizarding World', badge: 'WIZARDING WORLD', tagline: 'Harry Potter and Fantastic Beasts — the complete magical journey.', accent: 'wizard', category: 'fantasy' },
-    { slug: 'middle-earth', name: 'Middle-earth', badge: 'MIDDLE-EARTH', tagline: 'The Lord of the Rings, The Hobbit and the ages of Middle-earth.', accent: 'lotr', category: 'fantasy' },
-    { slug: 'pirates', name: 'Pirates of the Caribbean', badge: 'PIRATES', tagline: 'Captain Jack Sparrow and every voyage across the cursed seas.', accent: 'pirates', category: 'fantasy' },
-    // ── ACTION ──
-    { slug: 'fast-furious', name: 'Fast & Furious', badge: 'FAST', tagline: 'Every high-octane heist, race and family mission.', accent: 'fast', category: 'action' },
-    { slug: 'james-bond', name: 'James Bond 007', badge: '007', tagline: 'The complete EON 007 film canon — six decades of espionage.', accent: 'bond', category: 'action' },
-    { slug: 'mission-impossible', name: 'Mission: Impossible', badge: 'M:I', tagline: 'The original IMF series and every impossible cinematic mission.', accent: 'mi', category: 'action' },
-    { slug: 'jurassic-park', name: 'Jurassic World', badge: 'JURASSIC', tagline: 'Every Jurassic Park and World film, plus the animated canon.', accent: 'jurassic', category: 'action' },
-    { slug: 'predator', name: 'Predator', badge: 'PREDATOR', tagline: 'The ultimate hunters — Predator, Prey and the AVP encounters.', accent: 'predator', category: 'action' },
-    // ── HORROR ──
-    { slug: 'conjuring', name: 'The Conjuring Universe', badge: 'CONJURING', tagline: 'Conjuring, Annabelle, The Nun and every connected nightmare.', accent: 'horror', category: 'horror' },
-    // ── ANIMATION ──
-    { slug: 'despicable-me', name: 'Despicable Me & Minions', badge: 'MINIONS', tagline: 'Gru, the Minions and every supervillain adventure.', accent: 'minions', category: 'animation' },
-    { slug: 'toy-story', name: 'Toy Story', badge: 'PIXAR', tagline: 'The complete Toy Story saga and its animated spin-offs.', accent: 'toystory', category: 'animation' },
-    { slug: 'shrek', name: 'Shrek', badge: 'DREAMWORKS', tagline: 'Shrek, Puss in Boots and every Far Far Away adventure.', accent: 'shrek', category: 'animation' },
-    { slug: 'kung-fu-panda', name: 'Kung Fu Panda', badge: 'DREAMWORKS', tagline: 'Po’s complete journey across films and animated series.', accent: 'kungfu', category: 'animation' },
-    { slug: 'ice-age', name: 'Ice Age', badge: 'BLUE SKY', tagline: 'Manny, Sid, Diego, Scrat and every adventure with the herd.', accent: 'iceage', category: 'animation' }
+    { slug: 'mcu', name: 'Marvel Cinematic Universe', badge: 'MARVEL', tagline: 'The complete MCU timeline — every film and narrative series.', accent: 'marvel' },
+    { slug: 'dceu', name: 'DC Universe', badge: 'DC', tagline: 'The DCEU legacy and DC Studios’ interconnected new era.', accent: 'dc' },
+    { slug: 'x-men', name: 'X-Men Cinematic Universe', badge: 'X-MEN', tagline: 'Every mutant film — the X-Men saga, Wolverine and Deadpool.', accent: 'xmen' },
+    { slug: 'yrf-spy', name: 'YRF Spy Universe', badge: 'YRF SPY', tagline: 'Tiger, Pathaan and Kabir — India’s biggest spy crossover.', accent: 'yrfspy' },
+    { slug: 'jurassic-park', name: 'Jurassic World', badge: 'JURASSIC', tagline: 'Every Jurassic Park and World film, plus the animated canon.', accent: 'jurassic' },
+    { slug: 'cop-universe', name: 'Cop Universe', badge: 'COP UNIVERSE', tagline: 'Rohit Shetty’s force — Singham, Simmba and Sooryavanshi.', accent: 'cop' },
+    { slug: 'star-wars', name: 'Star Wars Cinematic Universe', badge: 'STAR WARS', tagline: 'The Skywalker saga, the standalone Stories and the Ewok adventures.', accent: 'starwars' },
+    { slug: 'transformers', name: 'Transformers', badge: 'TRANSFORMERS', tagline: 'Robots in disguise — films and animated sagas across generations.', accent: 'transformers' },
+    { slug: 'conjuring', name: 'The Conjuring Universe', badge: 'CONJURING', tagline: 'Conjuring, Annabelle, The Nun and every connected nightmare.', accent: 'horror' },
+    { slug: 'fast-furious', name: 'Fast & Furious', badge: 'FAST', tagline: 'Every high-octane heist, race and family mission.', accent: 'fast' },
+    { slug: 'james-bond', name: 'James Bond 007', badge: '007', tagline: 'The complete EON 007 film canon — six decades of espionage.', accent: 'bond' },
+    { slug: 'terminator', name: 'Terminator', badge: 'TERMINATOR', tagline: 'The complete war between humanity and the machines.', accent: 'terminator' },
+    { slug: 'wizarding-world', name: 'Wizarding World', badge: 'WIZARDING WORLD', tagline: 'Harry Potter and Fantastic Beasts — the complete magical journey.', accent: 'wizard' },
+    { slug: 'middle-earth', name: 'Middle-earth', badge: 'MIDDLE-EARTH', tagline: 'The Lord of the Rings, The Hobbit and the ages of Middle-earth.', accent: 'lotr' },
+    { slug: 'mission-impossible', name: 'Mission: Impossible', badge: 'M:I', tagline: 'The original IMF series and every impossible cinematic mission.', accent: 'mi' },
+    { slug: 'predator', name: 'Predator', badge: 'PREDATOR', tagline: 'The ultimate hunters — Predator, Prey and the AVP encounters.', accent: 'predator' },
+    { slug: 'maddock', name: 'Maddock Supernatural Universe', badge: 'MADDOCK', tagline: 'Stree, Bhediya, Munjya and every Chanderi horror-comedy legend.', accent: 'maddock' }
   ];
 
   const hubCache = new Map();
   let activeUniverseSlug = null;
   let activeTab = 'all'; // 'all' | 'movies' | 'tv'
-  let activeCategory = 'all';
 
   function getUniverse(slug) {
     return UNIVERSES.find(u => u.slug === slug);
@@ -12223,7 +12229,11 @@ window.handleNotifyMe = async function(btn) {
   let curatedCatalogPromise = null;
   function loadCuratedCatalog() {
     if (curatedCatalogPromise) return curatedCatalogPromise;
-    curatedCatalogPromise = fetch('/collections-catalog.json?v=2', { cache: 'force-cache' })
+    /*  ?v= is the ONLY invalidation lever here: force-cache means the browser
+     *  will not even revalidate, so a content change with a stale version is
+     *  invisible to every returning client. Bump this whenever
+     *  collections-catalog.json changes — asset-seal.js now enforces it. */
+    curatedCatalogPromise = fetch('/collections-catalog.json?v=3', { cache: 'force-cache' })
       .then(response => {
         if (!response.ok) throw new Error('Catalog HTTP ' + response.status);
         return response.json();
@@ -12283,8 +12293,6 @@ window.handleNotifyMe = async function(btn) {
   const liteMode = prefersReducedMotion || lowPower;
   const enableTilt = !isTouchOnly && !prefersReducedMotion && !lowPower;
   if (liteMode) document.documentElement.classList.add('ch-lite');
-
-  const ARROW_SVG = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>';
 
   // Fade images in only once decoded — avoids janky pop-in and layout thrash
   function attachImageReveal(scope) {
@@ -12350,199 +12358,6 @@ window.handleNotifyMe = async function(btn) {
     }, { passive: true });
   }
 
-  // Set exact values immediately; use a compositor-only pop instead of frame-dependent counting.
-  function countUp(el, target, suffix) {
-    if (!el) return;
-    el.textContent = (Number(target) || 0) + (suffix || '');
-    if (!prefersReducedMotion && typeof el.animate === 'function') {
-      el.animate([
-        { opacity: 0.45, transform: 'translate3d(0,6px,0) scale(0.94)' },
-        { opacity: 1, transform: 'translate3d(0,0,0) scale(1)' }
-      ], { duration: 480, easing: 'cubic-bezier(0.22,1,0.36,1)' });
-    }
-  }
-
-  function buildHubCard(universe, index) {
-    const card = document.createElement('button');
-    card.type = 'button';
-    card.className = 'ch-card ch-accent-' + universe.accent;
-    card.setAttribute('data-slug', universe.slug);
-    card.setAttribute('data-category', universe.category);
-    card.setAttribute('aria-label', universe.name + ' — explore collection');
-    card.style.setProperty('--delay', Math.min(index, 12) * 55 + 'ms');
-    card.innerHTML =
-      '<div class="ch-card-media">' +
-        '<div class="ch-card-posters" id="chPosters-' + universe.slug + '"><div class="ch-card-skeleton"></div></div>' +
-        '<div class="ch-card-sheen"></div>' +
-      '</div>' +
-      '<div class="ch-card-overlay"></div>' +
-      '<div class="ch-card-glow"></div>' +
-      '<div class="ch-card-spotlight"></div>' +
-      '<div class="ch-card-body">' +
-        '<span class="ch-card-badge">' + escapeHTML(universe.badge) + '</span>' +
-        '<h3>' + escapeHTML(universe.name) + '</h3>' +
-        '<p>' + escapeHTML(universe.tagline) + '</p>' +
-        '<div class="ch-card-meta">' +
-          '<span class="ch-card-count" id="chCount-' + universe.slug + '">Loading…</span>' +
-          '<span class="ch-card-cta">Explore ' + ARROW_SVG + '</span>' +
-        '</div>' +
-      '</div>';
-    card.addEventListener('click', () => openUniverse(universe.slug));
-    bindTilt(card);
-    return card;
-  }
-
-  // ── Netflix-style hero poster mosaic (all universes merged) ──
-  let mosaicBuilt = false;
-  async function buildHeroMosaic() {
-    const wrap = document.getElementById('chHeroMosaic');
-    const grid = document.getElementById('chHeroMosaicGrid');
-    if (!wrap || !grid || mosaicBuilt) return;
-    mosaicBuilt = true;
-
-    // Reuses the same cached promises the cards use — zero extra network calls
-    const perUniverse = await Promise.all(UNIVERSES.map(async (u) => {
-      try {
-        const [movies, tv] = await Promise.all([
-          fetchUniverseMovies(u),
-          fetchUniverseTV(u)
-        ]);
-        return [...movies, ...tv].filter(x => x.poster_path).map(x => x.poster_path);
-      } catch (e) { return []; }
-    }));
-
-    // Round-robin interleave so Marvel, DC, Wizarding World… all appear mixed together
-    const pool = [];
-    const seen = new Set();
-    const longest = perUniverse.reduce((m, l) => Math.max(m, l.length), 0);
-    for (let i = 0; i < longest; i++) {
-      for (let u = 0; u < perUniverse.length; u++) {
-        const p = perUniverse[u][i];
-        if (p && !seen.has(p)) { seen.add(p); pool.push(p); }
-      }
-    }
-    if (!pool.length) return;
-
-    const vw = wrap.offsetWidth || window.innerWidth;
-    const vh = wrap.offsetHeight || 640;
-    const isNarrow = vw < 768;
-    const cols = vw < 560 ? 8 : vw < 900 ? 11 : vw < 1400 ? 13 : 16;
-    const gap = isNarrow ? 5 : 7;
-    const gridW = vw * (isNarrow ? 1.7 : 1.28);
-    const tileW = (gridW - gap * (cols - 1)) / cols;
-    const rows = Math.min(10, Math.ceil((vh * 1.4) / (tileW * 1.5 + gap)) + 1);
-    const maxTiles = isMzTV() ? 48 : (isNarrow ? 42 : (liteMode ? 60 : 112));
-    const total = Math.min(cols * rows, maxTiles);
-
-    grid.style.setProperty('--cols', cols);
-
-    let html = '';
-    for (let i = 0; i < total; i++) {
-      // stride keeps neighbouring tiles from being the same franchise
-      const path = pool[(i * 7) % pool.length];
-      html += '<div class="ch-mosaic-tile"><img src="https://image.tmdb.org/t/p/w185' + path +
-              '" alt="" width="185" height="278" loading="lazy" decoding="async" data-ch-reveal></div>';
-    }
-    grid.innerHTML = html;
-    attachImageReveal(grid);
-    requestAnimationFrame(() => wrap.classList.add('ch-mosaic-in'));
-  }
-
-  function renderHubGrid() {
-    const grid = document.getElementById('chGrid');
-    if (!grid || grid.dataset.built) return;
-    grid.dataset.built = '1';
-    const fragment = document.createDocumentFragment();
-    UNIVERSES.forEach((u, i) => fragment.appendChild(buildHubCard(u, i)));
-    grid.appendChild(fragment);
-
-    // Update stats
-    const statUniverses = document.getElementById('chStatUniverses');
-    if (statUniverses) countUp(statUniverses, UNIVERSES.length);
-
-    // Load counts and poster previews. Promise.all guarantees one exact global total.
-    Promise.all(UNIVERSES.map(async (universe) => {
-      try {
-        const [movies, tvSeries] = await Promise.all([
-          fetchUniverseMovies(universe),
-          fetchUniverseTV(universe)
-        ]);
-        const total = movies.length + tvSeries.length;
-        const countEl = document.getElementById('chCount-' + universe.slug);
-        if (countEl) {
-          let text = movies.length + ' Movie' + (movies.length !== 1 ? 's' : '');
-          if (tvSeries.length > 0) text += ' · ' + tvSeries.length + ' Series';
-          countEl.textContent = text;
-        }
-        const postersEl = document.getElementById('chPosters-' + universe.slug);
-        if (postersEl) {
-          const allItems = [...movies, ...tvSeries].filter(m => m.backdrop_path || m.poster_path);
-          const heroItem = allItems.find(m => m.backdrop_path) || allItems[0];
-          if (heroItem && heroItem.backdrop_path) {
-            postersEl.innerHTML =
-              '<img src="https://image.tmdb.org/t/p/w780' + heroItem.backdrop_path + '"' +
-              ' srcset="https://image.tmdb.org/t/p/w500' + heroItem.backdrop_path + ' 500w, https://image.tmdb.org/t/p/w780' + heroItem.backdrop_path + ' 780w"' +
-              ' sizes="(max-width: 768px) 90vw, 420px" alt="" width="780" height="439" loading="lazy" decoding="async"' +
-              ' class="ch-card-backdrop" data-ch-reveal>';
-          } else if (allItems.length > 0) {
-            postersEl.innerHTML = allItems.slice(0, 3).map(m =>
-              '<img src="' + IMG + m.poster_path + '" alt="" width="342" height="513" loading="lazy" decoding="async" data-ch-reveal>'
-            ).join('');
-          } else {
-            postersEl.innerHTML = '<div class="ch-card-empty">Coming soon</div>';
-          }
-          attachImageReveal(postersEl);
-        }
-        return total;
-      } catch (e) {
-        const countEl = document.getElementById('chCount-' + universe.slug);
-        if (countEl) countEl.textContent = 'Unavailable';
-        return 0;
-      }
-    })).then(totals => {
-      const statTitles = document.getElementById('chStatTitles');
-      if (statTitles) countUp(statTitles, totals.reduce((sum, count) => sum + count, 0), '+');
-    });
-
-    // Category tab listeners
-    initCategoryTabs();
-
-    // Cinematic poster wall behind the hero
-    buildHeroMosaic();
-  }
-
-  function initCategoryTabs() {
-    const tabsContainer = document.getElementById('chCategoryTabs');
-    if (!tabsContainer) return;
-    tabsContainer.querySelectorAll('.ch-cat-tab').forEach(btn => {
-      btn.addEventListener('click', () => {
-        tabsContainer.querySelectorAll('.ch-cat-tab').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        activeCategory = btn.dataset.cat;
-        filterGridByCategory();
-      });
-    });
-  }
-
-  function filterGridByCategory() {
-    const grid = document.getElementById('chGrid');
-    if (!grid) return;
-    const cards = grid.querySelectorAll('.ch-card');
-    let visibleIdx = 0;
-    cards.forEach(card => {
-      const cat = card.dataset.category;
-      const show = activeCategory === 'all' || cat === activeCategory;
-      card.style.display = show ? '' : 'none';
-      if (show) {
-        card.style.setProperty('--delay', Math.min(visibleIdx, 12) * 55 + 'ms');
-        card.classList.remove('ch-card-animate');
-        void card.offsetWidth;
-        card.classList.add('ch-card-animate');
-        visibleIdx++;
-      }
-    });
-  }
-
   function renderUniverseDetail(universe, movies, tvSeries) {
     const detail = document.getElementById('chDetailView');
     if (!detail) return;
@@ -12561,6 +12376,23 @@ window.handleNotifyMe = async function(btn) {
     const yearStart = (allItems[0].release_date || allItems[0].first_air_date || '').slice(0, 4) || '?';
     const yearEnd = (allItems[allItems.length - 1].release_date || allItems[allItems.length - 1].first_air_date || '').slice(0, 4) || 'Present';
 
+    /*  Franchises are living things — Maddock has four films dated 2026-2028 and
+     *  YRF has two more Tigers coming. Those used to render exactly like a released
+     *  film: a poster, a year, and a 0.0-star rating that made a hotly anticipated
+     *  sequel look badly reviewed. They are now separated out, chipped as UPCOMING,
+     *  and given their own tab, which also means "N Movies" stops over-promising
+     *  how much there is to actually watch tonight.
+     *  Date-only compare (YYYY-MM-DD sorts lexicographically) — no Date parsing,
+     *  no timezone edge where a film flips state depending on the viewer's clock. */
+    const today = new Date().toISOString().slice(0, 10);
+    const dateOf = (item) => item.release_date || item.first_air_date || '';
+    const isUpcoming = (item) => {
+      const d = dateOf(item);
+      return !d || d > today;
+    };
+    const upcomingItems = allItems.filter(isUpcoming);
+    const releasedCount = allItems.length - upcomingItems.length;
+
     function buildCards(items) {
       return items.map((item, idx) => {
         const title = item.title || item.name || '';
@@ -12568,18 +12400,26 @@ window.handleNotifyMe = async function(btn) {
         const voteRaw = Number(item.vote_average || 0);
         const rating = voteRaw.toFixed(1);
         const isTVItem = item._type === 'tv';
+        const soon = isUpcoming(item);
         const delay = Math.min(idx, 16) * 45;
+        /*  An unreleased title often has no poster yet. Rendering IMG + null gives
+         *  a broken-image icon, so fall back to a lettered placeholder. */
+        const art = item.poster_path
+          ? '<img src="' + IMG + item.poster_path + '" alt="' + escapeHTML(title) + ' poster" width="342" height="513" loading="lazy" decoding="async" data-ch-reveal>'
+          : '<div class="ch-movie-noart" aria-hidden="true">' + escapeHTML(title.slice(0, 1).toUpperCase() || '?') + '</div>';
         return (
-          '<div class="ch-movie-card ch-accent-' + universe.accent + '" data-id="' + item.id + '" data-type="' + item._type + '"' +
-            ' role="button" tabindex="0" aria-label="' + escapeHTML(title) + ' (' + year + ')" style="--delay:' + delay + 'ms;animation-delay:' + delay + 'ms">' +
+          '<div class="ch-movie-card ch-accent-' + universe.accent + (soon ? ' ch-movie-soon' : '') + '" data-id="' + item.id + '" data-type="' + item._type + '"' +
+            ' role="button" tabindex="0" aria-label="' + escapeHTML(title) + ' (' + year + ')' + (soon ? ', upcoming' : '') + '" style="--delay:' + delay + 'ms;animation-delay:' + delay + 'ms">' +
             '<div class="ch-movie-card-inner">' +
-              '<img src="' + IMG + item.poster_path + '" alt="' + escapeHTML(title) + ' poster" width="342" height="513" loading="lazy" decoding="async" data-ch-reveal>' +
+              art +
               '<span class="ch-movie-order">' + (idx + 1) + '</span>' +
               (isTVItem ? '<span class="ch-movie-type-badge ch-type-tv">TV</span>' : '<span class="ch-movie-type-badge ch-type-movie">MOVIE</span>') +
-              (voteRaw > 0 ? '<div class="ch-movie-rating">★ ' + rating + '</div>' : '') +
+              // A rating on an unreleased film is noise at best and misleading at worst.
+              (soon ? '<div class="ch-movie-soon-chip">UPCOMING</div>'
+                    : (voteRaw > 0 ? '<div class="ch-movie-rating">★ ' + rating + '</div>' : '')) +
               '<div class="ch-movie-shine"></div>' +
               '<div class="ch-movie-hover-overlay">' +
-                '<div class="ch-movie-hover-play">▶</div>' +
+                '<div class="ch-movie-hover-play">' + (soon ? '🕒' : '▶') + '</div>' +
               '</div>' +
             '</div>' +
             '<div class="ch-movie-info"><h4>' + escapeHTML(title) + '</h4><span>' + year + '</span></div>' +
@@ -12612,6 +12452,8 @@ window.handleNotifyMe = async function(btn) {
             '<span class="ch-detail-count">' + totalMovies + ' Movie' + (totalMovies !== 1 ? 's' : '') + '</span>' +
             (totalTV > 0 ? '<span class="ch-detail-count">' + totalTV + ' TV Series</span>' : '') +
             '<span class="ch-detail-count">' + yearStart + ' – ' + yearEnd + '</span>' +
+            (upcomingItems.length ? '<span class="ch-detail-count ch-detail-count--soon">' +
+              releasedCount + ' of ' + allItems.length + ' released</span>' : '') +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -12619,6 +12461,7 @@ window.handleNotifyMe = async function(btn) {
         '<button class="ch-dtab active" data-filter="all">All (' + allItems.length + ')</button>' +
         '<button class="ch-dtab" data-filter="movies">Movies (' + totalMovies + ')</button>' +
         (totalTV > 0 ? '<button class="ch-dtab" data-filter="tv">TV Series (' + totalTV + ')</button>' : '') +
+        (upcomingItems.length ? '<button class="ch-dtab" data-filter="upcoming">Upcoming (' + upcomingItems.length + ')</button>' : '') +
       '</div>' +
       '<div class="ch-detail-sort">' +
         '<button class="ch-sort-btn active" data-sort="release">Release Order</button>' +
@@ -12633,19 +12476,20 @@ window.handleNotifyMe = async function(btn) {
     const heroEl = detail.querySelector('.ch-detail-hero');
     if (heroEl && !prefersReducedMotion) requestAnimationFrame(() => heroEl.classList.add('ch-kenburns'));
 
-    // Tab filtering
-    detail.querySelectorAll('.ch-dtab').forEach(tab => {
-      tab.addEventListener('click', () => {
-        detail.querySelectorAll('.ch-dtab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        const filter = tab.dataset.filter;
-        let filtered = allItems;
-        if (filter === 'movies') filtered = allItems.filter(i => i._type === 'movie');
-        else if (filter === 'tv') filtered = allItems.filter(i => i._type === 'tv');
-        const activeSort = detail.querySelector('.ch-sort-btn.active');
-        paintGrid(applySort(filtered, activeSort ? activeSort.dataset.sort : 'release'));
-      });
-    });
+    /*  Filter and sort were each re-deriving the visible list from the DOM, in two
+     *  near-identical copies that had to stay in agreement. Adding a third filter to
+     *  both would have been a third chance for them to drift, so both handlers now
+     *  go through one function that reads the two active buttons and repaints.
+     *
+     *  Movies/TV deliberately still COUNT their upcoming entries, so the number on
+     *  the tab always matches the number of cards behind it. Upcoming is a
+     *  cross-cutting view of the same list, not a fourth bucket carved out of it. */
+    function applyFilter(list, filter) {
+      if (filter === 'movies') return list.filter(i => i._type === 'movie');
+      if (filter === 'tv') return list.filter(i => i._type === 'tv');
+      if (filter === 'upcoming') return list.filter(isUpcoming);
+      return list;
+    }
 
     function applySort(list, sort) {
       const items = [...list];
@@ -12654,18 +12498,26 @@ window.handleNotifyMe = async function(btn) {
       return items;
     }
 
-    // Sort functionality
-    detail.querySelectorAll('.ch-sort-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        detail.querySelectorAll('.ch-sort-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        const activeFilter = detail.querySelector('.ch-dtab.active').dataset.filter;
-        let items = allItems;
-        if (activeFilter === 'movies') items = allItems.filter(i => i._type === 'movie');
-        else if (activeFilter === 'tv') items = allItems.filter(i => i._type === 'tv');
-        paintGrid(applySort(items, btn.dataset.sort));
+    function repaint() {
+      const tab = detail.querySelector('.ch-dtab.active');
+      const sortBtn = detail.querySelector('.ch-sort-btn.active');
+      paintGrid(applySort(
+        applyFilter(allItems, tab ? tab.dataset.filter : 'all'),
+        sortBtn ? sortBtn.dataset.sort : 'release'
+      ));
+    }
+
+    function wireGroup(selector) {
+      detail.querySelectorAll(selector).forEach(btn => {
+        btn.addEventListener('click', () => {
+          detail.querySelectorAll(selector).forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          repaint();
+        });
       });
-    });
+    }
+    wireGroup('.ch-dtab');
+    wireGroup('.ch-sort-btn');
 
     bindMovieCardClicks();
   }
@@ -12697,14 +12549,14 @@ window.handleNotifyMe = async function(btn) {
     if (!universe) return;
     const overlay = document.getElementById('collections-hub-overlay');
     if (!overlay) return;
-    if (!overlay.classList.contains('open')) openCollectionsHubOverlay({ skipHistory: true });
+    if (!overlay.classList.contains('open')) openCollectionsHubOverlay();
 
     activeUniverseSlug = slug;
     overlay.classList.add('detail-mode');
     const topbarTitle = document.getElementById('chTopbarTitle');
     const backLabel = document.getElementById('chBackLabel');
     if (topbarTitle) topbarTitle.textContent = universe.name;
-    if (backLabel) backLabel.textContent = 'Collections';
+    if (backLabel) backLabel.textContent = 'Close';
 
     if (!(options && options.skipHistory)) {
       window.history.pushState({ collectionsHub: true, universe: slug }, '', '#collections-' + slug);
@@ -12725,20 +12577,6 @@ window.handleNotifyMe = async function(btn) {
     } catch (error) {
       console.warn('[MovieZone] Failed to open universe', slug, error);
       if (detail) detail.innerHTML = '<div class="ch-detail-empty"><div class="ch-detail-empty-icon">⚠️</div><strong>Could not load this universe.</strong><span>Please try again in a moment.</span></div>';
-    }
-  }
-
-  function closeUniverseDetail(options) {
-    const overlay = document.getElementById('collections-hub-overlay');
-    if (!overlay) return;
-    overlay.classList.remove('detail-mode');
-    activeUniverseSlug = null;
-    const topbarTitle = document.getElementById('chTopbarTitle');
-    const backLabel = document.getElementById('chBackLabel');
-    if (topbarTitle) topbarTitle.textContent = 'Collections & Universes';
-    if (backLabel) backLabel.textContent = 'Close';
-    if (!(options && options.skipHistory) && window.location.hash.startsWith('#collections-')) {
-      window.history.pushState({ collectionsHub: true }, '', '#collections');
     }
   }
 
@@ -12872,24 +12710,23 @@ window.handleNotifyMe = async function(btn) {
     else if (overlay && overlay.classList.contains('open')) initParticles();
   });
 
+  /*  A universe IS the destination — there is no picker page in between, so this
+   *  entry point requires a slug. The overlay only ever exists in detail mode.
+   *  Called from universes-rail.js (homepage rail) and from the popstate router. */
   window.openCollectionsHub = function(event, initialSlug) {
     if (event) event.preventDefault();
-    openCollectionsHubOverlay({});
-    if (initialSlug) openUniverse(initialSlug);
+    if (!initialSlug || !getUniverse(initialSlug)) return;
+    openUniverse(initialSlug);
   };
 
-  function openCollectionsHubOverlay(options) {
+  function openCollectionsHubOverlay() {
     const overlay = document.getElementById('collections-hub-overlay');
     if (!overlay) return;
     overlay.classList.add('open');
     if (!isMzTV()) {
       document.body.style.overflow = 'hidden';
     }
-    renderHubGrid();
     initParticles();
-    if (!(options && options.skipHistory) && !window.location.hash.startsWith('#collections')) {
-      window.history.pushState({ collectionsHub: true }, '', '#collections');
-    }
   }
 
   window.closeCollectionsHub = function(options) {
@@ -12904,10 +12741,10 @@ window.handleNotifyMe = async function(btn) {
     }
   };
 
+  /*  There is no hub grid to step back to any more, so Back / Escape from a
+   *  universe leaves the overlay entirely and returns to the page underneath. */
   window.handleCollectionsBack = function() {
-    const overlay = document.getElementById('collections-hub-overlay');
-    if (overlay && overlay.classList.contains('detail-mode')) closeUniverseDetail();
-    else window.closeCollectionsHub();
+    window.closeCollectionsHub();
   };
 
   document.addEventListener('keydown', (e) => {
@@ -12919,19 +12756,16 @@ window.handleNotifyMe = async function(btn) {
     }
   });
 
+  /*  Only #collections-<slug> is a real destination. A bare #collections is no
+   *  longer a page, so it tears the overlay down like any other hash. */
   window.addEventListener('popstate', () => {
     const overlay = document.getElementById('collections-hub-overlay');
     if (!overlay) return;
     const hash = window.location.hash;
-    if (hash.startsWith('#collections-')) {
-      const slug = hash.replace('#collections-', '');
-      if (getUniverse(slug)) {
-        if (!overlay.classList.contains('open')) openCollectionsHubOverlay({ skipHistory: true });
-        openUniverse(slug, { skipHistory: true });
-      }
-    } else if (hash === '#collections') {
-      if (!overlay.classList.contains('open')) openCollectionsHubOverlay({ skipHistory: true });
-      else closeUniverseDetail({ skipHistory: true });
+    const slug = hash.startsWith('#collections-') ? hash.replace('#collections-', '') : '';
+    if (slug && getUniverse(slug)) {
+      if (!overlay.classList.contains('open')) openCollectionsHubOverlay();
+      openUniverse(slug, { skipHistory: true });
     } else if (overlay.classList.contains('open')) {
       overlay.classList.remove('open', 'detail-mode');
       document.body.style.overflow = '';
@@ -12940,11 +12774,31 @@ window.handleNotifyMe = async function(btn) {
     }
   });
 
-  // Deep-link support — clean up stale #collections hash on page load to prevent loop
+  /*  COLD-LOAD DEEP LINKS
+   *  This used to throw the hash away on DOMContentLoaded — pasting
+   *  /#collections-mcu into a fresh tab landed you on the homepage, so a franchise
+   *  page could not be shared, bookmarked or survive a refresh. The comment said it
+   *  was "to prevent loop", and it genuinely was: opening the overlay pushed
+   *  #collections, which fired the router, which opened the overlay again.
+   *
+   *  That loop is gone with the picker. openCollectionsHubOverlay() no longer
+   *  touches history at all, and the open below passes skipHistory because the URL
+   *  is ALREADY the state we want — pushing it again would put a duplicate entry in
+   *  front of the page the visitor arrived from.
+   *
+   *  A bare #collections, or a slug that no longer exists (the retired franchises,
+   *  or a typo), is still stripped: there is no page to show, and leaving a dead
+   *  hash in the bar invites a reload into the same nothing. */
+  function openFromHash() {
+    const hash = window.location.hash;
+    if (!hash.startsWith('#collections')) return;
+    const slug = hash.startsWith('#collections-') ? hash.slice('#collections-'.length) : '';
+    if (slug && getUniverse(slug)) openUniverse(slug, { skipHistory: true });
+    else window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
   if (window.location.hash.startsWith('#collections')) {
-    document.addEventListener('DOMContentLoaded', () => {
-      window.history.replaceState(null, '', window.location.pathname + window.location.search);
-    });
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', openFromHash);
+    else openFromHash();
   }
 })();
 

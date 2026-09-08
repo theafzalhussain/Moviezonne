@@ -12,7 +12,7 @@
 //     Now 7.6 on both sides.
 //   * Versioned same-origin assets became CACHE-FIRST (see below).
 //   * TMDB images get their own stale-while-revalidate cache.
-const CACHE_NAME = 'moviezone-v116';
+const CACHE_NAME = 'moviezone-v122';
 
 // Separate cache for TMDB posters/backdrops. Kept apart from the shell so the
 // activate handler can wipe an old shell without throwing away hundreds of
@@ -26,10 +26,10 @@ const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/tv-mode.min.css?v=1.3',
-  '/moviezone.min.css?v=8.9',
+  '/moviezone.min.css?v=9.3',
   '/tv-mode.min.js?v=1.4',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=12.4',
+  '/moviezone.min.js?v=12.8',
   '/manifest.json',
   '/moviezone-logo.png?v=2',
   '/icon-192.png?v=2',
@@ -56,7 +56,12 @@ const OPTIONAL_ASSETS = [
   '/provider-mxplayer.png',
   '/provider-aha.svg',
   '/provider-crunchyroll.svg',
-  '/collections-catalog.json?v=2',
+  '/collections-catalog.json?v=3',
+  // The Cinematic Universe rail on the homepage. Both are optional for the same
+  // reason the catalogue above is: the row is below the fold and built lazily, so
+  // a 404 on either must not be able to fail the whole service-worker install.
+  '/universes.css?v=2',
+  '/universes-rail.js?v=2',
   // pwa-install.min.js moved off the critical path: index.html no longer ships a
   // <script> tag for it, it is injected on idle / on demand. Still worth having
   // offline so the install popup works, but it must not be able to fail a

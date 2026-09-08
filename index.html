@@ -13,9 +13,9 @@
 <link rel="preconnect" href="https://image.tmdb.org" crossorigin>
 <link rel="dns-prefetch" href="https://image.tmdb.org">
 
-<link rel="stylesheet" href="/moviezone.min.css?v=8.9">
+<link rel="stylesheet" href="/moviezone.min.css?v=9.3">
 <!--MZ_PERF_HEAD-->
-<link rel="preload" href="/moviezone.min.css?v=8.9" as="style" fetchpriority="high">
+<link rel="preload" href="/moviezone.min.css?v=9.3" as="style" fetchpriority="high">
 <link rel="preload" as="image" media="(max-width: 1024px)" href="https://image.tmdb.org/t/p/w780/qeQJx07rK2xm8SD2sJxFKhE7gs0.jpg" fetchpriority="high">
 <link rel="preload" as="image" media="(min-width: 1025px)" href="https://image.tmdb.org/t/p/w1280/qeQJx07rK2xm8SD2sJxFKhE7gs0.jpg" fetchpriority="high">
 <meta name="mz-hero-backdrop" content="/qeQJx07rK2xm8SD2sJxFKhE7gs0.jpg">
@@ -34,7 +34,7 @@
 <link rel="preload" href="/fonts/outfit-latin-var.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/bebas-neue-latin-400.woff2" as="font" type="font/woff2" crossorigin>
 
-<link rel="preload" href="/moviezone.min.js?v=12.4" as="script">
+<link rel="preload" href="/moviezone.min.js?v=12.8" as="script">
 
 <style id="mz-fonts">
 @font-face{font-family:'Outfit';font-style:normal;font-weight:300 900;font-display:swap;src:url(/fonts/outfit-latin-var.woff2) format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
@@ -1022,11 +1022,6 @@ html.mz-no-ads .mz-ad-slot{display:none}
     <li><a href="#" class="active" onclick="goHome(event)">Home</a></li>
     <!-- <li><a href="#movies-section" onclick="goHome(event)">Movies</a></li> -->
     <li><a href="#" onclick="filterCat('tv', event)">Web Series</a></li>
-    <li><a href="#" class="nav-premium" data-label="Cinematic Universe" onclick="openCollectionsHub(event)">
-      <svg class="nav-premium-icon" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M12 2.6l2.02 4.55 4.96.5-3.7 3.33 1.03 4.87L12 13.4l-4.31 2.45 1.03-4.87-3.7-3.33 4.96-.5L12 2.6z"/><circle cx="19.4" cy="17.8" r="1.5"/><circle cx="5.2" cy="19.4" r="1.1"/></svg>
-      <span class="nav-premium-label">Cinematic Universe</span>
-      <span class="nav-premium-shine" aria-hidden="true"></span>
-    </a></li>
     
 <li><a href="#upcoming" onclick="goHome(event)">Upcoming</a></li>
     <li><a href="#" onclick="filterCat('anime', event)">Anime</a></li>
@@ -1170,6 +1165,31 @@ html.mz-no-ads .mz-ad-slot{display:none}
   </div>
 </section>
 
+<!-- ── CINEMATIC UNIVERSE RAIL ──
+     Sits directly BELOW Top 10 on purpose: Top 10 is the "what is hot right now"
+     answer most visitors came for, so it gets the higher slot, and franchise
+     browsing reads as the next step down the page rather than a detour past it.
+     Same tile geometry, arrows and trailing fade as the Top Providers rail. A tile
+     opens #collections-<slug> — that franchise's own page. There is no picker page
+     in front of it any more, so this rail and the SSR deep links are the only way
+     in. Only the header and skeletons ship; universes-rail.js builds the tiles,
+     and that file and universes.css carry the full reasoning. -->
+<link rel="stylesheet" href="/universes.css?v=2" media="print" onload="this.media='all'">
+<noscript><style>#cinematic-universes{display:none}</style></noscript>
+<section id="cinematic-universes" class="uv-section" aria-labelledby="uvHeading">
+  <div class="uv-header">
+    <div>
+      <h2 id="uvHeading" class="uv-heading">Cinematic Universe</h2>
+      <p class="uv-subtitle">Every franchise, every timeline — jump straight in.</p>
+    </div>
+  </div>
+  <ul id="uvRail" class="uv-rail" aria-label="Cinematic universes">
+    <li><span class="uv-skeleton"></span></li>
+    <li><span class="uv-skeleton"></span></li>
+    <li><span class="uv-skeleton"></span></li>
+  </ul>
+</section>
+
 <!-- â”€â”€ MAIN MOVIES SECTION â”€â”€ -->
 <div class="main-content" id="movies-section">
   <div class="section-header">
@@ -1311,7 +1331,16 @@ html.mz-no-ads .mz-ad-slot{display:none}
 </section>
 
 <!-- ── UPCOMING MOVIE DETAIL MODAL ── -->
-<!-- â”€â”€ COLLECTIONS HUB (Premium Universes) â”€â”€ -->
+<!-- ══════════════════════════════════════════════════════════════════════
+     CINEMATIC UNIVERSE PAGE (one franchise at a time)
+     This used to be a two-state hub: a picker view (#collections) holding an
+     18-card grid, a poster mosaic and category tabs, and a detail view for the
+     franchise you then clicked. The picker is gone. Visitors arrive from the
+     homepage rail having ALREADY chosen a franchise, so the grid was a stop on
+     the way to somewhere they had picked, and the navbar entry that was its only
+     other entrance is gone too. What is left is the detail view, always in
+     .detail-mode, addressed as #collections-<slug>.
+     ══════════════════════════════════════════════════════════════════════ -->
 <div id="collections-hub-overlay" class="collections-hub-overlay">
   <canvas id="chParticleCanvas" class="ch-particle-canvas"></canvas>
   <div class="ch-topbar">
@@ -1319,37 +1348,10 @@ html.mz-no-ads .mz-ad-slot{display:none}
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
       <span id="chBackLabel">Close</span>
     </button>
-    <div class="ch-topbar-title" id="chTopbarTitle">Collections &amp; Universes</div>
+    <div class="ch-topbar-title" id="chTopbarTitle">Cinematic Universe</div>
     <div class="ch-topbar-stats" id="chTopbarStats"></div>
   </div>
   <div class="ch-scroll" id="chScroll">
-    <div class="ch-hub-view" id="chHubView">
-      <div class="ch-hero">
-        <div class="ch-hero-mosaic" id="chHeroMosaic" aria-hidden="true">
-          <div class="ch-hero-mosaic-grid" id="chHeroMosaicGrid"></div>
-          <div class="ch-hero-mosaic-veil"></div>
-        </div>
-        <div class="ch-hero-glow"></div>
-        <div class="ch-hero-badge">&#10022; MOVIEZONE PREMIUM</div>
-        <h2>Cinematic <span class="ch-hero-gradient-text">Universes</span></h2>
-        <p>Every franchise. Every timeline. Movies &amp; TV Series — all A to Z in one luxury hub.</p>
-        <div class="ch-hero-stats">
-          <div class="ch-stat-card"><span class="ch-stat-num" id="chStatUniverses">0</span><span class="ch-stat-label">Universes</span></div>
-          <div class="ch-stat-card"><span class="ch-stat-num" id="chStatTitles">0</span><span class="ch-stat-label">Titles</span></div>
-          <div class="ch-stat-card"><span class="ch-stat-num" id="chStatYears">60+</span><span class="ch-stat-label">Years</span></div>
-        </div>
-      </div>
-      <div class="ch-category-tabs" id="chCategoryTabs">
-        <button class="ch-cat-tab active" data-cat="all">All Universes</button>
-        <button class="ch-cat-tab" data-cat="superhero">Superhero</button>
-        <button class="ch-cat-tab" data-cat="scifi">Sci-Fi</button>
-        <button class="ch-cat-tab" data-cat="fantasy">Fantasy</button>
-        <button class="ch-cat-tab" data-cat="action">Action</button>
-        <button class="ch-cat-tab" data-cat="horror">Horror</button>
-        <button class="ch-cat-tab" data-cat="animation">Animation</button>
-      </div>
-      <div class="ch-grid" id="chGrid"></div>
-    </div>
     <div class="ch-detail-view" id="chDetailView"></div>
   </div>
 </div>
@@ -1747,7 +1749,7 @@ html.mz-no-ads .mz-ad-slot{display:none}
       unstyled text. A leading slash is the whole fix. -->
 <script src="/tv-mode.min.js?v=1.4" defer></script>
 <script src="/search-engine.min.js?v=2.1" defer></script>
-<script src="/moviezone.min.js?v=12.4" defer></script>
+<script src="/moviezone.min.js?v=12.8" defer></script>
 <script>
 /*  ── pwa-install.min.js is NOT loaded with the others ─────────────────────────
  *  It was a fourth `defer` script, so its 30 KB was parsed and executed inside
@@ -1811,6 +1813,37 @@ window.addEventListener('beforeinstallprompt', function () { window.__mzLoadPwaI
   });
   window.addEventListener('load', function () { setTimeout(pull, 6000); });
 })();
+</script>
+<script>
+/*  ── Cinematic Universe rail ──────────────────────────────────────────────────
+ *  The row's tiles are built by /universes-rail.js, requested 2s after `load`.
+ *
+ *  Not a <script defer> tag, for the same reason pwa-install.min.js stopped being
+ *  one: a fourth deferred script executes inside the load window, and this one
+ *  renders a row nobody has scrolled to yet.
+ *
+ *  An IntersectionObserver with a 600px rootMargin was tried first and reverted.
+ *  It measurably did not fire: with the section 1272px down in a 900px viewport
+ *  the observer reported isIntersecting:false and never revisited, so the rail
+ *  stayed as skeletons — rootMargin is not honoured the same way once the
+ *  document is a nested browsing context, and "the observer might not report" is
+ *  not an acceptable failure mode for a row that is part of the page. The cost it
+ *  was guarding against is already handled better: the franchise backdrops are
+ *  the only real weight here and they are loading="lazy", so the browser gates
+ *  them on the viewport itself. What is left is one ~3KB script.
+ *
+ *  A missing section (the SSR detail routes render a different body) is a silent
+ *  no-op.
+ */
+window.addEventListener('load', function () {
+  if (!document.getElementById('cinematic-universes')) return;
+  setTimeout(function () {
+    var s = document.createElement('script');
+    s.src = '/universes-rail.js?v=2';
+    s.async = true;
+    document.head.appendChild(s);
+  }, 2000);
+});
 </script>
 <script>
 // ── Loader dismissal ─────────────────────────────────────────────────────────

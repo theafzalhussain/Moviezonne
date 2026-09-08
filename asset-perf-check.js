@@ -926,9 +926,27 @@ check('the weak-hardware fast path is not mobile-only', () => {
     'low-end-mode is gated on isMobile alone, so weak laptops get all 76 backdrop-filters');
 });
 
+/*  The "Cinematic Universe" navbar pill and its always-on sweep were removed with
+ *  the #collections picker they opened, so there is normally nothing to measure
+ *  here. The check is kept rather than deleted because the sweep is exactly the
+ *  kind of decoration that gets reintroduced, and the bug it caught — animating
+ *  `left` on an always-visible navbar element, forcing layout every frame — is
+ *  invisible until someone profiles. If the pill comes back, so do the
+ *  assertions; if it is absent, the stylesheet and the markup must agree that it
+ *  is gone, so a half-removal cannot pass quietly either. */
 check('the always-on navbar sweep is composited', () => {
   const css = fs.readFileSync('moviezone.css', 'utf8');
+  const html = fs.readFileSync('index.html', 'utf8');
   const start = css.indexOf('@keyframes navPremiumSweep');
+
+  if (start === -1) {
+    assert.ok(!/nav-premium/.test(css),
+      '.nav-premium styling survived without its @keyframes navPremiumSweep');
+    assert.ok(!/nav-premium/.test(html),
+      'the navbar still ships the .nav-premium pill but its stylesheet is gone');
+    return;
+  }
+
   const fn = css.slice(start, start + 300);
   assert.ok(!/left\s*:/.test(fn), 'navbar sweep animates `left` again (layout every frame)');
   assert.ok(/translate3d/.test(fn), 'navbar sweep is not using a composited transform');

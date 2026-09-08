@@ -107,7 +107,6 @@ img {
 .slide-bg-img,
 .ud-backdrop-img,
 .ch-detail-hero-img,
-.ch-card-backdrop,
 .card-poster img,
 .upcoming-poster img,
 .cw-card-img,
@@ -928,149 +927,6 @@ body {
 .nav-links a:hover::after,
 .nav-links a.active::after {
   width: 55%;
-}
-
-/* ── Premium nav link (Cinematic Universe) ── */
-.nav-links a.nav-premium {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.36rem;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  padding: 0.5rem 0.95rem;
-  border-color: rgba(245, 197, 24, 0.32);
-  background:
-    linear-gradient(135deg, rgba(245, 197, 24, 0.16), rgba(124, 58, 237, 0.14) 55%, rgba(245, 197, 24, 0.1));
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.04) inset,
-    0 2px 14px rgba(245, 197, 24, 0.14);
-  animation: navPremiumGlow 3.2s ease-in-out infinite;
-}
-
-/* Keep the shared hover wash from double-tinting the premium pill */
-.nav-links a.nav-premium::before {
-  background: linear-gradient(135deg, rgba(245, 197, 24, 0.2), rgba(124, 58, 237, 0.18));
-}
-
-.nav-links a.nav-premium::after {
-  background: linear-gradient(90deg, var(--gold3), #a855f7);
-}
-
-.nav-links a.nav-premium .nav-premium-label {
-  background: linear-gradient(92deg, var(--gold3) 0%, #fff6d3 28%, var(--gold) 52%, #d8b4fe 78%, var(--gold3) 100%);
-  background-size: 220% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-  animation: navPremiumSheen 5s linear infinite;
-}
-
-.nav-links a.nav-premium .nav-premium-icon {
-  color: var(--gold3);
-  filter: drop-shadow(0 0 4px rgba(245, 197, 24, 0.55));
-  transition: transform 0.45s var(--ease-spring);
-  flex-shrink: 0;
-}
-
-/* Diagonal light sweep across the pill */
-.nav-links a.nav-premium .nav-premium-shine {
-  position: absolute;
-  top: 0;
-  left: -60%;
-  width: 45%;
-  height: 100%;
-  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.38), transparent);
-  transform: skewX(-18deg);
-  pointer-events: none;
-  /*  Animated via transform, not `left`. This element lives in the navbar and
-   *  runs forever, so animating `left` forced a layout pass on an always-visible
-   *  subtree every single frame. translate3d is composited — same visual, no
-   *  layout, no repaint. The 396% figure is the old 178%-of-parent travel
-   *  re-expressed against this element's own 45% width (178 / 45).
-   */
-  will-change: transform;
-  animation: navPremiumSweep 4.5s ease-in-out infinite;
-}
-
-.nav-links a.nav-premium:hover,
-.nav-links a.nav-premium.active {
-  border-color: rgba(245, 197, 24, 0.6);
-  animation: none;
-  /* let the richer hover glow take over */
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.07) inset,
-    0 4px 22px rgba(245, 197, 24, 0.3),
-    0 0 26px rgba(168, 85, 247, 0.22);
-  transform: translateY(-1px);
-}
-
-.nav-links a.nav-premium:hover .nav-premium-icon {
-  transform: rotate(72deg) scale(1.18);
-}
-
-@keyframes navPremiumGlow {
-
-  0%,
-  100% {
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset, 0 2px 14px rgba(245, 197, 24, 0.12);
-  }
-
-  50% {
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06) inset, 0 3px 20px rgba(245, 197, 24, 0.26), 0 0 18px rgba(168, 85, 247, 0.18);
-  }
-}
-
-@keyframes navPremiumSheen {
-  0% {
-    background-position: 220% 50%;
-  }
-
-  100% {
-    background-position: -20% 50%;
-  }
-}
-
-@keyframes navPremiumSweep {
-
-  0%,
-  62% {
-    transform: skewX(-18deg) translate3d(0, 0, 0);
-  }
-
-  92%,
-  100% {
-    transform: skewX(-18deg) translate3d(396%, 0, 0);
-  }
-}
-
-/* Mobile panel premium variant */
-#mzMobilePanel .mz-mp-link.mz-mp-premium {
-  font-weight: 700;
-  border: 1px solid rgba(245, 197, 24, 0.34);
-  background: linear-gradient(135deg, rgba(245, 197, 24, 0.14), rgba(124, 58, 237, 0.12));
-  box-shadow: 0 4px 18px rgba(245, 197, 24, 0.14);
-}
-
-#mzMobilePanel .mz-mp-link.mz-mp-premium::before {
-  content: '\2726';
-  margin-right: 0.5rem;
-  color: var(--gold3);
-  font-size: 0.95em;
-  filter: drop-shadow(0 0 4px rgba(245, 197, 24, 0.5));
-}
-
-@media (prefers-reduced-motion: reduce) {
-
-  .nav-links a.nav-premium,
-  .nav-links a.nav-premium .nav-premium-label,
-  .nav-links a.nav-premium .nav-premium-shine {
-    animation: none;
-  }
-
-  .nav-links a.nav-premium .nav-premium-shine {
-    display: none;
-  }
 }
 
 /* Search bar */
@@ -8359,13 +8215,15 @@ html[data-mz-tv="true"] .cat-group-menu {
 
 
 /* ═══════════════════════════════════════════════════════════════
-   COLLECTIONS HUB — ULTRA PREMIUM LUXURY EDITION v4
-   Cinematic universes • glass + gold • GPU-only animations
+   CINEMATIC UNIVERSE PAGE — glass + gold, GPU-only animations
+   One franchise per page, opened from the homepage rail as
+   #collections-<slug>. The picker grid this section was originally
+   written for (hero, poster mosaic, stat cards, category tabs and
+   18 franchise cards) has been removed along with its markup.
    ═══════════════════════════════════════════════════════════════ */
 :root {
   --ch-gold: #ffc107;
   --ch-gold-soft: rgba(245, 197, 24, 0.14);
-  --ch-line: rgba(255, 255, 255, 0.07);
   --ch-glass: rgba(255, 255, 255, 0.035);
   --ch-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --ch-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -8403,18 +8261,6 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 }
 
-@keyframes chGlowPulse {
-
-  0%,
-  100% {
-    opacity: 0.35;
-  }
-
-  50% {
-    opacity: 0.75;
-  }
-}
-
 @keyframes chAurora {
   0% {
     transform: translate3d(-4%, -2%, 0) scale(1.05);
@@ -8426,20 +8272,6 @@ html[data-mz-tv="true"] .cat-group-menu {
 
   100% {
     transform: translate3d(-4%, -2%, 0) scale(1.05);
-  }
-}
-
-@keyframes chGradientShift {
-  0% {
-    background-position: 0% 50%;
-  }
-
-  50% {
-    background-position: 100% 50%;
-  }
-
-  100% {
-    background-position: 0% 50%;
   }
 }
 
@@ -8497,16 +8329,6 @@ html[data-mz-tv="true"] .cat-group-menu {
   100% {
     transform: scale(1.5);
     opacity: 0;
-  }
-}
-
-@keyframes chBadgeShine {
-  0% {
-    background-position: 0% 50%;
-  }
-
-  100% {
-    background-position: 200% 50%;
   }
 }
 
@@ -8681,547 +8503,13 @@ html[data-mz-tv="true"] .cat-group-menu {
   border-radius: 99px;
 }
 
-.ch-hub-view,
 .ch-detail-view {
   padding: 0 4% 5rem;
 }
 
-.collections-hub-overlay.detail-mode .ch-hub-view {
-  display: none;
-}
-
-.collections-hub-overlay:not(.detail-mode) .ch-detail-view {
-  display: none;
-}
-
-/* ── Hero ─────────────────────────────────────────────────────── */
-.ch-hero {
-  max-width: 980px;
-  margin: 0 auto;
-  padding: 5.5rem 0 3.2rem;
-  position: relative;
-  text-align: center;
-}
-
-/* Netflix-style full-bleed poster mosaic behind the hero */
-.ch-hero-mosaic {
-  position: absolute;
-  top: -84px;
-  left: 50%;
-  width: 100vw;
-  margin-left: -50vw;
-  height: calc(100% + 210px);
-  overflow: hidden;
-  z-index: 0;
-  pointer-events: none;
-  contain: strict;
-  opacity: 0;
-  transition: opacity 1.1s var(--ch-ease);
-}
-
-.ch-hero-mosaic.ch-mosaic-in {
-  opacity: 1;
-}
-
-.ch-hero-mosaic-grid {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 128%;
-  display: grid;
-  grid-template-columns: repeat(var(--cols, 12), 1fr);
-  gap: 7px;
-  transform: translate3d(-50%, -50%, 0) rotate(-9deg) scale(1.14);
-  transform-origin: center center;
-  animation: chMosaicDrift 46s ease-in-out infinite;
-  will-change: transform;
-}
-
-@keyframes chMosaicDrift {
-  0% {
-    transform: translate3d(-50%, -50%, 0) rotate(-9deg) scale(1.14);
-  }
-
-  50% {
-    transform: translate3d(-51.5%, -48.5%, 0) rotate(-9deg) scale(1.19);
-  }
-
-  100% {
-    transform: translate3d(-50%, -50%, 0) rotate(-9deg) scale(1.14);
-  }
-}
-
-.ch-mosaic-tile {
-  position: relative;
-  aspect-ratio: 2 / 3;
-  border-radius: 5px;
-  overflow: hidden;
-  background: #0b0b16;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
-}
-
-.ch-mosaic-tile img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-  opacity: 0;
-  transform: scale(1.02);
-  transition: opacity 0.9s ease;
-  filter: saturate(1.05) contrast(1.02);
-}
-
-.ch-mosaic-tile img.ch-img-in {
-  opacity: 1;
-}
-
-/* Cinematic darkening so the headline stays perfectly readable */
-.ch-hero-mosaic-veil {
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(58% 62% at 50% 45%, rgba(3, 3, 10, 0.94) 0%, rgba(3, 3, 10, 0.78) 45%, rgba(3, 3, 10, 0.42) 72%, rgba(3, 3, 10, 0.28) 100%),
-    linear-gradient(180deg, rgba(3, 3, 10, 0.9) 0%, rgba(3, 3, 10, 0.35) 22%, rgba(3, 3, 10, 0.55) 62%, var(--bg) 96%),
-    linear-gradient(90deg, rgba(3, 3, 10, 0.75) 0%, transparent 22%, transparent 78%, rgba(3, 3, 10, 0.75) 100%);
-}
-
-.ch-hero-mosaic-veil::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(46% 46% at 22% 18%, rgba(124, 58, 237, 0.18), transparent 70%),
-    radial-gradient(46% 46% at 80% 82%, rgba(245, 197, 24, 0.12), transparent 70%);
-  mix-blend-mode: screen;
-}
-
-.ch-hero-glow {
-  position: absolute;
-  top: -140px;
-  left: 50%;
-  width: 620px;
-  height: 520px;
-  margin-left: -310px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(245, 197, 24, 0.12), rgba(124, 58, 237, 0.08) 45%, transparent 72%);
-  filter: blur(70px);
-  animation: chGlowPulse 6s ease-in-out infinite;
-  pointer-events: none;
-  will-change: opacity;
-}
-
-.ch-hero-badge {
-  position: relative;
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.5rem 1.5rem;
-  border-radius: 999px;
-  background: linear-gradient(90deg, rgba(245, 197, 24, 0.10), rgba(124, 58, 237, 0.10), rgba(245, 197, 24, 0.10));
-  background-size: 200% 100%;
-  animation: chBadgeShine 8s linear infinite;
-  border: 1px solid rgba(245, 197, 24, 0.26);
-  color: var(--gold3);
-  font-size: 0.6rem;
-  font-weight: 800;
-  letter-spacing: 0.2em;
-  margin-bottom: 1.7rem;
-  box-shadow: 0 6px 30px rgba(245, 197, 24, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-.ch-hero h1 {
-  position: relative;
-  z-index: 2;
-  font-family: 'Bebas Neue', sans-serif;
-  font-size: clamp(3.4rem, 8.5vw, 6rem);
-  letter-spacing: 0.012em;
-  color: var(--text);
-  margin-bottom: 1rem;
-  line-height: 0.96;
-  text-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
-}
-
-.ch-hero-gradient-text {
-  background: linear-gradient(100deg, #fff3b0 0%, var(--gold) 22%, #ff6b35 46%, #e040fb 72%, #7c3aed 100%);
-  background-size: 220% auto;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  animation: chGradientShift 7s ease infinite;
-}
-
-.ch-hero p {
-  position: relative;
-  z-index: 2;
-  color: var(--text2);
-  font-size: 1.02rem;
-  line-height: 1.8;
-  max-width: 580px;
-  margin: 0 auto;
-  opacity: 0.82;
-  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.75);
-}
-
-/* ── Stat cards ───────────────────────────────────────────────── */
-.ch-hero-stats {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  gap: 1.1rem;
-  margin-top: 2.6rem;
-  justify-content: center;
-  flex-wrap: wrap;
-}
-
-.ch-stat-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 1.25rem 2.3rem;
-  border-radius: 20px;
-  background: linear-gradient(150deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.012));
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  border: 1px solid var(--ch-line);
-  transition: transform 0.4s var(--ch-spring), box-shadow 0.4s var(--ch-ease);
-  position: relative;
-  overflow: hidden;
-}
-
-.ch-stat-card::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  background: linear-gradient(140deg, rgba(245, 197, 24, 0.45), transparent 55%, rgba(124, 58, 237, 0.35));
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  opacity: 0;
-  transition: opacity 0.4s ease;
-  pointer-events: none;
-}
-
-.ch-stat-card:hover::before {
-  opacity: 1;
-}
-
-.ch-stat-card:hover {
-  transform: translate3d(0, -6px, 0);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
-}
-
-.ch-stat-num {
-  font-family: 'Bebas Neue', sans-serif;
-  font-size: 2.35rem;
-  line-height: 1;
-  background: var(--grad-gold);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  font-variant-numeric: tabular-nums;
-}
-
-.ch-stat-label {
-  font-size: 0.6rem;
-  color: var(--text2);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  font-weight: 700;
-  opacity: 0.7;
-}
-
-/* ── Category tabs ────────────────────────────────────────────── */
-.ch-category-tabs {
-  display: flex;
-  gap: 0.55rem;
-  margin: 0 auto 2.6rem;
-  overflow-x: auto;
-  padding: 0.35rem 0.35rem 0.7rem;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-  justify-content: center;
-  scroll-snap-type: x proximity;
-}
-
-.ch-category-tabs::-webkit-scrollbar {
-  display: none;
-}
-
-.ch-cat-tab {
-  padding: 0.68rem 1.55rem;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  background: var(--ch-glass);
-  color: var(--text2);
-  font: 600 0.78rem 'Outfit', sans-serif;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: transform 0.3s var(--ch-spring), color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  position: relative;
-  overflow: hidden;
-  scroll-snap-align: center;
-  flex-shrink: 0;
-}
-
-.ch-cat-tab::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, rgba(245, 197, 24, 0.14), rgba(124, 58, 237, 0.08));
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.ch-cat-tab:hover::before {
-  opacity: 1;
-}
-
-.ch-cat-tab:hover {
-  color: var(--text);
-  border-color: rgba(255, 255, 255, 0.2);
-  transform: translate3d(0, -2px, 0);
-}
-
-.ch-cat-tab:active {
-  transform: scale(0.96);
-}
-
-.ch-cat-tab.active {
-  background: linear-gradient(135deg, rgba(245, 197, 24, 0.22), rgba(245, 197, 24, 0.06));
-  border-color: rgba(245, 197, 24, 0.55);
-  color: var(--gold3);
-  box-shadow: 0 6px 24px rgba(245, 197, 24, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  font-weight: 700;
-}
-
-.ch-cat-tab.active::before {
-  opacity: 0;
-}
-
-/* ── Universe grid ────────────────────────────────────────────── */
-.ch-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
-  gap: 1.8rem;
-  padding-bottom: 3rem;
-  perspective: 1400px;
-}
-
-.ch-card {
-  --ch-rx: 0deg;
-  --ch-ry: 0deg;
-  --ch-ty: 0px;
-  --ch-sc: 1;
-  --ch-mx: 50%;
-  --ch-my: 50%;
-  position: relative;
-  display: block;
-  width: 100%;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 26px;
-  overflow: hidden;
-  min-height: 318px;
-  background: linear-gradient(160deg, rgba(20, 20, 34, 0.96), rgba(7, 7, 15, 0.99));
-  cursor: pointer;
-  text-align: left;
-  padding: 0;
-  font-family: inherit;
-  transform-style: preserve-3d;
-  transform: rotateX(var(--ch-rx)) rotateY(var(--ch-ry)) translate3d(0, var(--ch-ty), 0) scale(var(--ch-sc));
-  transition: transform 0.55s var(--ch-spring), box-shadow 0.45s var(--ch-ease), border-color 0.45s ease;
-  animation: chCardEntrance 0.62s var(--ch-ease) both;
-  animation-delay: var(--delay, 0ms);
-  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.38);
-  contain: layout paint style;
-}
-
-.ch-card.ch-tilting {
-  transition: transform 0.12s linear, box-shadow 0.45s var(--ch-ease), border-color 0.45s ease;
-}
-
-.ch-card.ch-card-animate {
-  animation: chCardEntrance 0.5s var(--ch-ease) both;
-  animation-delay: var(--delay, 0ms);
-}
-
-.ch-card:hover,
-.ch-card:focus-visible {
-  --ch-ty: -12px;
-  --ch-sc: 1.022;
-  border-color: rgba(245, 197, 24, 0.42);
-  box-shadow: 0 46px 110px rgba(0, 0, 0, 0.68), 0 0 70px rgba(245, 197, 24, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  outline: none;
-  z-index: 4;
-}
-
-.ch-card:active {
-  --ch-sc: 0.995;
-}
-
-/* Rotating conic luxury border */
-.ch-card::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1.5px;
-  background: conic-gradient(from 0deg, rgba(245, 197, 24, 0.85), rgba(124, 58, 237, 0.6), rgba(230, 57, 70, 0.45), rgba(245, 197, 24, 0.85));
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  opacity: 0;
-  transition: opacity 0.45s ease;
-  z-index: 5;
-  pointer-events: none;
-}
-
-.ch-card:hover::before,
-.ch-card:focus-visible::before {
-  opacity: 0.9;
-}
-
-.ch-card-media {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  border-radius: inherit;
-}
-
-.ch-card-posters {
-  position: absolute;
-  inset: -1px;
-  display: flex;
-  gap: 2px;
-  overflow: hidden;
-  transform: translate3d(0, 0, 0) scale(1.02);
-  transition: transform 0.9s var(--ch-ease), filter 0.7s var(--ch-ease);
-  filter: saturate(1.05) brightness(0.7);
-}
-
-.ch-card:hover .ch-card-posters {
-  transform: translate3d(0, 0, 0) scale(1.1);
-  filter: saturate(1.35) brightness(0.92);
-}
-
-.ch-card-posters img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: center top;
-  opacity: 0;
-  transition: opacity 0.6s ease;
-}
-
-.ch-card-posters img.ch-img-in {
-  opacity: 1;
-}
-
-.ch-card-posters .ch-card-backdrop {
-  object-position: center 22%;
-}
-
-/* Cinematic sheen sweep on hover */
-.ch-card-sheen {
-  position: absolute;
-  top: -25%;
-  left: 0;
-  width: 45%;
-  height: 150%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.14), transparent);
-  transform: translate3d(-120%, 0, 0) rotate(8deg);
-  pointer-events: none;
-  z-index: 3;
-  opacity: 0;
-}
-
-.ch-card:hover .ch-card-sheen {
-  opacity: 1;
-  animation: chSheenSweep 1.1s var(--ch-ease);
-}
-
-/* Pointer-follow spotlight */
-.ch-card-spotlight {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.4s ease;
-  background: radial-gradient(340px circle at var(--ch-mx) var(--ch-my), rgba(245, 197, 24, 0.16), transparent 62%);
-}
-
-.ch-card:hover .ch-card-spotlight {
-  opacity: 1;
-}
-
-.ch-card-skeleton {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(110deg, rgba(28, 28, 46, 0.85) 25%, rgba(52, 52, 76, 0.85) 37%, rgba(28, 28, 46, 0.85) 63%);
-  background-size: 220% 100%;
-  animation: shimmer 1.8s ease infinite;
-}
-
-.ch-card-empty {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: rgba(255, 255, 255, 0.32);
-  font-size: 0.8rem;
-  letter-spacing: 0.05em;
-}
-
-.ch-card-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  background: linear-gradient(180deg,
-      rgba(4, 4, 11, 0) 0%,
-      rgba(4, 4, 11, 0.18) 26%,
-      rgba(4, 4, 11, 0.62) 56%,
-      rgba(4, 4, 11, 0.95) 82%,
-      rgba(4, 4, 11, 0.99) 100%);
-  transition: opacity 0.45s ease;
-}
-
-.ch-card:hover .ch-card-overlay {
-  opacity: 0.9;
-}
-
-.ch-card-glow {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  opacity: 0;
-  transition: opacity 0.5s ease;
-  background: radial-gradient(ellipse at 50% 108%, rgba(245, 197, 24, 0.2), transparent 62%);
-  pointer-events: none;
-}
-
-.ch-card:hover .ch-card-glow {
-  opacity: 1;
-}
-
-.ch-card-body {
-  position: relative;
-  z-index: 4;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 1.6rem 1.7rem;
-  min-height: 318px;
-  justify-content: flex-end;
-  transform: translateZ(28px);
-}
-
+/*  The franchise page hero prints this badge (renderUniverseDetail), which is why
+    it outlived the picker grid it was written for. The .ch-accent-* rules further
+    down recolour it per universe. */
 .ch-card-badge {
   display: inline-block;
   align-self: flex-start;
@@ -9234,113 +8522,6 @@ html[data-mz-tv="true"] .cat-group-menu {
   background: linear-gradient(135deg, #fff3b0, var(--gold) 45%, #e6a800);
   box-shadow: 0 4px 16px rgba(245, 197, 24, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.5);
   transition: transform 0.35s var(--ch-spring), box-shadow 0.35s ease;
-}
-
-.ch-card:hover .ch-card-badge {
-  transform: translate3d(0, -2px, 0) scale(1.04);
-  box-shadow: 0 8px 26px rgba(245, 197, 24, 0.5);
-}
-
-.ch-card-body h3 {
-  font-size: 1.36rem;
-  font-weight: 800;
-  color: #fff;
-  line-height: 1.18;
-  margin-top: 0.35rem;
-  letter-spacing: -0.01em;
-  text-shadow: 0 3px 16px rgba(0, 0, 0, 0.65);
-}
-
-.ch-card-body p {
-  font-size: 0.775rem;
-  color: rgba(255, 255, 255, 0.55);
-  line-height: 1.5;
-  max-width: 94%;
-  transition: color 0.35s ease;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.ch-card:hover .ch-card-body p {
-  color: rgba(255, 255, 255, 0.78);
-}
-
-.ch-card-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.8rem;
-  margin-top: 0.55rem;
-  padding-top: 0.7rem;
-  position: relative;
-}
-
-.ch-card-meta::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, rgba(245, 197, 24, 0.4), rgba(255, 255, 255, 0.06) 60%, transparent);
-}
-
-.ch-card-count {
-  font-size: 0.7rem;
-  color: var(--gold3);
-  font-weight: 700;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  letter-spacing: 0.01em;
-}
-
-.ch-card-count::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--gold);
-  box-shadow: 0 0 8px rgba(245, 197, 24, 0.8);
-  flex-shrink: 0;
-}
-
-.ch-card-cta {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.34rem 0.85rem;
-  border-radius: 999px;
-  font-size: 0.66rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  color: var(--gold3);
-  border: 1px solid rgba(245, 197, 24, 0.3);
-  background: rgba(245, 197, 24, 0.07);
-  opacity: 0;
-  transform: translate3d(10px, 0, 0);
-  transition: opacity 0.35s var(--ch-ease), transform 0.35s var(--ch-spring), background 0.3s ease;
-  white-space: nowrap;
-}
-
-.ch-card:hover .ch-card-cta,
-.ch-card:focus-visible .ch-card-cta {
-  opacity: 1;
-  transform: none;
-}
-
-.ch-card:hover .ch-card-cta {
-  background: rgba(245, 197, 24, 0.16);
-}
-
-.ch-card-cta svg {
-  transition: transform 0.35s var(--ch-spring);
-}
-
-.ch-card:hover .ch-card-cta svg {
-  transform: translateX(3px);
 }
 
 /* ── Detail view ──────────────────────────────────────────────── */
@@ -9504,6 +8685,14 @@ html[data-mz-tv="true"] .cat-group-menu {
   background: rgba(245, 197, 24, 0.14);
   border-color: rgba(245, 197, 24, 0.3);
   color: var(--gold3);
+}
+
+/*  "5 of 9 released". Violet rather than gold so it reads as information about
+    what is still coming, not as another headline stat competing with the counts. */
+.ch-detail-count--soon {
+  background: rgba(124, 58, 237, 0.16);
+  border-color: rgba(124, 58, 237, 0.34);
+  color: #cbb2ff;
 }
 
 /* Sticky glass toolbar */
@@ -9800,6 +8989,60 @@ html[data-mz-tv="true"] .cat-group-menu {
   transform: translate3d(0, -3px, 0);
 }
 
+/*  ── UPCOMING TITLES ─────────────────────────────────────────────────────
+    A franchise page lists films that are not out yet — Maddock has four dated
+    2026-2028, YRF has more Tigers coming. They sat in the grid looking exactly
+    like something you could press play on, wearing a 0.0 rating that read as a
+    terrible review rather than "no votes yet". These rules are what tell the two
+    states apart: the chip replaces the rating, and the poster is knocked back so
+    the eye skips it while scanning for something to watch tonight. */
+.ch-movie-soon-chip {
+  position: absolute;
+  bottom: 9px;
+  right: 9px;
+  padding: 0.2rem 0.5rem;
+  border-radius: 8px;
+  background: rgba(8, 8, 18, 0.82);
+  border: 1px solid rgba(124, 58, 237, 0.5);
+  color: #cbb2ff;
+  font-size: 0.55rem;
+  font-weight: 900;
+  letter-spacing: 0.09em;
+  z-index: 5;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: transform 0.35s var(--ch-spring);
+}
+
+.ch-movie-card:hover .ch-movie-soon-chip {
+  transform: translate3d(0, -3px, 0);
+}
+
+.ch-movie-soon .ch-movie-card-inner img {
+  filter: saturate(0.72) brightness(0.72);
+}
+
+.ch-movie-soon:hover .ch-movie-card-inner img {
+  filter: none;
+}
+
+/*  Unreleased titles frequently have no poster on TMDB yet. This is the stand-in:
+    the title's first letter on the card's own gradient, so the grid keeps its
+    rhythm instead of showing a broken-image glyph. */
+.ch-movie-noart {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  background: linear-gradient(160deg, rgba(32, 32, 54, 0.95), rgba(10, 10, 20, 0.98));
+  color: rgba(255, 255, 255, 0.22);
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 2.6rem;
+  line-height: 1;
+  user-select: none;
+}
+
 .ch-movie-hover-overlay {
   position: absolute;
   inset: 0;
@@ -9944,11 +9187,6 @@ html[data-mz-tv="true"] .cat-group-menu {
   color: #000;
 }
 
-.ch-accent-pirates .ch-card-badge {
-  background: linear-gradient(135deg, #daa520, #8b4513);
-  color: #fff;
-}
-
 .ch-accent-narnia .ch-card-badge {
   background: linear-gradient(135deg, #d4a017, #b8860b);
   color: #000;
@@ -10014,33 +9252,25 @@ html[data-mz-tv="true"] .cat-group-menu {
   color: #fff;
 }
 
-.ch-accent-minions .ch-card-badge {
-  background: linear-gradient(135deg, #ffeb3b, #ffd700);
-  color: #000;
-}
-
-.ch-accent-toystory .ch-card-badge {
-  background: linear-gradient(135deg, #1e90ff, #0066cc);
+.ch-accent-cars .ch-card-badge {
+  background: linear-gradient(135deg, #ff4444, #cc0000);
   color: #fff;
 }
 
-.ch-accent-shrek .ch-card-badge {
-  background: linear-gradient(135deg, #8bc34a, #388e3c);
-  color: #062006;
+/*  Added with the YRF Spy, Cop and Maddock franchises. X-Men and Star Wars did
+    not need entries — their badge rules were already here from an earlier pass. */
+.ch-accent-yrfspy .ch-card-badge {
+  background: linear-gradient(135deg, #ffb45c, #c46a1c);
+  color: #1b1005;
 }
 
-.ch-accent-kungfu .ch-card-badge {
-  background: linear-gradient(135deg, #ffd700, #ff4500);
-  color: #12100a;
+.ch-accent-cop .ch-card-badge {
+  background: linear-gradient(135deg, #ffe9b0, #9a6a18);
+  color: #1b1305;
 }
 
-.ch-accent-iceage .ch-card-badge {
-  background: linear-gradient(135deg, #b0e0e6, #6ab7d4);
-  color: #002733;
-}
-
-.ch-accent-cars .ch-card-badge {
-  background: linear-gradient(135deg, #ff4444, #cc0000);
+.ch-accent-maddock .ch-card-badge {
+  background: linear-gradient(135deg, #ff6b5c, #b3221f);
   color: #fff;
 }
 
@@ -10073,24 +9303,20 @@ html[data-mz-tv="true"] .cat-group-menu {
   box-shadow: 0 46px 110px rgba(0, 0, 0, 0.68), 0 0 60px rgba(0, 255, 65, 0.16);
 }
 
-.ch-accent-minions:hover,
-.ch-accent-kungfu:hover {
-  box-shadow: 0 46px 110px rgba(0, 0, 0, 0.68), 0 0 60px rgba(255, 215, 0, 0.18);
+.ch-accent-xmen:hover {
+  box-shadow: 0 46px 110px rgba(0, 0, 0, 0.68), 0 0 60px rgba(63, 111, 168, 0.24);
 }
 
-.ch-accent-toystory:hover,
-.ch-accent-iceage:hover {
-  box-shadow: 0 46px 110px rgba(0, 0, 0, 0.68), 0 0 60px rgba(30, 144, 255, 0.2);
+.ch-accent-yrfspy:hover,
+.ch-accent-cop:hover {
+  box-shadow: 0 46px 110px rgba(0, 0, 0, 0.68), 0 0 60px rgba(196, 106, 28, 0.24);
+}
+
+.ch-accent-maddock:hover {
+  box-shadow: 0 46px 110px rgba(0, 0, 0, 0.68), 0 0 60px rgba(179, 34, 31, 0.24);
 }
 
 /* ── Responsive ───────────────────────────────────────────────── */
-@media (max-width: 1024px) {
-  .ch-grid {
-    grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
-    gap: 1.4rem;
-  }
-}
-
 @media (max-width: 768px) {
   .ch-topbar {
     padding: 0.8rem 4%;
@@ -10103,95 +9329,6 @@ html[data-mz-tv="true"] .cat-group-menu {
 
   .ch-topbar-title {
     font-size: 1.02rem;
-  }
-
-  .ch-hero {
-    padding: 2.6rem 0 1.9rem;
-  }
-
-  .ch-hero h1 {
-    font-size: 2.7rem;
-  }
-
-  .ch-hero p {
-    font-size: 0.9rem;
-    line-height: 1.7;
-  }
-
-  .ch-hero-glow {
-    width: 320px;
-    height: 300px;
-    margin-left: -160px;
-    top: -70px;
-    filter: blur(50px);
-  }
-
-  .ch-hero-mosaic {
-    top: -70px;
-    height: calc(100% + 150px);
-  }
-
-  .ch-hero-mosaic-grid {
-    width: 170%;
-    gap: 5px;
-    animation: none;
-  }
-
-  .ch-hero-stats {
-    gap: 0.65rem;
-    margin-top: 1.8rem;
-  }
-
-  .ch-stat-card {
-    padding: 0.85rem 1.35rem;
-    border-radius: 16px;
-  }
-
-  .ch-stat-num {
-    font-size: 1.6rem;
-  }
-
-  .ch-category-tabs {
-    justify-content: flex-start;
-    margin-bottom: 1.8rem;
-  }
-
-  .ch-cat-tab {
-    padding: 0.52rem 1.05rem;
-    font-size: 0.72rem;
-  }
-
-  .ch-grid {
-    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-    gap: 1.1rem;
-    perspective: none;
-  }
-
-  .ch-card {
-    min-height: 236px;
-    border-radius: 20px;
-  }
-
-  .ch-card-body {
-    min-height: 236px;
-    padding: 1.25rem;
-    transform: none;
-  }
-
-  .ch-card-body h3 {
-    font-size: 1.12rem;
-  }
-
-  .ch-card-cta {
-    opacity: 1;
-    transform: none;
-    padding: 0.28rem 0.7rem;
-    font-size: 0.6rem;
-  }
-
-  .ch-card-sheen,
-  .ch-card-spotlight {
-    display: none;
   }
 
   .ch-movie-grid {
@@ -10241,22 +9378,6 @@ html[data-mz-tv="true"] .cat-group-menu {
 }
 
 @media (max-width: 480px) {
-  .ch-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .ch-card {
-    min-height: 212px;
-  }
-
-  .ch-card-body {
-    min-height: 212px;
-  }
-
-  .ch-hero h1 {
-    font-size: 2.25rem;
-  }
-
   .ch-movie-grid {
     grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
     gap: 0.65rem;
@@ -10270,40 +9391,12 @@ html[data-mz-tv="true"] .cat-group-menu {
     font-size: 0.72rem;
   }
 
-  .ch-hero-stats {
-    flex-wrap: wrap;
-  }
-
-  .ch-stat-card {
-    flex: 1;
-    min-width: 88px;
-    padding: 0.7rem 0.8rem;
-  }
-
   .ch-detail-hero {
     min-height: 260px;
   }
 }
 
 @media (min-width: 1400px) {
-  .ch-grid {
-    grid-template-columns: repeat(3, 1fr);
-    gap: 2.1rem;
-  }
-
-  .ch-card {
-    min-height: 352px;
-  }
-
-  .ch-card-body {
-    min-height: 352px;
-    padding: 1.9rem;
-  }
-
-  .ch-card-body h3 {
-    font-size: 1.5rem;
-  }
-
   .ch-movie-grid {
     grid-template-columns: repeat(auto-fill, minmax(186px, 1fr));
   }
@@ -10311,14 +9404,9 @@ html[data-mz-tv="true"] .cat-group-menu {
 
 @media (min-width: 1800px) {
 
-  .ch-hub-view,
   .ch-detail-view {
     padding-left: 6%;
     padding-right: 6%;
-  }
-
-  .ch-grid {
-    grid-template-columns: repeat(4, 1fr);
   }
 }
 
@@ -10326,37 +9414,20 @@ html[data-mz-tv="true"] .cat-group-menu {
 @media (prefers-reduced-motion: reduce) {
 
   .collections-hub-overlay::before,
-  .ch-hero-glow,
-  .ch-hero-badge,
-  .ch-hero-gradient-text,
   .ch-detail-hero-particles,
-  .ch-card-sheen,
   .ch-movie-shine,
   .ch-movie-card-inner,
-  .ch-card-skeleton,
   .ch-detail-empty-icon,
   .ch-movie-hover-play::before {
     animation: none !important;
   }
 
-  .ch-hero-mosaic-grid {
-    animation: none !important;
-  }
-
-  .ch-hero-mosaic {
-    transition: none !important;
-  }
-
-  .ch-card,
   .ch-movie-card,
-  .ch-stat-card,
-  .ch-cat-tab,
   .ch-dtab {
     animation: none !important;
     transition: opacity 0.2s linear !important;
   }
 
-  .ch-card:hover,
   .ch-movie-card:hover {
     transform: none !important;
   }
@@ -10380,19 +9451,12 @@ html[data-mz-tv="true"] .cat-group-menu {
   display: none;
 }
 
-.ch-lite .ch-card-sheen,
-.ch-lite .ch-movie-shine,
-.ch-lite .ch-card-spotlight {
+.ch-lite .ch-movie-shine {
   display: none;
-}
-
-.ch-lite .ch-hero-mosaic-grid {
-  animation: none;
 }
 
 .ch-lite .ch-topbar,
 .ch-lite .ch-detail-tabs,
-.ch-lite .ch-stat-card,
 .ch-lite .ch-detail-count {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
@@ -12202,41 +11266,92 @@ img { content-visibility: auto; }
 .top10-heading {
   display: flex;
   align-items: center;
-  gap: 0.7rem;
+  gap: clamp(0.8rem, 1.5vw, 1.5rem);
   margin: 0;
 }
+/*  ── HEADING: big HOLLOW "TOP 10" + stacked sub-label ──
+ *
+ *  The reference is an oversized HOLLOW "TOP 10": a thin stroke traces each glyph
+ *  and the interior is the page background showing through. The reference stroke is
+ *  red; ours is this project's gold, so the heading reads as the same family as the
+ *  giant gold rank numerals below it.
+ *
+ *  ⚠ DO NOT PUT background-clip:text BACK ON THIS RULE.
+ *  A previous pass had `background: linear-gradient(...)` + `-webkit-background-clip:
+ *  text` + `-webkit-text-fill-color: transparent` here and described it as hollow.
+ *  It is not: that trio is the standard gradient-FILLED text recipe — the clipped
+ *  background paints inside the glyph, so the letters rendered as solid gold blocks
+ *  with a gold edge and the outline was invisible. Hollow needs a transparent fill
+ *  with NO background to clip, so only -webkit-text-stroke paints.
+ *
+ *  The stroke is deliberately THIN relative to the glyph (like the reference) and it
+ *  scales with the viewport — a fixed 1px vanishes at 8rem and a fixed 3px closes up
+ *  the counters of the O/P/0 on a phone. */
 .top10-big {
   display: flex;
   align-items: baseline;
-  gap: 0.14em;
-  font: 400 clamp(2rem, 4.1vw, 3.1rem)/0.82 'Bebas Neue', 'Anton', sans-serif;
-  letter-spacing: 0.035em;
-  background: linear-gradient(150deg, var(--gold3, #ffd750) 0%, var(--gold, #ffc107) 45%, var(--red, #e63946) 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
+  gap: 0.1em;
+  /*  Oversized on purpose — this hollow wordmark IS the section's title treatment.
+      Kept a step under the reference so it still clears the Today/This Week pill
+      sharing this row and does not shout over the rank numerals below. */
+  font: 400 clamp(3.4rem, 8.6vw, 8rem)/0.8 'Bebas Neue', 'Anton', sans-serif;
+  letter-spacing: 0.045em;
+  /*  Hollow: nothing fills the glyph, so the page background shows through and the
+      stroke below is the only paint. Both properties are needed — `color` for
+      engines without the -webkit- prefix, the prefixed one for Blink/WebKit. */
+  color: transparent;
   -webkit-text-fill-color: transparent;
-  -webkit-text-stroke: clamp(1px, 0.12vw, 1.7px) var(--gold, #ffc107);
-  filter: drop-shadow(0 3px 12px rgba(245, 197, 24, 0.22));
+  /*  Hairline stroke. Thin is the whole look, so this stays as fine as it can while
+      still surviving a phone's DPR rounding — under ~0.9px Blink drops it to nothing
+      on 1x displays, and over ~2px the counters of the O/P/0 start to close up. */
+  -webkit-text-stroke: clamp(1px, 0.11vw, 1.75px) var(--gold, #ffc107);
+  /*  Dimensional glow, three layers, all cheap (no layout, composited):
+        1. a hairline halo hugging the stroke so a 1px line still reads as lit,
+        2. a cool-gold bloom lifted UPWARD, and
+        3. a warmer amber bloom falling DOWNWARD.
+      Two blooms in opposite directions is what stops the wordmark looking like a
+      flat wireframe — it reads as a lit object rather than an outline drawing. */
+  filter: drop-shadow(0 0 1px rgba(255, 214, 90, 0.65))
+          drop-shadow(0 -3px 16px rgba(255, 214, 90, 0.2))
+          drop-shadow(0 6px 22px rgba(214, 158, 12, 0.26));
   white-space: nowrap;
+  /*  Slow idle "breathing" of the glow — the wordmark reads as a lit object that
+   *  is alive rather than a static outline. Animates filter/opacity only (both
+   *  composited, no layout), so it clears asset-perf-check's per-frame gate. */
+  animation: top10BigBreathe 4.5s ease-in-out infinite;
 }
-.top10-big-num { letter-spacing: 0.01em; }
+@keyframes top10BigBreathe {
+  0%, 100% {
+    filter: drop-shadow(0 0 1px rgba(255, 214, 90, 0.6))
+            drop-shadow(0 -3px 14px rgba(255, 214, 90, 0.16))
+            drop-shadow(0 6px 20px rgba(214, 158, 12, 0.22));
+  }
+  50% {
+    filter: drop-shadow(0 0 2px rgba(255, 224, 120, 0.85))
+            drop-shadow(0 -4px 22px rgba(255, 214, 90, 0.34))
+            drop-shadow(0 8px 30px rgba(214, 158, 12, 0.4));
+  }
+}
+/*  "10" matches "TOP" in size — the reference keeps them equal — and only tightens
+    its own tracking so the 1 and 0 sit close like the reference numerals. */
+.top10-big-num { letter-spacing: 0.005em; }
 /*  Two short lines, not one long one — that stacking is what gives the reference
  *  its poster-credit look and it keeps the heading narrow beside the toggle. */
 .top10-sub {
   display: flex;
   flex-direction: column;
-  gap: 0.28em;
+  gap: 0.45em;
   line-height: 1;
 }
 .top10-sub-a,
 .top10-sub-b {
-  font: 800 clamp(0.68rem, 1.05vw, 0.88rem)/1 'Outfit', sans-serif;
-  letter-spacing: 0.2em;
+  font: 800 clamp(0.7rem, 1.02vw, 0.95rem)/1 'Outfit', sans-serif;
+  letter-spacing: 0.24em;
   text-transform: uppercase;
-  color: var(--text);
+  color: #fff;
   white-space: nowrap;
 }
-.top10-sub-b { color: var(--text2); }
+.top10-sub-b { color: rgba(255, 205, 70, 0.78); }
 
 /*  MOBILE HEADER — the Today / This Week pill is HIDDEN below 768px on purpose.
     On a phone it was either squashed against the 4% gutter beside the title or
@@ -12266,11 +11381,11 @@ img { content-visibility: auto; }
   /*  No font-weight here. This is Bebas Neue and the only face shipped is
       bebas-neue-latin-400.woff2, so the 800 that used to be on this rule bought a
       synthetically-smeared glyph, not a bolder one. */
-  .top10-heading { gap: 0.6rem; }
+  .top10-heading { gap: 0.7rem; }
   .top10-sub-a,
   .top10-sub-b {
-    font-size: 0.7rem;
-    letter-spacing: 0.14em;
+    font-size: 0.66rem;
+    letter-spacing: 0.16em;
   }
 }
 

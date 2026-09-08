@@ -1,11 +1,15 @@
 {
   "version": 1,
-  "updated": "2026-07-29",
+  "updated": "2026-09-08",
   "scope": "Curated narrative franchise films and series; excludes documentaries, making-of titles and unrelated keyword matches.",
   "sources": [
     "https://www.marvel.com/articles/movies/mcu-timeline-order-disney-plus",
     "https://www.dc.com/blog/2023/01/31/dc-studios-announces-slate-of-10-new-film-and-television-projects",
-    "https://www.themoviedb.org/"
+    "https://www.themoviedb.org/",
+    "https://www.themoviedb.org/collection/10-star-wars-collection",
+    "https://en.wikipedia.org/wiki/YRF_Spy_Universe",
+    "https://en.wikipedia.org/wiki/Cop_Universe",
+    "https://en.wikipedia.org/wiki/Maddock_Supernatural_Universe"
   ],
   "universes": {
     "mcu": {
@@ -772,83 +776,424 @@
         }
       ]
     },
-    "terminator": {
+    "x-men": {
       "movies": [
         {
-          "id": 218,
-          "title": "The Terminator",
-          "release_date": "1984-10-26",
-          "poster_path": "/qvktm0BHcnmDpul4Hz01GIazWPr.jpg",
-          "backdrop_path": "/ffdqHMWkh1h9MABwIfbfRJhgFW6.jpg",
-          "vote_average": 7.685
+          "id": 36657,
+          "title": "X-Men",
+          "release_date": "2000-07-13",
+          "poster_path": "/bRDAc4GogyS9ci3ow7UnInOcriN.jpg",
+          "backdrop_path": "/3QUVzbcNyfGe3ocWkYAT8emK8Co.jpg",
+          "vote_average": 7.021
         },
         {
-          "id": 280,
-          "title": "Terminator 2: Judgment Day",
-          "release_date": "1991-07-03",
-          "poster_path": "/jFTVD4XoWQTcg7wdyJKa8PEds5q.jpg",
-          "backdrop_path": "/izkMjmhauFx9DjoBQqM5sM5WAwE.jpg",
-          "vote_average": 8.2
+          "id": 36658,
+          "title": "X2",
+          "release_date": "2003-04-27",
+          "poster_path": "/bst4alFUXCxISwdRUKSMhhkrX1M.jpg",
+          "backdrop_path": "/7TYITrR804tLITNur3b8VLCK6tw.jpg",
+          "vote_average": 7.045
         },
         {
-          "id": 296,
-          "title": "Terminator 3: Rise of the Machines",
-          "release_date": "2003-07-02",
-          "poster_path": "/vvevzdYIrk2636maNW4qeWmlPFG.jpg",
-          "backdrop_path": "/voVkSwgFYv9GOpRNfUAwj6qYRTL.jpg",
-          "vote_average": 6.199
+          "id": 36668,
+          "title": "X-Men: The Last Stand",
+          "release_date": "2006-05-24",
+          "poster_path": "/a2xicU8DpKtRizOHjQLC1JyCSRS.jpg",
+          "backdrop_path": "/nLMXULCGLnzRxz11txPzPqbOHSz.jpg",
+          "vote_average": 6.427
         },
         {
-          "id": 534,
-          "title": "Terminator Salvation",
-          "release_date": "2009-05-20",
-          "poster_path": "/gw6JhlekZgtKUFlDTezq3j5JEPK.jpg",
-          "backdrop_path": "/74zPun6CdSNVSDLcKOM8Yjv7WWB.jpg",
-          "vote_average": 6.096
+          "id": 2080,
+          "title": "X-Men Origins: Wolverine",
+          "release_date": "2009-04-28",
+          "poster_path": "/yj8LbTju1p7CUJg7US2unSBk33s.jpg",
+          "backdrop_path": "/p4GzAzjlL7lXIVGvayg7zvzGTSi.jpg",
+          "vote_average": 6.297
         },
         {
-          "id": 87101,
-          "title": "Terminator Genisys",
-          "release_date": "2015-06-23",
-          "poster_path": "/oZRVDpNtmHk8M1VYy1aeOWUXgbC.jpg",
-          "backdrop_path": "/wvlIoof1FnKPLv9jAYanuP31V0C.jpg",
+          "id": 49538,
+          "title": "X-Men: First Class",
+          "release_date": "2011-06-01",
+          "poster_path": "/hNEokmUke0dazoBhttFN0o3L7Xv.jpg",
+          "backdrop_path": "/yhp5Pt4GugkCs5mz63qWz5khHXe.jpg",
+          "vote_average": 7.305
+        },
+        {
+          "id": 76170,
+          "title": "The Wolverine",
+          "release_date": "2013-07-21",
+          "poster_path": "/t2wVAcoRlKvEIVSbiYDb8d0QqqS.jpg",
+          "backdrop_path": "/bEAQfLTykGg232kJogBlxRYaRqU.jpg",
+          "vote_average": 6.436
+        },
+        {
+          "id": 127585,
+          "title": "X-Men: Days of Future Past",
+          "release_date": "2014-05-15",
+          "poster_path": "/tYfijzolzgoMOtegh1Y7j2Enorg.jpg",
+          "backdrop_path": "/3czpqXzFy5UcNuD1AubecRLWkwD.jpg",
+          "vote_average": 7.535
+        },
+        {
+          "id": 293660,
+          "title": "Deadpool",
+          "release_date": "2016-02-09",
+          "poster_path": "/3E53WEZJqP6aM84D8CckXx4pIHw.jpg",
+          "backdrop_path": "/rFj9IKlL75B2pXhZA60jkNWvxeW.jpg",
+          "vote_average": 7.626
+        },
+        {
+          "id": 246655,
+          "title": "X-Men: Apocalypse",
+          "release_date": "2016-05-18",
+          "poster_path": "/ikA8UhYdTGpqbatFa93nIf6noSr.jpg",
+          "backdrop_path": "/sTQNRqLbfCXolrb5CizAW1dj528.jpg",
+          "vote_average": 6.527
+        },
+        {
+          "id": 263115,
+          "title": "Logan",
+          "release_date": "2017-02-28",
+          "poster_path": "/fnbjcRDYn6YviCcePDnGdyAkYsB.jpg",
+          "backdrop_path": "/qTdCfGyDisY9e8BLycszlyTsPWx.jpg",
+          "vote_average": 7.821
+        },
+        {
+          "id": 383498,
+          "title": "Deadpool 2",
+          "release_date": "2018-05-15",
+          "poster_path": "/to0spRl1CMDvyUbOnbb4fTk3VAd.jpg",
+          "backdrop_path": "/3P52oz9HPQWxcwHOwxtyrVV1LKi.jpg",
+          "vote_average": 7.489
+        },
+        {
+          "id": 320288,
+          "title": "Dark Phoenix",
+          "release_date": "2019-06-05",
+          "poster_path": "/cCTJPelKGLhALq3r51A9uMonxKj.jpg",
+          "backdrop_path": "/j9ZV0UOagjQ4seR8Hd5N6JfwdTP.jpg",
           "vote_average": 5.959
         },
         {
-          "id": 290859,
-          "title": "Terminator: Dark Fate",
-          "release_date": "2019-10-23",
-          "poster_path": "/vqzNJRH4YyquRiWxCCOH0aXggHI.jpg",
-          "backdrop_path": "/a6cDxdwaQIFjSkXf7uskg78ZyTq.jpg",
-          "vote_average": 6.421
+          "id": 340102,
+          "title": "The New Mutants",
+          "release_date": "2020-04-02",
+          "poster_path": "/xiDGcXJTvu1lazFRYip6g1eLt9c.jpg",
+          "backdrop_path": "/1MoeNacOltBWojkStjhT3svBTOK.jpg",
+          "vote_average": 6.052
+        },
+        {
+          "id": 533535,
+          "title": "Deadpool & Wolverine",
+          "release_date": "2024-07-24",
+          "poster_path": "/8cdWjvZQUExUUTzyp4t6EDMubfO.jpg",
+          "backdrop_path": "/by8z9Fe8y7p4jo2YlW2SZDnptyT.jpg",
+          "vote_average": 7.586
+        }
+      ],
+      "tv": []
+    },
+    "yrf-spy": {
+      "movies": [
+        {
+          "id": 85985,
+          "title": "Ek Tha Tiger",
+          "release_date": "2012-08-15",
+          "poster_path": "/9qmIOiKLdlIRmdvPV6UmbUx9WFn.jpg",
+          "backdrop_path": "/jM8C4mURyEkQorqyGF5wPFp4M5J.jpg",
+          "vote_average": 6.153
+        },
+        {
+          "id": 441909,
+          "title": "Tiger Zinda Hai",
+          "release_date": "2017-12-18",
+          "poster_path": "/mdzNLFfCfuBoJz43l0SmMWWdu5t.jpg",
+          "backdrop_path": "/enSG6SDVjZOktOQbcPk2r2Jy4ND.jpg",
+          "vote_average": 6.251
+        },
+        {
+          "id": 585268,
+          "title": "War",
+          "release_date": "2019-10-02",
+          "poster_path": "/yUtaHkL2SDIAZhRApZAyQrAXygn.jpg",
+          "backdrop_path": "/aOSDKvqglKVa3SYy4CPXYUAfDlf.jpg",
+          "vote_average": 6.759
+        },
+        {
+          "id": 864692,
+          "title": "Pathaan",
+          "release_date": "2023-01-25",
+          "poster_path": "/arf00BkwvXo0CFKbaD9OpqdE4Nu.jpg",
+          "backdrop_path": "/9wRAIQeOv2qzcgpfvA4dYZKeezl.jpg",
+          "vote_average": 6.4
+        },
+        {
+          "id": 720557,
+          "title": "Tiger 3",
+          "release_date": "2023-11-11",
+          "poster_path": "/7wgED7Yx9VLcNWSO91VgwicHmMD.jpg",
+          "backdrop_path": "/kqSxCsGIT4rqrZTTMpYP8RIzojv.jpg",
+          "vote_average": 5.649
+        },
+        {
+          "id": 1109086,
+          "title": "War 2",
+          "release_date": "2025-08-13",
+          "poster_path": "/fxxVbjhIOl8ZPS69dH8xeeuxvmh.jpg",
+          "backdrop_path": "/pKIRUTnwY3YYU9urSdsuobdcliP.jpg",
+          "vote_average": 6
+        },
+        {
+          "id": 1284460,
+          "title": "Alpha",
+          "release_date": "2025-08-20",
+          "poster_path": "/oUZlrGPTAtinic87FF7jIT6EHmN.jpg",
+          "backdrop_path": "/rakS8RAhKOMIplBi4RbluQg4Xqn.jpg",
+          "vote_average": 6.199
+        }
+      ],
+      "tv": []
+    },
+    "jurassic-park": {
+      "movies": [
+        {
+          "id": 329,
+          "title": "Jurassic Park",
+          "release_date": "1993-06-11",
+          "poster_path": "/b1xCNnyrPebIc7EWNZIa6jhb1Ww.jpg",
+          "backdrop_path": "/o7LzVmlOSYc3EspyVMC9bsTTARc.jpg",
+          "vote_average": 7.975
+        },
+        {
+          "id": 330,
+          "title": "The Lost World: Jurassic Park",
+          "release_date": "1997-05-23",
+          "poster_path": "/ss6cqHQc72eCsXrvne11XVZs3bR.jpg",
+          "backdrop_path": "/A4rYaPdzgocCjQ0n9LUSYUxyvpS.jpg",
+          "vote_average": 6.568
+        },
+        {
+          "id": 331,
+          "title": "Jurassic Park III",
+          "release_date": "2001-07-18",
+          "poster_path": "/oQXj4NUfS3r3gHXtDOzcJgj1lLc.jpg",
+          "backdrop_path": "/8v8x4vVbRgrsdU3M4drnD7HQbfe.jpg",
+          "vote_average": 6.178
+        },
+        {
+          "id": 135397,
+          "title": "Jurassic World",
+          "release_date": "2015-06-06",
+          "poster_path": "/rhr4y79GpxQF9IsfJItRXVaoGs4.jpg",
+          "backdrop_path": "/dF6FjTZzRTENfB4R17HDN20jLT2.jpg",
+          "vote_average": 6.703
+        },
+        {
+          "id": 351286,
+          "title": "Jurassic World: Fallen Kingdom",
+          "release_date": "2018-06-06",
+          "poster_path": "/x2Us3jR6ToMJjbcPbLimYoxf6xr.jpg",
+          "backdrop_path": "/6WA9stUMbIkEPxn3D5SWlA8FIi7.jpg",
+          "vote_average": 6.531
+        },
+        {
+          "id": 507086,
+          "title": "Jurassic World Dominion",
+          "release_date": "2022-06-01",
+          "poster_path": "/jbAvCACjLf1ZG0unB2tdmx5HAf1.jpg",
+          "backdrop_path": "/698FjyzLdpgXmUSr63LaRwblTmx.jpg",
+          "vote_average": 6.602
+        },
+        {
+          "id": 1234821,
+          "title": "Jurassic World Rebirth",
+          "release_date": "2025-06-23",
+          "poster_path": "/1RICxzeoNCAO5NpcRMIgg1XT6fm.jpg",
+          "backdrop_path": "/zNriRTr0kWwyaXPzdg1EIxf0BWk.jpg",
+          "vote_average": 6.274
         }
       ],
       "tv": [
         {
-          "id": 433,
-          "name": "Terminator: The Sarah Connor Chronicles",
-          "first_air_date": "2008-01-13",
-          "poster_path": "/vkMRWrVrNeX42ruRV5Q15mlBACG.jpg",
-          "backdrop_path": "/dyJVcCJnONxLlFpTVwUE2gA12FX.jpg",
-          "vote_average": 7.476
+          "id": 93741,
+          "name": "Jurassic World Camp Cretaceous",
+          "first_air_date": "2020-09-18",
+          "poster_path": "/pwte1p4ZySI1qAVSVdSTRKjuIAa.jpg",
+          "backdrop_path": "/4WIglfr4lDFVjCEcXzCeu6cJsOh.jpg",
+          "vote_average": 8.017
         },
         {
-          "id": 56150,
-          "name": "Terminator Salvation: The Machinima Series",
-          "first_air_date": "2009-05-18",
-          "poster_path": "/XE6GE6JFj8nMd2qPcqby15M82X.jpg",
-          "backdrop_path": "/2JNljYdphbMWX1Yq2JuusKvJyJc.jpg",
-          "vote_average": 7.6
-        },
-        {
-          "id": 239287,
-          "name": "Terminator Zero",
-          "first_air_date": "2024-08-29",
-          "poster_path": "/v4sbn6IsJGAIZNHjdB4CprvS7zo.jpg",
-          "backdrop_path": "/woH18JkZMYhMSWqtHkPA4F6Gd1z.jpg",
-          "vote_average": 7.024
+          "id": 237512,
+          "name": "Jurassic World: Chaos Theory",
+          "first_air_date": "2024-05-24",
+          "poster_path": "/c2Od0cY2IeayDj5osUxZSAD1QK.jpg",
+          "backdrop_path": "/qjPC0KYEhdWAIPmCtAkg0j1iJXC.jpg",
+          "vote_average": 8.314
         }
       ]
+    },
+    "cop-universe": {
+      "movies": [
+        {
+          "id": 70590,
+          "title": "Singham",
+          "release_date": "2011-07-22",
+          "poster_path": "/pggLRaurdWwjqX2vkhKIVQSBjXV.jpg",
+          "backdrop_path": "/rCtRb7KqvYj1GCtFMgcPSpkHZIz.jpg",
+          "vote_average": 6.5
+        },
+        {
+          "id": 285803,
+          "title": "Singham Returns",
+          "release_date": "2014-08-15",
+          "poster_path": "/k8CDjZLYG8bCIuXWAg4gukxf0BE.jpg",
+          "backdrop_path": "/rvG9irR3D0HrxAA0Jh577Rik2Ck.jpg",
+          "vote_average": 6.115
+        },
+        {
+          "id": 496524,
+          "title": "Simmba",
+          "release_date": "2018-12-27",
+          "poster_path": "/3jUuzSymG3uzYM1cUaERsFSZT58.jpg",
+          "backdrop_path": "/fGYTO7BJzKdgLB2CSjNvYISjZtE.jpg",
+          "vote_average": 6.2
+        },
+        {
+          "id": 592508,
+          "title": "Sooryavanshi",
+          "release_date": "2021-11-05",
+          "poster_path": "/zgEc1Tn4iKvttPUzkMOUB4BNoXK.jpg",
+          "backdrop_path": "/7w06baRS9VPm5RYz8lawTCLiR4j.jpg",
+          "vote_average": 5.777
+        },
+        {
+          "id": 1014214,
+          "title": "Singham Again",
+          "release_date": "2024-11-01",
+          "poster_path": "/2JbNkHg8m7LaBy61LyrnnlenaxY.jpg",
+          "backdrop_path": "/lexEx0B4WDOXGfqPTj4R8FCrE7H.jpg",
+          "vote_average": 5.023
+        }
+      ],
+      "tv": [
+        {
+          "id": 201009,
+          "name": "Indian Police Force",
+          "first_air_date": "2024-01-19",
+          "poster_path": "/hEiUy3Du35ZmVeKgVQnDK6wgMAt.jpg",
+          "backdrop_path": "/KapWiv2ecDdp4nAP0AfWr321T9.jpg",
+          "vote_average": 6.558
+        }
+      ]
+    },
+    "star-wars": {
+      "movies": [
+        {
+          "id": 11,
+          "title": "Star Wars",
+          "release_date": "1977-05-25",
+          "poster_path": "/fai0rspsNeJCS69wHNjOdWxcI7P.jpg",
+          "backdrop_path": "/zqkmTXzjkAgXmEWLRsY4UpTWCeo.jpg",
+          "vote_average": 8.208
+        },
+        {
+          "id": 1891,
+          "title": "The Empire Strikes Back",
+          "release_date": "1980-05-20",
+          "poster_path": "/nNAeTmF4CtdSgMDplXTDPOpYzsX.jpg",
+          "backdrop_path": "/k9pshruhCpJAdH9RaGJO6jaWQ4X.jpg",
+          "vote_average": 8.4
+        },
+        {
+          "id": 1892,
+          "title": "Return of the Jedi",
+          "release_date": "1983-05-25",
+          "poster_path": "/jQYlydvHm3kUix1f8prMucrplhm.jpg",
+          "backdrop_path": "/ziECpBRIyclmBNaFSWlvCfsKbMD.jpg",
+          "vote_average": 7.911
+        },
+        {
+          "id": 1884,
+          "title": "The Ewok Adventure",
+          "release_date": "1984-12-21",
+          "poster_path": "/4GrECLKaJhYA6ooSTOG0XEuPnSl.jpg",
+          "backdrop_path": "/waWPYcXrbENXEoJkrQt7zFUdq14.jpg",
+          "vote_average": 5.843
+        },
+        {
+          "id": 10372,
+          "title": "Ewoks: The Battle for Endor",
+          "release_date": "1985-11-24",
+          "poster_path": "/ntgKdekb7xMKscyh2Hei706LBLf.jpg",
+          "backdrop_path": "/xdH8k2O6mpLv4szeLkQGiM1aSOC.jpg",
+          "vote_average": 5.403
+        },
+        {
+          "id": 1893,
+          "title": "Star Wars: Episode I - The Phantom Menace",
+          "release_date": "1999-05-19",
+          "poster_path": "/6wkfovpn7Eq8dYNKaG5PY3q2oq6.jpg",
+          "backdrop_path": "/3TeGmKJfkik1D1rIoqGb1aR4k9c.jpg",
+          "vote_average": 6.583
+        },
+        {
+          "id": 1894,
+          "title": "Star Wars: Episode II - Attack of the Clones",
+          "release_date": "2002-05-15",
+          "poster_path": "/oZNPzxqM2s5DyVWab09NTQScDQt.jpg",
+          "backdrop_path": "/cxvr2IOTwHcQa3EqMoQ8RHCkqBG.jpg",
+          "vote_average": 6.598
+        },
+        {
+          "id": 1895,
+          "title": "Star Wars: Episode III - Revenge of the Sith",
+          "release_date": "2005-05-17",
+          "poster_path": "/xfSAoBEm9MNBjmlNcDYLvLSMlnq.jpg",
+          "backdrop_path": "/5vDuLrjJXFS9PTF7Q1xzobmYKR9.jpg",
+          "vote_average": 7.474
+        },
+        {
+          "id": 140607,
+          "title": "Star Wars: The Force Awakens",
+          "release_date": "2015-12-15",
+          "poster_path": "/wqnLdwVXoBjKibFRR5U3y0aDUhs.jpg",
+          "backdrop_path": "/8BTsTfln4jlQrLXUBquXJ0ASQy9.jpg",
+          "vote_average": 7.242
+        },
+        {
+          "id": 330459,
+          "title": "Rogue One: A Star Wars Story",
+          "release_date": "2016-12-14",
+          "poster_path": "/i0yw1mFbB7sNGHCs7EXZPzFkdA1.jpg",
+          "backdrop_path": "/6t8ES1d12OzWyCGxBeDYLHoaDrT.jpg",
+          "vote_average": 7.5
+        },
+        {
+          "id": 181808,
+          "title": "Star Wars: The Last Jedi",
+          "release_date": "2017-12-13",
+          "poster_path": "/ySaaKHOLAQU5HoZqWmzDIj1VvZ1.jpg",
+          "backdrop_path": "/5Iw7zQTHVRBOYpA0V6z0yypOPZh.jpg",
+          "vote_average": 6.739
+        },
+        {
+          "id": 348350,
+          "title": "Solo: A Star Wars Story",
+          "release_date": "2018-05-15",
+          "poster_path": "/4oD6VEccFkorEBTEDXtpLAaz0Rl.jpg",
+          "backdrop_path": "/7LZ0K4FsALrt7OeNIGOVLNuKQRU.jpg",
+          "vote_average": 6.552
+        },
+        {
+          "id": 181812,
+          "title": "Star Wars: The Rise of Skywalker",
+          "release_date": "2019-12-18",
+          "poster_path": "/db32LaOibwEliAmSL2jjDF6oDdj.jpg",
+          "backdrop_path": "/auJKGst3vXpJozHZh4nMFs0xWIU.jpg",
+          "vote_average": 6.249
+        }
+      ],
+      "tv": []
     },
     "transformers": {
       "movies": [
@@ -1088,210 +1433,87 @@
         }
       ]
     },
-    "wizarding-world": {
+    "conjuring": {
       "movies": [
         {
-          "id": 671,
-          "title": "Harry Potter and the Philosopher's Stone",
-          "release_date": "2001-11-16",
-          "poster_path": "/wuMc08IPKEatf9rnMNXvIDxqP4W.jpg",
-          "backdrop_path": "/1XAC6RPT01UX9EQGy2JVn5c8pgy.jpg",
-          "vote_average": 7.9
+          "id": 138843,
+          "title": "The Conjuring",
+          "release_date": "2013-07-18",
+          "poster_path": "/wVYREutTvI2tmxr6ujrHT704wGF.jpg",
+          "backdrop_path": "/ecKQlAEG95k62SMGhvX83oEqANK.jpg",
+          "vote_average": 7.541
         },
         {
-          "id": 672,
-          "title": "Harry Potter and the Chamber of Secrets",
-          "release_date": "2002-11-13",
-          "poster_path": "/sdEOH0992YZ0QSxgXNIGLq1ToUi.jpg",
-          "backdrop_path": "/1stUIsjawROZxjiCMtqqXqgfZWC.jpg",
-          "vote_average": 7.707
+          "id": 250546,
+          "title": "Annabelle",
+          "release_date": "2014-10-01",
+          "poster_path": "/yLsuU2P2SpDYFwtZQ7dtfVAf6TE.jpg",
+          "backdrop_path": "/pWZ0srAfPx4XyJMlFkKBlmYfx3C.jpg",
+          "vote_average": 5.79
         },
         {
-          "id": 673,
-          "title": "Harry Potter and the Prisoner of Azkaban",
-          "release_date": "2004-05-31",
-          "poster_path": "/aWxwnYoe8p2d2fcxOqtvAtJ72Rw.jpg",
-          "backdrop_path": "/htmYEfH7TQgzsXHCnNXxmoYKQtL.jpg",
-          "vote_average": 8
+          "id": 259693,
+          "title": "The Conjuring 2",
+          "release_date": "2016-06-08",
+          "poster_path": "/zEqyD0SBt6HL7W9JQoWwtd5Do1T.jpg",
+          "backdrop_path": "/hD9zZYKYb1xBgcm8XIfyvclSkjs.jpg",
+          "vote_average": 7.294
         },
         {
-          "id": 674,
-          "title": "Harry Potter and the Goblet of Fire",
-          "release_date": "2005-11-16",
-          "poster_path": "/fECBtHlr0RB3foNHDiCBXeg9Bv9.jpg",
-          "backdrop_path": "/1OV7hau4D3rWGS5bu8sqBYeVpe.jpg",
-          "vote_average": 7.802
+          "id": 396422,
+          "title": "Annabelle: Creation",
+          "release_date": "2017-08-03",
+          "poster_path": "/tb86j8jVCVsdZnzf8I6cIi65IeM.jpg",
+          "backdrop_path": "/o8u0NyEigCEaZHBdCYTRfXR8U4i.jpg",
+          "vote_average": 6.609
         },
         {
-          "id": 675,
-          "title": "Harry Potter and the Order of the Phoenix",
-          "release_date": "2007-07-08",
-          "poster_path": "/5aOyriWkPec0zUDxmHFP9qMmBaj.jpg",
-          "backdrop_path": "/pkxPkHOPJjOvzfQOclANEBT8OfK.jpg",
-          "vote_average": 7.673
+          "id": 439079,
+          "title": "The Nun",
+          "release_date": "2018-09-05",
+          "poster_path": "/sFC1ElvoKGdHJIWRpNB3xWJ9lJA.jpg",
+          "backdrop_path": "/cMnVmutb5mVgIBeiMOncAbwNjvG.jpg",
+          "vote_average": 5.909
         },
         {
-          "id": 767,
-          "title": "Harry Potter and the Half-Blood Prince",
-          "release_date": "2009-07-15",
-          "poster_path": "/z7uo9zmQdQwU5ZJHFpv2Upl30i1.jpg",
-          "backdrop_path": "/ze6Mx4QE5mQVXRYmG2flncqqle4.jpg",
-          "vote_average": 7.7
+          "id": 480414,
+          "title": "The Curse of La Llorona",
+          "release_date": "2019-04-17",
+          "poster_path": "/hETrPpoKs6BwoilK64YJ7Z5GcRT.jpg",
+          "backdrop_path": "/8MCCpfOe7hkG28cNmkXVrOWRIlK.jpg",
+          "vote_average": 5.65
         },
         {
-          "id": 12444,
-          "title": "Harry Potter and the Deathly Hallows: Part 1",
-          "release_date": "2010-11-17",
-          "poster_path": "/iGoXIpQb7Pot00EEdwpwPajheZ5.jpg",
-          "backdrop_path": "/vcrgU0KaNj5mKUCIQSUdiQwTE9y.jpg",
-          "vote_average": 7.735
+          "id": 521029,
+          "title": "Annabelle Comes Home",
+          "release_date": "2019-06-26",
+          "poster_path": "/qWsHMrbg9DsBY3bCMk9jyYCRVRs.jpg",
+          "backdrop_path": "/jB98SrdXAYSbiprjIwc7WfVCuCV.jpg",
+          "vote_average": 6.407
         },
         {
-          "id": 12445,
-          "title": "Harry Potter and the Deathly Hallows: Part 2",
-          "release_date": "2011-07-12",
-          "poster_path": "/c54HpQmuwXjHq2C9wmoACjxoom3.jpg",
-          "backdrop_path": "/cbcpDn6XJaIGoOil1bKuskU8ds4.jpg",
-          "vote_average": 8.1
+          "id": 423108,
+          "title": "The Conjuring: The Devil Made Me Do It",
+          "release_date": "2021-05-25",
+          "poster_path": "/xbSuFiJbbBWCkyCCKIMfuDCA4yV.jpg",
+          "backdrop_path": "/p26c040MErns7DJYhisa1CpVB5i.jpg",
+          "vote_average": 7.346
         },
         {
-          "id": 259316,
-          "title": "Fantastic Beasts and Where to Find Them",
-          "release_date": "2016-11-16",
-          "poster_path": "/fLsaFKExQt05yqjoAvKsmOMYvJR.jpg",
-          "backdrop_path": "/8Qsr8pvDL3s1jNZQ4HK1d1Xlvnh.jpg",
-          "vote_average": 7.309
+          "id": 968051,
+          "title": "The Nun II",
+          "release_date": "2023-09-06",
+          "poster_path": "/5gzzkR7y3hnY8AD1wXjCnVlHba5.jpg",
+          "backdrop_path": "/27jtaS1oCiLK5Y7P6iOXG2yj1Nc.jpg",
+          "vote_average": 6.634
         },
         {
-          "id": 338952,
-          "title": "Fantastic Beasts: The Crimes of Grindelwald",
-          "release_date": "2018-11-14",
-          "poster_path": "/fMMrl8fD9gRCFJvsx0SuFwkEOop.jpg",
-          "backdrop_path": "/i3rRY0EKYhSpyOLRAQ7iB05zhAp.jpg",
-          "vote_average": 6.833
-        },
-        {
-          "id": 338953,
-          "title": "Fantastic Beasts: The Secrets of Dumbledore",
-          "release_date": "2022-04-06",
-          "poster_path": "/3c5GNLB4yRSLBby0trHoA1DSQxQ.jpg",
-          "backdrop_path": "/zGLHX92Gk96O1DJvLil7ObJTbaL.jpg",
-          "vote_average": 6.627
-        }
-      ],
-      "tv": []
-    },
-    "middle-earth": {
-      "movies": [
-        {
-          "id": 120,
-          "title": "The Lord of the Rings: The Fellowship of the Ring",
-          "release_date": "2001-12-18",
-          "poster_path": "/6oom5QYQ2yQTMJIbnvbkBL9cHo6.jpg",
-          "backdrop_path": "/mWDdRXTivGE7aaY2vo1Ie0PfCX5.jpg",
-          "vote_average": 8.439
-        },
-        {
-          "id": 121,
-          "title": "The Lord of the Rings: The Two Towers",
-          "release_date": "2002-12-18",
-          "poster_path": "/5VTN0pR8gcqV3EPUHHfMGnJYN9L.jpg",
-          "backdrop_path": "/kWYfW2Re0rUDE6IHhy4CRuKWeFr.jpg",
-          "vote_average": 8.424
-        },
-        {
-          "id": 122,
-          "title": "The Lord of the Rings: The Return of the King",
-          "release_date": "2003-12-17",
-          "poster_path": "/rCzpDGLbOoPwLjy3OAm5NUPOTrC.jpg",
-          "backdrop_path": "/2u7zbn8EudG6kLlBzUYqP8RyFU4.jpg",
-          "vote_average": 8.502
-        },
-        {
-          "id": 49051,
-          "title": "The Hobbit: An Unexpected Journey",
-          "release_date": "2012-12-12",
-          "poster_path": "/yHA9Fc37VmpUA5UncTxxo3rTGVA.jpg",
-          "backdrop_path": "/xyXmtuvsoM5J3yNad0nvcetpBdY.jpg",
-          "vote_average": 7.379
-        },
-        {
-          "id": 57158,
-          "title": "The Hobbit: The Desolation of Smaug",
-          "release_date": "2013-12-11",
-          "poster_path": "/xQYiXsheRCDBA39DOrmaw1aSpbk.jpg",
-          "backdrop_path": "/6GGpZHvSpeIm5Tk5yn5P5ibUNjF.jpg",
-          "vote_average": 7.583
-        },
-        {
-          "id": 122917,
-          "title": "The Hobbit: The Battle of the Five Armies",
-          "release_date": "2014-12-10",
-          "poster_path": "/xT98tLqatZPQApyRmlPL12LtiWp.jpg",
-          "backdrop_path": "/3UbaCMmqOd7mca4Y5DOzY2ZVTyX.jpg",
-          "vote_average": 7.339
-        },
-        {
-          "id": 839033,
-          "title": "The Lord of the Rings: The War of the Rohirrim",
-          "release_date": "2024-12-05",
-          "poster_path": "/23WCoDo6wzBfzbX7BGTNwVUqZfi.jpg",
-          "backdrop_path": "/ie8OSgIHEl6yQiGJ90dsyBWOpQA.jpg",
-          "vote_average": 6.55
-        }
-      ],
-      "tv": [
-        {
-          "id": 84773,
-          "name": "The Lord of the Rings: The Rings of Power",
-          "first_air_date": "2022-09-01",
-          "poster_path": "/kf5Hz70tjNAHg4swGDzOr9BfoZ1.jpg",
-          "backdrop_path": "/o2wg8QiSCQrhj91tBfxunE3O5Ba.jpg",
-          "vote_average": 7.23
-        }
-      ]
-    },
-    "pirates": {
-      "movies": [
-        {
-          "id": 22,
-          "title": "Pirates of the Caribbean: The Curse of the Black Pearl",
-          "release_date": "2003-07-09",
-          "poster_path": "/poHwCZeWzJCShH7tOjg8RIoyjcw.jpg",
-          "backdrop_path": "/uRNgkJSkNBFbbn9fPsEjDIy8Sh3.jpg",
-          "vote_average": 7.8
-        },
-        {
-          "id": 58,
-          "title": "Pirates of the Caribbean: Dead Man's Chest",
-          "release_date": "2006-07-06",
-          "poster_path": "/uXEqmloGyP7UXAiphJUu2v2pcuE.jpg",
-          "backdrop_path": "/vr6n6ZFUZvedvIlhfYcbCWcaKyW.jpg",
-          "vote_average": 7.4
-        },
-        {
-          "id": 285,
-          "title": "Pirates of the Caribbean: At World's End",
-          "release_date": "2007-05-19",
-          "poster_path": "/jGWpG4YhpQwVmjyHEGkxEkeRf0S.jpg",
-          "backdrop_path": "/1jHxkVXMI5s3vRiyiZooUy1shB5.jpg",
-          "vote_average": 7.3
-        },
-        {
-          "id": 1865,
-          "title": "Pirates of the Caribbean: On Stranger Tides",
-          "release_date": "2011-05-15",
-          "poster_path": "/keGfSvCmYj7CvdRx36OdVrAEibE.jpg",
-          "backdrop_path": "/uzIGtyS6bbnJzGsPL93WCF1FWm8.jpg",
-          "vote_average": 6.572
-        },
-        {
-          "id": 166426,
-          "title": "Pirates of the Caribbean: Dead Men Tell No Tales",
-          "release_date": "2017-05-23",
-          "poster_path": "/6lAPOAFYFWIO3SQRemEY2wInQMC.jpg",
-          "backdrop_path": "/7C921eWK06n12c1miRXnYoEu5Yv.jpg",
-          "vote_average": 6.662
+          "id": 1038392,
+          "title": "The Conjuring: Last Rites",
+          "release_date": "2025-09-03",
+          "poster_path": "/byWgphT74ClOVa8EOGzYDkl8DVL.jpg",
+          "backdrop_path": "/i8MupUe4xgmYXoRNAQMYvuoexSU.jpg",
+          "vote_average": 6.952
         }
       ],
       "tv": []
@@ -1603,6 +1825,247 @@
       ],
       "tv": []
     },
+    "terminator": {
+      "movies": [
+        {
+          "id": 218,
+          "title": "The Terminator",
+          "release_date": "1984-10-26",
+          "poster_path": "/qvktm0BHcnmDpul4Hz01GIazWPr.jpg",
+          "backdrop_path": "/ffdqHMWkh1h9MABwIfbfRJhgFW6.jpg",
+          "vote_average": 7.685
+        },
+        {
+          "id": 280,
+          "title": "Terminator 2: Judgment Day",
+          "release_date": "1991-07-03",
+          "poster_path": "/jFTVD4XoWQTcg7wdyJKa8PEds5q.jpg",
+          "backdrop_path": "/izkMjmhauFx9DjoBQqM5sM5WAwE.jpg",
+          "vote_average": 8.2
+        },
+        {
+          "id": 296,
+          "title": "Terminator 3: Rise of the Machines",
+          "release_date": "2003-07-02",
+          "poster_path": "/vvevzdYIrk2636maNW4qeWmlPFG.jpg",
+          "backdrop_path": "/voVkSwgFYv9GOpRNfUAwj6qYRTL.jpg",
+          "vote_average": 6.199
+        },
+        {
+          "id": 534,
+          "title": "Terminator Salvation",
+          "release_date": "2009-05-20",
+          "poster_path": "/gw6JhlekZgtKUFlDTezq3j5JEPK.jpg",
+          "backdrop_path": "/74zPun6CdSNVSDLcKOM8Yjv7WWB.jpg",
+          "vote_average": 6.096
+        },
+        {
+          "id": 87101,
+          "title": "Terminator Genisys",
+          "release_date": "2015-06-23",
+          "poster_path": "/oZRVDpNtmHk8M1VYy1aeOWUXgbC.jpg",
+          "backdrop_path": "/wvlIoof1FnKPLv9jAYanuP31V0C.jpg",
+          "vote_average": 5.959
+        },
+        {
+          "id": 290859,
+          "title": "Terminator: Dark Fate",
+          "release_date": "2019-10-23",
+          "poster_path": "/vqzNJRH4YyquRiWxCCOH0aXggHI.jpg",
+          "backdrop_path": "/a6cDxdwaQIFjSkXf7uskg78ZyTq.jpg",
+          "vote_average": 6.421
+        }
+      ],
+      "tv": [
+        {
+          "id": 433,
+          "name": "Terminator: The Sarah Connor Chronicles",
+          "first_air_date": "2008-01-13",
+          "poster_path": "/vkMRWrVrNeX42ruRV5Q15mlBACG.jpg",
+          "backdrop_path": "/dyJVcCJnONxLlFpTVwUE2gA12FX.jpg",
+          "vote_average": 7.476
+        },
+        {
+          "id": 56150,
+          "name": "Terminator Salvation: The Machinima Series",
+          "first_air_date": "2009-05-18",
+          "poster_path": "/XE6GE6JFj8nMd2qPcqby15M82X.jpg",
+          "backdrop_path": "/2JNljYdphbMWX1Yq2JuusKvJyJc.jpg",
+          "vote_average": 7.6
+        },
+        {
+          "id": 239287,
+          "name": "Terminator Zero",
+          "first_air_date": "2024-08-29",
+          "poster_path": "/v4sbn6IsJGAIZNHjdB4CprvS7zo.jpg",
+          "backdrop_path": "/woH18JkZMYhMSWqtHkPA4F6Gd1z.jpg",
+          "vote_average": 7.024
+        }
+      ]
+    },
+    "wizarding-world": {
+      "movies": [
+        {
+          "id": 671,
+          "title": "Harry Potter and the Philosopher's Stone",
+          "release_date": "2001-11-16",
+          "poster_path": "/wuMc08IPKEatf9rnMNXvIDxqP4W.jpg",
+          "backdrop_path": "/1XAC6RPT01UX9EQGy2JVn5c8pgy.jpg",
+          "vote_average": 7.9
+        },
+        {
+          "id": 672,
+          "title": "Harry Potter and the Chamber of Secrets",
+          "release_date": "2002-11-13",
+          "poster_path": "/sdEOH0992YZ0QSxgXNIGLq1ToUi.jpg",
+          "backdrop_path": "/1stUIsjawROZxjiCMtqqXqgfZWC.jpg",
+          "vote_average": 7.707
+        },
+        {
+          "id": 673,
+          "title": "Harry Potter and the Prisoner of Azkaban",
+          "release_date": "2004-05-31",
+          "poster_path": "/aWxwnYoe8p2d2fcxOqtvAtJ72Rw.jpg",
+          "backdrop_path": "/htmYEfH7TQgzsXHCnNXxmoYKQtL.jpg",
+          "vote_average": 8
+        },
+        {
+          "id": 674,
+          "title": "Harry Potter and the Goblet of Fire",
+          "release_date": "2005-11-16",
+          "poster_path": "/fECBtHlr0RB3foNHDiCBXeg9Bv9.jpg",
+          "backdrop_path": "/1OV7hau4D3rWGS5bu8sqBYeVpe.jpg",
+          "vote_average": 7.802
+        },
+        {
+          "id": 675,
+          "title": "Harry Potter and the Order of the Phoenix",
+          "release_date": "2007-07-08",
+          "poster_path": "/5aOyriWkPec0zUDxmHFP9qMmBaj.jpg",
+          "backdrop_path": "/pkxPkHOPJjOvzfQOclANEBT8OfK.jpg",
+          "vote_average": 7.673
+        },
+        {
+          "id": 767,
+          "title": "Harry Potter and the Half-Blood Prince",
+          "release_date": "2009-07-15",
+          "poster_path": "/z7uo9zmQdQwU5ZJHFpv2Upl30i1.jpg",
+          "backdrop_path": "/ze6Mx4QE5mQVXRYmG2flncqqle4.jpg",
+          "vote_average": 7.7
+        },
+        {
+          "id": 12444,
+          "title": "Harry Potter and the Deathly Hallows: Part 1",
+          "release_date": "2010-11-17",
+          "poster_path": "/iGoXIpQb7Pot00EEdwpwPajheZ5.jpg",
+          "backdrop_path": "/vcrgU0KaNj5mKUCIQSUdiQwTE9y.jpg",
+          "vote_average": 7.735
+        },
+        {
+          "id": 12445,
+          "title": "Harry Potter and the Deathly Hallows: Part 2",
+          "release_date": "2011-07-12",
+          "poster_path": "/c54HpQmuwXjHq2C9wmoACjxoom3.jpg",
+          "backdrop_path": "/cbcpDn6XJaIGoOil1bKuskU8ds4.jpg",
+          "vote_average": 8.1
+        },
+        {
+          "id": 259316,
+          "title": "Fantastic Beasts and Where to Find Them",
+          "release_date": "2016-11-16",
+          "poster_path": "/fLsaFKExQt05yqjoAvKsmOMYvJR.jpg",
+          "backdrop_path": "/8Qsr8pvDL3s1jNZQ4HK1d1Xlvnh.jpg",
+          "vote_average": 7.309
+        },
+        {
+          "id": 338952,
+          "title": "Fantastic Beasts: The Crimes of Grindelwald",
+          "release_date": "2018-11-14",
+          "poster_path": "/fMMrl8fD9gRCFJvsx0SuFwkEOop.jpg",
+          "backdrop_path": "/i3rRY0EKYhSpyOLRAQ7iB05zhAp.jpg",
+          "vote_average": 6.833
+        },
+        {
+          "id": 338953,
+          "title": "Fantastic Beasts: The Secrets of Dumbledore",
+          "release_date": "2022-04-06",
+          "poster_path": "/3c5GNLB4yRSLBby0trHoA1DSQxQ.jpg",
+          "backdrop_path": "/zGLHX92Gk96O1DJvLil7ObJTbaL.jpg",
+          "vote_average": 6.627
+        }
+      ],
+      "tv": []
+    },
+    "middle-earth": {
+      "movies": [
+        {
+          "id": 120,
+          "title": "The Lord of the Rings: The Fellowship of the Ring",
+          "release_date": "2001-12-18",
+          "poster_path": "/6oom5QYQ2yQTMJIbnvbkBL9cHo6.jpg",
+          "backdrop_path": "/mWDdRXTivGE7aaY2vo1Ie0PfCX5.jpg",
+          "vote_average": 8.439
+        },
+        {
+          "id": 121,
+          "title": "The Lord of the Rings: The Two Towers",
+          "release_date": "2002-12-18",
+          "poster_path": "/5VTN0pR8gcqV3EPUHHfMGnJYN9L.jpg",
+          "backdrop_path": "/kWYfW2Re0rUDE6IHhy4CRuKWeFr.jpg",
+          "vote_average": 8.424
+        },
+        {
+          "id": 122,
+          "title": "The Lord of the Rings: The Return of the King",
+          "release_date": "2003-12-17",
+          "poster_path": "/rCzpDGLbOoPwLjy3OAm5NUPOTrC.jpg",
+          "backdrop_path": "/2u7zbn8EudG6kLlBzUYqP8RyFU4.jpg",
+          "vote_average": 8.502
+        },
+        {
+          "id": 49051,
+          "title": "The Hobbit: An Unexpected Journey",
+          "release_date": "2012-12-12",
+          "poster_path": "/yHA9Fc37VmpUA5UncTxxo3rTGVA.jpg",
+          "backdrop_path": "/xyXmtuvsoM5J3yNad0nvcetpBdY.jpg",
+          "vote_average": 7.379
+        },
+        {
+          "id": 57158,
+          "title": "The Hobbit: The Desolation of Smaug",
+          "release_date": "2013-12-11",
+          "poster_path": "/xQYiXsheRCDBA39DOrmaw1aSpbk.jpg",
+          "backdrop_path": "/6GGpZHvSpeIm5Tk5yn5P5ibUNjF.jpg",
+          "vote_average": 7.583
+        },
+        {
+          "id": 122917,
+          "title": "The Hobbit: The Battle of the Five Armies",
+          "release_date": "2014-12-10",
+          "poster_path": "/xT98tLqatZPQApyRmlPL12LtiWp.jpg",
+          "backdrop_path": "/3UbaCMmqOd7mca4Y5DOzY2ZVTyX.jpg",
+          "vote_average": 7.339
+        },
+        {
+          "id": 839033,
+          "title": "The Lord of the Rings: The War of the Rohirrim",
+          "release_date": "2024-12-05",
+          "poster_path": "/23WCoDo6wzBfzbX7BGTNwVUqZfi.jpg",
+          "backdrop_path": "/ie8OSgIHEl6yQiGJ90dsyBWOpQA.jpg",
+          "vote_average": 6.55
+        }
+      ],
+      "tv": [
+        {
+          "id": 84773,
+          "name": "The Lord of the Rings: The Rings of Power",
+          "first_air_date": "2022-09-01",
+          "poster_path": "/kf5Hz70tjNAHg4swGDzOr9BfoZ1.jpg",
+          "backdrop_path": "/o2wg8QiSCQrhj91tBfxunE3O5Ba.jpg",
+          "vote_average": 7.23
+        }
+      ]
+    },
     "mission-impossible": {
       "movies": [
         {
@@ -1689,84 +2152,6 @@
         }
       ]
     },
-    "jurassic-park": {
-      "movies": [
-        {
-          "id": 329,
-          "title": "Jurassic Park",
-          "release_date": "1993-06-11",
-          "poster_path": "/b1xCNnyrPebIc7EWNZIa6jhb1Ww.jpg",
-          "backdrop_path": "/o7LzVmlOSYc3EspyVMC9bsTTARc.jpg",
-          "vote_average": 7.975
-        },
-        {
-          "id": 330,
-          "title": "The Lost World: Jurassic Park",
-          "release_date": "1997-05-23",
-          "poster_path": "/ss6cqHQc72eCsXrvne11XVZs3bR.jpg",
-          "backdrop_path": "/A4rYaPdzgocCjQ0n9LUSYUxyvpS.jpg",
-          "vote_average": 6.568
-        },
-        {
-          "id": 331,
-          "title": "Jurassic Park III",
-          "release_date": "2001-07-18",
-          "poster_path": "/oQXj4NUfS3r3gHXtDOzcJgj1lLc.jpg",
-          "backdrop_path": "/8v8x4vVbRgrsdU3M4drnD7HQbfe.jpg",
-          "vote_average": 6.178
-        },
-        {
-          "id": 135397,
-          "title": "Jurassic World",
-          "release_date": "2015-06-06",
-          "poster_path": "/rhr4y79GpxQF9IsfJItRXVaoGs4.jpg",
-          "backdrop_path": "/dF6FjTZzRTENfB4R17HDN20jLT2.jpg",
-          "vote_average": 6.703
-        },
-        {
-          "id": 351286,
-          "title": "Jurassic World: Fallen Kingdom",
-          "release_date": "2018-06-06",
-          "poster_path": "/x2Us3jR6ToMJjbcPbLimYoxf6xr.jpg",
-          "backdrop_path": "/6WA9stUMbIkEPxn3D5SWlA8FIi7.jpg",
-          "vote_average": 6.531
-        },
-        {
-          "id": 507086,
-          "title": "Jurassic World Dominion",
-          "release_date": "2022-06-01",
-          "poster_path": "/jbAvCACjLf1ZG0unB2tdmx5HAf1.jpg",
-          "backdrop_path": "/698FjyzLdpgXmUSr63LaRwblTmx.jpg",
-          "vote_average": 6.602
-        },
-        {
-          "id": 1234821,
-          "title": "Jurassic World Rebirth",
-          "release_date": "2025-06-23",
-          "poster_path": "/1RICxzeoNCAO5NpcRMIgg1XT6fm.jpg",
-          "backdrop_path": "/zNriRTr0kWwyaXPzdg1EIxf0BWk.jpg",
-          "vote_average": 6.274
-        }
-      ],
-      "tv": [
-        {
-          "id": 93741,
-          "name": "Jurassic World Camp Cretaceous",
-          "first_air_date": "2020-09-18",
-          "poster_path": "/pwte1p4ZySI1qAVSVdSTRKjuIAa.jpg",
-          "backdrop_path": "/4WIglfr4lDFVjCEcXzCeu6cJsOh.jpg",
-          "vote_average": 8.017
-        },
-        {
-          "id": 237512,
-          "name": "Jurassic World: Chaos Theory",
-          "first_air_date": "2024-05-24",
-          "poster_path": "/c2Od0cY2IeayDj5osUxZSAD1QK.jpg",
-          "backdrop_path": "/qjPC0KYEhdWAIPmCtAkg0j1iJXC.jpg",
-          "vote_average": 8.314
-        }
-      ]
-    },
     "predator": {
       "movies": [
         {
@@ -1844,406 +2229,50 @@
       ],
       "tv": []
     },
-    "conjuring": {
+    "maddock": {
       "movies": [
         {
-          "id": 138843,
-          "title": "The Conjuring",
-          "release_date": "2013-07-18",
-          "poster_path": "/wVYREutTvI2tmxr6ujrHT704wGF.jpg",
-          "backdrop_path": "/ecKQlAEG95k62SMGhvX83oEqANK.jpg",
-          "vote_average": 7.541
+          "id": 533991,
+          "title": "Stree",
+          "release_date": "2018-08-31",
+          "poster_path": "/euhgW6hpDYw7nxFDjqHn0eKvQPX.jpg",
+          "backdrop_path": "/4qgK44Ee1iRXTRp6w9LvMz76LJw.jpg",
+          "vote_average": 6.978
         },
         {
-          "id": 250546,
-          "title": "Annabelle",
-          "release_date": "2014-10-01",
-          "poster_path": "/yLsuU2P2SpDYFwtZQ7dtfVAf6TE.jpg",
-          "backdrop_path": "/pWZ0srAfPx4XyJMlFkKBlmYfx3C.jpg",
-          "vote_average": 5.79
+          "id": 799177,
+          "title": "Bhediya",
+          "release_date": "2022-11-25",
+          "poster_path": "/iZtq44ZmxBW0E3tAeLG6UdJe9aj.jpg",
+          "backdrop_path": "/4YJ28KoOb5ViUzhqurdcWIFa7M0.jpg",
+          "vote_average": 6.934
         },
         {
-          "id": 259693,
-          "title": "The Conjuring 2",
-          "release_date": "2016-06-08",
-          "poster_path": "/zEqyD0SBt6HL7W9JQoWwtd5Do1T.jpg",
-          "backdrop_path": "/hD9zZYKYb1xBgcm8XIfyvclSkjs.jpg",
-          "vote_average": 7.294
+          "id": 1187058,
+          "title": "Munjya",
+          "release_date": "2024-06-07",
+          "poster_path": "/ylYdXu0SM79Qs7vOz6q7mBxanVD.jpg",
+          "backdrop_path": "/4Yr1efAiQ55YdV9R7N4WOntpmZ5.jpg",
+          "vote_average": 6.163
         },
         {
-          "id": 396422,
-          "title": "Annabelle: Creation",
-          "release_date": "2017-08-03",
-          "poster_path": "/tb86j8jVCVsdZnzf8I6cIi65IeM.jpg",
-          "backdrop_path": "/o8u0NyEigCEaZHBdCYTRfXR8U4i.jpg",
-          "vote_average": 6.609
+          "id": 1112426,
+          "title": "Stree 2",
+          "release_date": "2024-08-15",
+          "poster_path": "/nfnhwfUEFuSOxxf4jDdBlY6Lccw.jpg",
+          "backdrop_path": "/fVV0A67kDjTTQ4CvUn8LoletRmI.jpg",
+          "vote_average": 6.701
         },
         {
-          "id": 439079,
-          "title": "The Nun",
-          "release_date": "2018-09-05",
-          "poster_path": "/sFC1ElvoKGdHJIWRpNB3xWJ9lJA.jpg",
-          "backdrop_path": "/cMnVmutb5mVgIBeiMOncAbwNjvG.jpg",
-          "vote_average": 5.909
-        },
-        {
-          "id": 480414,
-          "title": "The Curse of La Llorona",
-          "release_date": "2019-04-17",
-          "poster_path": "/hETrPpoKs6BwoilK64YJ7Z5GcRT.jpg",
-          "backdrop_path": "/8MCCpfOe7hkG28cNmkXVrOWRIlK.jpg",
-          "vote_average": 5.65
-        },
-        {
-          "id": 521029,
-          "title": "Annabelle Comes Home",
-          "release_date": "2019-06-26",
-          "poster_path": "/qWsHMrbg9DsBY3bCMk9jyYCRVRs.jpg",
-          "backdrop_path": "/jB98SrdXAYSbiprjIwc7WfVCuCV.jpg",
-          "vote_average": 6.407
-        },
-        {
-          "id": 423108,
-          "title": "The Conjuring: The Devil Made Me Do It",
-          "release_date": "2021-05-25",
-          "poster_path": "/xbSuFiJbbBWCkyCCKIMfuDCA4yV.jpg",
-          "backdrop_path": "/p26c040MErns7DJYhisa1CpVB5i.jpg",
-          "vote_average": 7.346
-        },
-        {
-          "id": 968051,
-          "title": "The Nun II",
-          "release_date": "2023-09-06",
-          "poster_path": "/5gzzkR7y3hnY8AD1wXjCnVlHba5.jpg",
-          "backdrop_path": "/27jtaS1oCiLK5Y7P6iOXG2yj1Nc.jpg",
-          "vote_average": 6.634
-        },
-        {
-          "id": 1038392,
-          "title": "The Conjuring: Last Rites",
-          "release_date": "2025-09-03",
-          "poster_path": "/byWgphT74ClOVa8EOGzYDkl8DVL.jpg",
-          "backdrop_path": "/i8MupUe4xgmYXoRNAQMYvuoexSU.jpg",
-          "vote_average": 6.952
+          "id": 1196364,
+          "title": "Thamma",
+          "release_date": "2025-10-21",
+          "poster_path": "/udkbDwBbysCGEydt0FHnl9dVO2k.jpg",
+          "backdrop_path": "/e5bFtChejaGio218NejT0jXgSux.jpg",
+          "vote_average": 6.6
         }
       ],
       "tv": []
-    },
-    "despicable-me": {
-      "movies": [
-        {
-          "id": 20352,
-          "title": "Despicable Me",
-          "release_date": "2010-07-08",
-          "poster_path": "/b1BT309QWjtFUlJPLmXmrcHOWEL.jpg",
-          "backdrop_path": "/2XSeKDmIa2KxaiJy4J9e8FrIZhk.jpg",
-          "vote_average": 7.261
-        },
-        {
-          "id": 93456,
-          "title": "Despicable Me 2",
-          "release_date": "2013-06-26",
-          "poster_path": "/5Fh4NdoEnCjCK9wLjdJ9DJNFl2b.jpg",
-          "backdrop_path": "/uD267eSiACfWLxp47t3gYymOQRj.jpg",
-          "vote_average": 6.947
-        },
-        {
-          "id": 211672,
-          "title": "Minions",
-          "release_date": "2015-06-17",
-          "poster_path": "/dr02BdCNAUPVU07aOodwPYv6HCf.jpg",
-          "backdrop_path": "/wKrxeY6lbu7KFBsWVcMH6M8avwr.jpg",
-          "vote_average": 6.422
-        },
-        {
-          "id": 324852,
-          "title": "Despicable Me 3",
-          "release_date": "2017-06-15",
-          "poster_path": "/6t3YWl7hrr88lCEFlGVqW5yV99R.jpg",
-          "backdrop_path": "/ftRkFtAGuHngHnLiOxktq0aCVMF.jpg",
-          "vote_average": 6.47
-        },
-        {
-          "id": 438148,
-          "title": "Minions: The Rise of Gru",
-          "release_date": "2022-06-29",
-          "poster_path": "/wKiOkZTN9lUUUNZLmtnwubZYONg.jpg",
-          "backdrop_path": "/wZS4xSfPtk1NPQnx9zsT5R2WhCu.jpg",
-          "vote_average": 7.3
-        },
-        {
-          "id": 519182,
-          "title": "Despicable Me 4",
-          "release_date": "2024-06-20",
-          "poster_path": "/wWba3TaojhK7NdycRhoQpsG0FaH.jpg",
-          "backdrop_path": "/twsxsfao6ZOVvT8LfudH603MMi6.jpg",
-          "vote_average": 6.983
-        },
-        {
-          "id": 1315772,
-          "title": "Minions & Monsters",
-          "release_date": "2026-06-24",
-          "poster_path": "/nz7i42yhLIJ4ve9JKgM6NthoLHO.jpg",
-          "backdrop_path": "/kkcwhgSFd81QDlXo8ytrpHPQjhy.jpg",
-          "vote_average": 6.4
-        }
-      ],
-      "tv": []
-    },
-    "toy-story": {
-      "movies": [
-        {
-          "id": 862,
-          "title": "Toy Story",
-          "release_date": "1995-11-22",
-          "poster_path": "/uXDfjJbdP4ijW5hWSBrPrlKpxab.jpg",
-          "backdrop_path": "/3Rfvhy1Nl6sSGJwyjb0QiZzZYlB.jpg",
-          "vote_average": 7.984
-        },
-        {
-          "id": 863,
-          "title": "Toy Story 2",
-          "release_date": "1999-10-30",
-          "poster_path": "/4rbcp3ng8n1MKHjpeqW0L7Fnpzz.jpg",
-          "backdrop_path": "/7iUDfakacY1HpajP1DtHrCuDB95.jpg",
-          "vote_average": 7.618
-        },
-        {
-          "id": 10193,
-          "title": "Toy Story 3",
-          "release_date": "2010-06-16",
-          "poster_path": "/AbbXspMOwdvwWZgVN0nabZq03Ec.jpg",
-          "backdrop_path": "/uAfhsySkr1UzQg1zdg3dZQRz9Fd.jpg",
-          "vote_average": 7.813
-        },
-        {
-          "id": 301528,
-          "title": "Toy Story 4",
-          "release_date": "2019-06-19",
-          "poster_path": "/w9kR8qbmQ01HwnvK4alvnQ2ca0L.jpg",
-          "backdrop_path": "/q62bpQ67qaXY0u6b2wFEnQYIbPd.jpg",
-          "vote_average": 7.464
-        },
-        {
-          "id": 718789,
-          "title": "Lightyear",
-          "release_date": "2022-06-15",
-          "poster_path": "/b9t3w1loraDh7hjdWmpc9ZsaYns.jpg",
-          "backdrop_path": "/hwUxHPkuUleJeoick4uZsrKDXxF.jpg",
-          "vote_average": 6.867
-        },
-        {
-          "id": 1084244,
-          "title": "Toy Story 5",
-          "release_date": "2026-06-17",
-          "poster_path": "/sfQtVlIHljToOwYjhe21KPGzZWK.jpg",
-          "backdrop_path": "/8sSKdEmlmqF4kJUd28SqthXC4yZ.jpg",
-          "vote_average": 7.423
-        }
-      ],
-      "tv": [
-        {
-          "id": 3744,
-          "name": "Buzz Lightyear of Star Command",
-          "first_air_date": "2000-10-02",
-          "poster_path": "/xVfKtjtL6aePBxn8ogN4ViOnRRg.jpg",
-          "backdrop_path": "/mUcyG56SxR8c9QLQwcDT93VB0Cm.jpg",
-          "vote_average": 6.5
-        },
-        {
-          "id": 323849,
-          "name": "Forky Asks a Question",
-          "first_air_date": "2019-11-12",
-          "poster_path": "/kd8Tuc1110dkhdWELC3APLvIJOK.jpg",
-          "backdrop_path": "/kdnIvDYDXTSJeEtEVzihVl7VtKu.jpg",
-          "vote_average": 0
-        }
-      ]
-    },
-    "shrek": {
-      "movies": [
-        {
-          "id": 808,
-          "title": "Shrek",
-          "release_date": "2001-05-18",
-          "poster_path": "/iB64vpL3dIObOtMZgX3RqdVdQDc.jpg",
-          "backdrop_path": "/sRvXNDItGlWCqtO3j6wks52FmbD.jpg",
-          "vote_average": 7.773
-        },
-        {
-          "id": 809,
-          "title": "Shrek 2",
-          "release_date": "2004-05-19",
-          "poster_path": "/2yYP0PQjG8zVqturh1BAqu2Tixl.jpg",
-          "backdrop_path": "/8ohobj5lAIbl5XWw11FywS3IRrS.jpg",
-          "vote_average": 7.327
-        },
-        {
-          "id": 810,
-          "title": "Shrek the Third",
-          "release_date": "2007-05-17",
-          "poster_path": "/n4SexGGQzI26E269tfpa80MZaGV.jpg",
-          "backdrop_path": "/wvXxKpFGXvQJRB0nvvfURhRD3C0.jpg",
-          "vote_average": 6.313
-        },
-        {
-          "id": 10192,
-          "title": "Shrek Forever After",
-          "release_date": "2010-05-16",
-          "poster_path": "/6HrfPZtKcGmX2tUWW3cnciZTaSD.jpg",
-          "backdrop_path": "/uzzTystB8lL0mRDII5Sfs5HxgkI.jpg",
-          "vote_average": 6.409
-        },
-        {
-          "id": 417859,
-          "title": "Puss in Boots",
-          "release_date": "2011-10-27",
-          "poster_path": "/7a5Jzjr9TmffGy76y1SZhn3sCiz.jpg",
-          "backdrop_path": "/c5MCkebYhFuhmi32x760HfcvLIO.jpg",
-          "vote_average": 6.61
-        },
-        {
-          "id": 315162,
-          "title": "Puss in Boots: The Last Wish",
-          "release_date": "2022-12-07",
-          "poster_path": "/kuf6dutpsT0vSVehic3EZIqkOBt.jpg",
-          "backdrop_path": "/jr8tSoJGj33XLgFBy6lmZhpGQNu.jpg",
-          "vote_average": 8.212
-        },
-        {
-          "id": 421892,
-          "title": "Shrek 5",
-          "release_date": "2027-06-30",
-          "poster_path": "/zVGvsXptUWd1PgptipLNoIQYytW.jpg",
-          "backdrop_path": "/wHbZr627WHFPMpfskRwX6NBgjxv.jpg",
-          "vote_average": 0
-        }
-      ],
-      "tv": []
-    },
-    "kung-fu-panda": {
-      "movies": [
-        {
-          "id": 9502,
-          "title": "Kung Fu Panda",
-          "release_date": "2008-06-04",
-          "poster_path": "/wWt4JYXTg5Wr3xBW2phBrMKgp3x.jpg",
-          "backdrop_path": "/qdthf9WrRDSaIkGVQGhhJ9pz1hn.jpg",
-          "vote_average": 7.332
-        },
-        {
-          "id": 49444,
-          "title": "Kung Fu Panda 2",
-          "release_date": "2011-05-25",
-          "poster_path": "/mtqqD00vB4PGRt20gWtGqFhrkd0.jpg",
-          "backdrop_path": "/reHkSQwiYKK4SabnGDY1FWKie82.jpg",
-          "vote_average": 7.076
-        },
-        {
-          "id": 140300,
-          "title": "Kung Fu Panda 3",
-          "release_date": "2016-01-23",
-          "poster_path": "/oajNi4Su39WAByHI6EONu8G8HYn.jpg",
-          "backdrop_path": "/s3FiHTdpQVpqIqdBxLLiy40wGut.jpg",
-          "vote_average": 6.93
-        },
-        {
-          "id": 1011985,
-          "title": "Kung Fu Panda 4",
-          "release_date": "2024-03-02",
-          "poster_path": "/kDp1vUBnMpe8ak4rjgl3cLELqjU.jpg",
-          "backdrop_path": "/3ffPx9jqg0yj9y1KWeagT7D20CB.jpg",
-          "vote_average": 7.005
-        }
-      ],
-      "tv": [
-        {
-          "id": 39898,
-          "name": "Kung Fu Panda: Legends of Awesomeness",
-          "first_air_date": "2011-09-19",
-          "poster_path": "/rkq5Jt7boR5v65bDbELHz3DW7sv.jpg",
-          "backdrop_path": "/abmwQvkZh6yufaodYwnOV15EST0.jpg",
-          "vote_average": 7.405
-        },
-        {
-          "id": 82747,
-          "name": "Kung Fu Panda: The Paws of Destiny",
-          "first_air_date": "2018-11-15",
-          "poster_path": "/x4yvmIVuXxYKfTlgRtSJnGC1Izs.jpg",
-          "backdrop_path": "/fUhIeUfqPreLuEmgDuhb9LAdxHp.jpg",
-          "vote_average": 7.2
-        },
-        {
-          "id": 129959,
-          "name": "Kung Fu Panda: The Dragon Knight",
-          "first_air_date": "2022-07-14",
-          "poster_path": "/7C9TKvU5dNyhvoG9kQvRFsg6vlA.jpg",
-          "backdrop_path": "/j7FL6KfjEjrGSXt6peQw7U3VL0R.jpg",
-          "vote_average": 7.486
-        }
-      ]
-    },
-    "ice-age": {
-      "movies": [
-        {
-          "id": 425,
-          "title": "Ice Age",
-          "release_date": "2002-03-14",
-          "poster_path": "/gLhHHZUzeseRXShoDyC4VqLgsNv.jpg",
-          "backdrop_path": "/8pwIhymsxfAVjrAE7syDjQULn37.jpg",
-          "vote_average": 7.381
-        },
-        {
-          "id": 950,
-          "title": "Ice Age: The Meltdown",
-          "release_date": "2006-03-29",
-          "poster_path": "/8vNkkk4erLGDg3UfbmSHsTdSNcY.jpg",
-          "backdrop_path": "/o1jr0UqVjxIZ1JnFzuVLN4ulWey.jpg",
-          "vote_average": 6.725
-        },
-        {
-          "id": 8355,
-          "title": "Ice Age: Dawn of the Dinosaurs",
-          "release_date": "2009-06-26",
-          "poster_path": "/cXOLaxcNjNAYmEx1trZxOTKhK3Q.jpg",
-          "backdrop_path": "/6Ybbh8TrO8bkEfQXDedekLwVDfA.jpg",
-          "vote_average": 6.773
-        },
-        {
-          "id": 57800,
-          "title": "Ice Age: Continental Drift",
-          "release_date": "2012-06-27",
-          "poster_path": "/dfp1BZF7FxbBUyzHvMOI9t8NWDD.jpg",
-          "backdrop_path": "/liiPM38H376CDqxJ7VeQjan5YUy.jpg",
-          "vote_average": 6.392
-        },
-        {
-          "id": 278154,
-          "title": "Ice Age: Collision Course",
-          "release_date": "2016-06-23",
-          "poster_path": "/okF78W1AcXAenlYFE3vna9Uuqjp.jpg",
-          "backdrop_path": "/wQoe0j7ZDk7LWexC0XhwkK4brIb.jpg",
-          "vote_average": 6.121
-        },
-        {
-          "id": 774825,
-          "title": "The Ice Age Adventures of Buck Wild",
-          "release_date": "2022-01-28",
-          "poster_path": "/9ginbMWmt9y7PIHW1c9hnbIVWPm.jpg",
-          "backdrop_path": "/tleIOY1MS8DIe6v7x6gg7lRCOfA.jpg",
-          "vote_average": 6.568
-        }
-      ],
-      "tv": [
-        {
-          "id": 158307,
-          "name": "Ice Age: Scrat Tales",
-          "first_air_date": "2022-04-13",
-          "poster_path": "/mTfYwY7DELH08SeO8LyUMe9Tvfr.jpg",
-          "backdrop_path": "/d6bd55iIpEd5iuTSxJNvW4ATdwq.jpg",
-          "vote_average": 7.3
-        }
-      ]
     }
   }
 }

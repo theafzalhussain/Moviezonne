@@ -29,6 +29,12 @@ const BROWSER_NEEDS = [
   'search-engine.min.js', 'pwa-install.min.js',
   'sw.js', 'manifest.json',
   'collections-catalog.json',
+  /*  The homepage's deferred feature files. Both are requested by the browser —
+   *  universes-rail.js is injected on approach and universes.css is the deferred
+   *  stylesheet it needs — so an .assetsignore rule that swallowed either would
+   *  leave the Cinematic Universe row as bare skeletons in production. */
+  'universes.css', 'universes-rail.js',
+  'providers.css',
   'robots.txt', 'sitemap.xml',
   'moviezone-logo.webp', 'moviezone-logo.png',
   'icon-192.png', 'icon-512.png', 'icon-192.webp', 'icon-512.webp',

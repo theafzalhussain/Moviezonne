@@ -1,0 +1,376 @@
+/*  CINEMATIC UNIVERSE RAIL
+ *
+ *  This rail is the only entrance to the franchise pages. It replaced a picker
+ *  screen (#collections) that held every franchise as a card and was itself
+ *  reachable from exactly one place: a "Cinematic Universe" item in the navbar.
+ *  That cost a visitor who wanted only Marvel three interactions — open the nav,
+ *  scan the grid, click again — to reach a page they had already decided on. Both
+ *  the picker and the navbar item are gone; one tap here goes straight into
+ *  #collections-<slug>.
+ *
+ *  WHY IT IS BUILT LIKE THE PROVIDER RAIL AND NOT LIKE THE OLD HUB GRID
+ *  That grid was a destination: full-bleed key art, taglines, counts, tilt and a
+ *  particle field. On the homepage that would compete with the hero carousel
+ *  above it. The provider rail is the right precedent — a logo-first tile on a
+ *  dark surface, a gold ring on hover, a trailing-edge fade — so this section
+ *  deliberately mirrors #top-providers geometry (142px tiles, the same clamp on
+ *  tile width, the same arrow buttons) and the two rows read as a pair.
+ *
+ *  WHY THIS IS A SEPARATE STYLESHEET
+ *  moviezone.min.css + moviezone.min.js are held to a measured parse budget in
+ *  asset-perf-check.js and it currently has ~240 bytes of headroom. This section
+ *  sits below the fold, so it has no business in the render-critical bundle at
+ *  all: the file is deferred exactly the way providers.css is, and the rail's
+ *  markup is built by universes-rail.js which is not requested until after `load`.
+ *  Nothing here is on the first-paint path.
+ *
+ *  ABOUT THE WORDMARKS
+ *  There are no franchise logo files in this repo and there should not be: one
+ *  more image request per tile for a below-the-fold row, each one a licensed
+ *  asset. Every tile therefore renders a TYPESET lockup — the site's own three
+ *  faces (Outfit, Bebas Neue, Playfair Display) driven by five custom properties
+ *  per brand (--uv-a/--uv-b for the ink, --uv-font, --uv-size, --uv-track). That
+ *  is why the shared .uv-mark rule below is long and each brand block is three or
+ *  four lines. Behind the lockup sits the franchise's own TMDB key art at w300,
+ *  dimmed to ~22% — real per-universe imagery, at ~15 KB a tile, lazy, and it is
+ *  what stops the row from looking like a list of buttons.
+ *
+ *  WITH SCRIPTING OFF
+ *  index.html carries `<noscript><style>#cinematic-universes{display:none}</style>`
+ *  rather than the usual <noscript> copy of this stylesheet. Without JS the tiles
+ *  never arrive, so styling the row would only produce a titled strip of permanent
+ *  skeletons — hiding it is the honest state, and it costs fewer bytes in a file
+ *  that is itself inside the measured first-paint transfer budget.
+ */
+
+.uv-section {
+  /*  Sits between the provider rail and the Top 10 rail. Both of those bring
+   *  their own spacing (providers has 2rem bottom, Top 10 its own top), so this
+   *  block only needs enough to keep the two headings from colliding. */
+  padding: 2.25rem 4% 2rem;
+  color: var(--text); background: var(--bg);
+}
+
+/* ── header (mirrors .providers-header) ───────────────────────────────── */
+.uv-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: 1.35rem; }
+.uv-heading { display: flex; align-items: center; gap: .8rem; margin: 0; font: 650 clamp(1.35rem, 2vw, 1.85rem)/1.4 'Outfit', sans-serif; letter-spacing: -.025em; color: var(--text); }
+/*  Gold bar rather than the provider rail's red one: this row leads into the
+    premium Collections hub, and gold is what that hub is built out of. */
+.uv-heading::before {
+  content: '';
+  width: 4px; height: .82em; flex: none;
+  border-radius: 4px;
+  background: linear-gradient(180deg, var(--gold3, #ffd750), var(--gold, #ffc107));
+  box-shadow: 0 0 14px var(--gold-glow, rgba(245, 197, 24, .25));
+  animation: uvBarPulse 3.2s ease-in-out infinite;
+}
+@keyframes uvBarPulse {
+  0%, 100% { box-shadow: 0 0 12px var(--gold-glow, rgba(245, 197, 24, .22)); }
+  50%      { box-shadow: 0 0 22px var(--gold-glow, rgba(245, 197, 24, .5)); }
+}
+.uv-subtitle { margin: .45rem 0 0 calc(4px + .8rem); font-size: 14px; line-height: 1.5; color: var(--text2); }
+
+.uv-controls { display: flex; flex: none; gap: .5rem; }
+.uv-controls[hidden] { display: none; }
+.uv-arrow {
+  display: grid; place-items: center;
+  width: 42px; height: 42px; padding: 0;
+  border: 1px solid var(--border2); border-radius: 50%;
+  background: linear-gradient(180deg, var(--card2, #13131f), var(--card, #0d0d1a));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05);
+  color: var(--text2); cursor: pointer;
+  transition: border-color 180ms ease, color 180ms ease, box-shadow 180ms ease, transform 180ms ease, opacity 180ms ease;
+}
+.uv-arrow:disabled { opacity: .28; cursor: default; }
+.uv-arrow:not(:disabled):hover {
+  color: var(--gold); border-color: var(--border-gold, rgba(245, 197, 24, .18));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 0 0 1px rgba(245, 197, 24, .22), 0 6px 18px -10px var(--gold-glow, rgba(245, 197, 24, .22));
+}
+.uv-arrow:not(:disabled):active { transform: scale(.94); }
+.uv-arrow:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+/* ── rail ─────────────────────────────────────────────────────────────── */
+.uv-rail {
+  --uv-fade: 64px;
+  display: flex; gap: 1rem;
+  overflow-x: auto; overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  list-style: none; margin: 0;
+  padding: 10px 2px 16px;
+  /*  Height is reserved before the tiles exist. universes-rail.js fills this
+      list after first paint, and without a floor the section would be 0px tall
+      at paint and then jump 168px — a layout shift on the homepage, which is
+      exactly what the reserved hero box elsewhere in this page exists to avoid. */
+  min-height: 168px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.uv-rail::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+/*  Trailing-edge fade only, for the same measured reason providers.css gives: a
+    leading fade washes black over the first tile at any scrollLeft > 0, and the
+    disabled "previous" arrow already says "you are at the start". */
+.uv-rail[data-edge="end"],
+.uv-rail[data-edge="both"] {
+  -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - var(--uv-fade)), transparent 100%);
+          mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - var(--uv-fade)), transparent 100%);
+}
+
+.uv-rail > li { flex: 0 0 clamp(190px, 15vw, 228px); min-width: 0; scroll-snap-align: start; }
+
+/*  Skeletons occupy the row for the one frame between the script arriving and
+    the catalog resolving, so the fade-in has something to replace. */
+.uv-skeleton {
+  display: block;
+  height: 142px; border: 1px solid var(--border2); border-radius: 18px;
+  background: linear-gradient(180deg, var(--card2, #13131f), var(--card, #0d0d1a));
+  opacity: .55;
+}
+
+/* ── tile ─────────────────────────────────────────────────────────────── */
+.uv-card {
+  position: relative; overflow: hidden;
+  display: block;
+  height: 142px; padding: 0;
+  border: 1px solid var(--border2); border-radius: 18px;
+  background:
+    radial-gradient(125% 100% at 50% 0%, rgba(255, 255, 255, .055) 0%, rgba(255, 255, 255, 0) 62%),
+    linear-gradient(180deg, var(--card2, #13131f) 0%, var(--card, #0d0d1a) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .045), 0 2px 6px -3px rgba(0, 0, 0, .6);
+  color: var(--text); text-decoration: none;
+  transition: transform 220ms var(--ease-smooth, cubic-bezier(.25, .46, .45, .94)), border-color 220ms ease, box-shadow 220ms ease;
+}
+
+/*  Key art. Deliberately very dim and slightly saturated-down: it is texture
+    that says "this is Middle-earth" at a glance, not a poster. object-position
+    favours the upper third because TMDB backdrops put faces there. */
+.uv-art {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover; object-position: 50% 35%;
+  opacity: 0; border-radius: inherit;
+  filter: saturate(.85) contrast(1.05);
+  transition: opacity 420ms ease, transform 480ms var(--ease-smooth, cubic-bezier(.25, .46, .45, .94));
+}
+.uv-card.uv-art-in .uv-art { opacity: .22; }
+
+/*  Two jobs: keep the lockup legible over any backdrop, and tint the tile with
+    the franchise's own colour so the row is not 18 grey boxes. */
+.uv-veil {
+  position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background:
+    radial-gradient(120% 90% at 50% 118%, color-mix(in srgb, var(--uv-a, #ffc107) 24%, transparent) 0%, transparent 62%),
+    linear-gradient(180deg, rgba(3, 3, 10, .58) 0%, rgba(3, 3, 10, .74) 55%, rgba(3, 3, 10, .92) 100%);
+}
+/*  color-mix is ~95% supported but this row must not be unreadable on the rest,
+    so the tint degrades to a flat scrim rather than to nothing. */
+@supports not (background: color-mix(in srgb, red 10%, transparent)) {
+  .uv-veil { background: linear-gradient(180deg, rgba(3, 3, 10, .6) 0%, rgba(3, 3, 10, .88) 100%); }
+}
+
+/*  Gold sheen on the top edge, same idea as .provider-card::after. */
+.uv-card::after {
+  content: '';
+  position: absolute; top: 0; left: 15%; right: 15%; height: 1px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, transparent, rgba(245, 197, 24, .8), transparent);
+  opacity: 0; transition: opacity 220ms ease;
+  pointer-events: none;
+}
+
+/* ── lockup ───────────────────────────────────────────────────────────── */
+.uv-lockup {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: .28em; padding: 1rem .9rem 1.7rem;
+  text-align: center;
+  transition: transform 220ms var(--ease-smooth, cubic-bezier(.25, .46, .45, .94));
+}
+.uv-mark {
+  display: block; max-width: 100%;
+  font-family: var(--uv-font, 'Outfit'), sans-serif;
+  font-weight: var(--uv-weight, 800);
+  font-size: var(--uv-size, 25px);
+  line-height: 1.02;
+  letter-spacing: var(--uv-track, .01em);
+  text-transform: uppercase;
+  color: var(--uv-a, #f0f0fc);
+  /*  The gradient is clipped to the glyphs when a second stop is given, which is
+      how the metallic brands (Terminator, Transformers, 007) get their sheen
+      without an image. Brands that want flat ink simply do not set --uv-b. */
+  background-image: linear-gradient(180deg, var(--uv-a, #f0f0fc) 0%, var(--uv-b, var(--uv-a, #f0f0fc)) 100%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 2px 10px color-mix(in srgb, var(--uv-a, #ffc107) 30%, transparent));
+  text-wrap: balance;
+}
+.uv-sub {
+  display: block;
+  font: 600 9.5px/1.3 'Outfit', sans-serif;
+  letter-spacing: .22em; text-transform: uppercase;
+  color: rgba(240, 240, 252, .62);
+}
+
+/*  Title count. Small, bottom-left, and the ONLY thing on the tile that is not
+    the logo — it is the answer to "is this worth opening", which a bare wordmark
+    cannot give. Provider tiles have no equivalent because a platform's library
+    size is not a number we can honestly state. */
+.uv-count {
+  position: absolute; left: 0; right: 0; bottom: .62rem;
+  font: 600 10px/1 'Outfit', sans-serif;
+  letter-spacing: .12em; text-transform: uppercase;
+  text-align: center; color: rgba(240, 240, 252, .5);
+  transition: color 220ms ease;
+}
+
+/* ── interaction ──────────────────────────────────────────────────────── */
+@media (hover: hover) {
+  .uv-card:hover {
+    transform: translateY(-4px);
+    border-color: var(--border-gold, rgba(245, 197, 24, .18));
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, .08),
+      0 0 0 1px rgba(245, 197, 24, .26),
+      0 16px 34px -14px rgba(0, 0, 0, .8),
+      0 10px 28px -16px var(--gold-glow, rgba(245, 197, 24, .22));
+  }
+  .uv-card:hover::after { opacity: 1; }
+  .uv-card:hover .uv-lockup { transform: scale(1.045); }
+  .uv-card.uv-art-in:hover .uv-art { opacity: .38; transform: scale(1.06); }
+  .uv-card:hover .uv-count { color: var(--gold); }
+}
+.uv-card:active { transform: translateY(-1px) scale(.985); }
+.uv-card:focus-visible {
+  outline: 2px solid var(--gold); outline-offset: -3px;
+  border-color: var(--border-gold, rgba(245, 197, 24, .18));
+}
+.uv-card:focus-visible::after { opacity: 1; }
+.uv-card.uv-art-in:focus-visible .uv-art { opacity: .38; }
+
+/* ══ BRAND LOCKUPS ══════════════════════════════════════════════════════
+   Keyed on the `accent` value each universe already carries in moviezone.js,
+   so a universe cannot end up with a mismatched treatment — the class name is
+   derived from the same field the hub's own cards use. A slug with no block
+   here still renders: the shared rule above is a complete, neutral gold-white
+   lockup on purpose. */
+
+/*  Marvel is the one wordmark that is a shape rather than a colour, so it is the
+    one that gets a boxed variant: white on the Marvel red, filling its line. */
+.uv-b-marvel { --uv-a: #ffffff; --uv-size: 23px; --uv-track: .06em; }
+.uv-b-marvel .uv-mark {
+  padding: .18em .5em; border-radius: 3px;
+  background: linear-gradient(180deg, #f0141e 0%, #c9080f 100%);
+  -webkit-background-clip: border-box; background-clip: border-box;
+  -webkit-text-fill-color: #fff; color: #fff;
+  filter: drop-shadow(0 3px 12px rgba(230, 20, 30, .45));
+}
+
+.uv-b-dc { --uv-a: #eaf3ff; --uv-b: #6aa8ff; --uv-size: 40px; --uv-track: .04em; --uv-weight: 900; }
+
+/*  Metallics: light top stop, dark bottom stop, Bebas for the condensed
+    machine-cut look these three franchises share. */
+.uv-b-terminator { --uv-a: #eef2f6; --uv-b: #7b8794; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-size: 31px; --uv-track: .1em; }
+.uv-b-transformers { --uv-a: #dfe9f5; --uv-b: #5f7ea8; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-size: 25px; --uv-track: .07em; }
+.uv-b-bond { --uv-a: #fff4c8; --uv-b: #b98d23; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-size: 48px; --uv-track: .06em; }
+.uv-b-fast { --uv-a: #f4f6f8; --uv-b: #8b939c; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-size: 30px; --uv-track: .05em; }
+/*  The nitro streak under FAST & FURIOUS. One pseudo-element, no image. */
+.uv-b-fast .uv-mark { position: relative; }
+.uv-b-fast .uv-mark::after {
+  content: ''; position: absolute; left: 4%; right: 4%; bottom: -.14em; height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, #ff7a18 35%, #ffd166 70%, transparent);
+}
+
+/*  Serif brands. Playfair 700 is the only serif shipped, and it is what makes
+    these three read as "saga" rather than "action". */
+.uv-b-wizard { --uv-a: #ffe9a8; --uv-b: #b8873a; --uv-font: 'Playfair Display'; --uv-weight: 700; --uv-size: 20px; --uv-track: .05em; }
+.uv-b-lotr { --uv-a: #ffdf9b; --uv-b: #a06f28; --uv-font: 'Playfair Display'; --uv-weight: 700; --uv-size: 21px; --uv-track: .04em; }
+.uv-b-horror { --uv-a: #f3dcdc; --uv-b: #8c1420; --uv-font: 'Playfair Display'; --uv-weight: 700; --uv-size: 21px; --uv-track: .04em; }
+
+.uv-b-mi { --uv-a: #ffffff; --uv-b: #c9ced6; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-size: 27px; --uv-track: .04em; }
+/*  The M:I fuse. Red on the leading edge of the wordmark, which is the one bit
+    of that logo everyone recognises. */
+.uv-b-mi .uv-sub { color: rgba(255, 92, 92, .85); }
+
+.uv-b-jurassic { --uv-a: #ffd45e; --uv-b: #d8341f; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-size: 30px; --uv-track: .08em; }
+.uv-b-predator { --uv-a: #ff5a4d; --uv-b: #6fd36a; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-size: 30px; --uv-track: .12em; }
+
+/*  Star Wars is the other logo that is a SHAPE, not a colour — flat yellow,
+    heavily tracked, filling its line — so like Marvel it opts out of the
+    gradient-clip treatment and paints solid ink instead. */
+.uv-b-starwars { --uv-a: #ffe81f; --uv-b: #ffe81f; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-size: 28px; --uv-track: .1em; }
+.uv-b-starwars .uv-mark {
+  -webkit-text-fill-color: #ffe81f; color: #ffe81f;
+  filter: drop-shadow(0 2px 10px rgba(255, 232, 31, .3));
+}
+.uv-b-starwars .uv-sub { color: rgba(255, 232, 31, .62); }
+
+/*  X-Men: the cold blue-steel of the film logos. Bebas keeps the hyphenated
+    name on one line at this size, which Outfit 900 does not. */
+.uv-b-xmen { --uv-a: #f2f7ff; --uv-b: #3f6fa8; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-size: 33px; --uv-track: .07em; }
+
+/*  YRF Spy: gunmetal into the saffron of the Indian-thriller palette. Tighter
+    tracking than the metallics above because "YRF Spy" is two short words and
+    wide tracking pulls them apart into three. */
+.uv-b-yrfspy { --uv-a: #ffffff; --uv-b: #c46a1c; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-size: 27px; --uv-track: .04em; }
+.uv-b-yrfspy .uv-sub { color: rgba(255, 176, 92, .72); }
+
+/*  Cop Universe: khaki-and-gold, the colour of the uniform these six films are
+    built on. Outfit 900 rather than Bebas — "Singham" is a name, not a machine. */
+.uv-b-cop { --uv-a: #ffe9b0; --uv-b: #9a6a18; --uv-size: 27px; --uv-weight: 900; --uv-track: .03em; }
+.uv-b-cop .uv-sub { color: rgba(255, 214, 132, .7); }
+
+/*  Maddock Supernatural: Chanderi red. These are horror COMEDIES, so the ink
+    stops short of the Conjuring's near-black blood and keeps some warmth. */
+.uv-b-maddock { --uv-a: #ffd9d0; --uv-b: #b3221f; --uv-font: 'Playfair Display'; --uv-weight: 700; --uv-size: 27px; --uv-track: .04em; }
+.uv-b-maddock .uv-sub { color: rgba(255, 150, 140, .72); }
+
+/* ── phones (mirrors the providers.css breakpoint exactly) ───────────── */
+@media (max-width: 600px) {
+  .uv-section { padding: 1.5rem 4% 1.25rem; }
+  .uv-header { align-items: flex-start; margin-bottom: 1rem; }
+  .uv-subtitle { max-width: 220px; }
+  .uv-rail { --uv-fade: 40px; gap: .85rem; padding: 8px 2px 12px; min-height: 140px; }
+  .uv-rail > li { flex-basis: 170px; }
+  .uv-card, .uv-skeleton { height: 120px; border-radius: 16px; }
+  .uv-lockup { padding: .85rem .75rem 1.5rem; }
+  .uv-mark { font-size: calc(var(--uv-size, 25px) * .84); }
+  .uv-count { bottom: .5rem; font-size: 9px; }
+  .uv-arrow { width: 38px; height: 38px; }
+
+  /* ── MOBILE: box shown "as hovered" without a hover ──
+     Same reasoning as providers.css: a phone never hovers, so the gold ring,
+     the top sheen, the brighter key art and the gold count that desktop only
+     shows on hover would otherwise never appear. Paint them as the RESTING
+     state so the tiles read like hovered desktop cards. No translateY lift —
+     the rail clips to its padding box and a per-tile lift would shave the glow. */
+  .uv-card {
+    border-color: var(--border-gold, rgba(245, 197, 24, .18));
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, .08),
+      0 0 0 1px rgba(245, 197, 24, .24),
+      0 12px 26px -16px rgba(0, 0, 0, .8),
+      0 8px 22px -16px var(--gold-glow, rgba(245, 197, 24, .22));
+  }
+  .uv-card::after { opacity: 1; }
+  .uv-card.uv-art-in .uv-art { opacity: .34; }
+  .uv-count { color: var(--gold); }
+  .uv-card:active { transform: scale(.97); }
+}
+
+/* ── low-end and reduced-motion ───────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .uv-card, .uv-card::after, .uv-art, .uv-lockup, .uv-count, .uv-arrow { transition: none; }
+  .uv-heading::before { animation: none; }
+  .uv-card:hover, .uv-card:active { transform: none; }
+  .uv-card:hover .uv-lockup { transform: none; }
+  .uv-card.uv-art-in:hover .uv-art { transform: none; }
+}
+
+/*  low-end-mode is set by moviezone.js on weak devices and by the TV module on
+    low-tier TVs. Blur-free already; what costs there is the per-glyph
+    drop-shadow on 18 gradient-clipped wordmarks, so that is what goes. */
+.low-end-mode .uv-mark { filter: none; }
+.low-end-mode .uv-art { transition: none; }
+html[data-mz-tv="true"] .uv-card.uv-art-in .uv-art { opacity: .18; }
+html[data-mz-tv="true"] .uv-mark { filter: none; }

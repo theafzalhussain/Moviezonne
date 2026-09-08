@@ -46,6 +46,11 @@
   border-radius: 4px;
   background: linear-gradient(180deg, var(--red2, #ff4d5e), var(--red, #e63946));
   box-shadow: 0 0 14px var(--red-glow, rgba(230, 57, 70, .25));
+  animation: providersBarPulse 3.2s ease-in-out infinite;
+}
+@keyframes providersBarPulse {
+  0%, 100% { box-shadow: 0 0 12px var(--red-glow, rgba(230, 57, 70, .22)); }
+  50%      { box-shadow: 0 0 22px var(--red-glow, rgba(230, 57, 70, .45)); }
 }
 .providers-subtitle { margin: .45rem 0 0 calc(4px + .8rem); font-size: 14px; line-height: 1.5; color: var(--text2); }
 
@@ -105,6 +110,18 @@
   transition: transform 220ms var(--ease-smooth, cubic-bezier(.25, .46, .45, .94)), border-color 220ms ease, box-shadow 220ms ease;
 }
 
+/* Soft gold aura that blooms up from behind the tile on hover/focus. Sits below
+   the logo (z-index) and never intercepts pointer events. Reads as the card
+   catching a spotlight rather than as a second border. */
+.provider-card::before {
+  content: '';
+  position: absolute; inset: -1px; border-radius: inherit; z-index: 0;
+  background: radial-gradient(120% 90% at 50% 115%, rgba(245, 197, 24, .22) 0%, transparent 60%);
+  opacity: 0; transition: opacity 260ms ease;
+  pointer-events: none;
+}
+.provider-logo { position: relative; z-index: 1; }
+
 /* Gold sheen along the top edge — appears with the hover ring, reads as light
    catching a bevel rather than as a border colour change. */
 .provider-card::after {
@@ -147,6 +164,7 @@
       0 10px 28px -16px var(--gold-glow, rgba(245, 197, 24, .22));
   }
   .provider-card:hover::after { opacity: 1; }
+  .provider-card:hover::before { opacity: 1; }
   .provider-card:hover .provider-logo { transform: scale(1.05); }
   .provider-card:hover img { opacity: 1; }
 }
@@ -157,6 +175,7 @@
   border-color: var(--border-gold, rgba(245, 197, 24, .18));
 }
 .provider-card:focus-visible::after { opacity: 1; }
+.provider-card:focus-visible::before { opacity: 1; }
 .provider-card:focus-visible img { opacity: 1; }
 .providers-arrow:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
@@ -173,10 +192,33 @@
   .provider-logo--apple img { width: 82px; max-width: 82px; height: 82px; }
   .provider-logo--apple > span { font-size: 34px; }
   .providers-arrow { width: 38px; height: 38px; }
+
+  /* ── MOBILE: box shown "as hovered" without a hover ──
+     On a phone there is no hover, so the gold ring + aura + full-opacity logo
+     that desktop only reveals on hover would never be seen. Here we paint that
+     same premium box state as the RESTING state — the tiles read exactly like a
+     hovered desktop card. The big translateY lift is intentionally NOT applied:
+     the rail is an overflow container clipped to its padding box, and a -4px
+     lift on every tile would shave the glow off the top. The ring, aura, top
+     sheen and bright logo carry the whole effect on their own. */
+  .provider-card {
+    border-color: var(--border-gold, rgba(245, 197, 24, .18));
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, .08),
+      0 0 0 1px rgba(245, 197, 24, .24),
+      0 12px 26px -16px rgba(0, 0, 0, .8),
+      0 8px 22px -16px var(--gold-glow, rgba(245, 197, 24, .22));
+  }
+  .provider-card::after { opacity: 1; }
+  .provider-card::before { opacity: 1; }
+  .provider-logo img { opacity: 1; }
+  /* Pressing still gives feedback. */
+  .provider-card:active { transform: scale(.97); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .provider-card, .provider-card::after, .provider-logo, .provider-logo img, .providers-arrow { transition: none; }
+  .provider-card, .provider-card::after, .provider-card::before, .provider-logo, .provider-logo img, .providers-arrow { transition: none; }
+  .providers-heading::before { animation: none; }
   .provider-card:hover, .provider-card:active { transform: none; }
   .provider-card:hover .provider-logo { transform: none; }
 }
