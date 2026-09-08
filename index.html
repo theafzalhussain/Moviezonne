@@ -806,8 +806,18 @@ html.mz-no-ads .mz-ad-slot{display:none}
    *  goodwill: the second and third popunder are what makes people leave and
    *  never come back.
    */
+  /*  ── TEMPORARY MASTER PAUSE ──
+   *  Flip to true to turn every ad unit OFF site-wide (popunder, Social Bar and
+   *  the native banner), on top of the dev/crawler/TV gate below. When paused the
+   *  gate reports reason:'paused', sets the mz-no-ads class so the reserved slot
+   *  collapses before first paint (no empty hole, no layout shift), and nothing
+   *  is ever injected. To turn ads back on, set this to false again — that is the
+   *  ONLY edit needed here. NOTE: seo-ssr.js carries its own copy of this switch
+   *  (var PAUSED) for the server-rendered watch/detail pages; flip BOTH to fully
+   *  pause the whole site. */
   var POP_CAP_KEY = 'mz_ad_pop_at';
   var POP_CAP_MS = 30 * 60 * 1000;
+  var MZ_ADS_PAUSED = true;
 
   var UNITS = [
     { name: 'popunder', trigger: 'idle', cap: POP_CAP_KEY, capMs: POP_CAP_MS,
@@ -833,6 +843,7 @@ html.mz-no-ads .mz-ad-slot{display:none}
     if (env.local) return { enabled: false, reason: 'dev' };
     if (env.crawler) return { enabled: false, reason: 'crawler' };
     if (env.tv) return { enabled: false, reason: 'tv' };
+    if (env.off) return { enabled: false, reason: 'paused' };
     return { enabled: true, reason: 'ok' };
   }
 
@@ -840,6 +851,7 @@ html.mz-no-ads .mz-ad-slot{display:none}
     var ua = navigator.userAgent || '';
     var host = location.hostname;
     return {
+      off: MZ_ADS_PAUSED,
       units: UNITS.length > 0,
       local: /^(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)$/.test(host)
         || /^(?:192\.168\.|10\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(host),
@@ -1081,7 +1093,7 @@ html.mz-no-ads .mz-ad-slot{display:none}
   <div class="providers-header">
     <div>
       <h2 id="providersHeading" class="providers-heading">Top Providers</h2>
-      <p class="providers-subtitle">Find your next watch on your favourite platform.</p>
+      <!-- <p class="providers-subtitle">Find your next watch on your favourite platform.</p> -->
     </div>
     <div class="providers-controls" role="group" aria-label="Provider carousel" hidden>
       <button class="providers-arrow" type="button" data-provider-scroll="-1" aria-label="Previous providers" aria-controls="providersRail" disabled>
@@ -1180,7 +1192,7 @@ html.mz-no-ads .mz-ad-slot{display:none}
   <div class="uv-header">
     <div>
       <h2 id="uvHeading" class="uv-heading">Cinematic Universe</h2>
-      <p class="uv-subtitle">Every franchise, every timeline — jump straight in.</p>
+      <!-- <p class="uv-subtitle">Every franchise, every timeline — jump straight in.</p> -->
     </div>
   </div>
   <ul id="uvRail" class="uv-rail" aria-label="Cinematic universes">

@@ -30,6 +30,17 @@ const close = html.lastIndexOf('})();', end);
 assert(close > start, 'the ad IIFE closing was not found');
 const block = html.slice(start, close);
 
+/*  ── PAUSE-AWARE MODE ──
+ *  index.html carries a temporary master switch (var MZ_ADS_PAUSED). When it is
+ *  ON, a real visitor is deliberately served NO ads, so the guardrails below
+ *  that assert "a real visitor gets ads" would otherwise fail by design. When
+ *  paused, each of those flips to assert the OFF state instead (nothing injected,
+ *  reason 'paused', slot collapsed). The dev/crawler/TV classification, markup,
+ *  service-worker and CLS-reservation checks are unaffected and always run, so
+ *  the moment MZ_ADS_PAUSED is set back to false every original guarantee is
+ *  re-asserted automatically. */
+const SPA_PAUSED = /var MZ_ADS_PAUSED\s*=\s*true/.test(block);
+
 /** A fresh sandbox per run, so no state leaks between branches.
  *  Models just enough DOM to observe what the loader actually does: what it
  *  appended, what it observed, and what class it put on <html>. */
@@ -183,6 +194,12 @@ const TIZEN = 'Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.0) AppleWebKit/537.36 (KHTM
 const LIGHTHOUSE = 'Mozilla/5.0 (Linux; Android 11; moto g power) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36 Chrome-Lighthouse';
 
 check('production desktop Chrome: the click-activated units are injected', () => {
+  if (SPA_PAUSED) {
+    const { ads: a, appended } = envFor(CHROME, 'moviezone.dev', false);
+    equal(a.state.profile.reason, 'paused', 'ads are paused but a real visitor was not gated as paused');
+    equal(appended.length, 0, 'a unit was injected while ads are paused');
+    return;
+  }
   const { ads: a, appended } = envFor(CHROME, 'moviezone.dev', false);
   equal(a.state.profile.reason, 'ok', 'gated out in production');
   assert(a.state.injected.length > 0, 'nothing was injected for a real visitor');
@@ -195,6 +212,11 @@ check('production desktop Chrome: the click-activated units are injected', () =>
 });
 
 check('popunder and Social Bar are both on the idle path', () => {
+  if (SPA_PAUSED) {
+    const { ads: a } = envFor(CHROME, 'moviezone.dev', false);
+    equal(a.state.injected.length, 0, 'a unit loaded on the idle path while ads are paused');
+    return;
+  }
   const { ads: a } = envFor(CHROME, 'moviezone.dev', false);
   equal(a.state.injected.indexOf('popunder') !== -1, true, 'popunder was not loaded');
   equal(a.state.injected.indexOf('socialbar') !== -1, true, 'Social Bar was not loaded');
@@ -209,6 +231,11 @@ check('the Native Banner is NOT loaded by the idle path', () => {
 
 check('the Native Banner loads when its slot comes near the viewport', () => {
   const r = run(CHROME, 'moviezone.dev', false).ready();
+  if (SPA_PAUSED) {
+    r.intersect();
+    assert(!r.appended.some((el) => /invoke\.js/.test(el.src)), 'the banner loaded while ads are paused');
+    return;
+  }
   assert(r.io.targets.length === 1, 'the slot is not being observed at all');
   assert(!r.appended.some((el) => /invoke\.js/.test(el.src)),
     'invoke.js was injected on DOMContentLoaded rather than on approach');
@@ -221,6 +248,7 @@ check('the Native Banner loads when its slot comes near the viewport', () => {
 });
 
 check('the slot is loaded before it is actually seen, not once it is', () => {
+  if (SPA_PAUSED) return;   // no observer is registered while ads are paused
   const r = run(CHROME, 'moviezone.dev', false).ready();
   assert(r.io.opts && /^\d+px$/.test(String(r.io.opts.rootMargin)),
     'no rootMargin, so the banner starts loading only once it is already on screen');
@@ -229,6 +257,7 @@ check('the slot is loaded before it is actually seen, not once it is', () => {
 });
 
 check('invoke.js carries data-cfasync="false", as Adsterra ships it', () => {
+  if (SPA_PAUSED) return;   // invoke.js is never injected while ads are paused
   const r = run(CHROME, 'moviezone.dev', false).ready().intersect();
   const native = r.appended.filter((el) => /invoke\.js/.test(el.src))[0];
   assert(native, 'invoke.js was never injected');
@@ -243,6 +272,7 @@ check('a TV is not served ads even if it is only recognised later', () => {
 });
 
 check('the "Sponsored" label appears only once the widget has rendered', () => {
+  if (SPA_PAUSED) return;   // the widget never renders while ads are paused
   const r = run(CHROME, 'moviezone.dev', false).ready().intersect();
   assert(!/is-filled/.test(r.slot.className),
     'the label is revealed before the ad exists — a label with nothing under it is worse than none');
@@ -251,6 +281,7 @@ check('the "Sponsored" label appears only once the widget has rendered', () => {
 });
 
 check('an already-filled container is labelled without waiting for a mutation', () => {
+  if (SPA_PAUSED) return;   // no slot is observed while ads are paused
   const r = run(CHROME, 'moviezone.dev', false).ready();
   r.container.childElementCount = 1;
   r.intersect();
@@ -265,6 +296,11 @@ check('the reserved slot is collapsed before paint when ads are gated off', () =
       'no mz-no-ads class for a gated-off visitor (' + (tv ? 'TV' : 'dev') + '); the 300px reservation would be a permanent hole');
   });
   const ok = run(CHROME, 'moviezone.dev', false);
+  if (SPA_PAUSED) {
+    assert(/mz-no-ads/.test(ok.htmlClass()),
+      'ads are paused, so even a real visitor must get mz-no-ads to collapse the reserved slot');
+    return;
+  }
   assert(!/mz-no-ads/.test(ok.htmlClass()),
     'a real visitor got mz-no-ads, which hides the slot the banner renders into');
 });
@@ -356,6 +392,11 @@ check('Googlebot: nothing is injected', () => {
 
 check('Lighthouse is NOT gated out — an audit must see what users see', () => {
   const { ads: a, appended } = envFor(LIGHTHOUSE, 'moviezone.dev', false);
+  if (SPA_PAUSED) {
+    equal(a.state.profile.reason, 'paused', 'Lighthouse should see the same paused state a user sees');
+    equal(appended.length, 0, 'an ad script was injected for Lighthouse while ads are paused');
+    return;
+  }
   equal(a.state.profile.reason, 'ok',
     'hiding ads from Lighthouse makes the score a lie; the RUM gate makes the same promise');
   assert(appended.length > 0, 'the audit would measure a page without the ad script');
@@ -373,6 +414,7 @@ check('data-mz-tv alone is enough, for a TV whose UA we do not know', () => {
 });
 
 check('a second intersection cannot double-inject the banner', () => {
+  if (SPA_PAUSED) return;   // the banner is never injected while ads are paused
   const r = run(CHROME, 'moviezone.dev', false).ready();
   r.intersect(); r.intersect();
   equal(r.appended.filter((el) => /invoke\.js/.test(el.src)).length, 1,
@@ -492,6 +534,10 @@ check('only the popunder is capped — the inline units are not', () => {
 check('a fresh visitor gets the popunder', () => {
   const r = run(CHROME, 'moviezone.dev', false, {});
   r.ads.load();
+  if (SPA_PAUSED) {
+    equal(r.ads.state.injected.indexOf('popunder'), -1, 'a popunder fired while ads are paused');
+    return;
+  }
   assert(r.ads.state.injected.indexOf('popunder') !== -1, 'the first popunder was suppressed — that is the one that earns');
   assert(r.store['mz_ad_pop_at'], 'the cap was never recorded, so the next page would pop again');
 });
@@ -502,10 +548,12 @@ check('a visitor who just had one does NOT get a second', () => {
   r.ads.load();
   equal(r.ads.state.injected.indexOf('popunder'), -1,
     'a second popunder inside the window — this is exactly what makes people install an ad blocker');
+  if (SPA_PAUSED) return;   // when paused the cap logic is never reached, only the gate
   assert(r.ads.state.capped.indexOf('popunder') !== -1, 'the suppression was not recorded');
 });
 
 check('the cap expires, so a later visit can earn again', () => {
+  if (SPA_PAUSED) return;   // nothing earns while ads are paused
   const store = { mz_ad_pop_at: String(Date.now() - 60 * 60 * 1000) };
   const r = run(CHROME, 'moviezone.dev', false, store);
   r.ads.load();
@@ -513,6 +561,7 @@ check('the cap expires, so a later visit can earn again', () => {
 });
 
 check('the cap never suppresses Social Bar or the banner', () => {
+  if (SPA_PAUSED) return;   // no units load while ads are paused
   const store = { mz_ad_pop_at: String(Date.now()) };
   const r = run(CHROME, 'moviezone.dev', false, store);
   r.ads.load();
@@ -532,6 +581,10 @@ const watchHtml = seo.renderWatchPage(
 const SSR_OPEN = '<script data-mz-ads="1">';
 const ssrStart = watchHtml.indexOf(SSR_OPEN);
 const ssrBlock = ssrStart < 0 ? '' : watchHtml.slice(ssrStart + SSR_OPEN.length, watchHtml.indexOf('</script>', ssrStart));
+
+/*  Same master switch, seo-ssr.js side (var PAUSED). Same pause-aware handling
+ *  as SPA_PAUSED above for the server-rendered watch/detail loader. */
+const SSR_PAUSED = /var PAUSED\s*=\s*true/.test(ssrBlock);
 
 /** Run the SSR loader exactly as the browser would. */
 function runSsr(ua, host, store) {
@@ -627,6 +680,12 @@ check('the watch page shares the SPA popunder cap key', () => {
 
 check('a real visitor on the watch page gets the banner on approach', () => {
   const r = runSsr(CHROME, 'moviezone.dev', {}).ready();
+  if (SSR_PAUSED) {
+    equal(r.ads.enabled, false, 'ads are paused but the watch page still enabled them');
+    r.intersect();
+    assert(!r.appended.some((el) => /invoke\.js/.test(el.src)), 'the banner loaded on the watch page while ads are paused');
+    return;
+  }
   equal(r.ads.enabled, true, 'gated out in production');
   assert(!r.appended.some((el) => /invoke\.js/.test(el.src)), 'invoke.js loaded before the slot was near');
   r.intersect();
@@ -636,6 +695,7 @@ check('a real visitor on the watch page gets the banner on approach', () => {
 });
 
 check('the watch page popunder respects a cap already spent on the SPA', () => {
+  if (SSR_PAUSED) return;   // the popunder never fires while ads are paused
   const r = runSsr(CHROME, 'moviezone.dev', { mz_ad_pop_at: String(Date.now() - 5000) }).tick();
   assert(r.ads.capped.indexOf('popunder') !== -1,
     'someone who already got a popunder while browsing gets a second one on pressing play');
@@ -644,6 +704,11 @@ check('the watch page popunder respects a cap already spent on the SPA', () => {
 
 check('the watch page popunder still fires for a visitor who landed directly', () => {
   const r = runSsr(CHROME, 'moviezone.dev', {}).tick();
+  if (SSR_PAUSED) {
+    assert(!r.appended.some((el) => /c72eb8605ed50b20e9de4938ed2680fe/.test(el.src)),
+      'the popunder fired on the watch page while ads are paused');
+    return;
+  }
   assert(r.appended.some((el) => /c72eb8605ed50b20e9de4938ed2680fe/.test(el.src)),
     'a visitor arriving straight from Google earns nothing');
 });
@@ -723,6 +788,33 @@ check('category and browse pages stay ad-free', () => {
       fn + ' opts into ads; a page that is only a grid of links is the worst irritation-to-revenue '
       + 'ratio on the site');
   });
+});
+
+/*  ── explicit paused-state guarantees ──
+ *  These run only while the master switch is ON, and assert the pause is doing
+ *  what it claims: a real visitor is served nothing and the reserved slot is
+ *  collapsed, on both the SPA and the SSR pages. They document the intended
+ *  state, so a half-applied pause (one file flipped, the other not) is caught. */
+console.log('');
+check('MASTER PAUSE — the SPA serves a real visitor no ads and collapses the slot', () => {
+  if (!SPA_PAUSED) { assert(true); return; }   // no-op guarantee when ads are live
+  const { ads: a, appended } = envFor(CHROME, 'moviezone.dev', false);
+  equal(a.state.profile.reason, 'paused', 'the SPA gate is not reporting the pause');
+  equal(a.state.injected.length, 0, 'the SPA injected a unit while paused');
+  equal(appended.length, 0, 'a script still reached the SPA document while paused');
+  assert(/mz-no-ads/.test(run(CHROME, 'moviezone.dev', false).htmlClass()),
+    'the reserved slot was not collapsed for a paused visitor');
+});
+check('MASTER PAUSE — the SSR watch page serves a real visitor no ads', () => {
+  if (!SSR_PAUSED) { assert(true); return; }
+  const r = runSsr(CHROME, 'moviezone.dev', {}).ready().intersect().tick();
+  equal(r.ads.enabled, false, 'the SSR watch page still enabled ads while paused');
+  equal(r.appended.length, 0, 'the SSR watch page injected a unit while paused');
+  assert(/mz-no-ads/.test(r.htmlClass()), 'the SSR reserved slot was not collapsed while paused');
+});
+check('MASTER PAUSE — both surfaces agree (no half-applied pause)', () => {
+  equal(SPA_PAUSED, SSR_PAUSED,
+    'index.html (MZ_ADS_PAUSED) and seo-ssr.js (PAUSED) disagree — flip BOTH to the same value');
 });
 
 console.log('-'.repeat(70));
