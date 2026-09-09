@@ -20,7 +20,7 @@
 // this bump a returning visitor would keep being served the old square tiles
 // forever. The activate handler deletes every cache that is not CACHE_NAME, so
 // renaming the shell is what forces the re-download.
-const CACHE_NAME = 'moviezone-v129';
+const CACHE_NAME = 'moviezone-v132';
 
 // Separate cache for TMDB posters/backdrops. Kept apart from the shell so the
 // activate handler can wipe an old shell without throwing away hundreds of
@@ -34,10 +34,10 @@ const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/tv-mode.min.css?v=1.3',
-  '/moviezone.min.css?v=9.5',
+  '/moviezone.min.css?v=9.7',
   '/tv-mode.min.js?v=1.5',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=13.3',
+  '/moviezone.min.js?v=13.5',
   '/manifest.json',
   '/moviezone-logo.png?v=2',
   '/icon-192.png?v=2',

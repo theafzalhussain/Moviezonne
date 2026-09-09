@@ -1,4 +1,4 @@
-﻿/* ═══════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    MOVIEZONE — ULTRA PREMIUM LUXURY EDITION
    Complete design system with cinematic animations
    ═══════════════════════════════════════════════════════════════ */
@@ -2460,7 +2460,8 @@ body {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 1.85rem;
-  padding: 1.1rem 1.3rem;
+  /*  Fluid so the banner does not eat a third of a 360px screen. */
+  padding: clamp(0.8rem, 2.1vw, 1.1rem) clamp(0.95rem, 2.5vw, 1.3rem);
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 22px;
   background:
@@ -2485,18 +2486,142 @@ body {
   border-radius: 0 3px 3px 0;
 }
 
+/*  ══ THE MOVIES BANNER: TITLE AT THE START, RAILS BELOW CENTRED ══
+ *
+ *  The title was briefly centred to line up with the category strip and the
+ *  sub-filter rail below it, and it read badly: a single short phrase floating in
+ *  the middle of a very wide banner has nothing to anchor it, and it broke the
+ *  left-edge reading line that the gradient ::before stripe sets up. So the text
+ *  sits at the start, hard against its accent bar, and only the two rows of pills
+ *  below stay centred — they are a control cluster, the title is a label.
+ *
+ *  ID-scoped on purpose: the mobile block further down sets
+ *  `.section-header { flex-direction: column; align-items: flex-start }`, and an
+ *  ID beats a class whatever the source order, so this holds at every width
+ *  without needing to be repeated inside each media query.
+ */
+#movies-section > .section-header {
+  justify-content: flex-start;
+  gap: 1rem;
+}
+
+/*  Two vertical gradient bars 15px apart is one too many. The banner's full-height
+ *  edge stripe and .title-line say exactly the same thing, and side by side at the
+ *  start of the row they read as a doubled accent — worst at phone widths, where
+ *  the padding shrinks and the rounded corner clips the stripe into a stub. The
+ *  brighter, text-height bar wins; the edge stripe goes. Continue Watching and
+ *  Upcoming keep theirs. */
+#movies-section > .section-header::before {
+  display: none;
+}
+
+/*  A warm bloom that starts at the accent stripe and falls away to the right, so
+ *  the lit part of the banner is the part with the words in it. Pure paint — no
+ *  layout, nothing animated. */
+#movies-section > .section-header::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(42% 150% at 0% 0%, rgba(245, 197, 24, 0.13), transparent 72%),
+    radial-gradient(38% 130% at 8% 120%, rgba(124, 58, 237, 0.11), transparent 70%);
+  pointer-events: none;
+}
+
 .section-title {
   display: flex;
   align-items: center;
   gap: 1rem;
+  /*  Above the ::after bloom. */
+  position: relative;
+  z-index: 1;
+  min-width: 0;
 }
 
 .section-title h2 {
   font-family: 'Bebas Neue', sans-serif;
-  font-size: 2.3rem;
-  letter-spacing: 3px;
+  /*  Was a flat 2.3rem at every width, including 360px phones where it forced
+   *  the longer headings ("18+ ADULT MOVIES & WEB SERIES") onto three lines. */
+  font-size: clamp(1.45rem, 4.6vw, 2.3rem);
+  letter-spacing: clamp(1.4px, 0.34vw, 3px);
+  line-height: 1.08;
   color: var(--text);
   text-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+/*  ── THE HEADING ITSELF ──
+ *
+ *  Bebas at this size is a big flat slab of one colour, which on a dark panel
+ *  looks unfinished. Three cheap layers turn it into lit metal:
+ *
+ *    1. a near-vertical sheen — a warm white through the cap height, cooling
+ *       through lilac to a deep grey-violet at the baseline. Reads as a polished
+ *       face catching light from above.
+ *    2. a hairline white text-stroke, which puts a crisp lit edge on every glyph.
+ *       Without it the pale top of the gradient bleeds into the panel behind it
+ *       and the letterforms go soft.
+ *    3. two drop-shadows: a dark one for depth, and a very faint gold bloom that
+ *       ties the words to the accent bar beside them. The gold is at 12% — it is
+ *       meant to be felt, not seen.
+ *
+ *  `filter: drop-shadow` rather than text-shadow: with the fill transparent, a
+ *  text-shadow paints THROUGH the glyphs and greys the sheen out. drop-shadow
+ *  works on the composited result instead, so the shadow stays behind the
+ *  letters. .low-end-mode drops it (filter: none !important) exactly as it
+ *  already drops the text-shadow above — the sheen and the stroke survive, the
+ *  cost does not.
+ *
+ *  Applied to the feed heading AND to Upcoming, because they are the same rank of
+ *  heading on the same page and the plain solid version next to the metal one just
+ *  looked like the one nobody had finished. Continue Watching stays plain: it is a
+ *  small personal rail, not a section of the catalogue.
+ */
+#movies-section .section-title h2,
+#upcoming .section-title h2 {
+  background: linear-gradient(177deg,
+      #fffdf6 0%,
+      #ffffff 24%,
+      #f4f0ff 52%,
+      #d2cae9 76%,
+      #a79dc7 92%,
+      #8b81ac 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  -webkit-text-stroke: 0.4px rgba(255, 255, 255, 0.22);
+  filter:
+    drop-shadow(0 4px 14px rgba(0, 0, 0, 0.5))
+    drop-shadow(0 0 20px rgba(245, 197, 24, 0.12));
+  /*  Bebas has no descenders to speak of, but the gradient is clipped to the
+   *  line box, so a hair of extra room keeps the last stop off the baseline. */
+  padding-bottom: 1px;
+}
+
+/*  The Clear All button is injected INSIDE #sectionHeading (showWatchlist writes
+ *  it into the h2's innerHTML), and -webkit-text-fill-color inherits — so without
+ *  this the button's own label would be clipped to the heading's gradient and
+ *  render as an empty red pill. Its <svg> uses stroke="currentColor" and `color`
+ *  is untouched above, so the icon needs nothing. The text-stroke has to be reset
+ *  for the same reason: inherited, it outlines the button's 0.8rem label and turns
+ *  it to mush. */
+#movies-section .section-title h2 .clear-watchlist-btn {
+  -webkit-text-fill-color: #fff;
+  -webkit-text-stroke: 0;
+}
+
+/*  A slightly heavier, brighter accent bar for the two catalogue sections, and one
+ *  that TRACKS THE TEXT: the shared rule is a fixed 36px, which is right next to a
+ *  2.3rem heading and half again too tall next to the 1.45rem it clamps down to
+ *  on a phone, where the bar ended up setting the banner's height instead of the
+ *  words doing it. */
+#movies-section .section-title .title-line,
+#upcoming .section-title .title-line {
+  width: 6px;
+  height: clamp(26px, 5.6vw, 40px);
+  background: linear-gradient(to bottom, #ffd750, var(--gold), var(--red) 62%, var(--accent));
+  box-shadow:
+    0 0 22px rgba(245, 197, 24, 0.45),
+    0 0 10px rgba(230, 57, 70, 0.28);
 }
 
 .clear-watchlist-btn {
@@ -2565,52 +2690,122 @@ body {
   display: flex;
   gap: 0.65rem;
   flex-wrap: wrap;
+  /*  Centred to match the banner above and the sub-filter rail below. On phones
+   *  the mobile block turns this row into a horizontal scroller and resets
+   *  justify-content to flex-start — centring a scroll container makes its
+   *  leading pills unreachable. */
+  justify-content: center;
   margin-bottom: 2.2rem;
   -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
 }
 
 .cat-tab {
+  /*  ══ ONE PILL, ONE HIGHLIGHT ══
+   *
+   *  This strip was briefly a nine-colour rainbow: every tab carried its own
+   *  accent hue (azure Hollywood, magenta Bollywood, emerald Tollywood, and so on)
+   *  on top of the red/cyan/gold that Trending/4K/Top Rated already had.
+   *  Individually each pill looked good; together, nine saturated hues in one row
+   *  read as a toy and destroyed the one thing a filter strip exists to
+   *  communicate — WHICH ONE IS SELECTED. When every pill is loud, the loud one is
+   *  not an answer to anything.
+   *
+   *  So the strip is uniform: every tab from All to Category is the same neutral
+   *  dark-glass pill, and the ONLY colour in the row is the brand gradient, which
+   *  appears in exactly two places — under the cursor, and on the tab you have
+   *  actually chosen. Hover therefore PREVIEWS selection instead of competing with
+   *  it, and the selection itself is unmistakable at a glance.
+   *
+   *  The gradient lives on ::before rather than on `background` for two reasons:
+   *  a gradient cannot be interpolated, so swapping backgrounds can only ever
+   *  snap, whereas opacity on an overlay fades; and it lets hover and .active
+   *  share ONE definition of the highlight instead of two that drift apart. */
   position: relative;
   overflow: hidden;
   padding: 0.6rem 1.2rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.13);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025)),
-    rgba(10, 10, 20, 0.68);
-  color: var(--text2);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.085), rgba(255, 255, 255, 0.022)),
+    rgba(10, 10, 20, 0.72);
+  color: #dde5f2;
   font-family: 'Outfit', sans-serif;
   font-size: 0.83rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s var(--ease-smooth);
+  /*  Named properties, not `all`. `all` includes `background`, and a gradient
+   *  background cannot interpolate — the browser jumps it at the halfway point,
+   *  which is the flicker this control used to have on hover. */
+  transition:
+    color 0.28s ease,
+    border-color 0.28s ease,
+    transform 0.28s var(--ease-smooth),
+    box-shadow 0.28s ease;
   letter-spacing: 0.2px;
   backdrop-filter: blur(16px) saturate(160%);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
+/*  THE highlight: the same gradient the active pill wears, faded in for hover. */
 .cat-tab::before {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, rgba(245, 197, 24, 0.16), rgba(124, 58, 237, 0.1));
-  opacity: 0;
-  transition: opacity 0.25s ease;
   border-radius: inherit;
+  background: linear-gradient(135deg,
+      rgba(245, 197, 24, 0.95) 0%,
+      rgba(230, 120, 50, 0.88) 52%,
+      rgba(124, 58, 237, 0.85) 100%);
+  opacity: 0;
+  transition: opacity 0.28s ease;
+}
+
+.cat-tab:hover::before,
+.cat-tab.active::before {
+  opacity: 1;
+}
+
+/*  Ink and border are shared by hover and active so the two states cannot drift
+ *  apart. The border goes transparent rather than gold: a 1px rim on top of a
+ *  gradient that already reaches the pill's edge only muddies that edge. */
+.cat-tab:hover,
+.cat-tab.active {
+  color: #fff;
+  border-color: transparent;
 }
 
 .cat-tab:hover {
   transform: translateY(-2.5px);
-  border-color: rgba(245, 197, 24, 0.2);
-  color: var(--text);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(245, 197, 24, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 14px 32px rgba(0, 0, 0, 0.4),
+    0 8px 26px rgba(245, 197, 24, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
-.cat-tab:hover::before {
-  opacity: 1;
+/*  Keyboard and D-pad focus has to be visible on its own: the strip is fully
+ *  navigable without a pointer, and the browser's default outline on a near-black
+ *  pill is close to invisible. */
+.cat-tab:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
 }
 
+.cat-tab:active {
+  transform: translateY(0) scale(0.97);
+}
+
+/*  ══ WHY EVERY LABEL IS WRAPPED IN A <span> ══
+ *
+ *  ::before is absolutely positioned, and an absolutely positioned child paints
+ *  AFTER its parent's in-flow text (CSS paint order step 8 beats step 7). While
+ *  the overlay was a faint 20%-alpha wash you could read straight through it; now
+ *  that it is the opaque brand gradient it would cover the label outright. The
+ *  span gives the text its own z-index so it lands on top of the overlay.
+ *
+ *  Which is why index.html wraps every tab label — the Category trigger already
+ *  did, and it was the one pill that never had this problem. */
 .cat-tab span {
   position: relative;
   z-index: 1;
@@ -2640,8 +2835,26 @@ body {
   flex-wrap: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 0.6rem 0.75rem;
-  margin: -1.2rem 0 2rem;
+  padding: 0.55rem 0.7rem;
+  /*  ══ THE RAIL HUGS ITS CHIPS AND SITS ON THE CENTRE LINE ══
+   *
+   *  It used to be a full-bleed rail with `margin: -1.2rem 0 2rem`, so a
+   *  three-chip platform bar (All / Movies / Web Series) drew a container the
+   *  entire width of the section with its pills crammed into the left corner and
+   *  a wide empty plain to the right — the single worst thing about this area.
+   *
+   *  `fit-content` + auto side margins makes the rail exactly as wide as the
+   *  chips it holds and centres it under the category strip. `max-width: 100%`
+   *  is what keeps the nine-chip anime bar honest: once the chips no longer fit
+   *  it clamps to the full width and goes back to being a scroller, and because
+   *  there is then no free space inside it, no justify-content is needed either
+   *  way — which also avoids the unreachable-leading-item trap that
+   *  `justify-content: center` causes in a scroll container.
+   *
+   *  The top margin is 0: .cat-filter-sep below owns the gap now. */
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto 2rem;
   border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.06);
   /*  Neutral, near-black rail: the chips are the colour in this row, not the
@@ -2652,6 +2865,48 @@ body {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 12px 30px rgba(0, 0, 0, 0.35);
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
+}
+
+/*  ══ THE DIVIDER BETWEEN THE CATEGORY STRIP AND ITS SUB-FILTER RAIL ══
+ *
+ *  Created and toggled by syncFilterSeparator() in moviezone.js, which shows it
+ *  only while one of the three sub-bars is actually on screen — a hairline under
+ *  the tabs with nothing beneath it would just look like a stray rule.
+ *
+ *  Deliberately NOT a child of .cat-tabs: on phones that row is a scroll
+ *  container and would clip it.
+ *
+ *  The negative top margin borrows from .cat-tabs' own 2.2rem bottom margin
+ *  rather than adding to it, so turning the divider on does not push the grid
+ *  down — this area is directly above the LCP image and any height it gains
+ *  shows up as layout shift. */
+.cat-filter-sep {
+  display: none;
+  position: relative;
+  height: 1px;
+  width: min(100%, 660px);
+  margin: -1.15rem auto 1.15rem;
+  background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(245, 197, 24, 0.2) 20%,
+      rgba(255, 255, 255, 0.14) 50%,
+      rgba(124, 58, 237, 0.24) 80%,
+      transparent 100%);
+}
+
+/*  A small gold lozenge on the centre line, echoing .section-sep's centre tick
+ *  so the two dividers read as the same family at two different scales. */
+.cat-filter-sep::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 7px;
+  height: 7px;
+  transform: translate(-50%, -50%) rotate(45deg);
+  border-radius: 2px;
+  background: var(--grad-gold);
+  box-shadow: 0 0 12px rgba(245, 197, 24, 0.5);
 }
 
 .anime-filter-bar::-webkit-scrollbar {
@@ -2728,10 +2983,6 @@ body {
 }
 
 /* ── OTT bar: identical rail, no icons, so the pills carry the width instead ── */
-.ott-filter-bar {
-  margin-top: 0.5rem;
-}
-
 .ott-filter-bar .ott-chip {
   padding: 0.62rem 1.45rem;
 }
@@ -2795,8 +3046,19 @@ body {
 
 @media (max-width: 600px) {
   .anime-filter-bar {
-    margin: -0.8rem 0 1.4rem;
+    /*  `0 auto` and not `-0.8rem 0`: the auto side margins are what centre the
+     *  rail, and .cat-filter-sep owns the gap above it now. This rule used to
+     *  reinstate the old full-bleed left-aligned geometry below 600px, which is
+     *  exactly the width where it matters most. */
+    margin: 0 auto 1.4rem;
     padding: 0.45rem;
+  }
+
+  /*  Tighter divider on a phone: 660px of hairline on a 360px screen is just a
+   *  full-bleed rule, and the point of it is to read as a short centred break. */
+  .cat-filter-sep {
+    width: min(82%, 320px);
+    margin: -0.95rem auto 0.95rem;
   }
 
   .anime-chip {
@@ -2810,10 +3072,11 @@ body {
   }
 }
 
+/*  The selected tab. Note there is NO `background` here — the gradient is the
+ *  shared ::before overlay, pinned on by `.cat-tab.active::before` above. All this
+ *  rule adds is the extra weight and the deeper bloom that separate "chosen" from
+ *  "merely under the cursor". */
 .cat-tab.active {
-  background: linear-gradient(135deg, rgba(245, 197, 24, 0.95), rgba(230, 120, 50, 0.88), rgba(124, 58, 237, 0.85));
-  border-color: transparent;
-  color: #fff;
   font-weight: 700;
   box-shadow:
     0 18px 40px rgba(124, 58, 237, 0.22),
@@ -2857,46 +3120,61 @@ body {
   transition: none !important;
 }
 
-/* .cat-tab::before is the hover glow; on a menu button it just adds a delayed
-   wash after the panel has opened. */
-.cat-group-trigger::before {
-  display: none;
+/*  `.cat-group-trigger::before { display: none }` used to sit here, back when
+    ::before was a faint delayed wash that added nothing to a menu button. It is
+    now the shared brand-gradient highlight that every other pill in the row uses,
+    so suppressing it is exactly what made this one pill look dead. It stays on. */
+
+/*  The trigger DOES take the shared ::before gradient, unlike before — it is a
+ *  pill in the same row as nine others, and being the one that never lit up made
+ *  it look disabled. The three states it has to show are all painted with that one
+ *  overlay: hover (shared rule), panel open, and "a genre inside me is the active
+ *  filter". Only the last one also needs a mark, because it has to survive the
+ *  panel closing. */
+.cat-group.is-open>.cat-group-trigger::before,
+.cat-group-trigger.has-active::before {
+  opacity: 1;
 }
 
 .cat-group-chevron {
   transition: none !important;
-  opacity: 0.75;
+  /*  No `color` of its own: the SVG is stroke="currentColor", so the chevron
+   *  tracks the trigger's ink — muted grey at rest, white once the pill lights up.
+   *  It was pinned to gold, which then sat on top of a gold-to-violet gradient and
+   *  disappeared into it exactly when it mattered most (panel open). */
+  opacity: 0.8;
   flex-shrink: 0;
 }
 
 .cat-group.is-open .cat-group-chevron {
   transform: rotate(180deg);
+  opacity: 1;
 }
 
 /* Trigger reflects the state of its children: highlighted while the menu is
-   open, and marked when one of the categories inside it is the active filter. */
+   open, and marked when one of the categories inside it is the active filter.
+   Border goes transparent for the same reason the other pills' does — a rim over
+   a gradient that already reaches the edge only muddies it. */
 .cat-group.is-open>.cat-group-trigger,
 .cat-group-trigger.has-active {
-  border-color: rgba(245, 197, 24, 0.42);
+  border-color: transparent;
   color: #fff;
 }
 
-.cat-group-trigger.has-active {
-  background:
-    linear-gradient(180deg, rgba(245, 197, 24, 0.18), rgba(245, 197, 24, 0.06)),
-    rgba(10, 10, 20, 0.68);
-}
-
+/*  The "a genre is selected" dot. White, not gold: it sits ON the gold end of the
+ *  gradient now, where a gold dot is invisible. z-index puts it above the overlay
+ *  for the same reason the labels need a span. */
 .cat-group-trigger.has-active::after {
   content: '';
   position: absolute;
   top: 7px;
   right: 9px;
+  z-index: 2;
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--gold);
-  box-shadow: 0 0 8px var(--gold);
+  background: #fff;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.9);
 }
 
 .cat-group-menu {
@@ -2909,21 +3187,32 @@ body {
   top: calc(100% + 0.55rem);
   left: 0;
   z-index: 40;
-  min-width: 208px;
+  min-width: 232px;
   max-width: min(88vw, 420px);
   max-height: min(58vh, 420px);
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 0.55rem;
+  padding: 0.6rem;
   flex-wrap: wrap;
-  gap: 0.4rem;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(9, 9, 18, 0.97);
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
-  box-shadow: 0 22px 54px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  gap: 0.3rem;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  /*  Not a flat panel: a vertical fade from a lifted top edge into near-black at
+     the bottom, which is what makes a floating surface read as floating rather
+     than as a grey rectangle pasted over the page. */
+  background:
+    linear-gradient(180deg, rgba(24, 22, 38, 0.98) 0%, rgba(10, 10, 20, 0.985) 100%);
+  backdrop-filter: blur(22px) saturate(170%);
+  -webkit-backdrop-filter: blur(22px) saturate(170%);
+  /*  A hairline gold ring at 8% sits under the drop shadow. It is barely visible
+     on its own and that is the point — it ties the panel to the pill that opened
+     it without drawing a gold box on the page. */
+  box-shadow:
+    0 28px 64px rgba(0, 0, 0, 0.66),
+    0 0 0 1px rgba(245, 197, 24, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
   scrollbar-width: thin;
+  scrollbar-color: rgba(245, 197, 24, 0.35) transparent;
   contain: layout style;
 }
 
@@ -2932,12 +3221,26 @@ body {
 }
 
 .cat-group-menu::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
 }
 
+.cat-group-menu::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/*  The bar was a 6px grey slab flush against the panel edge, i.e. the least
+    finished thing in the dropdown. Gold-tinted, inset by a transparent border so
+    it reads as a floating thumb rather than an edge. */
 .cat-group-menu::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(245, 197, 24, 0.3);
+  border: 2px solid transparent;
+  background-clip: padding-box;
   border-radius: 99px;
+}
+
+.cat-group-menu::-webkit-scrollbar-thumb:hover {
+  background: rgba(245, 197, 24, 0.55);
+  background-clip: padding-box;
 }
 
 /* Inside a menu the pills sit full width so the list reads as a menu rather
@@ -2945,11 +3248,30 @@ body {
 .cat-group-item {
   flex: 1 1 100%;
   text-align: left;
-  padding: 0.55rem 0.85rem;
-  border-radius: 10px;
+  /*  44px minimum, because these rows are the smallest tap target on the page and
+      anything under 44 produces mis-taps. The old 0.55rem padding gave ~35px. */
+  min-height: 44px;
+  align-items: center;
+  padding: 0.55rem 0.95rem;
+  border-radius: 12px;
   box-shadow: none;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
+  /*  A flex box, so min-height can centre the label instead of just adding dead
+      space under it. */
+  display: flex;
+}
+
+/*  A row in a vertical list should not hop off the surface it is pinned to. The
+    shared pill hover lifts 2.5px, which inside a panel reads as the row coming
+    loose; a nudge along the reading direction says the same thing and stays put. */
+.cat-group-item:hover {
+  transform: translateX(3px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+}
+
+.cat-group-item:active {
+  transform: translateX(3px) scale(0.985);
 }
 
 /* Right-aligned menu when the group sits near the viewport edge. */
@@ -3017,94 +3339,49 @@ html[data-mz-tv="true"] .cat-group-menu {
   /* Inside the panel the pills wrap as chips instead of full-width rows, which
      keeps all 13 genres visible without an inner scroll on a phone. (The later
      `.cat-tab { flex: 0 0 auto }` mobile rule forces this anyway — stated here
-     so the layout does not depend on that rule's position in the file.) */
+     so the layout does not depend on that rule's position in the file.)
+
+     The 44px min-height from the base rule is kept deliberately: this is a touch
+     surface, and a chip grid is only worth having if the chips are hittable. Four
+     rows of 44px plus gaps lands around 210px, well inside the 340px cap, so the
+     rows still do not need to scroll. */
   .cat-group-item {
     flex: 0 0 auto;
     padding: 0.62rem 0.9rem;
+    justify-content: center;
+  }
+
+  /*  A row of centred chips wants a hair more air between them than a stack of
+      full-width rows does, and the panel itself can afford less padding at this
+      width. */
+  .cat-group-menu {
+    padding: 0.55rem;
+    gap: 0.4rem;
+    border-radius: 18px;
+  }
+
+  /*  translateX on a chip in a wrapped grid shunts it sideways into its neighbour.
+      On touch there is no hover anyway — what matters is the pressed state. */
+  .cat-group-item:hover,
+  .cat-group-item:active {
+    transform: none;
   }
 }
 
-/* ══ PREMIUM HIGHLIGHT TABS (Trending / 4K / Top Rated) ══ */
-.cat-tab--trending {
-  border-color: rgba(255, 90, 60, 0.35);
-  background:
-    linear-gradient(180deg, rgba(255, 90, 60, 0.14), rgba(255, 60, 40, 0.06)),
-    rgba(10, 10, 20, 0.68);
-  color: #ff9a7a;
-}
-
-.cat-tab--trending:hover {
-  border-color: rgba(255, 90, 60, 0.55);
-  box-shadow: 0 12px 30px rgba(255, 60, 40, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-}
-
-.cat-tab--trending.active {
-  background: linear-gradient(135deg, #ff5a3c, #ff2d55);
-  color: #fff;
-  box-shadow: 0 16px 38px rgba(255, 45, 85, 0.3), 0 0 22px rgba(255, 90, 60, 0.25);
-}
-
-.cat-tab--4k {
-  border-color: rgba(6, 182, 212, 0.4);
-  background:
-    linear-gradient(180deg, rgba(6, 182, 212, 0.16), rgba(124, 58, 237, 0.08)),
-    rgba(10, 10, 20, 0.68);
-  color: #5fe3ff;
-  font-weight: 700;
-}
-
-.cat-tab--4k::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(120deg, transparent 30%, rgba(255, 255, 255, 0.18) 50%, transparent 70%);
-  transform: translateX(-120%);
-  animation: catShine 3.5s ease-in-out infinite;
-  pointer-events: none;
-}
-
-@keyframes catShine {
-
-  0%,
-  60% {
-    transform: translateX(-120%);
-  }
-
-  100% {
-    transform: translateX(120%);
-  }
-}
-
-.cat-tab--4k:hover {
-  border-color: rgba(6, 182, 212, 0.7);
-  box-shadow: 0 12px 32px rgba(6, 182, 212, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-}
-
-.cat-tab--4k.active {
-  background: linear-gradient(135deg, #06b6d4, #7c3aed);
-  color: #fff;
-  box-shadow: 0 16px 40px rgba(6, 182, 212, 0.32), 0 0 24px rgba(124, 58, 237, 0.28);
-}
-
-.cat-tab--top {
-  border-color: rgba(245, 197, 24, 0.4);
-  background:
-    linear-gradient(180deg, rgba(245, 197, 24, 0.14), rgba(245, 197, 24, 0.05)),
-    rgba(10, 10, 20, 0.68);
-  color: #ffd75a;
-}
-
-.cat-tab--top:hover {
-  border-color: rgba(245, 197, 24, 0.65);
-  box-shadow: 0 12px 30px rgba(245, 197, 24, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-}
-
-.cat-tab--top.active {
-  background: linear-gradient(135deg, #f5c518, #e6a800);
-  color: #1a1a10;
-  box-shadow: 0 16px 38px rgba(245, 197, 24, 0.3);
-}
+/*  The per-tab accent block used to live here: .cat-tab--trending (red),
+ *  .cat-tab--4k (cyan, with a looping shine sweep), .cat-tab--top (gold), plus
+ *  azure/magenta/emerald/indigo/rose for Hollywood through K-Drama. All of it is
+ *  gone, and the reasoning is written out on `.cat-tab` itself — in one sentence:
+ *  a filter strip's job is to show which filter is on, and nine competing hues
+ *  cannot do that. The single brand gradient on hover/.active does.
+ *
+ *  The matching cat-tab--* classes were removed from index.html at the same time,
+ *  so there are no orphan hooks left behind.
+ *
+ *  The @keyframes catShine sweep that animated the 4K pill went with it — nothing
+ *  referenced it any more. If one pill ever needs singling out again, do it with
+ *  ONE accent on ONE pill, which is the pattern that worked before this
+ *  experiment. */
 
 /* ═══════════════════════════════════════════════════════════════
    MOVIE GRID & CARDS — Premium collection tiles
@@ -6763,6 +7040,11 @@ html[data-mz-tv="true"] .cat-group-menu {
   .cat-tabs {
     flex-wrap: nowrap;
     overflow-x: auto;
+    /*  Back to flex-start: the strip is a scroller at this width, and centring
+     *  an overflowing scroll container pushes its leading pills into negative
+     *  scroll space, where they cannot be reached by scrolling at all. The
+     *  desktop rule that centres it is undone here on purpose. */
+    justify-content: flex-start;
     padding-bottom: 6px;
     scrollbar-width: none;
     -ms-overflow-style: none;
@@ -11202,6 +11484,30 @@ img { content-visibility: auto; }
    targets larger than a pointer would need. */
 [data-mz-tv="true"] .mz-pager-btn,[data-mz-tv="true"] .mz-pager-cur{min-width:56px;min-height:56px;font-size:1.05rem}
 [data-mz-tv="true"] .mz-pager-btn:focus{outline:3px solid var(--gold);outline-offset:3px;background:rgba(245,197,24,.2)}
+
+/* ── The one separator that has a pager sitting on it ─────────────────────────
+   .section-sep carries `margin: 4rem 4%` because everywhere else it is the ONLY
+   thing between two full sections and has to do all the separating itself. Under
+   the feed it is not: the panel's 2.5rem bottom padding and .mz-pager's own
+   margins already sit above it, and #upcoming contributes another 2rem of top
+   padding below. Stacking 4rem on both sides of that left the pager marooned in
+   the middle of ~230px of empty page and pushed Upcoming a full screen-third
+   further down than the break needed.
+
+   Scoped to the adjacent sibling of #feedPager so every other separator on the
+   site — including the ones the SSR pages emit — keeps the original 4rem. (An
+   HTML comment sits between the two elements in the markup; comments are not
+   elements, so `+` still matches.) */
+#feedPager + .section-sep {
+  margin-top: 2.2rem;
+  margin-bottom: 2.2rem;
+}
+
+/* Matching trim on the section below it. 2rem of top padding was tuned for a
+   separator with 4rem under it; with 2.2rem there it reads as a double gap. */
+#upcoming {
+  padding-top: 1.35rem;
+}
 
 
 /* ═══════════════════════════════════════════════════════════════

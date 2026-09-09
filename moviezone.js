@@ -5739,10 +5739,67 @@ function updateOttHeading(cat) {
   h.textContent = (mode && mode.id !== 'all') ? base + ' • ' + mode.label.toUpperCase() : base;
 }
 
+/*  ══════════════════════════════════════════════════════════════════════
+ *  THE DIVIDER BETWEEN THE CATEGORY STRIP AND ITS SUB-FILTER RAIL
+ *  ══════════════════════════════════════════════════════════════════════
+ *  The three sub-bars (OTT platform types, anime modes, cartoon modes) are a
+ *  SECOND row of controls under the category strip, and with nothing between
+ *  them the two rows read as one undifferentiated field of pills. A hairline
+ *  with a small gold lozenge on the centre line separates them, and lines up
+ *  with the centred banner and the centred rail either side of it.
+ *
+ *  It is a sibling of #catTabs, not a child: on phones that row is a horizontal
+ *  scroller, and a scroll container clips its descendants on both axes.
+ *
+ *  It is created lazily rather than sitting in index.html because it is only
+ *  ever wanted while a sub-bar is on screen — see syncCatFilterSeparator().
+ *
+ *  Returns null only when #catTabs is absent (the SSR category pages), which is
+ *  why every caller treats it as optional.
+ */
+function ensureCatFilterSep() {
+  const catTabs = document.getElementById('catTabs');
+  if (!catTabs) return null;
+  let sep = document.getElementById('catFilterSep');
+  if (!sep) {
+    sep = document.createElement('div');
+    sep.id = 'catFilterSep';
+    sep.className = 'cat-filter-sep';
+    sep.setAttribute('aria-hidden', 'true');   // decoration, not structure
+    catTabs.insertAdjacentElement('afterend', sep);
+  }
+  return sep;
+}
+
+/*  Visibility is DERIVED, never toggled by hand.
+ *
+ *  filterCat() runs all three bars' show/hide in sequence on every category
+ *  change, so any single caller only knows about its own bar — asking each of
+ *  them to also decide the divider's state would mean the last one to run wins,
+ *  and on a platform tab (hide anime → hide cartoon → show OTT) that ordering is
+ *  luck. Reading the DOM instead makes the answer correct whoever calls it and
+ *  in whatever order: the divider is shown if, and only if, one of the bars is
+ *  actually displayed. A hairline under the tabs with nothing beneath it would
+ *  just look like a stray rule.
+ *
+ *  The bars are toggled with inline display (none / flex), which is what is
+ *  read here — no getComputedStyle, so this is layout-read free and safe to
+ *  call as often as it likes.
+ */
+function syncCatFilterSeparator() {
+  const sep = document.getElementById('catFilterSep');
+  if (!sep) return;
+  const anyBarShown = ['ottFilterBar', 'animeFilterBar', 'cartoonFilterBar'].some(id => {
+    const bar = document.getElementById(id);
+    return !!bar && bar.style.display && bar.style.display !== 'none';
+  });
+  sep.style.display = anyBarShown ? 'block' : 'none';
+}
+
 /*  ── OTT SUB-FILTER BAR (All / Movies / Web Series) ──
  *
  *  Same host and geometry as the anime and cartoon bars: injected once, right
- *  after #catTabs, so the chips sit under the category strip and above the grid.
+ *  after the divider, so the chips sit under the category strip and above the grid.
  *  It reuses .anime-chip so there is one chip style to maintain rather than
  *  three, with .ott-filter-bar carrying only the colour difference.
  *
@@ -5759,12 +5816,13 @@ function renderOttFilterBar(cat) {
     bar.className = 'anime-filter-bar ott-filter-bar';
     bar.setAttribute('role', 'tablist');
     bar.setAttribute('aria-label', 'Platform content type');
-    catTabs.insertAdjacentElement('afterend', bar);
+    //  After the divider, so the DOM order is: strip → divider → rail.
+    (ensureCatFilterSep() || catTabs).insertAdjacentElement('afterend', bar);
   }
   const modes = ottModesFor(cat);
   //  Fewer than two chips means there is nothing to choose between — a
   //  single-type platform, where "All" and its one type are the same grid.
-  if (modes.length < 2) { bar.style.display = 'none'; return; }
+  if (modes.length < 2) { bar.style.display = 'none'; syncCatFilterSeparator(); return; }
   bar.innerHTML = modes.map(m => {
     const active = m.id === currentOttMode;
     return '<button type="button" class="anime-chip ott-chip' + (active ? ' active' : '') +
@@ -5772,11 +5830,13 @@ function renderOttFilterBar(cat) {
       '" onclick="setOttMode(\'' + m.id + '\')">' + m.label + '</button>';
   }).join('');
   bar.style.display = 'flex';
+  syncCatFilterSeparator();
 }
 
 function hideOttFilterBar() {
   const bar = document.getElementById('ottFilterBar');
   if (bar) bar.style.display = 'none';
+  syncCatFilterSeparator();
 }
 
 /*  Switching type is a different pool, so loadMovies() is called WITHOUT
@@ -6326,18 +6386,20 @@ function renderAnimeFilterBar() {
     bar.className = 'anime-filter-bar';
     bar.setAttribute('role', 'tablist');
     bar.setAttribute('aria-label', 'Anime filters');
-    catTabs.insertAdjacentElement('afterend', bar);
+    (ensureCatFilterSep() || catTabs).insertAdjacentElement('afterend', bar);
   }
   bar.innerHTML = ANIME_MODES.map(m => {
     const active = m.id === currentAnimeMode;
     return `<button type="button" class="anime-chip${active ? ' active' : ''}" role="tab" tabindex="0" aria-selected="${active}" onclick="setAnimeMode('${m.id}')"><span>${m.label}</span></button>`;
   }).join('');
   bar.style.display = 'flex';
+  syncCatFilterSeparator();
 }
 
 function hideAnimeFilterBar() {
   const bar = document.getElementById('animeFilterBar');
   if (bar) bar.style.display = 'none';
+  syncCatFilterSeparator();
 }
 
 function updateAnimeHeading() {
@@ -6705,18 +6767,20 @@ function renderCartoonFilterBar() {
     bar.className = 'anime-filter-bar';   // same chip styling as the anime bar
     bar.setAttribute('role', 'tablist');
     bar.setAttribute('aria-label', 'Cartoon filters');
-    catTabs.insertAdjacentElement('afterend', bar);
+    (ensureCatFilterSep() || catTabs).insertAdjacentElement('afterend', bar);
   }
   bar.innerHTML = CARTOON_MODES.map(m => {
     const active = m.id === currentCartoonMode;
     return `<button type="button" class="anime-chip${active ? ' active' : ''}" role="tab" tabindex="0" aria-selected="${active}" onclick="setCartoonMode('${m.id}')"><span class="anime-chip-icon" aria-hidden="true">${m.icon}</span><span>${m.label}</span></button>`;
   }).join('');
   bar.style.display = 'flex';
+  syncCatFilterSeparator();
 }
 
 function hideCartoonFilterBar() {
   const bar = document.getElementById('cartoonFilterBar');
   if (bar) bar.style.display = 'none';
+  syncCatFilterSeparator();
 }
 
 function updateCartoonHeading() {
@@ -10501,10 +10565,10 @@ const playerSources = [
       ? `https://vidrock.net/tv/${id}/${s}/${e}`
       : `https://vidrock.net/movie/${id}`;
   }},
-  { name: 'Hindi Multi-Audio', dubbed: true, url: (id, lang, type, s, e) => {
-    const base = `https://embed.smashystream.com/playere.php?tmdb=${id}`;
-    return type === 'tv' ? `${base}&season=${s}&episode=${e}` : base;
-  }},
+  // { name: 'Hindi Multi-Audio', dubbed: true, url: (id, lang, type, s, e) => {
+  //   const base = `https://embed.smashystream.com/playere.php?tmdb=${id}`;
+  //   return type === 'tv' ? `${base}&season=${s}&episode=${e}` : base;
+  // }},
   { name: 'Turbo Stream', dubbed: true, url: (id, lang, type, s, e) => {
     return type === 'tv'
       ? `https://111movies.com/tv/${id}/${s}/${e}`
@@ -11661,24 +11725,44 @@ document.addEventListener('DOMContentLoaded', () => {
   // Make HTML static category tabs focusable for TV
   document.querySelectorAll('.cat-tab').forEach(t => { t.tabIndex = 0; });
   
-  // Change TV Shows tab text to Web Series
-  const tvTab = document.querySelector('.cat-tab[onclick*="filterCat(\'tv\')"]');
-  if (tvTab) {
-    tvTab.innerHTML = 'Web Series';
-  }
+  /*  A leftover `tvTab.innerHTML = 'Web Series'` used to sit here, from when the
+   *  markup said "TV Shows". index.html has said "Web Series" for a long time, so
+   *  all the line did was rewrite the pill with its own label — and in doing so it
+   *  destroyed the <span> wrapper that every tab label now needs (the ::before
+   *  brand-gradient highlight paints over bare text; see `.cat-tab span` in
+   *  moviezone.css). One pill in the strip lost its label on hover, and only that
+   *  one, which is a genuinely confusing bug to look at. Renaming a tab belongs in
+   *  the markup. */
 
-  /*  Cartoons / Anime / 18+ / Hindi Dubbed used to be appended here at runtime.
-   *  Cartoons, Anime and 18+ are now declared on the strip in index.html and the
-   *  genres live in the "Category" dropdown, so injecting them again would push
-   *  duplicate pills onto the strip and undo the grouping. Hindi Dubbed was
-   *  dropped from the UI entirely; filterCat('dubbed') still works if called.
-   *  A safety sweep instead: if markup ever regresses and a category ends up
-   *  missing, log it rather than silently dropping the filter. */
+  /*  Cartoons / Anime / 18+ / Hindi Dubbed used to be appended to the strip here at
+   *  runtime. That injection is gone, and so are those pills: Cartoons (kids),
+   *  Anime and 18+ (adult) were removed from the UI, Hindi Dubbed too — all four
+   *  filters still work if filterCat() is called with them, they just have no tab.
+   *  The genres moved into the "Category" dropdown.
+   *
+   *  What is left is a safety sweep: if the markup ever regresses and a category
+   *  loses its button, say so instead of silently dropping the filter.
+   *
+   *  THE LIST BELOW USED TO BE ['kids', 'anime', 'adult', 'tv'] — three of which
+   *  had been deliberately deleted from the strip, so this guard printed
+   *  "Category tabs missing from markup: kids, anime, adult" into the console on
+   *  every single page load. A warning that is always wrong is worse than no
+   *  warning: it trains you to scroll past the one time it is right. (And it did
+   *  fire for real once, on `tv`, and nobody noticed among the noise.)
+   *
+   *  It now names exactly what index.html is supposed to carry, which is also the
+   *  contract cat-tabs.browser.test.html asserts — so the runtime guard and the
+   *  test can no longer disagree about what "missing" means. */
   (function verifyCategoryTabs() {
-    // The nine OTT platforms are deliberately absent: they are reached from the
-    // Top Providers rail and have no .cat-tab of their own.
-    const required = ['kids', 'anime', 'adult', 'tv'];
-    const missing = required.filter(c =>
+    // The strip. The nine OTT platforms are deliberately absent: they are reached
+    // from the Top Providers rail and have no .cat-tab of their own.
+    const onStrip = ['all', 'trending', 'uhd4k', 'toprated', 'hollywood',
+      'bollywood', 'tollywood', 'tv', 'kdrama'];
+    // The "Category" dropdown.
+    const inGenreMenu = ['action', 'comedy', 'horror', 'thriller', 'romance',
+      'scifi', 'adventure', 'fantasy', 'crime', 'documentary', 'family',
+      'animation'];
+    const missing = onStrip.concat(inGenreMenu).filter(c =>
       !document.querySelector('.cat-tab[onclick*="filterCat(\'' + c + '\')"]'));
     if (missing.length) {
       console.warn('[MovieZone] Category tabs missing from markup:', missing.join(', '));
