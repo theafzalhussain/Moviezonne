@@ -26,7 +26,7 @@
 // to ?v=4 in index.html, so both are bumped in OPTIONAL_ASSETS below and the
 // shell is renamed: the activate handler deletes every cache that is not
 // CACHE_NAME, which is what forces the re-download.
-const CACHE_NAME = 'moviezone-v133';
+const CACHE_NAME = 'moviezone-v134';
 
 // Separate cache for TMDB posters/backdrops. Kept apart from the shell so the
 // activate handler can wipe an old shell without throwing away hundreds of
@@ -40,10 +40,10 @@ const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/tv-mode.min.css?v=1.3',
-  '/moviezone.min.css?v=9.7',
+  '/moviezone.min.css?v=9.8',
   '/tv-mode.min.js?v=1.5',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=13.5',
+  '/moviezone.min.js?v=13.6',
   '/manifest.json',
   '/moviezone-logo.png?v=2',
   '/icon-192.png?v=2',

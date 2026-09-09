@@ -1,11 +1,11 @@
 {
   "moviezone.min.js": {
-    "version": "13.5",
-    "sha256": "a86311a6d4856916"
+    "version": "13.6",
+    "sha256": "f3e8e5c6d2ed2756"
   },
   "moviezone.min.css": {
-    "version": "9.7",
-    "sha256": "848a03fd4cd96790"
+    "version": "9.8",
+    "sha256": "7047f04fd52ed88c"
   },
   "tv-mode.min.js": {
     "version": "1.5",

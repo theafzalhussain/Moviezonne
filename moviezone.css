@@ -448,9 +448,11 @@ body {
 .mobile-nav-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(3, 3, 10, 0.6);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgba(245, 197, 24, 0.07) 0%, transparent 55%),
+    rgba(2, 2, 8, 0.68);
+  backdrop-filter: blur(7px) saturate(120%);
+  -webkit-backdrop-filter: blur(7px) saturate(120%);
   z-index: 9999;
   opacity: 0;
   pointer-events: none;
@@ -463,25 +465,49 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   PREMIUM MOBILE NAV PANEL
+   MOBILE MENU PANEL
+   ───────────────────────────────────────────────────────────────
+   Built by initMobileNav() in moviezone.js, not by the markup, and appended to
+   <body> rather than to #navbar — a child of a backdrop-filtered ancestor is
+   composited inside that filter, which used to make the panel blur itself.
+
+   It carries the same three ideas as the navbar so the two read as one product:
+   the brand medallion is literally the same .nav-logo-mark element, light comes
+   from the top on every surface, and gold appears only on the active row and the
+   brand. The left edge is a masked hairline that fades out top and bottom, which
+   is what stops the panel looking like it was cut out of the page.
    ═══════════════════════════════════════════════════════════════ */
 #mzMobilePanel {
   position: fixed;
   top: 0;
   right: 0;
-  width: min(300px, 82vw);
+  width: min(322px, 86vw);
   height: 100vh;
   height: 100dvh;
   z-index: 10000;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg, rgba(8, 8, 18, 0.99) 0%, rgba(4, 4, 12, 1) 100%);
-  border-left: 1px solid rgba(245, 197, 24, 0.1);
-  box-shadow: -30px 0 80px rgba(0, 0, 0, 0.9), 0 0 40px rgba(245, 197, 24, 0.03);
+  background:
+    radial-gradient(105% 55% at 100% 0%, rgba(245, 197, 24, 0.1) 0%, transparent 58%),
+    radial-gradient(90% 45% at 0% 100%, rgba(124, 58, 237, 0.09) 0%, transparent 60%),
+    linear-gradient(180deg, rgb(14, 14, 26) 0%, rgb(7, 7, 15) 55%, rgb(4, 4, 11) 100%);
   transform: translateX(100%);
-  transition: transform 0.32s cubic-bezier(0.32, 0.72, 0, 1);
+  transition: transform 0.36s cubic-bezier(0.32, 0.72, 0, 1);
   will-change: transform;
   overflow: hidden;
+  box-shadow: -30px 0 80px rgba(0, 0, 0, 0.9);
+}
+
+/* Masked hairline on the leading edge, brightest at the middle. */
+#mzMobilePanel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  background: linear-gradient(180deg, transparent, rgba(245, 197, 24, 0.4) 45%, transparent);
+  pointer-events: none;
 }
 
 #mzMobilePanel.open {
@@ -496,44 +522,100 @@ body {
 }
 
 #mzMobilePanel .mz-mp-header {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1.5rem 1.5rem 1rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  gap: 0.75rem;
+  padding: 1.15rem 1.1rem 1rem;
+}
+
+/* Fading rule under the header, gold at the left where the brand sits. */
+#mzMobilePanel .mz-mp-header::after {
+  content: '';
+  position: absolute;
+  left: 1.1rem;
+  right: 1.1rem;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+      rgba(245, 197, 24, 0.35) 0%,
+      rgba(255, 255, 255, 0.07) 40%,
+      transparent 100%);
 }
 
 #mzMobilePanel .mz-mp-brand {
-  font-family: 'Outfit', sans-serif;
-  font-size: 1.3rem;
-  font-weight: 900;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+/* The navbar medallion, reused verbatim. Sized here so the phone breakpoints
+   that shrink it in the bar cannot shrink it in the panel too. */
+#mzMobilePanel .nav-logo-mark {
+  width: 2.2rem;
+  height: 2.2rem;
+  font-size: 0.84rem;
+}
+
+#mzMobilePanel .mz-mp-brandcopy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+#mzMobilePanel .mz-mp-name {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.24rem;
+  line-height: 0.85;
   letter-spacing: 3px;
-  background: linear-gradient(135deg, #f5c518, #ffde6b);
+  white-space: nowrap;
+  background: linear-gradient(96deg, #fff7dc 0%, #ffe08a 22%, #f5c518 52%, #ffb26b 82%, #ffe9a8 100%);
   -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
   background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+#mzMobilePanel .mz-mp-tag {
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 2.6px;
+  text-transform: uppercase;
+  color: rgba(255, 226, 150, 0.55);
+  white-space: nowrap;
 }
 
 #mzMobilePanel .mz-mp-close {
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 1.5rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.4);
+  color: rgba(255, 255, 255, 0.62);
   cursor: pointer;
-  transition: all 0.2s ease;
   line-height: 1;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
 }
 
 #mzMobilePanel .mz-mp-close:hover {
-  background: rgba(245, 197, 24, 0.1);
-  color: var(--gold);
-  border-color: rgba(245, 197, 24, 0.2);
+  background: linear-gradient(180deg, rgba(245, 197, 24, 0.16), rgba(245, 197, 24, 0.04));
+  border-color: rgba(245, 197, 24, 0.3);
+  color: #ffd75e;
+}
+
+#mzMobilePanel .mz-mp-close:active {
+  transform: scale(0.93);
 }
 
 #mzMobilePanel .mz-mp-links {
@@ -545,61 +627,111 @@ body {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 1.2rem 1rem;
-  gap: 0.2rem;
+  padding: 0.9rem 0.8rem;
+  gap: 0.25rem;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
 }
 
 #mzMobilePanel .mz-mp-link {
+  position: relative;
   display: flex;
   align-items: center;
-  padding: 0.9rem 1.2rem;
+  padding: 0.82rem 0.9rem 0.82rem 1.05rem;
+  border: 1px solid transparent;
   border-radius: 14px;
   font-family: 'Outfit', sans-serif;
-  font-size: 1rem;
+  font-size: 0.98rem;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.75);
+  letter-spacing: 0.2px;
+  color: rgba(255, 255, 255, 0.72);
   text-decoration: none;
-  transition: all 0.2s ease;
   opacity: 0;
   transform: translateX(30px);
+}
+
+/* Chevron. Two borders on a rotated square — no extra element, no icon font. */
+#mzMobilePanel .mz-mp-link::after {
+  content: '';
+  position: absolute;
+  right: 1rem;
+  width: 5px;
+  height: 5px;
+  border-right: 1.6px solid currentColor;
+  border-bottom: 1.6px solid currentColor;
+  transform: rotate(-45deg);
+  opacity: 0.3;
+  transition: transform 0.25s ease, opacity 0.25s ease;
 }
 
 #mzMobilePanel.open .mz-mp-link {
   opacity: 1;
   transform: translateX(0);
   transition: opacity 0.3s ease calc(var(--i) * 0.04s + 0.1s),
-    transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) calc(var(--i) * 0.04s + 0.1s),
+    transform 0.34s cubic-bezier(0.32, 0.72, 0, 1) calc(var(--i) * 0.04s + 0.1s),
     background 0.2s ease,
+    border-color 0.2s ease,
     color 0.2s ease;
 }
 
 #mzMobilePanel .mz-mp-link:hover {
-  background: rgba(245, 197, 24, 0.06);
-  color: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.045);
+  color: #fff;
+}
+
+#mzMobilePanel .mz-mp-link:hover::after {
+  opacity: 0.6;
+  transform: rotate(-45deg) translate(1.5px, 1.5px);
 }
 
 #mzMobilePanel .mz-mp-link.active {
-  background: linear-gradient(135deg, rgba(245, 197, 24, 0.1), rgba(245, 197, 24, 0.04));
-  color: #f5c518;
-  border: 1px solid rgba(245, 197, 24, 0.12);
-  box-shadow: 0 4px 16px rgba(245, 197, 24, 0.06);
+  background: linear-gradient(90deg, rgba(245, 197, 24, 0.16) 0%, rgba(245, 197, 24, 0.03) 78%);
+  border-color: rgba(245, 197, 24, 0.16);
+  color: #ffd75e;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* Gold marker on the active row — the panel's echo of the navbar's sliding pill. */
+#mzMobilePanel .mz-mp-link.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 54%;
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(180deg, #ffe9a8, #f5c518);
+  box-shadow: 0 0 10px rgba(245, 197, 24, 0.7);
+}
+
+#mzMobilePanel .mz-mp-link.active::after {
+  opacity: 0.75;
 }
 
 #mzMobilePanel .mz-mp-footer {
-  padding: 1.2rem 1.5rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  position: relative;
+  padding: 1rem 1.1rem 1.15rem;
   text-align: center;
+}
+
+#mzMobilePanel .mz-mp-footer::before {
+  content: '';
+  position: absolute;
+  left: 1.1rem;
+  right: 1.1rem;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(245, 197, 24, 0.28) 50%, transparent);
 }
 
 #mzMobilePanel .mz-mp-footer span {
   font-family: 'Outfit', sans-serif;
-  font-size: 0.7rem;
-  font-weight: 500;
-  letter-spacing: 2px;
-  color: rgba(255, 255, 255, 0.2);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 2.6px;
+  color: rgba(255, 226, 150, 0.32);
   text-transform: uppercase;
 }
 
@@ -608,33 +740,43 @@ body {
    almost no room; trim the chrome so the links stay the tallest part. */
 @media (max-height: 560px) {
   #mzMobilePanel .mz-mp-header {
-    padding: 0.85rem 1.1rem 0.7rem;
+    padding: 0.75rem 1rem 0.65rem;
   }
 
-  #mzMobilePanel .mz-mp-brand {
+  #mzMobilePanel .nav-logo-mark {
+    width: 1.85rem;
+    height: 1.85rem;
+    font-size: 0.72rem;
+  }
+
+  #mzMobilePanel .mz-mp-name {
     font-size: 1.05rem;
-    letter-spacing: 2px;
+    letter-spacing: 2.2px;
+  }
+
+  #mzMobilePanel .mz-mp-tag {
+    display: none;
   }
 
   #mzMobilePanel .mz-mp-close {
     width: 32px;
     height: 32px;
     border-radius: 10px;
-    font-size: 1.25rem;
   }
 
   #mzMobilePanel .mz-mp-links {
-    padding: 0.6rem 0.8rem;
+    padding: 0.55rem 0.7rem;
+    gap: 0.15rem;
   }
 
   #mzMobilePanel .mz-mp-link {
-    padding: 0.6rem 1rem;
-    font-size: 0.92rem;
+    padding: 0.58rem 0.85rem 0.58rem 1rem;
+    font-size: 0.9rem;
     border-radius: 11px;
   }
 
   #mzMobilePanel .mz-mp-footer {
-    padding: 0.6rem 1.1rem;
+    padding: 0.55rem 1rem 0.65rem;
   }
 }
 
@@ -686,78 +828,128 @@ body {
    NAVBAR — Cinematic floating pill
    ═══════════════════════════════════════════════════════════════ */
 
+/*  ── NAVBAR — "obsidian & gold" floating rail ──────────────────────────────
+ *
+ *  Composition, in the order the eye is meant to read it:
+ *    1. brand lockup   — gold medallion + metallic wordmark + club line
+ *    2. segmented rail — the nav links inside ONE recessed capsule, with a
+ *                        single gold pill that slides between them
+ *    3. command bar    — search, with a jewelled glyph and a ⌘K affordance
+ *    4. install CTA    — the only solid-gold surface, so it reads as primary
+ *
+ *  Three things carry the "premium" impression and are worth protecting when
+ *  editing:
+ *
+ *  • ONE control height. --nav-ctl sizes the search field, the install button
+ *    and the menu button identically at every breakpoint. Mixed heights are the
+ *    single most common reason a dark glass navbar looks amateur.
+ *
+ *  • Light has ONE direction. Every surface gets a bright inset on its TOP edge
+ *    and a dark inset on its bottom, and the bar itself gets a soft specular at
+ *    top-centre. That consistency is what makes the glass read as a physical
+ *    object instead of a stack of translucent rectangles.
+ *
+ *  • Gold is RATIONED. Full-saturation gold appears on exactly three surfaces
+ *    (medallion, search glyph, install pill) plus the active nav pill. The rest
+ *    of the bar is neutral glass. The previous version painted a gold/red/violet
+ *    animated border around the whole thing, which is the opposite of luxury —
+ *    restraint is what makes the gold expensive.
+ *
+ *  --nav-gold is stored as bare RGB channels so every rule below can pick its
+ *  own alpha from the one brand value. */
+
 #navbar {
+  --nav-gold: 245, 197, 24;
+  --nav-ctl: 40px;
+  /* One control height for search / install / menu. */
+  --nav-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   z-index: 1000;
-  padding: 0.7rem 1.2rem;
-  margin: 0.9rem auto 0;
-  width: min(1400px, calc(100% - 1.6rem));
+  margin: 0.85rem auto 0;
+  width: min(1440px, calc(100% - 1.8rem));
+  padding: 0.5rem 0.8rem;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 24px;
   background:
-    linear-gradient(180deg, rgba(15, 15, 25, 0.65) 0%, rgba(5, 5, 10, 0.85) 100%);
-  backdrop-filter: blur(40px) saturate(250%) brightness(1.15);
-  -webkit-backdrop-filter: blur(40px) saturate(250%) brightness(1.15);
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  border-radius: 32px;
+    linear-gradient(180deg,
+      rgba(26, 26, 42, 0.62) 0%,
+      rgba(10, 10, 20, 0.78) 46%,
+      rgba(5, 5, 12, 0.88) 100%);
+  backdrop-filter: blur(30px) saturate(190%) brightness(1.06);
+  -webkit-backdrop-filter: blur(30px) saturate(190%) brightness(1.06);
   box-shadow:
-    0 30px 70px rgba(0, 0, 0, 0.7),
-    0 0 0 1px rgba(245, 197, 24, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.15),
-    inset 0 0 24px rgba(245, 197, 24, 0.05),
-    0 20px 40px rgba(124, 58, 237, 0.06);
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.55),
+    0 22px 48px -18px rgba(0, 0, 0, 0.85);
   transition:
-    box-shadow 0.4s var(--ease-smooth),
-    border-color 0.4s var(--ease-smooth),
-    background 0.4s var(--ease-smooth),
-    transform 0.4s var(--ease-smooth);
+    padding 0.45s var(--nav-ease),
+    background 0.45s var(--nav-ease),
+    border-color 0.45s var(--nav-ease),
+    box-shadow 0.45s var(--nav-ease);
 }
 
+/*  Ambient light layer: one broad specular at the top edge plus a gold and a
+    violet bloom in the two upper corners. Always on at 0.9 — it is what stops
+    the glass looking flat — and taken to full when the bar detaches on scroll. */
 #navbar::before {
   content: '';
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: linear-gradient(90deg,
-      rgba(245, 197, 24, 0) 0%,
-      rgba(245, 197, 24, 0.08) 20%,
-      rgba(124, 58, 237, 0.08) 50%,
-      rgba(230, 57, 70, 0.06) 80%,
-      rgba(245, 197, 24, 0) 100%);
+  background:
+    radial-gradient(125% 200% at 50% -85%, rgba(255, 255, 255, 0.10) 0%, transparent 58%),
+    radial-gradient(62% 165% at 6% 0%, rgba(var(--nav-gold), 0.10) 0%, transparent 55%),
+    radial-gradient(62% 165% at 94% 0%, rgba(124, 58, 237, 0.10) 0%, transparent 55%);
   pointer-events: none;
-  opacity: 0;
+  opacity: 0.9;
   transition: opacity 0.5s ease;
 }
 
+/*  Hairline jewel edge. A masked 1px gradient ring, not a border: it fades to
+    nothing at both ends so the bar looks lit rather than outlined. Champagne at
+    the shoulders, a single cool violet note past the middle to keep it from
+    reading as plain yellow. */
 #navbar::after {
   content: '';
   position: absolute;
-  inset: -1px;
+  inset: 0;
   border-radius: inherit;
-  padding: 1.5px;
-  background: linear-gradient(90deg, rgba(245, 197, 24, 0.7), rgba(230, 57, 70, 0.5), rgba(124, 58, 237, 0.7), rgba(245, 197, 24, 0.7));
-  background-size: 200% 100%;
+  padding: 1px;
+  background: linear-gradient(100deg,
+      rgba(var(--nav-gold), 0) 0%,
+      rgba(255, 244, 202, 0.7) 24%,
+      rgba(var(--nav-gold), 0.16) 45%,
+      rgba(124, 58, 237, 0.3) 63%,
+      rgba(var(--nav-gold), 0) 100%);
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   mask-composite: exclude;
   pointer-events: none;
-  opacity: 0.4;
-  transition: opacity 0.4s ease;
+  opacity: 0.5;
+  transition: opacity 0.45s ease;
 }
 
+/*  Scrolled = "detached". The glass goes denser (there is real content behind it
+    now, so it has to stay legible), the jewel edge comes up, and a low gold
+    bloom appears under the bar. The geometry change that goes with it — a
+    slightly narrower, tighter bar — is desktop-only and lives further down. */
 #navbar.scrolled {
   background:
-    linear-gradient(180deg, rgba(15, 15, 25, 0.85) 0%, rgba(5, 5, 10, 0.96) 100%);
+    linear-gradient(180deg, rgba(18, 18, 30, 0.88) 0%, rgba(6, 6, 14, 0.95) 100%);
+  border-color: rgba(255, 255, 255, 0.07);
   box-shadow:
-    0 35px 85px rgba(0, 0, 0, 0.85),
-    0 0 0 1px rgba(245, 197, 24, 0.2),
-    0 0 40px rgba(245, 197, 24, 0.12),
-    0 0 40px rgba(124, 58, 237, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.6),
+    0 26px 60px -20px rgba(0, 0, 0, 0.92),
+    0 0 40px -14px rgba(var(--nav-gold), 0.22);
 }
 
 #navbar.scrolled::before {
@@ -765,22 +957,36 @@ body {
 }
 
 #navbar.scrolled::after {
-  opacity: 0.9;
+  opacity: 0.95;
 }
 
+/*  Focus lifts the LIGHT, not the geometry. This used to be
+    `transform: translateY(-2px)`, which moved the whole bar — and the search
+    dropdown anchored inside it — the instant the field was clicked. */
 #navbar:focus-within {
-  transform: translateY(-2px);
+  border-color: rgba(var(--nav-gold), 0.16);
   box-shadow:
-    0 40px 90px rgba(0, 0, 0, 0.8),
-    0 0 0 1px rgba(245, 197, 24, 0.3),
-    0 0 50px rgba(245, 197, 24, 0.2),
-    0 0 50px rgba(124, 58, 237, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    inset 0 1px 0 rgba(255, 255, 255, 0.11),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.6),
+    0 28px 64px -20px rgba(0, 0, 0, 0.9),
+    0 0 52px -16px rgba(var(--nav-gold), 0.3);
 }
 
 #navbar:focus-within::after {
   opacity: 1;
-  animation-duration: 1.5s;
+}
+
+/*  Desktop condense-on-scroll: the padding tightens and the glass tightens with
+    it. Pure chrome — #navbar is position:fixed, so nothing below it can be moved
+    by this and it cannot cost a layout shift. Kept off phones and tablets on
+    purpose: the mobile bar is already at its minimum, and the ≤768px block clamps
+    every transition to 0.2s, so an animated size change there arrives as a jump
+    rather than a settle. */
+@media (min-width: 1025px) {
+  #navbar.scrolled {
+    padding-top: 0.4rem;
+    padding-bottom: 0.4rem;
+  }
 }
 
 .nav-brand {
@@ -788,14 +994,23 @@ body {
   align-items: center;
   gap: 0.65rem;
   flex-shrink: 0;
+  min-width: 0;
 }
 
 .nav-logo {
   display: inline-flex;
   align-items: center;
-  gap: 0.8rem;
+  gap: 0.7rem;
   text-decoration: none;
   cursor: pointer;
+  min-width: 0;
+  padding: 2px;
+  border-radius: 16px;
+}
+
+.nav-logo:focus-visible {
+  outline: 2px solid rgba(var(--nav-gold), 0.65);
+  outline-offset: 2px;
 }
 
 /* App/TV artwork stays hidden on desktop and mobile website chrome. */
@@ -804,150 +1019,318 @@ body {
   display: none;
 }
 
+/*  The medallion. Struck metal, not a flat gold square: a vertical gold ramp for
+    the body, a bright inset on the top edge and a dark one on the bottom for the
+    bevel, ::before for the specular pool, ::after for a sheen that sweeps across
+    on hover. `overflow: hidden` is what keeps the sweep inside the squircle. */
 .nav-logo-mark {
-  width: 2.6rem;
-  height: 2.6rem;
-  border-radius: 14px;
+  position: relative;
+  overflow: hidden;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 34%;
   display: grid;
   place-items: center;
-  font-family: 'Bebas Neue', sans-serif;
-  font-size: 0.92rem;
-  letter-spacing: 1px;
-  color: #120e00;
-  background: var(--grad-gold);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  box-shadow:
-    0 8px 24px rgba(245, 197, 24, 0.25),
-    0 2px 6px rgba(245, 197, 24, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.15);
   flex-shrink: 0;
-  transition: transform 0.3s var(--ease-spring), box-shadow 0.3s ease;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 0.98rem;
+  letter-spacing: 1.5px;
+  color: #1c1403;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
+  background: linear-gradient(160deg,
+      #fff6cf 0%, #ffd75e 26%, #f5c518 52%, #d99b0c 78%, #b57708 100%);
+  border: 1px solid rgba(255, 246, 214, 0.7);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.85),
+    inset 0 -2px 3px rgba(120, 76, 0, 0.35),
+    0 4px 10px -2px rgba(var(--nav-gold), 0.45),
+    0 10px 28px -10px rgba(var(--nav-gold), 0.55);
+  transition: transform 0.5s var(--nav-ease), box-shadow 0.4s ease;
+}
+
+.nav-logo-mark::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(80% 60% at 26% 12%, rgba(255, 255, 255, 0.72), transparent 62%),
+    radial-gradient(70% 50% at 80% 100%, rgba(120, 70, 0, 0.26), transparent 60%);
+  pointer-events: none;
+}
+
+.nav-logo-mark::after {
+  content: '';
+  position: absolute;
+  top: -60%;
+  left: 0;
+  width: 55%;
+  height: 220%;
+  transform: translateX(-230%) rotate(18deg);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.85), transparent);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.nav-logo:hover .nav-logo-mark::after {
+  animation: navMarkSheen 0.85s var(--nav-ease);
+}
+
+/*  translateX, not `left`: this element is always in the DOM, so animating an
+    offset property would force layout on every frame of the sweep. */
+@keyframes navMarkSheen {
+  0% {
+    transform: translateX(-230%) rotate(18deg);
+    opacity: 0;
+  }
+
+  25% {
+    opacity: 0.9;
+  }
+
+  100% {
+    transform: translateX(310%) rotate(18deg);
+    opacity: 0;
+  }
 }
 
 .nav-logo:hover .nav-logo-mark {
-  transform: rotate(-6deg) scale(1.08);
+  transform: translateY(-1px) rotate(-4deg) scale(1.05);
   box-shadow:
-    0 12px 32px rgba(245, 197, 24, 0.35),
-    0 4px 8px rgba(245, 197, 24, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    inset 0 1px 1px rgba(255, 255, 255, 0.9),
+    inset 0 -2px 3px rgba(120, 76, 0, 0.3),
+    0 6px 14px -2px rgba(var(--nav-gold), 0.55),
+    0 16px 36px -10px rgba(var(--nav-gold), 0.7);
 }
 
 .nav-logo-copy {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  line-height: 0.9;
+  justify-content: center;
+  gap: 0.18rem;
+  line-height: 1;
+  min-width: 0;
 }
 
+/*  Metallic wordmark. The ramp is wider than the text (background-size 220%) and
+    parked left of centre; hover slides it across, which reads as light travelling
+    over brushed gold. drop-shadow, not text-shadow: the glyphs are a clipped
+    background, so only a filter can actually see their shape. */
 .nav-logo-main {
   font-family: 'Bebas Neue', sans-serif;
-  font-size: 1.9rem;
-  letter-spacing: 3.5px;
-  background: var(--grad-premium);
+  font-size: 1.78rem;
+  line-height: 0.82;
+  letter-spacing: 4px;
+  white-space: nowrap;
+  background: linear-gradient(96deg,
+      #fff7dc 0%, #ffe08a 18%, #f5c518 38%,
+      #ffb26b 58%, #f5c518 76%, #ffe9a8 100%);
+  background-size: 220% 100%;
+  background-position: 12% 0;
   -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
   background-clip: text;
-  background-size: 200% 200%;
-  transition: background-position 0.5s ease;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  filter:
+    drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5))
+    drop-shadow(0 4px 16px rgba(var(--nav-gold), 0.22));
+  transition: background-position 0.9s var(--nav-ease), filter 0.4s ease;
 }
 
 .nav-logo:hover .nav-logo-main {
-  color: var(--gold);
+  background-position: 88% 0;
+  filter:
+    drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5))
+    drop-shadow(0 6px 22px rgba(var(--nav-gold), 0.4));
 }
 
+/*  "CINEMA CLUB" as a proper brand sub-line: a struck gold lozenge, the words,
+    then a hairline that fades out — the lockup convention every luxury mark uses
+    to stop a subtitle from floating loose under a wordmark. */
 .nav-logo-sub {
-  margin-top: 0.2rem;
-  font-family: 'Outfit', sans-serif;
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 3px;
-  text-transform: uppercase;
-  color: rgba(245, 197, 24, 0.72);
-}
-
-/* Nav Links */
-.nav-links {
   display: flex;
-  gap: 0.2rem;
-  list-style: none;
   align-items: center;
-  margin-left: 0.25rem;
+  gap: 0.42rem;
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 3.4px;
+  text-transform: uppercase;
+  color: rgba(255, 226, 150, 0.62);
+  white-space: nowrap;
 }
 
-.nav-links a {
-  color: rgba(240, 240, 252, 0.75);
-  text-decoration: none;
-  font-size: 0.86rem;
-  font-weight: 500;
-  letter-spacing: 0.3px;
-  padding: 0.5rem 0.9rem;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  transition: all 0.3s var(--ease-smooth);
+.nav-logo-sub::before {
+  content: '';
+  flex: 0 0 4px;
+  width: 4px;
+  height: 4px;
+  border-radius: 1px;
+  transform: rotate(45deg);
+  background: linear-gradient(135deg, #ffe9a8, #f5c518);
+  box-shadow: 0 0 6px rgba(var(--nav-gold), 0.7);
+}
+
+.nav-logo-sub::after {
+  content: '';
+  flex: 0 0 26px;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(var(--nav-gold), 0.5), transparent);
+}
+
+/*  ── Nav links: one recessed capsule + one sliding gold pill ────────────────
+    Every link used to carry its own gradient wash and its own growing underline,
+    so five links meant five competing highlights and the row read as five
+    separate buttons. Now the row IS a control: a single inset capsule, and one
+    pill that travels between items.
+
+    The pill is ::before on the <ul> — a <span> is not valid as a direct child of
+    a list — and its geometry comes from two custom properties that
+    initNavIndicator() in moviezone.js writes from the real measured link box.
+    That script also adds .mz-ind-on; until then (and if it never runs at all)
+    the .active link keeps a static pill of its own, so this degrades to exactly
+    the old behaviour rather than to nothing. */
+.nav-links {
   position: relative;
-  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  list-style: none;
+  /*  Auto margins on both sides, not a left margin: the rail floats in the space
+      between the brand and the right-hand cluster instead of being glued to the
+      wordmark. Above 1280px the block further down takes over and centres it on
+      the bar itself; auto margins are the safe fallback below that, because they
+      collapse to zero the moment the row runs out of room. */
+  margin-inline: auto;
+  padding: 4px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.012) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35);
 }
 
-.nav-links a::before {
+.nav-links::before {
   content: '';
   position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, rgba(245, 197, 24, 0.12), rgba(124, 58, 237, 0.1));
-  border-radius: inherit;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  width: var(--nav-ind-w, 0px);
+  transform: translate3d(var(--nav-ind-x, 0px), 0, 0);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(var(--nav-gold), 0.22) 0%, rgba(var(--nav-gold), 0.07) 100%);
+  border: 1px solid rgba(var(--nav-gold), 0.3);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 4px 14px -6px rgba(var(--nav-gold), 0.6);
   opacity: 0;
-  transition: opacity 0.25s ease;
+  pointer-events: none;
+  transition:
+    transform 0.46s cubic-bezier(0.34, 1.3, 0.44, 1),
+    width 0.46s cubic-bezier(0.34, 1.3, 0.44, 1),
+    opacity 0.3s ease;
 }
 
-.nav-links a::after {
-  content: '';
-  position: absolute;
-  bottom: 0.2rem;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 0;
-  height: 2px;
-  background: linear-gradient(90deg, var(--gold), var(--red));
-  transition: width 0.35s var(--ease-spring);
-  border-radius: 2px;
-}
-
-.nav-links a:hover,
-.nav-links a.active {
-  color: var(--gold);
-  border-color: rgba(245, 197, 24, 0.15);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
-}
-
-.nav-links a:hover::before,
-.nav-links a.active::before {
+.nav-links.mz-ind-on::before {
   opacity: 1;
 }
 
-.nav-links a:hover::after,
-.nav-links a.active::after {
-  width: 55%;
-}
+/*  Note for whoever reads tv-mode.css next: its
+    `html[data-mz-tv] .nav-links a::before, ...a::after { animation: none }` rule
+    is now a no-op — those two pseudo-elements were the per-link gradient wash and
+    the growing underline, and both are gone. It is left in place rather than
+    edited because touching that file costs a ?v= bump and every TV's warm cache
+    for a rule that already does nothing. */
 
-/* Search bar */
-.nav-search {
-  flex: 1;
-  max-width: 380px;
-  margin-left: auto;
+.nav-links a {
   position: relative;
+  z-index: 1;
+  display: block;
+  color: rgba(226, 226, 244, 0.7);
+  text-decoration: none;
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.83rem;
+  font-weight: 600;
+  letter-spacing: 0.25px;
+  padding: 0.44rem 0.82rem;
+  border-radius: 999px;
+  white-space: nowrap;
+  transition: color 0.28s ease, text-shadow 0.28s ease, transform 0.2s var(--nav-ease);
 }
 
+.nav-links a:hover {
+  color: #fff;
+}
+
+.nav-links a.active {
+  color: #ffd75e;
+  text-shadow: 0 0 18px rgba(var(--nav-gold), 0.45);
+}
+
+/*  Pre-script / no-script fallback for the active item. Suppressed the moment
+    the sliding pill takes over, so the two can never both be visible. */
+.nav-links:not(.mz-ind-on) a.active {
+  background: linear-gradient(180deg, rgba(var(--nav-gold), 0.2), rgba(var(--nav-gold), 0.06));
+  box-shadow: inset 0 0 0 1px rgba(var(--nav-gold), 0.3);
+}
+
+.nav-links a:active {
+  transform: scale(0.96);
+}
+
+.nav-links a:focus-visible {
+  outline: 2px solid rgba(var(--nav-gold), 0.65);
+  outline-offset: 1px;
+}
+
+/*  True centring, from 1280px up.
+    ─────────────────────────────────────────────────────────────────────────────
+    Taking the rail out of flow is the only way to centre it on the BAR rather
+    than on the gap between its neighbours: the brand lockup (~196px) and the
+    right-hand cluster (~390px) are not the same width, so any flow-based
+    centring — auto margins included — lands the rail left of true centre.
+
+    It is gated at 1280px because out of flow also means it can no longer push
+    anything: the rail is ~415px wide, so centred it occupies the middle 415px,
+    and the search + install cluster has to fit in the space that is left. At
+    1280px that leaves ~10px of slack; below it, the two would start to overlap,
+    which is exactly why every narrower width keeps the auto-margin fallback.
+    If the link list ever gains a sixth item, re-measure this boundary. */
+@media (min-width: 1280px) {
+  .nav-links {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    margin-inline: 0;
+  }
+}
+
+/*  ── Command bar ──────────────────────────────────────────────────────────── */
+.nav-search {
+  position: relative;
+  flex: 0 1 300px;
+  max-width: 300px;
+  min-width: 0;
+  margin-left: auto;
+}
+
+/*  Bloom behind the field on focus. Blurred radial pair rather than a box-shadow
+    so the light spills past the capsule's corners the way a real glow would. */
 .nav-search::before {
   content: '';
   position: absolute;
-  inset: -12px -14px;
+  inset: -14px -16px;
   border-radius: 999px;
   background:
-    radial-gradient(circle at 20% 50%, rgba(245, 197, 24, 0.15), transparent 36%),
-    radial-gradient(circle at 80% 50%, rgba(124, 58, 237, 0.15), transparent 32%);
-  filter: blur(14px);
+    radial-gradient(circle at 18% 50%, rgba(var(--nav-gold), 0.22), transparent 40%),
+    radial-gradient(circle at 82% 50%, rgba(124, 58, 237, 0.2), transparent 38%);
+  filter: blur(16px);
   opacity: 0;
-  transition: opacity 0.4s ease;
+  transition: opacity 0.45s ease;
   pointer-events: none;
 }
 
@@ -955,77 +1338,152 @@ body {
   opacity: 1;
 }
 
+/*  No backdrop-filter on the field. The bar behind it is already blurring the
+    page, and a nested backdrop-filter cannot re-blur its own parent's output —
+    it only bought a second full-size filter pass per frame. */
 .nav-search input {
   width: 100%;
+  height: var(--nav-ctl);
   position: relative;
   z-index: 1;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)),
-    rgba(8, 8, 16, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0 3.9rem 0 2.65rem;
+  border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 999px;
-  padding: 0.66rem 1rem 0.66rem 3rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.015) 100%),
+    rgba(6, 6, 14, 0.55);
   color: var(--text);
   font-family: 'Outfit', sans-serif;
-  font-size: 0.88rem;
+  font-size: 0.83rem;
   font-weight: 500;
+  letter-spacing: 0.2px;
   outline: none;
-  backdrop-filter: blur(20px) saturate(180%);
+  text-overflow: ellipsis;
   box-shadow:
-    0 16px 42px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.07),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.1);
-  transition: all 0.35s var(--ease-smooth);
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.4),
+    0 8px 22px -12px rgba(0, 0, 0, 0.8);
+  transition:
+    border-color 0.3s ease,
+    background 0.3s ease,
+    box-shadow 0.35s ease;
 }
 
 .nav-search input::placeholder {
-  color: rgba(160, 160, 192, 0.65);
+  color: rgba(168, 168, 200, 0.6);
+  font-weight: 500;
 }
 
 .nav-search input:hover {
-  border-color: rgba(245, 197, 24, 0.2);
-  box-shadow: 0 18px 52px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  border-color: rgba(var(--nav-gold), 0.22);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
+    rgba(8, 8, 18, 0.6);
 }
 
 .nav-search input:focus {
-  border-color: rgba(245, 197, 24, 0.5);
+  border-color: rgba(var(--nav-gold), 0.5);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.04)),
-    rgba(10, 10, 20, 0.88);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)),
+    rgba(9, 9, 20, 0.82);
   box-shadow:
-    0 0 0 4px rgba(245, 197, 24, 0.12),
-    0 22px 56px rgba(0, 0, 0, 0.4),
-    0 0 28px rgba(124, 58, 237, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    0 0 0 3px rgba(var(--nav-gold), 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    0 14px 34px -16px rgba(0, 0, 0, 0.85);
 }
 
+/*  The glyph is a struck gold token with a dark icon, not a gold icon on tinted
+    glass. It is the highest-contrast element in the bar, which is why the eye
+    lands on the search field first — the intended reading order. */
 .nav-search .search-icon {
   position: absolute;
-  left: 0.5rem;
+  left: 5px;
   top: 50%;
   transform: translateY(-50%);
-  width: 1.8rem;
-  height: 1.8rem;
+  width: 28px;
+  height: 28px;
   border-radius: 999px;
   display: grid;
   place-items: center;
-  color: var(--gold);
-  background: linear-gradient(135deg, rgba(245, 197, 24, 0.18), rgba(124, 58, 237, 0.12));
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: #241a04;
+  background: linear-gradient(150deg, #fff2bd 0%, #ffd75e 40%, #f0bb14 72%, #d79c08 100%);
+  border: 1px solid rgba(255, 246, 214, 0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    inset 0 -1px 2px rgba(120, 76, 0, 0.3),
+    0 3px 10px -3px rgba(var(--nav-gold), 0.55);
   pointer-events: none;
-  font-size: 0.75rem;
-  font-weight: 700;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
   z-index: 2;
+  transition: transform 0.35s var(--nav-ease), box-shadow 0.35s ease;
+}
+
+.nav-search:focus-within .search-icon {
+  transform: translateY(-50%) scale(1.06);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    0 5px 16px -4px rgba(var(--nav-gold), 0.8);
+}
+
+/*  Keyboard affordance. Label text is set by initSearchShortcut() so Apple
+    machines see ⌘ and everyone else sees Ctrl; it hides on focus and while the
+    field has content, where .mz-search-clear occupies the same corner. */
+.nav-kbd {
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  white-space: nowrap;
+  color: rgba(226, 226, 244, 0.5);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    0 1px 0 rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.nav-search:focus-within .nav-kbd,
+.nav-search:has(.mz-search-clear.visible) .nav-kbd {
+  opacity: 0;
+  transform: translateY(-50%) scale(0.9);
+}
+
+/*  Between 1025 and 1200px the link rail cannot shrink (its labels are nowrap),
+    so the search field is the only thing left to give — it drops to ~200px and the
+    chip's 46px plus the padding reserved for it left the placeholder truncated
+    mid-word. The hint is the first thing to go, and the field gets that width back. */
+@media (max-width: 1200px) {
+  .nav-kbd {
+    display: none;
+  }
+
+  .nav-search input {
+    padding-right: 2.4rem;
+  }
 }
 
 /* Intelligent Search Dropdown */
 .search-results-dropdown {
   position: absolute;
-  top: calc(100% + 12px);
-  left: -34px;
-  right: -34px;
-  min-width: 410px;
+  top: calc(100% + 10px);
+  left: -40px;
+  right: -40px;
+  /*  Kept equal to the field's width plus the two 40px overhangs, so the panel
+      never grows past `right` and out over the install button. Re-derive it if
+      .nav-search's max-width changes: 300 + 40 + 40. */
+  min-width: 380px;
   background:
     radial-gradient(circle at 15% 0%, rgba(245, 197, 24, 0.08), transparent 34%),
     linear-gradient(180deg, rgba(15, 15, 28, 0.99) 0%, rgba(7, 7, 15, 0.995) 100%);
@@ -1066,17 +1524,17 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.72rem 1rem 0.55rem;
-  color: rgba(255, 255, 255, 0.55);
-  font-size: 0.68rem;
+  padding: 0.6rem 0.85rem 0.45rem;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 0.63rem;
   font-weight: 700;
-  letter-spacing: 0.09em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
 .search-dropdown-heading small {
-  color: rgba(245, 197, 24, 0.72);
-  font-size: 0.64rem;
+  color: rgba(245, 197, 24, 0.7);
+  font-size: 0.62rem;
 }
 
 .search-correction {
@@ -1126,13 +1584,13 @@ body {
 .search-result-item {
   display: flex;
   align-items: center;
-  gap: 0.85rem;
-  min-height: 76px;
-  padding: 0.58rem 0.85rem;
+  gap: 0.75rem;
+  min-height: 62px;
+  padding: 0.42rem 0.8rem;
   cursor: pointer;
   outline: none;
   transition: background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   position: relative;
 }
 
@@ -1149,13 +1607,13 @@ body {
 }
 
 .search-result-item img {
-  width: 42px;
-  height: 60px;
+  width: 38px;
+  height: 54px;
   object-fit: cover;
-  border-radius: 9px;
+  border-radius: 8px;
   flex-shrink: 0;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 7px 18px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.4);
 }
 
 .search-result-info {
@@ -1163,70 +1621,46 @@ body {
   min-width: 0;
 }
 
-.search-result-title-row {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  min-width: 0;
-}
-
 .search-result-info h4 {
-  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.88rem;
+  font-size: 0.9rem;
   font-weight: 700;
+  letter-spacing: 0.1px;
   color: var(--text);
 }
 
+/*  One muted line under the title: type, then year. Nothing else — see the note
+    on the row markup in renderSearchDropdown(). */
 .search-result-info p {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 0.55rem;
-  font-size: 0.69rem;
-  color: var(--text3);
-  margin-top: 0.24rem;
+  gap: 0.5rem;
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.42);
+  margin-top: 0.18rem;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .search-result-info p span+span::before {
-  content: '•';
-  margin-right: 0.55rem;
+  content: '\2022';
+  margin-right: 0.5rem;
   color: rgba(255, 255, 255, 0.2);
-}
-
-.search-type-badge {
-  flex-shrink: 0;
-  padding: 0.15rem 0.34rem;
-  border-radius: 5px;
-  background: rgba(124, 58, 237, 0.16);
-  border: 1px solid rgba(124, 58, 237, 0.3);
-  color: #c4a7ff;
-  font-size: 0.52rem;
-  font-weight: 800;
-  letter-spacing: 0.05em;
 }
 
 .search-upcoming {
   color: var(--gold) !important;
-  font-weight: 800;
-}
-
-.search-match-reason {
-  display: block;
-  margin-top: 0.24rem;
-  color: rgba(245, 197, 24, 0.72);
-  font-size: 0.62rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-weight: 700;
 }
 
 .search-result-arrow {
-  color: rgba(245, 197, 24, 0.5);
-  font-size: 1.45rem;
+  flex-shrink: 0;
+  color: rgba(245, 197, 24, 0.4);
+  font-size: 1.3rem;
+  line-height: 1;
   transition: transform 0.2s ease, color 0.2s ease;
 }
 
@@ -1277,15 +1711,15 @@ body {
   width: 100%;
   border: 0;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
-  padding: 0.76rem 1rem;
+  padding: 0.68rem 0.85rem;
   background: rgba(255, 255, 255, 0.025);
-  color: rgba(255, 255, 255, 0.68);
+  color: rgba(255, 255, 255, 0.6);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.7rem;
   cursor: pointer;
-  font: 600 0.72rem 'Outfit', sans-serif;
+  font: 600 0.7rem 'Outfit', sans-serif;
 }
 
 .search-view-all:hover {
@@ -1295,7 +1729,7 @@ body {
 
 .search-view-all strong {
   color: var(--gold);
-  font-size: 0.68rem;
+  font-size: 0.66rem;
 }
 
 .search-grid-empty {
@@ -1321,11 +1755,11 @@ body {
 @media (max-width: 680px) {
   .search-results-dropdown {
     position: fixed;
-    top: 76px;
+    top: 104px;
     left: 10px;
     right: 10px;
     min-width: 0;
-    max-height: calc(100dvh - 92px);
+    max-height: calc(100dvh - 120px);
     border-radius: 18px;
   }
 
@@ -1342,43 +1776,82 @@ body {
   }
 }
 
-/* Hamburger */
+/*  ── Menu button ────────────────────────────────────────────────────────────
+    Same 42px control height as the search field and the install pill, so the
+    right-hand cluster reads as one row of equal parts. The middle bar is
+    deliberately shorter than the other two — it grows to match on hover, which
+    is the whole animation. All three go to a matched length in the open state so
+    the X has even arms. */
 .hamburger-btn {
   display: none;
-  flex-direction: column;
-  justify-content: center;
-  gap: 5px;
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
-  background: linear-gradient(135deg, rgba(245, 197, 24, 0.1), rgba(124, 58, 237, 0.07));
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  cursor: pointer;
-  flex-shrink: 0;
-  padding: 0;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
-  transition: background 0.3s ease, transform 0.3s ease;
-  z-index: 10001;
   position: relative;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: var(--nav-ctl);
+  height: var(--nav-ctl);
+  padding: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+  z-index: 10001;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.4);
+  transition:
+    background 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease,
+    transform 0.3s var(--nav-ease);
 }
 
 .hamburger-btn:hover {
-  background: linear-gradient(135deg, rgba(245, 197, 24, 0.18), rgba(124, 58, 237, 0.14));
-  transform: scale(1.05);
+  border-color: rgba(var(--nav-gold), 0.28);
+  background: linear-gradient(180deg, rgba(var(--nav-gold), 0.14), rgba(var(--nav-gold), 0.04));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 6px 18px -8px rgba(var(--nav-gold), 0.6);
+}
+
+.hamburger-btn:active {
+  transform: scale(0.94);
+}
+
+.hamburger-btn:focus-visible {
+  outline: 2px solid rgba(var(--nav-gold), 0.65);
+  outline-offset: 2px;
 }
 
 .hamburger-btn span {
-  width: 18px;
-  height: 2px;
-  margin: 0 auto;
-  background: var(--text);
+  width: 17px;
+  height: 1.8px;
   border-radius: 999px;
-  transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.2s ease, background 0.2s ease;
+  background: linear-gradient(90deg, #ffe9a8, #f5c518);
+  box-shadow: 0 0 8px rgba(var(--nav-gold), 0.35);
+  transition:
+    transform 0.34s cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 0.2s ease,
+    width 0.3s var(--nav-ease);
 }
 
+.hamburger-btn span:nth-child(2) {
+  width: 11px;
+}
+
+.hamburger-btn:hover span:nth-child(2) {
+  width: 17px;
+}
+
+.hamburger-btn.open span {
+  width: 18px;
+}
+
+/*  4px gap + 1.8px bar = 5.8px between the centre of one bar and the next. */
 .hamburger-btn.open span:nth-child(1) {
-  transform: translateY(7px) rotate(45deg);
-  background: var(--gold);
+  transform: translateY(5.8px) rotate(45deg);
 }
 
 .hamburger-btn.open span:nth-child(2) {
@@ -1387,34 +1860,7 @@ body {
 }
 
 .hamburger-btn.open span:nth-child(3) {
-  transform: translateY(-7px) rotate(-45deg);
-  background: var(--gold);
-}
-
-/* Nav Actions */
-.nav-actions {
-  display: flex;
-  gap: 0.5rem;
-  flex-shrink: 0;
-}
-
-.nav-btn {
-  background: linear-gradient(135deg, var(--accent), var(--red));
-  color: #fff;
-  border: none;
-  padding: 0.5rem 1.2rem;
-  border-radius: 50px;
-  font-family: 'Outfit', sans-serif;
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s;
-  letter-spacing: 0.3px;
-}
-
-.nav-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 22px var(--glow);
+  transform: translateY(-5.8px) rotate(-45deg);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -2065,11 +2511,12 @@ body {
         engines), then the real value. svh is the SMALL viewport height — the
         one that excludes the mobile browser's collapsing toolbars — so the
         hero, its dots and the top of the next section all stay put instead of
-        jumping when the toolbar hides. The subtraction is the two-row phone
-        navbar this section is offset by (margin-top further down the file);
-        without it the hero ran past the fold and took the dots with it. */
+        jumping when the toolbar hides. The subtraction is the phone navbar this
+        section is offset by (margin-top further down the file); without it the
+        hero ran past the fold and took the dots with it. Keep it in step with
+        that margin-top — both dropped when the navbar went to a single row. */
     height: 86vh;
-    height: calc(100svh - 110px);
+    height: calc(100svh - 114px);
     min-height: 460px;
   }
   /*  Title steps: the base AND both length variants are set here, because
@@ -6831,28 +7278,14 @@ html[data-mz-tv="true"] .cat-group-menu {
 @media (max-width: 1024px) {
   #navbar {
     width: min(100% - 1rem, 1400px);
-    padding: 0.78rem 1rem;
-    gap: 0.85rem;
-  }
-
-  .nav-links {
-    gap: 0.12rem;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .nav-links::-webkit-scrollbar {
-    display: none;
-  }
-
-  .nav-links a {
-    white-space: nowrap;
-    padding: 0.38rem 0.75rem;
+    padding: 0.46rem 0.5rem;
+    gap: 0.45rem;
+    border-radius: 20px;
   }
 
   .nav-search {
     max-width: 300px;
-    flex: 1 1 auto;
+    flex: 1 1 200px;
   }
 
   .footer-inner {
@@ -6860,12 +7293,15 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 }
 
-/* Tablets and foldables (769px-1024px) sat between the two breakpoints above:
-   too wide for the phone hamburger to kick in, too narrow to fit the full nav
-   link row + search box + install button on one line without everything
-   getting crushed (labels clipped, search placeholder truncated, "Install"
-   shrunk to "Instal"). Give this band the same collapsed-nav treatment as
-   phones, just without the phone-only hero/grid/footer overrides below. */
+/*  Tablets and foldables (769-1024px). Too narrow for the link rail, wide enough
+    that nothing else has to be sacrificed — so this band is the desktop bar with
+    the rail swapped for the menu button, on ONE row.
+    ─────────────────────────────────────────────────────────────────────────────
+    It used to wrap the search onto a second row, which made the bar ~110px tall
+    on an iPad and pushed the hero's first line of type most of the way down the
+    screen. Ordering is done with flex `order` rather than by moving the markup,
+    because the sibling selectors that drive the collapsing search below depend on
+    the DOM order staying brand → menu → links → search → install. */
 @media (max-width: 1024px) and (min-width: 769px) {
   /*  Hero box for the tablet band ONLY. It used to live in the ≤1024px block
       above, which also matched every phone and therefore overrode the phone
@@ -6883,14 +7319,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 
   #navbar {
-    flex-wrap: wrap;
-    align-items: center;
-  }
-
-  .hamburger-btn {
-    display: flex;
-    margin-left: auto;
-    order: 1;
+    flex-wrap: nowrap;
   }
 
   .nav-links {
@@ -6898,12 +7327,17 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 
   .nav-search {
+    order: 1;
+    margin-left: auto;
+  }
+
+  .nav-install-btn {
     order: 2;
-    max-width: 100%;
-    width: 100%;
-    flex: 1 1 100%;
-    margin-left: 0;
-    margin-top: 0.5rem;
+  }
+
+  .hamburger-btn {
+    display: flex;
+    order: 3;
   }
 }
 
@@ -6922,65 +7356,105 @@ html[data-mz-tv="true"] .cat-group-menu {
 
   /* Remove GPU-heavy grain */
 
+  /*  ── PHONE NAVBAR: two rows ────────────────────────────────────────────
+      Row 1  brand ....................... install · menu
+      Row 2  search, full width
+
+      The search field used to live on row 1, collapsed to a gold token that
+      expanded on focus. It fitted the bar into ~54px, but three round gold
+      controls crowded into the top-right corner read as clutter rather than as
+      chrome, and a search box you have to open first is a worse deal on the
+      device where search is used most. A full-width field on its own row is the
+      layout every serious mobile catalogue uses, and it is what this is now.
+
+      Everything is sized off --nav-ctl, so the whole bar rescales from one number
+      at each breakpoint below. The field is deliberately shorter than the round
+      controls: it is a text input, not a tap target, and the 4px it gives back
+      comes straight off the height the hero has to be offset by. */
   #navbar {
-    width: min(100% - 0.75rem, 1400px);
+    width: min(100% - 0.7rem, 1400px);
     margin-top: 0.4rem;
-    padding: 0.85rem 0.9rem;
-    gap: 0.7rem;
+    padding: 0.4rem 0.45rem;
+    gap: 0.42rem;
     flex-wrap: wrap;
-    align-items: center;
-    border-radius: 22px;
-  }
-
-  .nav-logo {
-    font-size: 1.5rem;
-    line-height: 1;
-  }
-
-  .nav-brand {
-    gap: 0.5rem;
-  }
-
-  .nav-logo-mark {
-    width: 2.25rem;
-    height: 2.25rem;
-    border-radius: 13px;
-    font-size: 0.82rem;
-  }
-
-  .nav-logo-main {
-    font-size: 1.48rem;
-    letter-spacing: 2.4px;
-  }
-
-  .nav-logo-sub {
-    font-size: 0.58rem;
-    letter-spacing: 2px;
-  }
-
-  .hamburger-btn {
-    display: flex;
-    margin-left: auto;
-    order: 1;
-  }
-
-  .nav-search {
-    order: 2;
-    max-width: 100% !important;
-    width: 100% !important;
-    margin-left: 0;
-    margin-top: 0.5rem;
+    border-radius: 18px;
+    --nav-ctl: 38px;
   }
 
   .nav-links {
     display: none !important;
   }
 
+  .nav-brand {
+    gap: 0.5rem;
+    min-width: 0;
+    margin-right: auto;
+  }
+
+  .nav-logo {
+    gap: 0.5rem;
+    padding: 0;
+  }
+
+  .nav-logo-mark {
+    width: 2.05rem;
+    height: 2.05rem;
+    font-size: 0.78rem;
+    letter-spacing: 1px;
+  }
+
+  .nav-logo-main {
+    font-size: 1.26rem;
+    letter-spacing: 2px;
+  }
+
+  .nav-logo-sub {
+    font-size: 0.5rem;
+    letter-spacing: 1.8px;
+    gap: 0.3rem;
+  }
+
+  .nav-logo-sub::after {
+    flex-basis: 14px;
+  }
+
+  .nav-install-btn {
+    order: 1;
+  }
+
+  .hamburger-btn {
+    display: flex;
+    order: 2;
+    border-radius: 12px;
+  }
+
+  /* Row 2. flex-basis 100% is what forces the wrap. */
+  .nav-search {
+    order: 3;
+    flex: 1 1 100%;
+    max-width: none;
+    margin-left: 0;
+  }
+
+  .nav-search input {
+    height: 34px;
+    padding: 0 0.9rem 0 2.5rem;
+    font-size: 0.84rem;
+  }
+
+  .nav-search .search-icon {
+    left: 4px;
+    width: 26px;
+    height: 26px;
+  }
+
   /*  Height and the whole text composition live in the mobile hero block up with
-      the carousel CSS. Only the top offset is here, because it is the two-row
-      phone navbar's height and belongs with the navbar rules above it. */
+      the carousel CSS. Only the top offset is here, because it is the phone
+      navbar's height and belongs with the navbar rules above it.
+      0.4rem margin + 2×0.4rem padding + 38px row 1 + 0.42rem gap + 34px row 2
+      + 2px border ≈ 100px. */
   #hero {
-    margin-top: 105px;
+    margin-top: 108px;
   }
 
   .carousel-thumbs {
@@ -7131,44 +7605,53 @@ html[data-mz-tv="true"] .cat-group-menu {
 
 @media (max-width: 480px) {
   #navbar {
-    width: min(100% - 0.5rem, 1400px);
-    padding: 0.72rem 0.75rem 0.82rem;
-    gap: 0.52rem;
+    width: min(100% - 0.55rem, 1400px);
+    padding: 0.36rem 0.4rem;
+    gap: 0.36rem;
+    border-radius: 16px;
+    --nav-ctl: 36px;
   }
 
-  .nav-logo {
-    gap: 0.52rem;
+  .nav-logo,
+  .nav-brand {
+    gap: 0.45rem;
   }
 
   .nav-logo-mark {
-    width: 2rem;
-    height: 2rem;
-    border-radius: 11px;
-    font-size: 0.74rem;
+    width: 1.9rem;
+    height: 1.9rem;
+    font-size: 0.72rem;
   }
 
   .nav-logo-main {
-    font-size: 1.28rem;
-    letter-spacing: 1.8px;
+    font-size: 1.14rem;
+    letter-spacing: 1.6px;
   }
 
+  /*  The club line is the first piece of the lockup to go: at this width the
+      medallion plus wordmark already carry the brand, and the extra row of 8px
+      type only makes the bar taller. */
   .nav-logo-sub {
     display: none;
   }
 
   .hamburger-btn {
-    width: 42px;
-    height: 42px;
-    border-radius: 12px;
+    border-radius: 11px;
   }
 
-  .nav-links a {
-    padding: 0.32rem 0.65rem;
-    font-size: 0.76rem;
+  .nav-search input {
+    height: 32px;
+    font-size: 0.8rem;
+  }
+
+  /*  Two-row navbar bottom sits at ~94px here. max-height is left to the ≤1024px
+      rule further down, which caps the panel at 300px. */
+  .search-results-dropdown {
+    top: 98px;
   }
 
   #hero {
-    margin-top: 95px;
+    margin-top: 99px;
   }
 
   /*  Modal play button only. This used to be a bare `.btn-play, .btn-info` rule,
@@ -7352,41 +7835,55 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 
   #navbar {
-    padding: 0.4rem 0.5rem;
-    width: calc(100vw - 12px);
+    width: calc(100vw - 10px);
+    padding: 0.32rem 0.36rem;
+    gap: 0.32rem;
     border-radius: 14px;
+    --nav-ctl: 34px;
   }
 
   .nav-logo-main {
-    font-size: 1.05rem;
+    font-size: 1.02rem;
+    letter-spacing: 1.2px;
   }
 
   .nav-logo-mark {
-    width: 1.6rem;
-    height: 1.6rem;
-    font-size: 0.6rem;
-    border-radius: 8px;
+    width: 1.72rem;
+    height: 1.72rem;
+    font-size: 0.64rem;
+    letter-spacing: 0.5px;
   }
 
   .hamburger-btn {
-    width: 30px;
-    height: 30px;
-    border-radius: 8px;
-  }
-
-  .nav-search input {
-    font-size: 0.7rem;
-    padding: 0.45rem 1rem 0.45rem 2rem;
     border-radius: 10px;
   }
 
+  .hamburger-btn span {
+    width: 15px;
+  }
+
+  .hamburger-btn span:nth-child(2) {
+    width: 10px;
+  }
+
+  .nav-search input {
+    height: 30px;
+    font-size: 0.76rem;
+    padding-left: 2.3rem;
+  }
+
   .nav-search .search-icon {
-    width: 1.2rem;
-    height: 1.2rem;
+    width: 24px;
+    height: 24px;
+  }
+
+  /* Two-row navbar bottom sits at ~86px here. */
+  .search-results-dropdown {
+    top: 92px;
   }
 
   #hero {
-    margin-top: 85px;
+    margin-top: 94px;
   }
 
   /*  Hero type is NOT re-shrunk here any more. This band used to force
@@ -7809,25 +8306,13 @@ html[data-mz-tv="true"] .cat-group-menu {
   #navbar {
     width: min(92%, calc(100% - 2.5rem));
     max-width: 1800px;
-    padding: 0.8rem 1.6rem;
-    gap: 1rem;
+    --nav-ctl: 44px;
   }
 
-  .nav-logo {
-    font-size: 1.9rem;
-  }
-
-  .nav-links {
-    gap: 0.5rem;
-  }
-
-  .nav-links a {
-    font-size: 0.95rem;
-    padding: 0.55rem 1rem;
-  }
-
+  /*  html{font-size:108%} above already scales every rem in the bar — padding,
+      type, the whole logo lockup — so only the px control height is restated. */
   .nav-search {
-    max-width: 340px;
+    max-width: 420px;
   }
 
   .movie-grid {
@@ -7860,29 +8345,21 @@ html[data-mz-tv="true"] .cat-group-menu {
 
 /* ═══ Full HD TV (1920px / 43inch+) ═══ */
 @media (min-width: 1920px) {
+  /*  flex-wrap:nowrap is the point of this band: a 1920px TV must never break the
+      bar onto two rows. Sizes come from the base rules. */
   #navbar {
     width: min(96%, calc(100% - 1.5rem));
     max-width: 1880px;
-    padding: 0.8rem 1.6rem;
-    gap: 1rem;
     flex-wrap: nowrap;
   }
 
   .nav-links {
-    gap: 0.3rem;
     flex-wrap: nowrap;
-    overflow: visible;
-  }
-
-  .nav-links a {
-    font-size: 0.88rem;
-    padding: 0.5rem 0.9rem;
-    white-space: nowrap;
   }
 
   .nav-search {
-    max-width: 300px;
-    flex: 0 1 300px;
+    max-width: 340px;
+    flex: 0 1 340px;
   }
 
   .movie-grid {
@@ -7910,21 +8387,11 @@ html[data-mz-tv="true"] .cat-group-menu {
   #navbar {
     width: min(92%, calc(100% - 3rem));
     max-width: 2400px;
-    padding: 1rem 2rem;
-    gap: 1.5rem;
-  }
-
-  .nav-links {
-    gap: 0.7rem;
-  }
-
-  .nav-links a {
-    font-size: 1.05rem;
-    padding: 0.6rem 1.2rem;
+    --nav-ctl: 48px;
   }
 
   .nav-search {
-    max-width: 420px;
+    max-width: 460px;
   }
 
   .movie-grid {
@@ -8043,10 +8510,12 @@ html[data-mz-tv="true"] .cat-group-menu {
   transform: scale(1) !important;
 }
 
-/* Kill ALL heavy box-shadows */
+/* Kill ALL heavy box-shadows.
+   #navbar is handled by the "navbar keeps its depth" block at the end of this
+   file instead — its shadows are inset hairlines on one small element, not the
+   large blurred drops this rule exists to remove. */
 .low-end-mode .movie-card,
 .low-end-mode .upcoming-card,
-.low-end-mode #navbar,
 .low-end-mode .cat-tab,
 .low-end-mode .modal-box,
 .low-end-mode .btn-play,
@@ -8077,22 +8546,20 @@ html[data-mz-tv="true"] .cat-group-menu {
   display: none !important;
 }
 
-/* Kill pseudo-element decorations */
+/* Kill pseudo-element decorations.
+   #navbar::before is not listed: static radial gradients, no filter. See the
+   "navbar keeps its depth" block at the end of this file. */
 .low-end-mode .movie-card::before,
 .low-end-mode .movie-card::after,
 .low-end-mode .upcoming-card::before,
 .low-end-mode .upcoming-card::after,
 .low-end-mode .main-content::before,
-.low-end-mode .nav-search::before,
-.low-end-mode #navbar::before {
+.low-end-mode .nav-search::before {
   display: none !important;
 }
 
-/* Simplify navbar background */
-.low-end-mode #navbar {
-  background: rgba(5, 5, 12, 0.95) !important;
-  border: 1px solid rgba(255, 255, 255, 0.05) !important;
-}
+/* Navbar background is set in the "navbar keeps its depth" block at the end of
+   this file, together with the bevels that make it read as glass. */
 
 /* Stop skeleton shimmer animation */
 .low-end-mode .skeleton {
@@ -8321,86 +8788,98 @@ html[data-mz-tv="true"] .cat-group-menu {
 }
 
 
-/* === NAV INSTALL BUTTON === */
+/*  ── Install CTA ────────────────────────────────────────────────────────────
+    The one solid-gold surface in the bar, which is what makes it read as the
+    primary action without needing motion to shout. It was previously gold-on-dark
+    with an infinite pulse ring, an infinite background pan and a scale(1.08)
+    hover — four effects competing for the same attention. A struck gold pill with
+    dark type wins that attention on contrast alone; the only motion left is one
+    slow, low-amplitude breath and a sheen that sweeps on hover.
+
+    display is toggled to flex by pwa-install.js when the app is not installed. */
 .nav-install-btn {
   display: none;
-  align-items: center;
-  gap: 7px;
-  padding: 9px 18px;
-  border: 1px solid rgba(245, 197, 24, 0.6);
-  border-radius: 999px;
-  background: linear-gradient(135deg, rgba(245, 197, 24, 0.18), rgba(230, 57, 70, 0.08), rgba(245, 197, 24, 0.18));
-  background-size: 200% 200%;
-  color: #f5c518;
-  font-size: 0.82rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-  white-space: nowrap;
-  margin-left: 10px;
-  animation: navInstallPulse 2.5s ease-in-out infinite, navInstallBgShift 4s ease infinite;
   position: relative;
   overflow: hidden;
-  letter-spacing: 0.02em;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--nav-ctl);
+  padding: 0 0.8rem;
+  flex-shrink: 0;
+  cursor: pointer;
+  white-space: nowrap;
+  border: 1px solid rgba(255, 244, 200, 0.55);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffe58f 0%, #f7cb2e 42%, #e3a413 100%);
+  color: #1a1305;
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.65),
+    inset 0 -2px 3px rgba(120, 76, 0, 0.22),
+    0 6px 18px -6px rgba(var(--nav-gold), 0.55);
+  transition:
+    transform 0.3s var(--nav-ease),
+    box-shadow 0.35s ease,
+    filter 0.3s ease;
 }
 
+/*  The markup ships an 18px glyph so the icon-only phone button still reads;
+    beside a 0.74rem label it was the largest thing in the pill. */
+.nav-install-btn svg {
+  flex-shrink: 0;
+  position: relative;
+  width: 15px;
+  height: 15px;
+  animation: navInstallArrow 2.4s ease-in-out infinite;
+}
+
+/*  translateX rather than `left`, so the sweep composites instead of forcing
+    layout on the whole bar for 600ms. The percentages are of the pseudo's own
+    width (65% of the button), so -170% ≈ one button-width to the left. */
 .nav-install-btn::before {
   content: '';
   position: absolute;
   top: 0;
-  left: -100%;
-  width: 100%;
+  left: 0;
+  width: 65%;
   height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(245, 197, 24, 0.25), transparent);
-  transition: left 0.5s ease;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+  transform: translateX(-170%) skewX(-18deg);
+  transition: transform 0.6s var(--nav-ease);
+  pointer-events: none;
 }
 
 .nav-install-btn:hover::before {
-  left: 100%;
+  transform: translateX(200%) skewX(-18deg);
 }
 
 .nav-install-btn:hover {
-  background: linear-gradient(135deg, #f5c518, #fbbf24, #e6a817);
-  background-size: 100% 100%;
-  color: #000;
-  border-color: #f5c518;
-  transform: scale(1.08) translateY(-1px);
-  box-shadow: 0 6px 25px rgba(245, 197, 24, 0.45), 0 0 15px rgba(245, 197, 24, 0.3);
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    inset 0 -2px 3px rgba(120, 76, 0, 0.18),
+    0 10px 26px -6px rgba(var(--nav-gold), 0.75);
 }
 
 .nav-install-btn:active {
-  transform: scale(0.95);
+  transform: translateY(0) scale(0.97);
 }
 
-.nav-install-btn svg {
-  flex-shrink: 0;
-  animation: navInstallArrow 1.8s ease-in-out infinite;
+.nav-install-btn:focus-visible {
+  outline: 2px solid #fff3c4;
+  outline-offset: 2px;
 }
 
-@keyframes navInstallPulse {
-
-  0%,
-  100% {
-    box-shadow: 0 0 8px rgba(245, 197, 24, 0.2), 0 0 0 0 rgba(245, 197, 24, 0.4);
-  }
-
-  50% {
-    box-shadow: 0 0 18px rgba(245, 197, 24, 0.4), 0 0 0 4px rgba(245, 197, 24, 0.08);
-  }
-}
-
-@keyframes navInstallBgShift {
-
-  0%,
-  100% {
-    background-position: 0% 50%;
-  }
-
-  50% {
-    background-position: 100% 50%;
-  }
-}
-
+/*  The pill itself no longer breathes. A glowing ring pulsing behind a solid gold
+    button is how the previous version compensated for being gold-on-dark and easy
+    to miss; a struck gold pill against neutral glass is already the loudest thing
+    in the bar. What is left is the arrow, which says "download" rather than
+    "look at me", and it is 2 keyframes on a 15px element. */
 @keyframes navInstallArrow {
 
   0%,
@@ -8413,33 +8892,19 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 }
 
-@media (max-width: 768px) {
+/*  Icon-only from tablet down: the label is the first thing to go, because the
+    down-arrow-into-tray glyph already carries the meaning. title="" on the button
+    keeps the tooltip, and aria-label is not needed since the visible text is
+    replaced by an equally specific title. */
+@media (max-width: 1024px) {
   .nav-install-btn span {
     display: none;
   }
 
   .nav-install-btn {
-    padding: 8px 10px;
-    margin-left: 6px;
-  }
-}
-
-/* Icon-only on phones: the 18x18 SVG plus 8-10px padding read as an
-   oversized button once the "Install" label is hidden. Shrink the tap
-   target and the icon itself so it sits compactly next to the logo. */
-@media (max-width: 480px) {
-  .nav-install-btn {
-    padding: 6px;
+    width: var(--nav-ctl);
+    padding: 0;
     gap: 0;
-    margin-left: 4px;
-    width: 30px;
-    height: 30px;
-    justify-content: center;
-  }
-
-  .nav-install-btn svg {
-    width: 14px;
-    height: 14px;
   }
 }
 
@@ -11325,20 +11790,24 @@ img { content-visibility: auto; }
   #hero::before, #hero::after { display: none !important; }
   .click-spark { display: none !important; }
 
-  /* Remove ALL backdrop-filters on mobile (main lag cause) */
+  /* Remove ALL backdrop-filters on mobile (main lag cause).
+     Nothing is re-enabled: #mzMobilePanel used to be excepted here, but the panel
+     is opaque now — layered gradients over solid colour stops — so a blur behind
+     it had nothing to reveal and only bought a full-height filter pass. */
   * { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
-  /* Only re-enable on mobile panel */
-  #mzMobilePanel { backdrop-filter: blur(20px) !important; -webkit-backdrop-filter: blur(20px) !important; }
 
-  /* Simplify box-shadows (major GPU cost) */
+  /*  Simplify box-shadows (major GPU cost). The navbar is deliberately NOT
+      flattened to a single shadow here — see the "navbar keeps its depth" block
+      near the end of this file. Its shadows are all inset hairlines on one
+      42px-tall element, which costs nothing measurable, and they are the entire
+      reason the bar reads as glass rather than as a grey rectangle. What IS
+      dropped is the backdrop-filter, which was the actual cost. */
   .movie-card, .upcoming-card, .player-chip, .player-chip--source, .cat-tab {
     box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
   }
   #navbar {
-    box-shadow: 0 4px 20px rgba(0,0,0,0.5) !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
-    background: rgba(5,5,12,0.95) !important;
   }
 
   /* Disable 3D tilt on touch */
@@ -11347,9 +11816,14 @@ img { content-visibility: auto; }
   /* Reduce grid reflow */
   .movie-grid { gap: 10px !important; }
 
-  /* Remove pseudo-element decorations */
+  /* Remove pseudo-element decorations.
+     #navbar::before is NOT in this list any more: it is three static radial
+     gradients on one small element, with no filter and no animation, and it is
+     what stops the bar looking like a flat grey slab once the backdrop-filter
+     is gone. .nav-search::before stays off — that one carries filter: blur(16px),
+     which is a real per-frame cost. */
   .movie-card::before, .movie-card::after, .upcoming-card::before, .upcoming-card::after,
-  .nav-search::before, #navbar::before { display: none !important; }
+  .nav-search::before { display: none !important; }
 
 }
 
@@ -11373,14 +11847,33 @@ img { content-visibility: auto; }
 
 /* === LOW-END / MOBILE MODE: Strip effects but KEEP short transitions for smooth UI === */
 .low-end-mode *, .low-end-mode *::before, .low-end-mode *::after {
-  box-shadow: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  text-shadow: none !important;
   filter: none !important;
   animation: none !important;
   transition-duration: 0.2s !important;
   transition-timing-function: ease !important;
+}
+
+/*  Shadows are purged everywhere EXCEPT the navbar and its slide-in menu.
+ *
+ *  low-end-mode is on for every phone (isMobile), and this purge exists for the
+ *  movie grid: 24+ cards, each with a large blurred drop shadow. The navbar is
+ *  one ~54px-tall element whose shadows are all inset hairlines — the depth that
+ *  makes it read as glass rather than as a grey rectangle — and stripping them
+ *  bought nothing measurable while costing the whole look on the device most
+ *  visitors use. The expensive part of that bar, its backdrop-filter, is still
+ *  switched off by the rule above.
+ *
+ *  :where() keeps the exclusion at zero specificity, so this selector still
+ *  weighs exactly the same as the `.low-end-mode *` it replaces. An engine too
+ *  old for :where() drops the rule and keeps its shadows, which is slower but
+ *  never broken. */
+.low-end-mode :not(:where(#navbar, #navbar *, #mzMobilePanel, #mzMobilePanel *)),
+.low-end-mode :not(:where(#navbar, #navbar *, #mzMobilePanel, #mzMobilePanel *))::before,
+.low-end-mode :not(:where(#navbar, #navbar *, #mzMobilePanel, #mzMobilePanel *))::after {
+  box-shadow: none !important;
+  text-shadow: none !important;
 }
 /* Allow mobile panel to animate smoothly */
 .low-end-mode #mzMobilePanel,
@@ -11400,12 +11893,28 @@ img { content-visibility: auto; }
 .low-end-mode #hero::before, .low-end-mode #hero::after { display: none !important; }
 .low-end-mode .click-spark { display: none !important; }
 .low-end-mode .movie-card::before, .low-end-mode .movie-card::after { display: none !important; }
-.low-end-mode #navbar {
-  background: rgba(5,5,12,0.97) !important;
-  border: 1px solid rgba(255,255,255,0.05) !important;
-}
 .low-end-mode .slide-gradient {
   background: linear-gradient(to top, rgba(3,3,10,0.98) 0%, transparent 50%) !important;
+}
+
+/*  ── NAVBAR WITHOUT BACKDROP-FILTER ────────────────────────────────────────
+ *  low-end-mode and the ≤768px block both switch the bar's backdrop-filter off —
+ *  it is the one genuinely expensive thing about it. A translucent background
+ *  with nothing blurring behind it turns into muddy grey, so swap in the opaque
+ *  twin of the same gradient: identical stops, alpha removed. tv-mode.css does
+ *  the same thing for the same reason, and overrides this for TV.
+ *
+ *  The bar's shadows and every gold bevel inside it survive low-end-mode via the
+ *  :where() exemption above; only this background needs restating. */
+.low-end-mode #navbar {
+  background: linear-gradient(180deg,
+      rgb(21, 21, 34) 0%,
+      rgb(11, 11, 21) 46%,
+      rgb(6, 6, 13) 100%) !important;
+}
+
+.low-end-mode #navbar.scrolled {
+  background: linear-gradient(180deg, rgb(16, 16, 27) 0%, rgb(5, 5, 12) 100%) !important;
 }
 
 /* === REDUCED MOTION (accessibility + performance) === */
@@ -11417,7 +11926,6 @@ img { content-visibility: auto; }
 }
 
 /* ── Search dropdown v2: match highlight, clear button, suggestion skeleton ── */
-.nav-search{position:relative}
 .mz-search-hl{background:rgba(245,197,24,.22);color:#f5c518;border-radius:3px;padding:0 1px;font-weight:800}
 .mz-search-clear{position:absolute;right:10px;top:50%;transform:translateY(-50%);display:none;align-items:center;justify-content:center;width:22px;height:22px;border:0;border-radius:50%;background:rgba(255,255,255,.09);color:rgba(255,255,255,.7);cursor:pointer;font-size:15px;line-height:1;padding:0;z-index:3;transition:background .18s ease,color .18s ease}
 .mz-search-clear:hover{background:rgba(245,197,24,.2);color:#f5c518}

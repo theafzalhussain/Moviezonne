@@ -9201,7 +9201,7 @@ function renderSearchDropdown(query, search) {
   } else {
     const heading = document.createElement('div');
     heading.className = 'search-dropdown-heading';
-    heading.innerHTML = '<span>Top matches</span><small>' + results.length + ' suggestions</small>';
+    heading.innerHTML = '<span>Top matches</span><small>' + results.length + '</small>';
     dropdown.appendChild(heading);
 
     results.forEach((item, index) => {
@@ -9218,23 +9218,36 @@ function renderSearchDropdown(query, search) {
       resultItem.setAttribute('aria-selected', 'false');
       resultItem.setAttribute('aria-label', title + ' (' + (type === 'tv' ? 'series' : 'movie') + ')');
 
-      /*  w154, not IMG (w342). The dropdown renders these at 42x60 CSS px, so
+      /*  w154, not IMG (w342). The dropdown renders these at 38x54 CSS px, so
        *  w342 was ~8x the pixels on a 1x screen and still ~2x on a 3x phone.
        *  Search fires on every few keystrokes and renders up to a dozen rows, so
        *  this was one of the heavier image paths on the site for one of the
-       *  smallest things it draws. w154 covers 42px at 3x with room to spare.
+       *  smallest things it draws. w154 covers 38px at 3x with room to spare.
        */
       const poster = item.poster_path ? 'https://image.tmdb.org/t/p/w154' + item.poster_path : SEARCH_POSTER_FALLBACK;
-      const quality = item._matchQuality || 'Related';
 
+      /*  ── The row is the TITLE ────────────────────────────────────────────
+       *  It used to carry four things: the title, a violet MOVIE/SERIES badge, a
+       *  meta line with the year AND the rating, and a gold "match reason" line
+       *  ("Related", "Possible typo", "With <actor>"). Three lines of text plus a
+       *  badge per suggestion, ten suggestions deep — the list read as a wall of
+       *  copy, and the one thing a person is scanning for, the title, had to
+       *  compete with all of it.
+       *
+       *  Now: the title, and one muted line with the type and the year. The year
+       *  stays because it is what separates the remakes from the originals, which
+       *  is the whole reason a suggestion list is more useful than a text field.
+       *  The rating and the match reason are gone from the UI — _matchQuality is
+       *  still computed, because the "did you mean" correction in search-engine.js
+       *  reads it, it is simply not printed any more.
+       */
       resultItem.innerHTML =
-        '<img src="' + poster + '" alt="' + escapeHTML(title) + ' poster" width="42" height="60" loading="lazy" decoding="async">' +
-        '<div class="search-result-info"><div class="search-result-title-row"><h4>' + highlightSearchMatch(title, query) + '</h4>' +
-        '<span class="search-type-badge">' + (type === 'tv' ? 'SERIES' : 'MOVIE') + '</span></div>' +
-        '<p><span>' + escapeHTML((releaseDate || '----').slice(0, 4)) + '</span><span>★ ' + Number(item.vote_average || 0).toFixed(1) + '</span>' +
-        (upcoming ? '<span class="search-upcoming">UPCOMING</span>' : '') + '</p>' +
-        '<small class="search-match-reason">' + escapeHTML(quality) + '</small></div>' +
-        '<span class="search-result-arrow">›</span>';
+        '<img src="' + poster + '" alt="" width="38" height="54" loading="lazy" decoding="async">' +
+        '<div class="search-result-info"><h4>' + highlightSearchMatch(title, query) + '</h4>' +
+        '<p><span>' + (type === 'tv' ? 'Series' : 'Movie') + '</span>' +
+        (releaseDate ? '<span>' + escapeHTML(releaseDate.slice(0, 4)) + '</span>' : '') +
+        (upcoming ? '<span class="search-upcoming">Upcoming</span>' : '') + '</p></div>' +
+        '<span class="search-result-arrow" aria-hidden="true">›</span>';
 
       resultItem.addEventListener('mouseenter', () => setActiveSearchItem(index, Array.from(dropdown.querySelectorAll('[data-search-result]'))));
       resultItem.addEventListener('click', event => openSearchResult(item, event));
@@ -9244,7 +9257,10 @@ function renderSearchDropdown(query, search) {
     const footer = document.createElement('button');
     footer.type = 'button';
     footer.className = 'search-view-all';
-    footer.innerHTML = '<span>View all results for “' + escapeHTML(query) + '”</span><strong>Press Enter →</strong>';
+    /*  The query is not repeated here any more. It is already in the field two
+        rows above, and quoting it back made the widest line in the panel the one
+        piece of text nobody needs to read. */
+    footer.innerHTML = '<span>View all results</span><strong>Enter →</strong>';
     footer.addEventListener('click', () => {
       searchAndDisplay(query);
       closeDropdown();
@@ -11777,7 +11793,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // The dropdown triggers are excluded on purpose: a menu button should react
     // instantly, and the injected ripple span is a layout hazard inside a flex
     // button (see the specificity note next to .ripple-span in moviezone.css).
-    const btn = e.target.closest('.btn-play, .btn-info, .btn-watchlist, .btn-download, .load-more-btn, .premium-play-btn, .cat-tab:not(.cat-group-trigger), .carousel-arrow, .nav-btn');
+    /*  .nav-btn is not in this list any more — that class had no markup anywhere
+        and its CSS has been deleted. */
+    const btn = e.target.closest('.btn-play, .btn-info, .btn-watchlist, .btn-download, .load-more-btn, .premium-play-btn, .cat-tab:not(.cat-group-trigger), .carousel-arrow');
     if (btn && !isMzTV()) {
       btn.classList.add('ripple-wrapper');
       const circle = document.createElement('span');
@@ -11818,16 +11836,27 @@ window.addEventListener('scroll', () => {
   // Create premium mobile panel
   const panel = document.createElement('div');
   panel.id = 'mzMobilePanel';
+  /*  The header reuses .nav-logo-mark verbatim — the same gold medallion element
+      the navbar uses — so the panel cannot drift out of step with the bar's brand
+      lockup when one of the two is restyled. */
   panel.innerHTML = `
     <div class="mz-mp-inner">
       <div class="mz-mp-header">
-        <span class="mz-mp-brand">MOVIEZONE</span>
-        <button class="mz-mp-close" aria-label="Close menu">&times;</button>
+        <span class="mz-mp-brand">
+          <span class="nav-logo-mark">MZ</span>
+          <span class="mz-mp-brandcopy">
+            <span class="mz-mp-name">MOVIEZONE</span>
+            <span class="mz-mp-tag">Cinema Club</span>
+          </span>
+        </span>
+        <button class="mz-mp-close" type="button" aria-label="Close menu">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
       </div>
       <nav class="mz-mp-links">
         ${Array.from(navLinksOriginal.querySelectorAll('a')).map((a, i) => 
           `<a href="${a.getAttribute('href') || '#'}" class="mz-mp-link${a.classList.contains('active') ? ' active' : ''}" data-idx="${i}"${a.closest('[data-tv-hide]') ? ' data-tv-hide' : ''} style="--i:${i}">${(a.dataset.label || a.textContent).trim()}</a>`
-        ).join('')}
+        ).join("")}
       </nav>
       <div class="mz-mp-footer">
         <span>Cinema Club</span>
@@ -11895,6 +11924,124 @@ window.addEventListener('scroll', () => {
       panel.querySelectorAll('.mz-mp-link').forEach(l => l.classList.remove('active'));
       link.classList.add('active');
     });
+  });
+})();
+
+/*  ── Nav link indicator ────────────────────────────────────────────────────
+ *  The desktop link row is one recessed capsule with a single gold pill that
+ *  slides between the items, instead of five links each carrying their own
+ *  highlight and their own growing underline.
+ *
+ *  The pill itself is .nav-links::before — a pseudo-element, because a <span> is
+ *  not valid as a direct child of a <ul>. All this does is feed it the two
+ *  numbers CSS cannot derive: where the target link starts and how wide it is.
+ *  Geometry comes from getBoundingClientRect rather than offsetLeft so it is
+ *  correct regardless of what the <li> wrappers do, minus the capsule's own
+ *  border because an absolutely positioned child is placed against its parent's
+ *  PADDING box, not its border box.
+ *
+ *  .mz-ind-on is added only once a real measurement has been written. Until
+ *  then — and forever, if this never runs — the stylesheet keeps a static pill on
+ *  the .active link, so the row degrades to its previous appearance rather than
+ *  to no active state at all.
+ */
+(function initNavIndicator() {
+  const ul = document.getElementById('navLinks');
+  if (!ul) return;
+  let raf = 0;
+
+  function place(el) {
+    if (!el) return;
+    const box = ul.getBoundingClientRect();
+    // Zero width means the row is display:none — phone and tablet widths.
+    if (!box.width) return;
+    const r = el.getBoundingClientRect();
+    if (!r.width) return;
+    const border = parseFloat(getComputedStyle(ul).borderLeftWidth) || 0;
+    ul.style.setProperty('--nav-ind-x', (r.left - box.left - border) + 'px');
+    ul.style.setProperty('--nav-ind-w', r.width + 'px');
+    ul.classList.add('mz-ind-on');
+  }
+
+  const rest = () => place(ul.querySelector('a.active'));
+
+  function sync() {
+    if (raf) return;
+    raf = requestAnimationFrame(() => { raf = 0; rest(); });
+  }
+
+  // Hover and keyboard focus preview the destination, then it settles back.
+  ul.addEventListener('mouseover', (e) => {
+    const a = e.target.closest('a');
+    if (a && ul.contains(a)) place(a);
+  });
+  ul.addEventListener('mouseleave', rest);
+  ul.addEventListener('focusin', (e) => {
+    const a = e.target.closest('a');
+    if (a) place(a);
+  });
+  ul.addEventListener('focusout', rest);
+
+  /*  Clicking a tab is what MAKES it the active one.
+      Nothing used to move .active on these links — it was hardcoded on Home in the
+      markup, and goHome / filterCat / showWatchlist only ever touched the .cat-tab
+      row inside the page. So the highlight sat on Home forever: hovering another
+      tab previewed the pill, and letting go snapped it straight back. Moving the
+      class here (rather than inside each of those three functions) keeps them
+      unaware of the navbar, and the observer below turns the class change into the
+      slide. */
+  ul.addEventListener('click', (e) => {
+    const a = e.target.closest('a');
+    if (!a || !ul.contains(a)) return;
+    ul.querySelectorAll('a.active').forEach((l) => l.classList.remove('active'));
+    a.classList.add('active');
+  });
+
+  /*  goHome / filterCat / showWatchlist move .active around and know nothing
+      about this pill. Watching the class attribute is what keeps them decoupled.
+      Only 'class' is observed, so the style writes above cannot feed back in. */
+  new MutationObserver(sync).observe(ul, { subtree: true, attributes: true, attributeFilter: ['class'] });
+
+  if (typeof ResizeObserver === 'function') new ResizeObserver(sync).observe(ul);
+  window.addEventListener('resize', sync, { passive: true });
+
+  /*  Re-measure once Outfit has loaded. It is wider than the sans-serif fallback,
+      so a pill sized during the fallback paint ends up a few px short on every
+      link and never corrects itself. */
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(sync).catch(() => {});
+  sync();
+})();
+
+/*  ── Search shortcut ──────────────────────────────────────────────────────
+ *  Ctrl+K (⌘K on Apple) jumps to the search field, which is what the .nav-kbd
+ *  chip in the navbar advertises. The chip's label is written here rather than in
+ *  the markup so the two can never disagree about which modifier this platform
+ *  actually uses.
+ */
+(function initSearchShortcut() {
+  const input = document.getElementById('searchInput');
+  const kbd = document.getElementById('navSearchKbd');
+  const apple = /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || '');
+  if (kbd) kbd.textContent = apple ? '\u2318 K' : 'Ctrl K';
+  if (!input) return;
+
+  document.addEventListener('keydown', (e) => {
+    if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
+    const mod = apple ? e.metaKey : e.ctrlKey;
+    if (!mod || e.altKey || e.shiftKey) return;
+    if (e.key !== 'k' && e.key !== 'K') return;
+
+    /*  Never take the shortcut away from another text field — someone editing
+        the season number in the player modal presses Ctrl+K to mean Ctrl+K. */
+    const active = document.activeElement;
+    if (active && active !== input) {
+      if (active.isContentEditable) return;
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName || '')) return;
+    }
+
+    e.preventDefault();
+    input.focus();
+    input.select();
   });
 })();
  

@@ -106,7 +106,45 @@ const brotliOf = (p) => zlib.brotliCompressSync(fs.readFileSync(p), {
   params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 }
 }).length;
 
-const CRITICAL_WIRE_BUDGET = 115 * 1024;
+const CRITICAL_WIRE_BUDGET = 117 * 1024;
+
+/*  Raised 115 -> 117 KB for the navbar redesign (Sep 2026).
+ *
+ *  It costs +1.5 KB brotli: +1.0 CSS, +0.3 JS, +0.2 index.html. What that buys is
+ *  a rebuilt bar — one recessed capsule holding the links with a single gold pill
+ *  that slides between them, a struck-metal brand medallion and wordmark, a
+ *  jewelled search token with a Ctrl/Cmd+K affordance and the shortcut behind it,
+ *  and a phone layout that is ONE row instead of two because the search field
+ *  collapses to a tappable token and expands on focus. That last part is the
+ *  reason the number moved and it pays for itself elsewhere: the phone navbar went
+ *  from ~105px tall to ~60px, so #hero gained 45px of above-the-fold height on
+ *  every phone (margin-top 105 -> 70, and the 100svh subtraction with it).
+ *
+ *  Trimmed first, and it was most of the work:
+ *    - the low-end/mobile shadow purge now EXEMPTS the navbar subtree with one
+ *      :not(:where(#navbar, ...)) selector instead of ~12 rules restating each
+ *      bevel it had just stripped (~1.6 KB saved)
+ *    - .nav-actions / .nav-btn deleted outright: no markup anywhere in the tree
+ *      referenced either, and the ripple selector list lost .nav-btn with them
+ *    - the 1800 / 1920 / 2500px bands dropped their per-element type and padding
+ *      overrides. html{font-size} already scales every rem in the bar, so only
+ *      --nav-ctl (a px control height) and the bar's own width need restating
+ *    - the install pill's infinite breathing glow is gone rather than retuned. It
+ *      existed to compensate for being gold-on-dark and easy to miss; the pill is
+ *      solid gold now, so the animation was two keyframes of full box-shadow
+ *      stacks buying nothing
+ *    - #mzMobilePanel stopped being excepted from the mobile backdrop-filter kill:
+ *      the panel is opaque now, so the blur had nothing behind it to reveal
+ *    - duplicate .nav-search{position:relative} in the search-v2 section removed
+ *
+ *  Why the ceiling moved rather than the feature shrinking further: 115 KB was
+ *  already down to 0.8 KB of headroom before this change — 0.7%, and by the same
+ *  reasoning recorded against the parse budget below, too tight to absorb any real
+ *  change. 117 KB restores roughly the alarm distance it was set with. This is
+ *  also the budget the comment above calls NOT this page's problem: at 1.5 Mbps
+ *  the whole first paint is ~0.6s of download, and the number that actually hurts
+ *  — parse weight — is at 438 of 449 KB and moved by 8 KB, not 20.
+ */
 
 /*  Raised 430 -> 435 KB for the hero print-quality badge (Sep 2026).
  *
