@@ -20,7 +20,7 @@
 // this bump a returning visitor would keep being served the old square tiles
 // forever. The activate handler deletes every cache that is not CACHE_NAME, so
 // renaming the shell is what forces the re-download.
-const CACHE_NAME = 'moviezone-v127';
+const CACHE_NAME = 'moviezone-v129';
 
 // Separate cache for TMDB posters/backdrops. Kept apart from the shell so the
 // activate handler can wipe an old shell without throwing away hundreds of
@@ -37,7 +37,7 @@ const STATIC_ASSETS = [
   '/moviezone.min.css?v=9.5',
   '/tv-mode.min.js?v=1.5',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=13.1',
+  '/moviezone.min.js?v=13.3',
   '/manifest.json',
   '/moviezone-logo.png?v=2',
   '/icon-192.png?v=2',
@@ -69,7 +69,7 @@ const OPTIONAL_ASSETS = [
   '/provider-discoveryplus.png',
   '/provider-shemaroo.png',
   '/provider-vi.png',
-  '/collections-catalog.json?v=3',
+  '/collections-catalog.json?v=4',
   // The Cinematic Universe rail on the homepage. Both are optional for the same
   // reason the catalogue above is: the row is below the fold and built lazily, so
   // a 404 on either must not be able to fail the whole service-worker install.

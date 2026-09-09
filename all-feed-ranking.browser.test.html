@@ -389,16 +389,39 @@
     ok('a regional film whose HD print just landed reaches the quality-update group',
       win.allFeedPriorityGroup(hiUpgraded) === 1, String(win.allFeedPriorityGroup(hiUpgraded)));
 
-    // Series and anime floors must not move with this: a low-traction Hindi
-    // series is not promoted merely for being regional.
+    /*  Web series from the tabbed industries now share the movie floor (12/8).
+     *  Before that, a Hindi original that had just dropped on JioHotstar or
+     *  Netflix India could not reach group 2 at all — it fell to the stale
+     *  fallback while an English premiere with fifty times the votes took the
+     *  fresh slot, so the Web Series and platform tabs read as Hollywood-only.
+     *
+     *  It is still a bar: this fixture (popularity 9, six votes) is below 12/8 and
+     *  must STILL be kept out of the fresh group. */
     var hiSeriesSmall = series(3, { name: 'HI-SERIES-SMALL', original_language: 'hi',
       popularity: 9, vote_count: 6 });
-    ok('the regional floor never touches web series or anime',
-      win.freshTierFloors(hiSeriesSmall).popularity === 20
-        && win.freshTierFloors(hiSeriesSmall).votes === 20
+    ok('a no-traction Hindi series is still kept out of the fresh group',
+      win.freshTierFloors(hiSeriesSmall).popularity === 12
+        && win.freshTierFloors(hiSeriesSmall).votes === 8
         && win.allFeedPriorityGroup(hiSeriesSmall) === 5,
       'floors ' + JSON.stringify(win.freshTierFloors(hiSeriesSmall))
         + ' group ' + win.allFeedPriorityGroup(hiSeriesSmall));
+    /*  ...and a Hindi series WITH traction has to reach it, which is the whole
+     *  point of the change. Popularity 24 is the same real-world number the movie
+     *  case uses (Batwara 1947, two days after release, zero votes). */
+    var hiSeriesReal = series(3, { name: 'HI-SERIES-REAL', original_language: 'hi',
+      popularity: 24, vote_count: 0 });
+    ok('a real Hindi web series premiere reaches the fresh web-series group',
+      win.allFeedPriorityGroup(hiSeriesReal) === 2,
+      String(win.allFeedPriorityGroup(hiSeriesReal)));
+    /*  English series keep the original 20/20 bar, so the Hollywood half of the
+     *  series feed is untouched. */
+    var enSeriesSmall = series(3, { name: 'EN-SERIES-SMALL', original_language: 'en',
+      popularity: 9, vote_count: 6 });
+    ok('the English series bar is unchanged',
+      win.freshTierFloors(enSeriesSmall).popularity === 20
+        && win.allFeedPriorityGroup(enSeriesSmall) === 5,
+      'floors ' + JSON.stringify(win.freshTierFloors(enSeriesSmall))
+        + ' group ' + win.allFeedPriorityGroup(enSeriesSmall));
     var jaAnimeSmall = series(3, { name: 'ANIME-SMALL', original_language: 'ja',
       genre_ids: [16], popularity: 9, vote_count: 6 });
     ok('anime keeps its own traction floor too',

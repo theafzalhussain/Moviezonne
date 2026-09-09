@@ -2228,19 +2228,34 @@ const FRESH_TIER_MIN_VOTES = 20;
  *  DC (29), Jana Nayagan (32), Vishwanath & Sons (70). The titles it now stops
  *  are the ones nobody searched for: Ohh My Dog (3), Tera Yaar Hoon Main (2).
  *
- *  Deliberately scoped to movies: the web series and anime floors stay at 20/20,
- *  so nothing in those halves of the feed changes.
+ *  Deliberately scoped to the three tabbed industries. It applies to MOVIES and
+ *  WEB SERIES alike, but never to anime.
+ *
+ *  The series half was added later, and for the same measured reason the movie
+ *  half exists. Judged by the 20/20 bar, a Hindi original that had just dropped
+ *  on JioHotstar or Netflix India almost never reached the fresh-series group: it
+ *  fell to the stale fallback while an English premiere with fifty times the vote
+ *  count took group 2. On the Web Series tab and on every platform tab that read
+ *  as "this site only carries Hollywood shows", which is wrong for a catalogue
+ *  whose audience is half Indian.
+ *
+ *  Anime is excluded on purpose — it keeps the 20/20 bar. Seasonal anime crosses
+ *  a print stage in dozens at a time with almost no votes behind it, which is the
+ *  exact case the original floor was written to stop, and anime is Japanese so it
+ *  would not match these languages anyway.
  */
-const REGIONAL_MOVIE_LANGUAGES = ['hi', 'ta', 'te'];
+const REGIONAL_INDUSTRY_LANGUAGES = ['hi', 'ta', 'te'];
 const REGIONAL_FRESH_MIN_POPULARITY = 12;
 const REGIONAL_FRESH_MIN_VOTES = 8;
 
 /** The popularity/vote bar a title must clear to be treated as a relevant fresh
- *  release. Regional-industry movies get the smaller bar; everything else, and
- *  every series or anime whatever its language, keeps the original one. */
+ *  release. Movies and web series from the tabbed industries get the smaller
+ *  bar; everything else, and all anime whatever its language, keeps the original
+ *  one. Still a bar, not an open door: a Hindi title with single-digit
+ *  popularity and no votes fails it exactly as before. */
 function freshTierFloors(title) {
-  if (mediaTypeOf(title) === 'movie'
-      && REGIONAL_MOVIE_LANGUAGES.indexOf(title.original_language || 'en') !== -1) {
+  const lang = title.original_language || 'en';
+  if (REGIONAL_INDUSTRY_LANGUAGES.indexOf(lang) !== -1 && !isAnimeContent(title)) {
     return { popularity: REGIONAL_FRESH_MIN_POPULARITY, votes: REGIONAL_FRESH_MIN_VOTES };
   }
   return { popularity: FRESH_TIER_MIN_POPULARITY, votes: FRESH_TIER_MIN_VOTES };
@@ -2425,52 +2440,133 @@ function feedLaneOf(title) {
  *  Malayalam, Kannada and the rest are not on this list — they reach the feed on
  *  merit through the normal ranking, which is what stops single-digit-popularity
  *  titles from taking a guaranteed front-row seat.
+ *
+ *  ── THE SERIES LANE GETS THE SAME TREATMENT ──
+ *  Originally this pass only ran on movies, which left a hole: on the Web Series
+ *  tab there are no movies at all, so the pass did nothing and the grid was
+ *  ordered purely by score — and an English premiere carries an order of
+ *  magnitude more popularity and votes than a Hindi one, so the tab opened
+ *  Hollywood-only. Platform tabs had the same problem for the same reason.
+ *
+ *  So the pass now runs once per lane: one guaranteed slot per industry among the
+ *  movies, and one per industry among the web series. Same rules, same narrowness
+ *  — a promoted series must be in the fresh web-series group (2), so nothing stale
+ *  is padded in. Anime keeps its own lane and is not promoted by industry; it is
+ *  Japanese by definition, so there is no industry mix to balance.
  */
 const FEED_FIRST_SCREEN_INDUSTRIES = ['en', 'hi', 'ta', 'te'];
-const FEED_PROMOTABLE_GROUPS = [0, 1];
+const FEED_PROMOTABLE_GROUPS = [0, 1];          // movie lane: latest release, then fresh print
+const FEED_SERIES_PROMOTABLE_GROUPS = [2];      // series lane: fresh streaming web series
 
-/** True when a title is new enough to defend a guaranteed front-row slot. */
+/*  ── THE CATALOGUE FALLBACK, AND WHY IT IS OPT-IN ──
+ *
+ *  Everything above only promotes titles that are genuinely NEW. On the ALL feed
+ *  that is right: it is a "what just arrived" surface, and padding its front row
+ *  with a two-year-old film would make it lie about what it is.
+ *
+ *  A category or platform tab makes a different promise. "Web Series", "Action"
+ *  or "Netflix" promise the best of that category, not only this week's arrivals,
+ *  and most of a provider library is back catalogue by definition. Measured with
+ *  fresh-only promotion: the Web Series first screen came out 7 Korean / 5
+ *  English with no Hindi at all, and MX Player's first screen had no Indian title
+ *  even though its pool held 11 Hindi, 3 Telugu and 2 Tamil ones — the Indian
+ *  shows were all catalogue, so nothing could claim a slot for them.
+ *
+ *  So those surfaces may fall back to an industry's strongest CATALOGUE title
+ *  when it has no fresh one. The fresh promotions still come first, so this never
+ *  costs a new release its position — the fallback lands just behind them, still
+ *  on the first screen. */
+const FEED_CATALOGUE_MOVIE_GROUPS = [4];
+const FEED_CATALOGUE_SERIES_GROUPS = [5];
+
+/** True when a title is new enough to defend a guaranteed front-row slot, or —
+ *  for the catalogue groups — strong enough to represent its industry. */
 function promotableToFirstScreen(item, group) {
-  if (mediaTypeOf(item) !== 'movie') return false;
   if (item._priorityGroup !== group) return false;
-  if (group !== 1) return true;
-  const state = item._qualityState || titleQualityState(item);
-  return state.upgradedDaysAgo != null && state.upgradedDaysAgo <= QUALITY_UPGRADE_BADGE_DAYS;
+
+  if (mediaTypeOf(item) !== 'movie') {
+    // Series lane. Anime has its own lane and no industry mix to balance.
+    if (isAnimeContent(item)) return false;
+    if (group === 2) return true;
+    return group === 5 && industryRepresentative(item);
+  }
+
+  if (group === 0) return true;
+  if (group === 1) {
+    /*  A promoted print upgrade must still be recent enough to WEAR its ribbon,
+     *  or the front row shows an old film with no badge and no explanation. */
+    const state = item._qualityState || titleQualityState(item);
+    return state.upgradedDaysAgo != null && state.upgradedDaysAgo <= QUALITY_UPGRADE_BADGE_DAYS;
+  }
+  return group === 4 && industryRepresentative(item);
 }
 
-function promoteFreshIndustryMix(pool) {
-  const chosen = [];
+/** A catalogue title may only claim an industry slot if somebody actually
+ *  watches it. The pool is already ranked, so the first match per industry is
+ *  that industry's strongest title — this only guards the case where an
+ *  industry's entire presence in the pool is no-name filler. */
+function industryRepresentative(item) {
+  return (item.vote_count || 0) >= REGIONAL_FRESH_MIN_VOTES
+    || (item.popularity || 0) >= REGIONAL_FRESH_MIN_POPULARITY;
+}
+
+function promoteFreshIndustryMix(pool, allowCatalogue) {
+  const freshChosen = [];
+  const catalogueChosen = [];
   const takenIndexes = new Set();
 
-  FEED_FIRST_SCREEN_INDUSTRIES.forEach((lang) => {
-    for (const group of FEED_PROMOTABLE_GROUPS) {
-      let found = -1;
-      for (let i = 0; i < pool.length; i++) {
-        const item = pool[i];
-        if (takenIndexes.has(i)) continue;
-        if ((item.original_language || 'en') !== lang) continue;
-        if (!promotableToFirstScreen(item, group)) continue;
-        found = i;
-        break;                                            // pool is ranked: first is best
+  /*  One pass per lane. `inLane` keeps the movie pass from stealing the slot the
+   *  series pass is about to fill, and vice versa — without it a tab holding both
+   *  would hand all four industry slots to whichever lane ranked higher. */
+  const claimSlots = (groups, inLane, sink) => {
+    FEED_FIRST_SCREEN_INDUSTRIES.forEach((lang) => {
+      for (const group of groups) {
+        let found = -1;
+        for (let i = 0; i < pool.length; i++) {
+          const item = pool[i];
+          if (takenIndexes.has(i)) continue;
+          if (!inLane(item)) continue;
+          if ((item.original_language || 'en') !== lang) continue;
+          if (!promotableToFirstScreen(item, group)) continue;
+          found = i;
+          break;                                          // pool is ranked: first is best
+        }
+        if (found !== -1) { takenIndexes.add(found); sink.push(found); break; }
       }
-      if (found !== -1) { takenIndexes.add(found); chosen.push(found); break; }
-    }
-  });
+    });
+  };
 
-  if (chosen.length < 2) return pool.slice();            // nothing to balance
+  const isMovie = (m) => mediaTypeOf(m) === 'movie';
+  const isSeries = (m) => mediaTypeOf(m) !== 'movie';
 
-  // Rank order among the promoted titles is preserved: the strongest of them
-  // still opens the feed, they are simply all on the first screen now.
-  chosen.sort((a, b) => a - b);
-  return chosen.map((i) => pool[i])
+  claimSlots(FEED_PROMOTABLE_GROUPS, isMovie, freshChosen);
+  claimSlots(FEED_SERIES_PROMOTABLE_GROUPS, isSeries, freshChosen);
+
+  if (allowCatalogue) {
+    /*  Only industries that did not already win a fresh slot are considered:
+     *  claimSlots skips a language once one of its titles is taken, because the
+     *  fresh pass breaks out of the group loop on success. An industry with a
+     *  fresh title therefore never also gets a catalogue slot. */
+    claimSlots(FEED_CATALOGUE_MOVIE_GROUPS, isMovie, catalogueChosen);
+    claimSlots(FEED_CATALOGUE_SERIES_GROUPS, isSeries, catalogueChosen);
+  }
+
+  if (freshChosen.length + catalogueChosen.length < 2) return pool.slice();
+
+  /*  Fresh promotions lead, catalogue representatives follow, and rank order is
+   *  preserved inside each set — so the strongest new arrival still opens the
+   *  surface and the fallback sits just behind it rather than above it. */
+  freshChosen.sort((a, b) => a - b);
+  catalogueChosen.sort((a, b) => a - b);
+  return freshChosen.concat(catalogueChosen).map((i) => pool[i])
     .concat(pool.filter((_, i) => !takenIndexes.has(i)));
 }
 
-function interleaveFeedByType(pool) {
+function interleaveFeedByType(pool, allowCatalogueIndustrySlots) {
   /*  The industry mix is applied first and kept whatever happens next: if the tv
    *  queries failed and this pool is movies only, the early return below must
    *  still hand back the balanced order, not the raw one. */
-  const promoted = promoteFreshIndustryMix(pool);
+  const promoted = promoteFreshIndustryMix(pool, allowCatalogueIndustrySlots);
 
   const lanes = { movie: [], series: [], anime: [] };
   promoted.forEach((item) => { lanes[feedLaneOf(item)].push(item); });
@@ -2553,15 +2649,150 @@ function ottRankLikeAllFeed(items) {
     // Undated or unproven titles get no premium rather than jumping the queue.
     const yearsOld = isNaN(t) ? 99 : Math.max(0, (now - t) / 31557600000);
     const premium = relevant ? Math.max(0, 3200 - (yearsOld * 620)) : 0;
-    m._ottFinal = (m._ottScore || 0) + premium;
+    /*  Same catalogue era weight the category tabs use, applied to the platform's
+     *  own relevance score. A provider library is mostly back catalogue, so
+     *  without it the decades-old titles with the biggest lifetime vote counts
+     *  opened the grid. It scales _ottScore rather than replacing it, so a
+     *  'trend'-tagged hit (TAG_BOOST 6000) still outranks a newer nobody. */
+    m._eraFactor = catalogueEraFactor(m, now);
+    m._ottFinal = ((m._ottScore || 0) * m._eraFactor) + premium;
   });
   items.sort((a, b) =>
     (a._priorityGroup - b._priorityGroup)
     || (a._freshTier - b._freshTier)
     || (b._ottFinal - a._ottFinal)
     || (a._eventAgeDays - b._eventAgeDays));
-  return interleaveFeedByType(diversifyByLanguageWithinPriority(items));
+  /*  `true` = a platform library may fall back to an industry's best CATALOGUE
+   *  title for its first-screen slot. A provider catalogue is mostly back
+   *  catalogue, so fresh-only promotion left MX Player's first screen with no
+   *  Indian title at all while its pool held 11 Hindi, 3 Telugu and 2 Tamil. */
+  return interleaveFeedByType(diversifyByLanguageWithinPriority(items), true);
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   UNIVERSAL CATEGORY RANKING  (every industry / genre / language tab)
+   ──────────────────────────────────────────────────────────────────────────
+   The problem this fixes:
+
+     Only the ALL feed and the platform tabs were ranked. Every other tab —
+     Bollywood, Hollywood, Tollywood, Web Series, K-Drama, and each genre in the
+     Category dropdown — took TMDB's raw `sort_by=popularity.desc` order and
+     rendered it verbatim (loadMovies' generic branch just concatenated the two
+     pages). TMDB popularity is a lifetime-ish signal, so the Bollywood tab
+     opened on Dilwale Dulhania Le Jayenge (1995) and Kunwari Dulhan (1991)
+     while that week's actual releases sat pages down.
+
+   The order every tab now produces, which is what the ALL feed already did:
+
+     1. newest releases           (priority group 0)
+     2. prints that just upgraded (group 1) — the "original quality landed"
+        moment, typically 1-2 months after a theatrical release
+     3. trending / in-demand      (composite score: popularity + velocity)
+     4. popular catalogue         (composite score, era-weighted)
+
+   Groups 0-3 come from allFeedPriorityGroup(); steps 3 and 4 fall out of
+   calculateMovieScore(), which already blends rating, popularity, trending
+   velocity and vote confidence.
+
+   ── why an era weight was still needed ──
+   FRESH_TIER_DAYS tops out at 120, so EVERY movie older than four months
+   collapses into the same last tier and is then ordered by score alone. Score
+   has no age term past 180 days, so a 1990s classic with a huge lifetime vote
+   count outranked a strong film from last year — the exact complaint. The era
+   weight below is a smooth decay applied to the catalogue score so that recency
+   matters again among old titles, without hard-cutting anything: a well-loved
+   classic still beats a modern flop, it just no longer opens the tab.
+
+   Deliberately NOT applied to:
+     • the ALL feed        — already ranked, and its ordering is the reference
+     • 'toprated'          — an all-time rating chart; demoting old films by age
+                             would defeat the entire purpose of the tab
+     • series/anime dates  — a long-running show's first_air_date says nothing
+                             about how current it is, so the decay is movies-only
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/*  Titles that must never reach the grid, whatever endpoint returned them.
+ *  Kept tiny and explicit: this is an editorial removal list, not a filter.
+ *  Matched by TMDB id first (exact, survives title edits upstream) with a
+ *  normalised-title fallback for the re-uploads TMDB sometimes carries under a
+ *  new id. */
+const FEED_BLOCKED_IDS = new Set([
+  1081422   // Kunwari Dulhan (1991) — mis-sold softcore print, no votes, kept surfacing on Bollywood
+]);
+const FEED_BLOCKED_TITLES = new Set([
+  'kunwari dulhan',
+  'kuwari dulhan'
+]);
+
+/** True when a title is on the editorial removal list. */
+function isFeedBlocked(item) {
+  if (!item) return true;
+  if (FEED_BLOCKED_IDS.has(item.id)) return true;
+  const name = (item.title || item.name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+  return name !== '' && FEED_BLOCKED_TITLES.has(name);
+}
+
+/*  Years of grace before the catalogue decay starts biting, and how hard it
+ *  bites afterwards. 0.06 per year past the grace period means a film loses
+ *  roughly a quarter of its score by year 7 and about two thirds by year 30 —
+ *  enough to clear the 1990s off the first screen, gentle enough that Dangal
+ *  (2016) still leads a forgettable 2019 release. */
+const CATALOGUE_ERA_GRACE_YEARS = 2;
+const CATALOGUE_ERA_DECAY = 0.06;
+const YEAR_MS = 31557600000;
+
+/** Multiplier in (0, 1] expressing how current a catalogue MOVIE is. Series,
+ *  anime and undated titles are returned unweighted (1) — see the note above. */
+function catalogueEraFactor(item, nowMs) {
+  if (mediaTypeOf(item) !== 'movie') return 1;
+  const d = item.release_date;
+  const t = d ? new Date(d).getTime() : NaN;
+  if (isNaN(t)) return 1;
+  const years = Math.max(0, (nowMs - t) / YEAR_MS);
+  const over = Math.max(0, years - CATALOGUE_ERA_GRACE_YEARS);
+  return 1 / (1 + (over * CATALOGUE_ERA_DECAY));
+}
+
+/** The ALL-feed ranking, applied to a single category's pool.
+ *
+ *  Same contract as ottRankLikeAllFeed(): annotate with rankByFreshness(), add
+ *  one surface-specific tiebreak, then diversify by language and interleave by
+ *  type. Runs entirely on an already-fetched pool, so it costs no requests.
+ */
+function rankCategoryFeed(items, nowMs) {
+  if (!Array.isArray(items) || items.length < 2) return items || [];
+  const now = nowMs || Date.now();
+  rankByFreshness(items, now);
+  items.forEach(m => {
+    m._eraFactor = catalogueEraFactor(m, now);
+    m._catScore = (m._rankScore || 0) * m._eraFactor;
+  });
+  items.sort((a, b) =>
+    (a._priorityGroup - b._priorityGroup)
+    || (a._freshTier - b._freshTier)
+    || (b._catScore - a._catScore)
+    || (a._eventAgeDays - b._eventAgeDays));
+  /*  `true` = this surface may give an industry's best CATALOGUE title a
+   *  first-screen slot when it has no fresh one. A category tab promises the best
+   *  of that category rather than only this week's arrivals, so — unlike the ALL
+   *  feed — that is not a lie. Fresh titles still lead; see promoteFreshIndustryMix. */
+  return interleaveFeedByType(diversifyByLanguageWithinPriority(items), true);
+}
+
+/*  Categories that own their ordering, so loadMovies() must NOT re-rank them:
+ *
+ *    all       ranks itself inline (it is the reference rankCategoryFeed copies)
+ *    toprated  is an all-time rating chart — weighting it towards recent films
+ *              would defeat the only thing the tab exists to show
+ *    kids      fetchCartoonMovies() pins famous cartoons and orders its own pool
+ *    anime     fetchAnimeMovies() ranks per anime mode (airing, latest, classics)
+ *
+ *  Platform tabs are excluded at the call site instead, via OTT[cat]:
+ *  ottRankLikeAllFeed() has already run on that pool. */
+const FEED_SELF_RANKED = new Set(['all', 'toprated', 'kids', 'anime']);
 
 /** IST calendar date, optionally shifted back by N days — used to build the
  *  release-window queries. TMDB expects plain YYYY-MM-DD. */
@@ -3782,6 +4013,35 @@ let _mzTop10CacheDay = null;
 let _mzTop10Window = 'day';    // active window: 'day' (Today, the default) or 'week' (This Week)
 const TOP10_COUNT = 10;
 
+/*  ── THE TOGGLE IS HIDDEN ON MOBILE, SO THE WINDOW MUST BE PINNED THERE ──
+ *
+ *  moviezone.css hides `.top10-head .top10-toggle` under @media (max-width: 768px)
+ *  — a phone has no room for the pill, and the rail is meant to be "Today" there.
+ *  The default already is 'day', but that alone was not enough:
+ *
+ *    • a visitor on a tablet/desktop picks "This Week", then rotates to portrait
+ *      or narrows the window past 768px. The pill disappears, _mzTop10Window is
+ *      still 'week', and the rail keeps serving weekly trending with no visible
+ *      control to change it back.
+ *    • the heading still reads "This Week" while the only affordance is gone.
+ *
+ *  So mobile clamps the window instead of merely defaulting it. TOP10_MOBILE_MQ
+ *  must stay in step with the CSS breakpoint. */
+const TOP10_MOBILE_MQ = '(max-width: 768px)';
+
+/** True when the viewport is narrow enough that the Today/This Week pill is
+ *  display:none, i.e. the user cannot choose a window at all. */
+function _mzTop10ToggleHidden() {
+  return typeof window.matchMedia === 'function'
+    && window.matchMedia(TOP10_MOBILE_MQ).matches;
+}
+
+/** The window the rail is actually allowed to show. Mobile is always 'day'. */
+function _mzTop10EffectiveWindow(requested) {
+  const win = (requested === 'day' || requested === 'week') ? requested : _mzTop10Window;
+  return _mzTop10ToggleHidden() ? 'day' : win;
+}
+
 /*  Keeps only titles a visitor can actually open.
  *
  *  TMDB's trending feed mixes in unreleased films — they trend on trailer
@@ -3951,8 +4211,9 @@ async function loadTop10(mode) {
   const section = document.getElementById('top10-trending');
   if (!rail || !section) return;
 
-  // Default to whatever window is currently active (Today on first load).
-  const win = (mode === 'day' || mode === 'week') ? mode : _mzTop10Window;
+  // Default to whatever window is currently active (Today on first load), then
+  // clamp: on a viewport where the toggle is hidden the rail is always 'day'.
+  const win = _mzTop10EffectiveWindow(mode);
   _mzTop10Window = win;
 
   // IST date, matching loadCarousel's release cutoff.
@@ -4221,6 +4482,8 @@ function initTop10() {
     const headWin = document.getElementById('top10HeadWin');
     const setWindow = (win) => {
       if (win !== 'day' && win !== 'week') return;
+      // Mobile has no pill, so it can never be moved off Today even defensively.
+      win = _mzTop10EffectiveWindow(win);
       const btns = toggle.querySelectorAll('.top10-toggle-btn');
       btns.forEach(b => {
         const on = b.dataset.window === win;
@@ -4247,6 +4510,23 @@ function initTop10() {
       if (win === _mzTop10Window) return;   // already showing this window
       setWindow(win);
     });
+
+    /*  Crossing the mobile breakpoint takes the pill away, so the window it set
+     *  has to be surrendered with it. Without this a visitor who picked "This
+     *  Week" on a wide window and then narrowed the viewport (or rotated a
+     *  tablet to portrait) was left on weekly trending with no control to leave
+     *  it — the section silently disagreed with its own heading.
+     *
+     *  setWindow() also repaints the button state and the heading, so when the
+     *  viewport widens again the pill comes back correctly showing Today. */
+    if (typeof window.matchMedia === 'function') {
+      const mq = window.matchMedia(TOP10_MOBILE_MQ);
+      const onBreakpoint = () => {
+        if (_mzTop10ToggleHidden() && _mzTop10Window !== 'day') setWindow('day');
+      };
+      if (typeof mq.addEventListener === 'function') mq.addEventListener('change', onBreakpoint);
+      else if (typeof mq.addListener === 'function') mq.addListener(onBreakpoint);   // older Safari
+    }
   }
 
   loadTop10();
@@ -5597,7 +5877,24 @@ function _mzCatPlan(cat, pageNum) {
       ['/discover/tv', { with_networks: N, without_networks: X, with_original_language: 'hi', sort_by: POP, page: pageStr, language: L }],
       ['/discover/tv', { with_networks: N, without_networks: X, with_original_language: 'en', sort_by: POP, page: pageStr, language: L }],
       ['/discover/tv', { with_networks: N, without_networks: X, with_original_language: 'ko', sort_by: POP, page: pageStr, language: L }],
-      ['/discover/tv', { with_networks: N, without_networks: X, sort_by: POP, page: pageStr, language: L }]
+      ['/discover/tv', { with_networks: N, without_networks: X, sort_by: POP, page: pageStr, language: L }],
+      /*  Fresh Indian premieres, as a dated window rather than a popularity page.
+       *
+       *  The Hindi source above is sorted by popularity, which surfaces the
+       *  long-running favourites — Mirzapur, Panchayat — and buries the show that
+       *  dropped last week somewhere on page three. So the ranking never saw a
+       *  fresh Hindi series to put in the latest group, and the first screen came
+       *  out Korean and English (measured: 7 ko / 5 en, zero hi).
+       *
+       *  Pipe-separated languages is the same OR form the Zee5 provider gate uses.
+       *  The vote floor is deliberately lower than SERIES_MIN_VOTES: an Indian
+       *  premiere collects a fraction of an English one's votes in week one, which
+       *  is the whole reason the regional relevance floor exists. */
+      ['/discover/tv', { with_networks: N, without_networks: X,
+        with_original_language: 'hi|ta|te', sort_by: POP,
+        'first_air_date.gte': istDateStr(LATEST_SERIES_WINDOW_DAYS),
+        'first_air_date.lte': istDateStr(0),
+        'vote_count.gte': '3', page: pageStr, language: L }]
     ];
   }
 
@@ -5683,11 +5980,58 @@ function _mzCatPlan(cat, pageNum) {
     ];
   }
 
+  /*  K-DRAMA — Korean web series only.
+   *
+   *  This used to carry a third source, ['/discover/movie', ko], and the branch in
+   *  loadMovies tagged that one index as 'movie'. It meant Korean FILMS landed on
+   *  a tab called K-Drama — Parasite opened the grid — which is not what the tab
+   *  promises. Korean cinema is still reachable: it is in the ALL feed, in the
+   *  genre tabs and through search.
+   *
+   *  Three pages of series instead of two, so dropping the movie source does not
+   *  cost the tab any depth. Broadcast networks (tvN, SBS, KBS, JTBC) are
+   *  deliberately NOT excluded here — unlike the Web Series tab, a K-drama airing
+   *  on a Korean channel is exactly what the user came for. */
   if (cat === 'kdrama') {
+    const KO = { with_original_language: 'ko', sort_by: POP, language: L };
     return [
-      ['/discover/tv', { with_original_language: 'ko', sort_by: POP, page: p1, language: L }],
-      ['/discover/tv', { with_original_language: 'ko', sort_by: POP, page: p2, language: L }],
-      ['/discover/movie', { with_original_language: 'ko', sort_by: POP, page: p1, language: L }]
+      ['/discover/tv', Object.assign({}, KO, { page: p1 })],
+      ['/discover/tv', Object.assign({}, KO, { page: p2 })],
+      ['/discover/tv', Object.assign({}, KO, { page: String(pageNum * 3) })]
+    ];
+  }
+
+  /*  TOLLYWOOD — the merged South Indian tab.
+   *
+   *  This used to be two separate tabs: 'south' (Tamil only) on the strip and
+   *  'tollywood' (Telugu only) hidden in the Category dropdown. They are one tab
+   *  now, so the pool has to carry both industries plus the two that were never
+   *  covered at all, Malayalam and Kannada.
+   *
+   *  It has to be a multi-request plan: TMDB's with_original_language takes a
+   *  single code and has no OR form, so one request per language is the only way
+   *  to get a genuine merge. That costs nothing extra in practice — tmdbBatch()
+   *  sends the whole plan as ONE POST to /api/tmdb/batch, exactly like the
+   *  16-source ALL feed does.
+   *
+   *  Telugu and Tamil get both pages because they are the two biggest producers
+   *  and the tab is named after Telugu; Malayalam and Kannada get one page each,
+   *  which is enough depth to be represented without diluting the first screen.
+   *  rankCategoryFeed() decides the actual order, so the per-language request
+   *  order below does not leak into what the user sees.
+   *
+   *  'south' is kept as an alias rather than deleted: /movies/south is a live SSR
+   *  page and the footer, JSON-LD and generated link block all still point at
+   *  filterCat('south'). Both ids resolve to this same merged pool. */
+  if (cat === 'tollywood' || cat === 'south') {
+    const S = { sort_by: POP, language: L };
+    return [
+      ['/discover/movie', Object.assign({}, S, { with_original_language: 'te', page: p1 })],
+      ['/discover/movie', Object.assign({}, S, { with_original_language: 'te', page: p2 })],
+      ['/discover/movie', Object.assign({}, S, { with_original_language: 'ta', page: p1 })],
+      ['/discover/movie', Object.assign({}, S, { with_original_language: 'ta', page: p2 })],
+      ['/discover/movie', Object.assign({}, S, { with_original_language: 'ml', page: p1 })],
+      ['/discover/movie', Object.assign({}, S, { with_original_language: 'kn', page: p1 })]
     ];
   }
 
@@ -5780,6 +6124,11 @@ function prefetchUpcomingPage(pageNum) {
 }
  
 // -- LOAD MOVIES
+/*  Single-request category params. NOTE: 'south' and 'tollywood' are NOT read
+ *  from here any more — _mzCatPlan() intercepts both ids and returns the merged
+ *  multi-language South Indian plan instead. The two entries stay so that any
+ *  caller reaching for CAT_PARAMS[cat] still gets a sane single-language query
+ *  rather than undefined. */
 const CAT_PARAMS = {
   bollywood: { with_original_language: 'hi', sort_by: 'popularity.desc', page: '1' },
   south:     { with_original_language: 'ta', sort_by: 'popularity.desc', page: '1' },
@@ -5981,7 +6330,7 @@ function renderAnimeFilterBar() {
   }
   bar.innerHTML = ANIME_MODES.map(m => {
     const active = m.id === currentAnimeMode;
-    return `<button type="button" class="anime-chip${active ? ' active' : ''}" role="tab" tabindex="0" aria-selected="${active}" onclick="setAnimeMode('${m.id}')"><span class="anime-chip-icon" aria-hidden="true">${m.icon}</span><span>${m.label}</span></button>`;
+    return `<button type="button" class="anime-chip${active ? ' active' : ''}" role="tab" tabindex="0" aria-selected="${active}" onclick="setAnimeMode('${m.id}')"><span>${m.label}</span></button>`;
   }).join('');
   bar.style.display = 'flex';
 }
@@ -6664,13 +7013,11 @@ async function loadMovies(cat, isLoadMore = false) {
         }
       }
 
-      // Sort by first air date, newest first, to show latest on top
-      uniqueShows.sort((a, b) => {
-        const dateA = a.first_air_date || '0';
-        const dateB = b.first_air_date || '0';
-        return dateB.localeCompare(dateA);
-      });
-
+      /*  No sort here on purpose. This used to be a plain first_air_date
+       *  descending sort, which put whichever obscure show aired most recently at
+       *  the top regardless of whether anyone was watching it. rankCategoryFeed()
+       *  below orders the pool instead: fresh relevant premieres first, then the
+       *  rest of the catalogue by composite demand. */
       movies.push(...uniqueShows);
     } else if (cat === 'kids') {
       // POWERFUL CARTOON ENGINE: strictly animated content only, famous first.
@@ -6722,8 +7069,11 @@ async function loadMovies(cat, isLoadMore = false) {
       // ⭐ TOP RATED: IMDb-style highest rated, min vote threshold ताकि reliable ho
       movies.push(...mzDedupeById(vals, (item, idx) => { if (idx === 3) item.media_type = 'tv'; }));
     } else if (cat === 'kdrama') {
-      // 🇰🇷 K-DRAMA: Korean web series (sources 0-1) + movies (source 2)
-      movies.push(...mzDedupeById(vals, (item, idx) => { item.media_type = idx === 2 ? 'movie' : 'tv'; }));
+      /*  🇰🇷 K-DRAMA: Korean web series only — every source is /discover/tv, so
+       *  everything is tagged 'tv'. The old plan had a Korean MOVIE source at
+       *  index 2 and tagged that one 'movie', which is how Parasite ended up on a
+       *  drama tab. */
+      movies.push(...mzDedupeById(vals, (item) => { item.media_type = 'tv'; }));
     } else if (OTT[cat]) {
       // ── PLATFORM TABS: every entry in the OTT table ──
       // Uses the OTT sub-filter mode (all / webseries / movies) to decide
@@ -6763,6 +7113,9 @@ async function loadMovies(cat, isLoadMore = false) {
   // LATEST MOVIES ONLY & BLOCK UPCOMING GLOBALLY
   movies = movies.filter(m => {
     if (!m.poster_path) return false;
+    // Editorial removal list — applied here so it covers every category, every
+    // endpoint and the infinite-scroll pages too.
+    if (isFeedBlocked(m)) return false;
     const rDate = m.release_date || m.first_air_date;
     // Agar release date hi nahi hai, toh bhi sirf popular + high votes wali movies pass karein (already released)
     // Anime/Cartoon exception: naye/niche titles ke votes kam hote hain, unhe drop nahi karna
@@ -6771,6 +7124,23 @@ async function loadMovies(cat, isLoadMore = false) {
     if (rDate > realToday) return false;
     return true;
   });
+
+  /*  ── UNIVERSAL RANKING FOR EVERY REMAINING TAB ────────────────────────────
+   *  Hollywood, Bollywood, Tollywood, Web Series, K-Drama, Trending, 4K and each
+   *  genre used to render TMDB's raw popularity order, which is why 1990s titles
+   *  opened those tabs. They all go through the ALL-feed ranking now: newest
+   *  releases, then prints that just upgraded, then trending, then popular.
+   *
+   *  Runs after the filter above so no effort is spent ordering titles that are
+   *  about to be dropped, and after the superseded-gather guard so it can never
+   *  write into another category's pool. Costs zero requests — the pool is
+   *  already in memory.
+   *
+   *  On the isLoadMore path `movies` holds only the newly fetched batch, so the
+   *  pages already on screen keep the order the user is looking at. */
+  if (!FEED_SELF_RANKED.has(cat) && !OTT[cat]) {
+    movies = rankCategoryFeed(movies);
+  }
 
   if (!movies.length && !isLoadMore) {
     /*  THE RETRY STORM, FIXED.
@@ -7208,13 +7578,13 @@ function renderMovies(movies, append = false) {
 // CATEGORY FILTER
 const CAT_HEADINGS = {
   all:'ALL MOVIES & SHOWS', tv: 'WEB SERIES', hollywood:'HOLLYWOOD', bollywood:'BOLLYWOOD',
-  south:'SOUTH INDIAN', tollywood:'TOLLYWOOD', action:'ACTION',
+  south:'TOLLYWOOD', tollywood:'TOLLYWOOD', action:'ACTION',
   comedy:'COMEDY', horror:'HORROR', thriller:'THRILLER', romance:'ROMANCE',
   scifi:'SCI-FI', animation:'ANIMATION', kids:'CARTOONS', anime:'ANIME SERIES & MOVIES',
   dubbed:'HINDI DUBBED MOVIES', // <-- YE LINE ADD KI HAI
   adult:'18+ ADULT MOVIES & WEB SERIES',
   trending:'🔥 TRENDING NOW', uhd4k:'💎 4K ULTRA HD', toprated:'⭐ TOP RATED',
-  kdrama:'K-DRAMA & KOREAN', netflix:'NETFLIX ORIGINALS',
+  kdrama:'K-DRAMA SERIES', netflix:'NETFLIX ORIGINALS',
   prime:'AMAZON PRIME VIDEO', jiohotstar:'JIOHOTSTAR', zee5:'ZEE5 MOVIES & WEB SERIES',
   apple:'APPLE TV+', sonyliv:'SONYLIV', mxplayer:'AMAZON MX PLAYER',
   aha:'AHA', crunchyroll:'CRUNCHYROLL ANIME',
@@ -12564,7 +12934,7 @@ window.handleNotifyMe = async function(btn) {
      *  will not even revalidate, so a content change with a stale version is
      *  invisible to every returning client. Bump this whenever
      *  collections-catalog.json changes — asset-seal.js now enforces it. */
-    curatedCatalogPromise = fetch('/collections-catalog.json?v=3', { cache: 'force-cache' })
+    curatedCatalogPromise = fetch('/collections-catalog.json?v=4', { cache: 'force-cache' })
       .then(response => {
         if (!response.ok) throw new Error('Catalog HTTP ' + response.status);
         return response.json();

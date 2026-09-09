@@ -1,7 +1,7 @@
 {
   "moviezone.min.js": {
-    "version": "13.1",
-    "sha256": "9743748605f72f85"
+    "version": "13.3",
+    "sha256": "1c62b1f761c81c5b"
   },
   "moviezone.min.css": {
     "version": "9.5",
@@ -24,7 +24,7 @@
     "sha256": "bc0f2745696f84c3"
   },
   "collections-catalog.json": {
-    "version": "3",
-    "sha256": "e8a37891a2009da6"
+    "version": "4",
+    "sha256": "9694fd8dde60e4be"
   }
 }

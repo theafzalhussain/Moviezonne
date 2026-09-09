@@ -520,7 +520,11 @@ async function catalogueSize(platform, type) {
     const fn = block('function ottRankLikeAllFeed(');
     assert.ok(/rankByFreshness\(items\)/.test(fn),
       'ottRankLikeAllFeed does not use the shared freshness ranking');
-    assert.ok(/interleaveFeedByType\(diversifyByLanguageWithinPriority\(items\)\)/.test(fn),
+    /*  Deliberately matched without the closing paren: the call now takes a second
+     *  argument (allowCatalogueIndustrySlots) so a provider library can give an
+     *  industry's best catalogue title a first-screen slot. The guard is that
+     *  neither stage is SKIPPED, not that the call takes no arguments. */
+    assert.ok(/interleaveFeedByType\(diversifyByLanguageWithinPriority\(items\)/.test(fn),
       'ottRankLikeAllFeed skips language balancing or type interleave');
     assert.ok(/_priorityGroup - b\._priorityGroup/.test(fn),
       'ottRankLikeAllFeed does not sort by priority group first — recency would lose to popularity');
