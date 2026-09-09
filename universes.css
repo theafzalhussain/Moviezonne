@@ -28,12 +28,29 @@
  *  There are no franchise logo files in this repo and there should not be: one
  *  more image request per tile for a below-the-fold row, each one a licensed
  *  asset. Every tile therefore renders a TYPESET lockup — the site's own three
- *  faces (Outfit, Bebas Neue, Playfair Display) driven by five custom properties
- *  per brand (--uv-a/--uv-b for the ink, --uv-font, --uv-size, --uv-track). That
- *  is why the shared .uv-mark rule below is long and each brand block is three or
- *  four lines. Behind the lockup sits the franchise's own TMDB key art at w300,
- *  dimmed to ~22% — real per-universe imagery, at ~15 KB a tile, lazy, and it is
- *  what stops the row from looking like a list of buttons.
+ *  faces (Outfit, Bebas Neue, Playfair Display) driven by six custom properties
+ *  per brand (--uv-a/--uv-b for the ink, --uv-font, --uv-weight, --uv-scale,
+ *  --uv-track). That is why the shared .uv-mark rule below is long and each brand
+ *  block is three or four lines.
+ *
+ *  WHY THE MARK IS SIZED IN cqw AND NOT px
+ *  A tile is clamp(190px, 15vw, 228px) wide and 170px on phones, so a fixed px
+ *  mark is right at exactly one of those widths and floats in dead space at the
+ *  others — which is what made this row read as small text on empty boxes next to
+ *  the provider rail, where every logo fills its card. .uv-card is therefore an
+ *  inline-size container and --uv-scale is a cqw multiplier: the wordmark keeps
+ *  the same share of the tile at every breakpoint, and the phone override that
+ *  used to re-scale it by hand is gone. --uv-size stays as the px fallback for
+ *  engines without container queries (Safari < 16), so nothing is unstyled there.
+ *
+ *  ABOUT THE KEY ART
+ *  Behind the lockup sits the franchise's own TMDB backdrop, w300/w500 by srcset
+ *  so a retina tile is not soft, and it is held at ~55% rather than the ~22% it
+ *  started at. That number is the single biggest reason this row now reads like
+ *  the provider rail: at 22% the art was invisible and every tile was the same
+ *  dark rectangle. Legibility is bought back by .uv-veil below — a dark ellipse
+ *  under the lockup, not a flat scrim over the whole tile — so the wordmark keeps
+ *  its contrast while the corners stay bright and cinematic.
  *
  *  WITH SCRIPTING OFF
  *  index.html carries `<noscript><style>#cinematic-universes{display:none}</style>`
@@ -145,6 +162,9 @@
   position: relative; overflow: hidden;
   display: block;
   height: 142px; padding: 0;
+  /*  The mark is sized in cqw against this box — see the header note. Safe on a
+      tile whose width comes from the flex basis and whose height is fixed. */
+  container-type: inline-size;
   border: 1px solid var(--border2); border-radius: 18px;
   background:
     radial-gradient(125% 100% at 50% 0%, rgba(255, 255, 255, .055) 0%, rgba(255, 255, 255, 0) 62%),
@@ -154,31 +174,61 @@
   transition: transform 220ms var(--ease-smooth, cubic-bezier(.25, .46, .45, .94)), border-color 220ms ease, box-shadow 220ms ease;
 }
 
-/*  Key art. Deliberately very dim and slightly saturated-down: it is texture
-    that says "this is Middle-earth" at a glance, not a poster. object-position
-    favours the upper third because TMDB backdrops put faces there. */
+/*  Key art. Held bright enough to be read as an image — see the header note on
+    why 22% was the problem. object-position favours the upper third because TMDB
+    backdrops put faces there, and the slight contrast lift keeps a dark still
+    from turning the tile into a grey wash. */
 .uv-art {
   position: absolute; inset: 0;
   width: 100%; height: 100%;
-  object-fit: cover; object-position: 50% 35%;
+  object-fit: cover; object-position: 50% 32%;
   opacity: 0; border-radius: inherit;
-  filter: saturate(.85) contrast(1.05);
+  filter: saturate(1.06) contrast(1.06);
   transition: opacity 420ms ease, transform 480ms var(--ease-smooth, cubic-bezier(.25, .46, .45, .94));
 }
-.uv-card.uv-art-in .uv-art { opacity: .22; }
+.uv-card.uv-art-in .uv-art { opacity: .55; }
 
-/*  Two jobs: keep the lockup legible over any backdrop, and tint the tile with
-    the franchise's own colour so the row is not 18 grey boxes. */
+/*  Three jobs, in paint order (first listed = topmost):
+      1. the franchise's own colour, blooming from the bottom edge, so the row is
+         not 17 identical grey boxes;
+      2. a dark ELLIPSE centred on the lockup — this is what buys back contrast
+         for the wordmark now the art is at 55%. A flat full-tile scrim was tried
+         first and it simply re-dimmed the image everywhere, which is what the
+         old 22% opacity already did;
+      3. a top-and-bottom gradient to seat the tile on the page and keep the
+         count pill legible over a bright still. */
 .uv-veil {
   position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  overflow: hidden;
   background:
-    radial-gradient(120% 90% at 50% 118%, color-mix(in srgb, var(--uv-a, #ffc107) 24%, transparent) 0%, transparent 62%),
-    linear-gradient(180deg, rgba(3, 3, 10, .58) 0%, rgba(3, 3, 10, .74) 55%, rgba(3, 3, 10, .92) 100%);
+    radial-gradient(115% 85% at 50% 122%, color-mix(in srgb, var(--uv-a, #ffc107) 30%, transparent) 0%, transparent 60%),
+    radial-gradient(72% 58% at 50% 50%, rgba(3, 3, 10, .78) 0%, rgba(3, 3, 10, .46) 62%, rgba(3, 3, 10, .16) 100%),
+    linear-gradient(180deg, rgba(3, 3, 10, .5) 0%, rgba(3, 3, 10, .22) 40%, rgba(3, 3, 10, .78) 100%);
 }
 /*  color-mix is ~95% supported but this row must not be unreadable on the rest,
     so the tint degrades to a flat scrim rather than to nothing. */
 @supports not (background: color-mix(in srgb, red 10%, transparent)) {
-  .uv-veil { background: linear-gradient(180deg, rgba(3, 3, 10, .6) 0%, rgba(3, 3, 10, .88) 100%); }
+  .uv-veil {
+    background:
+      radial-gradient(72% 58% at 50% 50%, rgba(3, 3, 10, .86) 0%, rgba(3, 3, 10, .5) 62%, rgba(3, 3, 10, .2) 100%),
+      linear-gradient(180deg, rgba(3, 3, 10, .5) 0%, rgba(3, 3, 10, .24) 40%, rgba(3, 3, 10, .8) 100%);
+  }
+}
+
+/*  Light sweeping across the tile once on hover. Transform + opacity only, so it
+    is composited; it is a child of the veil so it cannot sit above the wordmark,
+    and it is idle (opacity: 0, no animation) until a real hover starts. */
+.uv-veil::after {
+  content: '';
+  position: absolute; top: -10%; bottom: -10%; left: -55%; width: 42%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, .16), transparent);
+  transform: skewX(-14deg);
+  opacity: 0;
+}
+@keyframes uvSheen {
+  0%   { opacity: 0;  transform: translateX(0) skewX(-14deg); }
+  22%  { opacity: 1; }
+  100% { opacity: 0;  transform: translateX(380%) skewX(-14deg); }
 }
 
 /*  Gold sheen on the top edge, same idea as .provider-card::after. */
@@ -189,13 +239,14 @@
   background: linear-gradient(90deg, transparent, rgba(245, 197, 24, .8), transparent);
   opacity: 0; transition: opacity 220ms ease;
   pointer-events: none;
+  z-index: 2;
 }
 
 /* ── lockup ───────────────────────────────────────────────────────────── */
 .uv-lockup {
   position: absolute; inset: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: .28em; padding: 1rem .9rem;
+  gap: .3em; padding: 1rem .8rem;
   text-align: center;
   transition: transform 220ms var(--ease-smooth, cubic-bezier(.25, .46, .45, .94));
 }
@@ -203,38 +254,79 @@
   display: block; max-width: 100%;
   font-family: var(--uv-font, 'Outfit'), sans-serif;
   font-weight: var(--uv-weight, 800);
-  font-size: var(--uv-size, 25px);
+  /*  px first as the no-container-query fallback, cqw second so the mark keeps
+      its share of the tile at every width. An engine without cqw drops the
+      second declaration at parse time and keeps the first. */
+  font-size: var(--uv-size, 30px);
+  font-size: calc(var(--uv-scale, 14) * 1cqw);
   line-height: 1.02;
   letter-spacing: var(--uv-track, .01em);
   text-transform: uppercase;
   color: var(--uv-a, #f0f0fc);
   /*  The gradient is clipped to the glyphs when a second stop is given, which is
       how the metallic brands (Terminator, Transformers, 007) get their sheen
-      without an image. Brands that want flat ink simply do not set --uv-b. */
-  background-image: linear-gradient(180deg, var(--uv-a, #f0f0fc) 0%, var(--uv-b, var(--uv-a, #f0f0fc)) 100%);
+      without an image. Brands that want flat ink simply do not set --uv-b.
+      The light stop is held for the first quarter of the glyph height on purpose:
+      a straight --uv-a → --uv-b ramp puts the DARK end of the brand colour across
+      the middle of the letterform, and at this size that was legible on a black
+      box and muddy on real key art (Jurassic's red, Singham's bronze). Holding it
+      keeps the metallic falloff but confines it to the bottom edge. */
+  background-image: linear-gradient(180deg, var(--uv-a, #f0f0fc) 0%, var(--uv-a, #f0f0fc) 26%, var(--uv-b, var(--uv-a, #f0f0fc)) 100%);
   -webkit-background-clip: text; background-clip: text;
   -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 2px 10px color-mix(in srgb, var(--uv-a, #ffc107) 30%, transparent));
+  /*  Two shadows now, and the tight black one is the important one: at 55% art
+      the wordmark can land on a lit face or a sky, and a pure brand-coloured
+      glow does nothing for contrast there. */
+  filter:
+    drop-shadow(0 1px 1px rgba(0, 0, 0, .7))
+    drop-shadow(0 3px 14px color-mix(in srgb, var(--uv-a, #ffc107) 32%, transparent));
   text-wrap: balance;
 }
 .uv-sub {
   display: block;
-  font: 600 9.5px/1.3 'Outfit', sans-serif;
-  letter-spacing: .22em; text-transform: uppercase;
-  color: rgba(240, 240, 252, .62);
+  font: 600 10px/1.3 'Outfit', sans-serif;
+  letter-spacing: .19em; text-transform: uppercase;
+  color: rgba(240, 240, 252, .68);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .75);
+  text-wrap: balance;
+}
+/*  Hairline rule between the two lines. This one detail is most of what makes a
+    two-line lockup read as a logo rather than as a heading with a caption, and
+    it costs no node: currentColor means it inherits whatever tint the brand
+    block below gives the sub line. */
+.uv-sub::before {
+  content: '';
+  display: block; width: 24px; height: 1px;
+  margin: 0 auto .55em;
+  background: linear-gradient(90deg, transparent, currentColor, transparent);
+  opacity: .6;
+}
+/*  Brand-tinted sub by default, mixed from the DARK stop (--uv-b) towards white
+    so it stays legible on every tile — the light stop is already near-white on
+    most brands and mixing from it would give 17 identical grey lines. Brand
+    blocks further down still win; they come later in the cascade. */
+@supports (color: color-mix(in srgb, red 10%, white)) {
+  .uv-sub { color: color-mix(in srgb, var(--uv-b, var(--uv-a, #f0f0fc)) 52%, #ffffff); }
 }
 
-/*  Title count. Small, bottom-left, and the ONLY thing on the tile that is not
-    the logo — it is the answer to "is this worth opening", which a bare wordmark
-    cannot give. Provider tiles have no equivalent because a platform's library
-    size is not a number we can honestly state. */
+/*  Title count. The one thing on the tile that is not the logo — it answers "is
+    this worth opening", which a bare wordmark cannot. A glass pill in the corner
+    rather than a third centred text line, so the lockup stays a lockup. Provider
+    tiles have no equivalent because a platform's library size is not a number we
+    can honestly state. */
 .uv-count {
-  position: absolute; left: 0; right: 0; bottom: .62rem;
-  font: 600 10px/1 'Outfit', sans-serif;
+  position: absolute; top: .55rem; right: .55rem; z-index: 2;
+  padding: .3em .55em;
+  border: 1px solid rgba(255, 255, 255, .16); border-radius: 999px;
+  background: rgba(6, 6, 14, .5);
+  -webkit-backdrop-filter: blur(6px) saturate(1.2);
+          backdrop-filter: blur(6px) saturate(1.2);
+  font: 700 9px/1 'Outfit', sans-serif;
   letter-spacing: .12em; text-transform: uppercase;
-  text-align: center; color: rgba(240, 240, 252, .5);
-  transition: color 220ms ease;
+  color: rgba(255, 255, 255, .74);
+  transition: color 220ms ease, border-color 220ms ease, background-color 220ms ease;
 }
+
 
 /* ── interaction ──────────────────────────────────────────────────────── */
 @media (hover: hover) {
@@ -249,8 +341,13 @@
   }
   .uv-card:hover::after { opacity: 1; }
   .uv-card:hover .uv-lockup { transform: scale(1.045); }
-  .uv-card.uv-art-in:hover .uv-art { opacity: .38; transform: scale(1.06); }
-  .uv-card:hover .uv-count { color: var(--gold); }
+  .uv-card.uv-art-in:hover .uv-art { opacity: .78; transform: scale(1.06); }
+  .uv-card:hover .uv-veil::after { animation: uvSheen 900ms ease-out; }
+  .uv-card:hover .uv-count {
+    color: var(--gold, #f5c518);
+    border-color: rgba(245, 197, 24, .4);
+    background: rgba(6, 6, 14, .62);
+  }
 }
 .uv-card:active { transform: translateY(-1px) scale(.985); }
 .uv-card:focus-visible {
@@ -258,36 +355,53 @@
   border-color: var(--border-gold, rgba(245, 197, 24, .18));
 }
 .uv-card:focus-visible::after { opacity: 1; }
-.uv-card.uv-art-in:focus-visible .uv-art { opacity: .38; }
+.uv-card.uv-art-in:focus-visible .uv-art { opacity: .78; }
+.uv-card:focus-visible .uv-count { color: var(--gold, #f5c518); border-color: rgba(245, 197, 24, .4); }
 
 /* ══ BRAND LOCKUPS ══════════════════════════════════════════════════════
    Keyed on the `accent` value each universe already carries in moviezone.js,
    so a universe cannot end up with a mismatched treatment — the class name is
    derived from the same field the hub's own cards use. A slug with no block
    here still renders: the shared rule above is a complete, neutral gold-white
-   lockup on purpose. */
+   lockup on purpose.
+
+   --uv-scale is the cqw multiplier (the live size) and --uv-size the matching px
+   fallback for engines without container queries; the pair is tuned per brand so
+   the mark lands at roughly 80% of the tile's inner width, which is what the
+   provider logos do. Keep them in step — --uv-size ≈ --uv-scale × 2.12, the
+   width of a desktop tile in hundredths. */
 
 /*  Marvel is the one wordmark that is a shape rather than a colour, so it is the
     one that gets a boxed variant: white on the Marvel red, filling its line. */
-.uv-b-marvel { --uv-a: #ffffff; --uv-size: 23px; --uv-track: .06em; }
+.uv-b-marvel { --uv-a: #ffffff; --uv-scale: 12.6; --uv-size: 27px; --uv-track: .06em; }
 .uv-b-marvel .uv-mark {
   padding: .18em .5em; border-radius: 3px;
   background: linear-gradient(180deg, #f0141e 0%, #c9080f 100%);
   -webkit-background-clip: border-box; background-clip: border-box;
   -webkit-text-fill-color: #fff; color: #fff;
-  filter: drop-shadow(0 3px 12px rgba(230, 20, 30, .45));
+  filter: drop-shadow(0 3px 14px rgba(230, 20, 30, .5));
 }
 
-.uv-b-dc { --uv-a: #eaf3ff; --uv-b: #6aa8ff; --uv-size: 40px; --uv-track: .04em; --uv-weight: 900; }
+.uv-b-dc { --uv-a: #eaf3ff; --uv-b: #6aa8ff; --uv-scale: 26; --uv-size: 55px; --uv-track: .04em; --uv-weight: 900; }
 
 /*  Metallics: light top stop, dark bottom stop, Bebas for the condensed
-    machine-cut look these three franchises share. */
-.uv-b-terminator { --uv-a: #eef2f6; --uv-b: #7b8794; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-size: 31px; --uv-track: .1em; }
-.uv-b-transformers { --uv-a: #dfe9f5; --uv-b: #5f7ea8; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-size: 25px; --uv-track: .07em; }
-.uv-b-bond { --uv-a: #fff4c8; --uv-b: #b98d23; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-size: 48px; --uv-track: .06em; }
-.uv-b-fast { --uv-a: #f4f6f8; --uv-b: #8b939c; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-size: 30px; --uv-track: .05em; }
-/*  The nitro streak under FAST & FURIOUS. One pseudo-element, no image. */
+    machine-cut look these three franchises share.
+    Terminator and Transformers are the two longest single words in the row (10
+    and 12 characters, neither with a break opportunity), so they are the two
+    brands whose scale is set by measurement rather than by taste: at the row's
+    default they overflowed the tile and the card's overflow: hidden clipped them
+    to "TERMINAT" and "TRANSFORM". Their tracking is pulled in too, which is worth
+    more here than another point of size. */
+.uv-b-terminator { --uv-a: #eef2f6; --uv-b: #7b8794; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-scale: 11.5; --uv-size: 24px; --uv-track: .07em; }
+.uv-b-transformers { --uv-a: #dfe9f5; --uv-b: #5f7ea8; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-scale: 10.5; --uv-size: 22px; --uv-track: .01em; }
+.uv-b-bond { --uv-a: #fff4c8; --uv-b: #b98d23; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-scale: 29; --uv-size: 61px; --uv-track: .06em; }
+.uv-b-fast { --uv-a: #f4f6f8; --uv-b: #8b939c; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-scale: 19; --uv-size: 40px; --uv-track: .05em; }
+/*  The nitro streak under FAST & FURIOUS. One pseudo-element, no image. It also
+    does the job of the shared .uv-sub hairline, and this is the one lockup whose
+    two lines are a single phrase — "FAST / & FURIOUS" — so the hairline is
+    suppressed rather than drawn twice through the middle of it. */
 .uv-b-fast .uv-mark { position: relative; }
+.uv-b-fast .uv-sub::before { display: none; }
 .uv-b-fast .uv-mark::after {
   content: ''; position: absolute; left: 4%; right: 4%; bottom: -.14em; height: 2px;
   border-radius: 2px;
@@ -296,47 +410,47 @@
 
 /*  Serif brands. Playfair 700 is the only serif shipped, and it is what makes
     these three read as "saga" rather than "action". */
-.uv-b-wizard { --uv-a: #ffe9a8; --uv-b: #b8873a; --uv-font: 'Playfair Display'; --uv-weight: 700; --uv-size: 20px; --uv-track: .05em; }
-.uv-b-lotr { --uv-a: #ffdf9b; --uv-b: #a06f28; --uv-font: 'Playfair Display'; --uv-weight: 700; --uv-size: 21px; --uv-track: .04em; }
-.uv-b-horror { --uv-a: #f3dcdc; --uv-b: #8c1420; --uv-font: 'Playfair Display'; --uv-weight: 700; --uv-size: 21px; --uv-track: .04em; }
+.uv-b-wizard { --uv-a: #ffe9a8; --uv-b: #b8873a; --uv-font: 'Playfair Display'; --uv-weight: 700; --uv-scale: 12; --uv-size: 25px; --uv-track: .05em; }
+.uv-b-lotr { --uv-a: #ffdf9b; --uv-b: #a06f28; --uv-font: 'Playfair Display'; --uv-weight: 700; --uv-scale: 10; --uv-size: 21px; --uv-track: .03em; }
+.uv-b-horror { --uv-a: #f3dcdc; --uv-b: #8c1420; --uv-font: 'Playfair Display'; --uv-weight: 700; --uv-scale: 11; --uv-size: 23px; --uv-track: .04em; }
 
-.uv-b-mi { --uv-a: #ffffff; --uv-b: #c9ced6; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-size: 27px; --uv-track: .04em; }
+.uv-b-mi { --uv-a: #ffffff; --uv-b: #c9ced6; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-scale: 16; --uv-size: 34px; --uv-track: .04em; }
 /*  The M:I fuse. Red on the leading edge of the wordmark, which is the one bit
     of that logo everyone recognises. */
-.uv-b-mi .uv-sub { color: rgba(255, 92, 92, .85); }
+.uv-b-mi .uv-sub { color: rgba(255, 92, 92, .88); }
 
-.uv-b-jurassic { --uv-a: #ffd45e; --uv-b: #d8341f; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-size: 30px; --uv-track: .08em; }
-.uv-b-predator { --uv-a: #ff5a4d; --uv-b: #6fd36a; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-size: 30px; --uv-track: .12em; }
+.uv-b-jurassic { --uv-a: #ffd45e; --uv-b: #d8341f; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-scale: 15.5; --uv-size: 33px; --uv-track: .07em; }
+.uv-b-predator { --uv-a: #ff5a4d; --uv-b: #6fd36a; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-scale: 13.5; --uv-size: 29px; --uv-track: .11em; }
 
 /*  Star Wars is the other logo that is a SHAPE, not a colour — flat yellow,
     heavily tracked, filling its line — so like Marvel it opts out of the
     gradient-clip treatment and paints solid ink instead. */
-.uv-b-starwars { --uv-a: #ffe81f; --uv-b: #ffe81f; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-size: 28px; --uv-track: .1em; }
+.uv-b-starwars { --uv-a: #ffe81f; --uv-b: #ffe81f; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-scale: 11.5; --uv-size: 24px; --uv-track: .09em; }
 .uv-b-starwars .uv-mark {
   -webkit-text-fill-color: #ffe81f; color: #ffe81f;
-  filter: drop-shadow(0 2px 10px rgba(255, 232, 31, .3));
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .7)) drop-shadow(0 3px 14px rgba(255, 232, 31, .34));
 }
-.uv-b-starwars .uv-sub { color: rgba(255, 232, 31, .62); }
+.uv-b-starwars .uv-sub { color: rgba(255, 232, 31, .74); }
 
 /*  X-Men: the cold blue-steel of the film logos. Bebas keeps the hyphenated
     name on one line at this size, which Outfit 900 does not. */
-.uv-b-xmen { --uv-a: #f2f7ff; --uv-b: #3f6fa8; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-size: 33px; --uv-track: .07em; }
+.uv-b-xmen { --uv-a: #f2f7ff; --uv-b: #3f6fa8; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-scale: 19; --uv-size: 40px; --uv-track: .06em; }
 
 /*  YRF Spy: gunmetal into the saffron of the Indian-thriller palette. Tighter
     tracking than the metallics above because "YRF Spy" is two short words and
     wide tracking pulls them apart into three. */
-.uv-b-yrfspy { --uv-a: #ffffff; --uv-b: #c46a1c; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-size: 27px; --uv-track: .04em; }
-.uv-b-yrfspy .uv-sub { color: rgba(255, 176, 92, .72); }
+.uv-b-yrfspy { --uv-a: #ffffff; --uv-b: #c46a1c; --uv-font: 'Bebas Neue'; --uv-weight: 400; --uv-scale: 16; --uv-size: 34px; --uv-track: .04em; }
+.uv-b-yrfspy .uv-sub { color: rgba(255, 176, 92, .82); }
 
 /*  Cop Universe: khaki-and-gold, the colour of the uniform these six films are
     built on. Outfit 900 rather than Bebas — "Singham" is a name, not a machine. */
-.uv-b-cop { --uv-a: #ffe9b0; --uv-b: #9a6a18; --uv-size: 27px; --uv-weight: 900; --uv-track: .03em; }
-.uv-b-cop .uv-sub { color: rgba(255, 214, 132, .7); }
+.uv-b-cop { --uv-a: #ffe9b0; --uv-b: #9a6a18; --uv-scale: 14; --uv-size: 30px; --uv-weight: 900; --uv-track: .02em; }
+.uv-b-cop .uv-sub { color: rgba(255, 214, 132, .82); }
 
 /*  Maddock Supernatural: Chanderi red. These are horror COMEDIES, so the ink
     stops short of the Conjuring's near-black blood and keeps some warmth. */
-.uv-b-maddock { --uv-a: #ffd9d0; --uv-b: #b3221f; --uv-font: 'Playfair Display'; --uv-weight: 700; --uv-size: 27px; --uv-track: .04em; }
-.uv-b-maddock .uv-sub { color: rgba(255, 150, 140, .72); }
+.uv-b-maddock { --uv-a: #ffd9d0; --uv-b: #b3221f; --uv-font: 'Playfair Display'; --uv-weight: 700; --uv-scale: 18; --uv-size: 38px; --uv-track: .03em; }
+.uv-b-maddock .uv-sub { color: rgba(255, 150, 140, .82); }
 
 /* ── phones (mirrors the providers.css breakpoint exactly) ───────────── */
 @media (max-width: 600px) {
@@ -346,9 +460,18 @@
   .uv-rail { --uv-fade: 40px; gap: .85rem; padding: 8px 2px 12px; min-height: 140px; }
   .uv-rail > li { flex-basis: 170px; }
   .uv-card, .uv-skeleton { height: 120px; border-radius: 16px; }
-  .uv-lockup { padding: .85rem .75rem; }
-  .uv-mark { font-size: calc(var(--uv-size, 25px) * .84); }
-  .uv-count { bottom: .5rem; font-size: 9px; }
+  /*  Tighter side padding than desktop, deliberately: it puts the phone tile's
+      inner width at ~90% of the tile against desktop's ~88%, so DESKTOP is the
+      binding case for every wordmark. Without that, a mark tuned to fit at 216px
+      clipped at 170px (Transformers lost its last letter) and each brand would
+      have needed a second measurement here. */
+  .uv-lockup { padding: .85rem .55rem; }
+  /*  cqw already rescales the mark with the narrower tile, so only the px
+      fallback path needs a hand here. */
+  .uv-mark { font-size: calc(var(--uv-size, 30px) * .8); font-size: calc(var(--uv-scale, 14) * 1cqw); }
+  .uv-sub { font-size: 9px; letter-spacing: .16em; }
+  .uv-sub::before { width: 20px; margin-bottom: .45em; }
+  .uv-count { top: .45rem; right: .45rem; font-size: 8.5px; }
   .uv-arrow { width: 38px; height: 38px; }
 
   /* ── MOBILE: box shown "as hovered" without a hover ──
@@ -366,8 +489,8 @@
       0 8px 22px -16px var(--gold-glow, rgba(245, 197, 24, .22));
   }
   .uv-card::after { opacity: 1; }
-  .uv-card.uv-art-in .uv-art { opacity: .34; }
-  .uv-count { color: var(--gold); }
+  .uv-card.uv-art-in .uv-art { opacity: .62; }
+  .uv-count { color: var(--gold, #f5c518); border-color: rgba(245, 197, 24, .38); }
   .uv-card:active { transform: scale(.97); }
 }
 
@@ -378,12 +501,24 @@
   .uv-card:hover, .uv-card:active { transform: none; }
   .uv-card:hover .uv-lockup { transform: none; }
   .uv-card.uv-art-in:hover .uv-art { transform: none; }
+  /*  The sweep is decoration with no state to communicate, so it does not get a
+      reduced-duration version — it simply does not run. */
+  .uv-card:hover .uv-veil::after { animation: none; }
 }
 
 /*  low-end-mode is set by moviezone.js on weak devices and by the TV module on
-    low-tier TVs. Blur-free already; what costs there is the per-glyph
-    drop-shadow on 18 gradient-clipped wordmarks, so that is what goes. */
-.low-end-mode .uv-mark { filter: none; }
+    low-tier TVs. What costs there is the per-glyph drop-shadow on 17
+    gradient-clipped wordmarks, the backdrop-filter behind every count pill, and
+    the hover sweep — so those three go and the layout is untouched. The pill
+    keeps a solid, more opaque background instead of the blur, because it still
+    has to be legible over bright key art. */
+.low-end-mode .uv-mark { filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .7)); }
 .low-end-mode .uv-art { transition: none; }
-html[data-mz-tv="true"] .uv-card.uv-art-in .uv-art { opacity: .18; }
-html[data-mz-tv="true"] .uv-mark { filter: none; }
+.low-end-mode .uv-count {
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+  background: rgba(6, 6, 14, .78);
+}
+.low-end-mode .uv-veil::after { display: none; }
+html[data-mz-tv="true"] .uv-card.uv-art-in .uv-art { opacity: .42; }
+html[data-mz-tv="true"] .uv-mark { filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .7)); }
+html[data-mz-tv="true"] .uv-veil::after { display: none; }

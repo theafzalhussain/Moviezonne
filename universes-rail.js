@@ -46,34 +46,40 @@
   if (!section || !rail) return;
 
   /*  Per-franchise wordmark text. `mark` is the logo line, `sub` the small
-   *  tracked line under it — omitted where the franchise name IS the logo
-   *  (Terminator, Predator), because a redundant second line just shrinks the mark.
+   *  tracked line under it. EVERY entry has both: the two lines plus the hairline
+   *  rule between them are what make a tile read as a logo lockup rather than as
+   *  a label, and a row where some tiles have one line and some have two reads as
+   *  a row of inconsistent boxes. Terminator, Transformers and Predator used to
+   *  be single-line for exactly the wrong reason — the franchise name IS the logo
+   *  — so they now carry a saga line instead of nothing.
    *  Where a franchise is known by its lead character rather than its universe
    *  name, that character leads and the universe becomes the sub — Singham over
    *  "Cop Universe", Stree over "Maddock Horror".
+   *  Subs are kept to ~18 characters: past that they wrap onto two lines inside a
+   *  170px phone tile, and a wrapped caption undoes the lockup.
    *  Keyed by slug; see the header note on why this is not read from `badge`.
    *  Listed in rail order so this table and the catalog read the same way. */
   var LOCKUPS = {
     'mcu':                { mark: 'MARVEL',       sub: 'Cinematic Universe' },
     'dceu':               { mark: 'DC',           sub: 'Universe' },
     'x-men':              { mark: 'X-Men',        sub: 'Mutant Saga' },
-    'yrf-spy':            { mark: 'YRF Spy',      sub: 'Universe' },
+    'yrf-spy':            { mark: 'YRF Spy',      sub: 'Spy Universe' },
     'jurassic-park':      { mark: 'Jurassic',     sub: 'Park & World' },
     'cop-universe':       { mark: 'Singham',      sub: 'Cop Universe' },
     'star-wars':          { mark: 'Star Wars',    sub: 'Skywalker Saga' },
-    'transformers':       { mark: 'Transformers' },
-    'conjuring':          { mark: 'Conjuring',    sub: 'The Universe' },
+    'transformers':       { mark: 'Transformers', sub: 'Cybertron Saga' },
+    'conjuring':          { mark: 'Conjuring',    sub: 'Horror Universe' },
     'fast-furious':       { mark: 'Fast',         sub: '& Furious' },
     'james-bond':         { mark: '007',          sub: 'James Bond' },
-    'terminator':         { mark: 'Terminator' },
-    'wizarding-world':    { mark: 'Wizarding',    sub: 'World' },
+    'terminator':         { mark: 'Terminator',   sub: 'Judgment Day' },
+    'wizarding-world':    { mark: 'Wizarding',    sub: 'World of Magic' },
     'middle-earth':       { mark: 'Middle-earth', sub: 'Rings & Hobbit' },
-    'mission-impossible': { mark: 'Impossible',   sub: 'Mission:' },
-    'predator':           { mark: 'Predator' },
+    'mission-impossible': { mark: 'Mission',      sub: 'Impossible' },
+    'predator':           { mark: 'Predator',     sub: 'The Hunt' },
     'maddock':            { mark: 'Stree',        sub: 'Maddock Horror' }
   };
 
-  var IMG_BASE = 'https://image.tmdb.org/t/p/w300';
+  var IMG_BASE = 'https://image.tmdb.org/t/p/';
   var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   function esc(value) {
@@ -137,13 +143,25 @@
     li.innerHTML =
       '<a class="uv-card uv-b-' + esc(universe.accent) + '" href="#collections-' + esc(universe.slug) + '"' +
         ' data-uv-slug="' + esc(universe.slug) + '" aria-label="' + esc(label) + '">' +
-        (art ? '<img class="uv-art" src="' + IMG_BASE + art + '" alt="" width="300" height="169"' +
-               ' loading="lazy" decoding="async">' : '') +
+        /*  Two candidates, not one. The tile is up to 228px wide, so a 1x display
+         *  wants w300 and a 2x display wants ~456px of image — w300 stretched to
+         *  that is visibly soft, and the art is no longer a dim texture that can
+         *  hide it. `sizes` states the real rendered widths (the CSS clamp cap and
+         *  the phone flex-basis) so a 1x visitor still downloads only w300. */
+        (art ? '<img class="uv-art" src="' + IMG_BASE + 'w500' + art + '"' +
+               ' srcset="' + IMG_BASE + 'w300' + art + ' 300w, ' + IMG_BASE + 'w500' + art + ' 500w"' +
+               ' sizes="(max-width: 600px) 170px, 228px"' +
+               ' alt="" width="500" height="281" loading="lazy" decoding="async">' : '') +
         '<span class="uv-veil" aria-hidden="true"></span>' +
         '<span class="uv-lockup">' +
           '<span class="uv-mark">' + esc(lockup.mark) + '</span>' +
           (lockup.sub ? '<span class="uv-sub">' + esc(lockup.sub) + '</span>' : '') +
         '</span>' +
+        /*  aria-hidden because the count is already inside the link's aria-label
+         *  above ("Marvel Cinematic Universe — 42 titles, open collection"), and
+         *  announcing it twice is noise. Omitted entirely at zero rather than
+         *  rendering "0 TITLES" on a universe whose catalog entry came back empty. */
+        (total ? '<span class="uv-count" aria-hidden="true">' + total + ' titles</span>' : '') +
       '</a>';
 
     /*  Fade the art in only once it has decoded. Cached images can complete

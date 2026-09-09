@@ -1201,7 +1201,7 @@ html.mz-no-ads .mz-ad-slot{display:none}
      in front of it any more, so this rail and the SSR deep links are the only way
      in. Only the header and skeletons ship; universes-rail.js builds the tiles,
      and that file and universes.css carry the full reasoning. -->
-<link rel="stylesheet" href="/universes.css?v=3" media="print" onload="this.media='all'">
+<link rel="stylesheet" href="/universes.css?v=4" media="print" onload="this.media='all'">
 <noscript><style>#cinematic-universes{display:none}</style></noscript>
 <section id="cinematic-universes" class="uv-section" aria-labelledby="uvHeading">
   <div class="uv-header">
@@ -1887,7 +1887,7 @@ window.addEventListener('load', function () {
   if (!document.getElementById('cinematic-universes')) return;
   setTimeout(function () {
     var s = document.createElement('script');
-    s.src = '/universes-rail.js?v=3';
+    s.src = '/universes-rail.js?v=4';
     s.async = true;
     document.head.appendChild(s);
   }, 2000);

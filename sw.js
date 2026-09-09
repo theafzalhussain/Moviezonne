@@ -20,7 +20,13 @@
 // this bump a returning visitor would keep being served the old square tiles
 // forever. The activate handler deletes every cache that is not CACHE_NAME, so
 // renaming the shell is what forces the re-download.
-const CACHE_NAME = 'moviezone-v132';
+// v133: the Cinematic Universe tiles were rebuilt — key art at 55% instead of
+// 22% with a w300/w500 srcset, container-relative wordmarks, a title-count pill
+// and a new lockup for every franchise. universes.css and universes-rail.js go
+// to ?v=4 in index.html, so both are bumped in OPTIONAL_ASSETS below and the
+// shell is renamed: the activate handler deletes every cache that is not
+// CACHE_NAME, which is what forces the re-download.
+const CACHE_NAME = 'moviezone-v133';
 
 // Separate cache for TMDB posters/backdrops. Kept apart from the shell so the
 // activate handler can wipe an old shell without throwing away hundreds of
@@ -73,8 +79,8 @@ const OPTIONAL_ASSETS = [
   // The Cinematic Universe rail on the homepage. Both are optional for the same
   // reason the catalogue above is: the row is below the fold and built lazily, so
   // a 404 on either must not be able to fail the whole service-worker install.
-  '/universes.css?v=3',
-  '/universes-rail.js?v=3',
+  '/universes.css?v=4',
+  '/universes-rail.js?v=4',
   // pwa-install.min.js moved off the critical path: index.html no longer ships a
   // <script> tag for it, it is injected on idle / on demand. Still worth having
   // offline so the install popup works, but it must not be able to fail a

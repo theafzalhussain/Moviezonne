@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<!--  Throwaway visual harness for the Cinematic Universe rail. Renders the real
+      /universes-rail.js against the real /collections-catalog.json with a stub of
+      the moviezone.js handle, so a headless screenshot shows exactly what ships.
+      Delete after use. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>uv visual</title>
+<link rel="stylesheet" href="/moviezone.min.css?v=9.7">
+<link rel="stylesheet" href="/universes.css?v=4">
+<style>
+  body { margin: 0; background: #05050b; }
+  .uv-section { padding-top: 1rem; }
+  .wide { width: 1440px; }
+  .phone { width: 390px; }
+  /*  #grid unrolls the horizontal rail into a wrapping grid so one screenshot
+      covers all 17 lockups, including the ones normally scrolled out of view. */
+  body.grid .uv-rail { flex-wrap: wrap; overflow: visible; mask-image: none; -webkit-mask-image: none; }
+</style>
+</head>
+<body>
+<div id="host"></div>
+<script>
+var UNIVERSES = [
+  { slug: 'mcu', name: 'Marvel Cinematic Universe', accent: 'marvel' },
+  { slug: 'dceu', name: 'DC Universe', accent: 'dc' },
+  { slug: 'x-men', name: 'X-Men Cinematic Universe', accent: 'xmen' },
+  { slug: 'yrf-spy', name: 'YRF Spy Universe', accent: 'yrfspy' },
+  { slug: 'jurassic-park', name: 'Jurassic World', accent: 'jurassic' },
+  { slug: 'cop-universe', name: 'Cop Universe', accent: 'cop' },
+  { slug: 'star-wars', name: 'Star Wars Cinematic Universe', accent: 'starwars' },
+  { slug: 'transformers', name: 'Transformers', accent: 'transformers' },
+  { slug: 'conjuring', name: 'The Conjuring Universe', accent: 'horror' },
+  { slug: 'fast-furious', name: 'Fast & Furious', accent: 'fast' },
+  { slug: 'james-bond', name: 'James Bond 007', accent: 'bond' },
+  { slug: 'terminator', name: 'Terminator', accent: 'terminator' },
+  { slug: 'wizarding-world', name: 'Wizarding World', accent: 'wizard' },
+  { slug: 'middle-earth', name: 'Middle-earth', accent: 'lotr' },
+  { slug: 'mission-impossible', name: 'Mission: Impossible', accent: 'mi' },
+  { slug: 'predator', name: 'Predator', accent: 'predator' },
+  { slug: 'maddock', name: 'Maddock Supernatural Universe', accent: 'maddock' }
+];
+window.__moviezoneCollections = {
+  universeCount: UNIVERSES.length,
+  loadCatalog: function () {
+    return fetch('/collections-catalog.json').then(function (r) { return r.json(); })
+      .then(function (d) { return d.universes; });
+  },
+  getUniverse: function (slug) {
+    return UNIVERSES.filter(function (u) { return u.slug === slug; })[0];
+  }
+};
+
+/*  One section; the screenshot is taken twice at two window sizes, because the
+    phone treatment in universes.css is a viewport media query and cannot be
+    faked by narrowing a wrapper. */
+if (location.search.indexOf('grid') >= 0) document.body.classList.add('grid');
+document.getElementById('host').innerHTML =
+  '<section id="cinematic-universes" class="uv-section">' +
+  '<div class="uv-header"><div><h2 class="uv-heading">Cinematic Universe</h2></div></div>' +
+  '<ul id="uvRail" class="uv-rail"></ul></section>';
+</script>
+<script src="/universes-rail.js?v=4"></script>
+</body>
+</html>
