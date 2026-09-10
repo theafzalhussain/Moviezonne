@@ -1,0 +1,23 @@
+{
+   "commandExtractImageText": {
+      "message": "Wyodrębnij tekst z obrazu"
+   },
+   "commandImageTranslate": {
+      "message": "Przetłumacz wskazany obraz"
+   },
+   "commandPolishText": {
+      "message": "Ulepszanie pisania"
+   },
+   "commandSelectTranslate": {
+      "message": "Przetłumacz zaznaczony tekst"
+   },
+   "commandTranslatePage": {
+      "message": "Przetłumacz bieżącą stronę"
+   },
+   "extensionDescription": {
+      "message": "Najlepszy tłumacz AI do stron internetowych, plików, e-booków, prac naukowych, obrazów i tekstu"
+   },
+   "extensionName": {
+      "message": "AnyDoc Translator - bezpłatne tłumaczenie stron internetowych i PDF"
+   }
+}

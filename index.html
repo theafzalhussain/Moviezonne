@@ -1030,13 +1030,19 @@ html.mz-no-ads .mz-ad-slot{display:none}
     <span></span>
     <span></span>
   </button>
+  <!--  Browse tabs first (Bollywood → Web Series → K-Drama → Anime), then the two
+        utility destinations (Upcoming, Watchlist). Seven labels is the most this
+        rail can hold: between 1025 and 1319px the tabs tighten instead of the
+        search field collapsing — see the two intermediate @media blocks that
+        follow `.nav-links a` in moviezone.css. Add an eighth and that band breaks. -->
   <ul class="nav-links" id="navLinks">
     <li><a href="#" class="active" onclick="goHome(event)">Home</a></li>
     <!-- <li><a href="#movies-section" onclick="goHome(event)">Movies</a></li> -->
+    <li><a href="#" onclick="filterCat('bollywood', event)">Bollywood</a></li>
     <li><a href="#" onclick="filterCat('tv', event)">Web Series</a></li>
-    
-<li><a href="#upcoming" onclick="goHome(event)">Upcoming</a></li>
+    <li><a href="#" onclick="filterCat('kdrama', event)">K-Drama</a></li>
     <li><a href="#" onclick="filterCat('anime', event)">Anime</a></li>
+    <li><a href="#upcoming" onclick="goHome(event)">Upcoming</a></li>
     <li><a href="#" onclick="showWatchlist(event)">Watchlist</a></li>
   </ul>
   <div class="nav-search">
@@ -1049,6 +1055,16 @@ html.mz-no-ads .mz-ad-slot{display:none}
     <kbd class="nav-kbd" id="navSearchKbd" aria-hidden="true">Ctrl K</kbd>
     <div class="search-results-dropdown" id="searchDropdown"></div>
   </div>
+  <!--  Phone-only search trigger (≤768px). It sits BETWEEN .nav-search and the
+        install button on purpose: on a phone both this and .nav-search are given
+        `order: 1`, so the field expands into exactly the slot this token occupies
+        and the token hides — the "split open" animation is one max-width
+        transition, no reflow of the brand or the install button. Hidden by
+        default; the ≤768px block is the only thing that shows it. -->
+  <button class="nav-search-toggle" id="navSearchToggle" type="button"
+          aria-label="Open search" aria-expanded="false" aria-controls="searchInput">
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+  </button>
   <button class="nav-install-btn" id="navInstallBtn" onclick="installPWA()" title="Install MovieZone App" style="display:none;">
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
     <span>Install</span>
@@ -1227,6 +1243,12 @@ html.mz-no-ads .mz-ad-slot{display:none}
       <div class="title-line"></div>
       <h2 id="sectionHeading">ALL MOVIES & SHOWS</h2>
     </div>
+    <!-- Search meta lives here, NOT in the heading. The heading used to become
+         'BEST RESULTS FOR "PATHAAN" · DID YOU MEAN "FAHAD PATHAAN"?' — one Bebas
+         slab at up to 2.3rem that ran straight out of the banner's overflow:hidden.
+         `hidden` until a search fills it, and it is shorter than the heading beside
+         it, so revealing it cannot change the banner's height. -->
+    <div class="section-note" id="sectionNote" hidden></div>
   </div>
   <!-- Every label is wrapped in a <span>: .cat-tab::before is the absolutely
        positioned brand-gradient highlight, and an absolutely positioned child
@@ -1243,6 +1265,12 @@ html.mz-no-ads .mz-ad-slot{display:none}
     <button class="cat-tab" onclick="filterCat('tollywood')"><span>Tollywood</span></button>
     <button class="cat-tab" onclick="filterCat('tv')"><span>Web Series</span></button>
     <button class="cat-tab" onclick="filterCat('kdrama')"><span>K-Drama</span></button>
+    <!--  Anime also has a navbar entry. Unlike the other navbar duplicates that
+          were pruned from this strip, it stays here because filterCat('anime')
+          additionally renders the anime sub-mode bar (renderAnimeFilterBar), so
+          the pill is the only control that puts that bar next to the grid it
+          filters. cat-tabs.browser.test.html lists 'anime' under DIRECT. -->
+    <button class="cat-tab" onclick="filterCat('anime')"><span>Anime</span></button>
     <!-- Watchlist deliberately not repeated here: it is a personal list rather
          than a filter, and the navbar already links to showWatchlist(). -->
 

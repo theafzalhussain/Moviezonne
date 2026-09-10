@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>nav probe</title>
+<style>
+  body { margin: 0; background: #0b0b0b; color: #b6ffb6; font: 13px/1.5 ui-monospace, monospace; }
+  iframe { display: block; border: 0; height: 1px; margin: 0; visibility: hidden; }
+  pre { white-space: pre; padding: 10px; margin: 0; }
+</style>
+</head>
+<body>
+<div id="frames"></div>
+<pre id="probe">running…</pre>
+<script>
+const WIDTHS = [1920, 1600, 1440, 1366, 1300, 1280, 1279, 1200, 1100, 1025, 1024, 900, 800, 769, 768, 600, 481, 480, 414, 390, 360, 344, 320];
+const host = document.getElementById('frames');
+const frames = WIDTHS.map((w) => {
+  const f = document.createElement('iframe');
+  f.style.width = w + 'px';
+  f.src = '/navframe.tmp.html';
+  f.dataset.w = w;
+  host.appendChild(f);
+  return f;
+});
+const KIDS = ['.nav-brand', '.nav-links', '.nav-search', '.nav-install-btn', '.hamburger-btn'];
+
+function measure(f) {
+  const w = f.dataset.w;
+  const d = f.contentDocument, win = f.contentWindow;
+  const nav = d.getElementById('navbar');
+  const nr = nav.getBoundingClientRect();
+  const vis = [];
+  for (const s of KIDS) {
+    const el = nav.querySelector(s);
+    if (!el || win.getComputedStyle(el).display === 'none') continue;
+    const r = el.getBoundingClientRect();
+    vis.push({ s: s.replace('.nav-', '').replace('.', ''), x: r.x, right: r.right, w: r.width, top: r.top, abs: win.getComputedStyle(el).position === 'absolute' });
+  }
+  const bad = [];
+  const sorted = vis.slice().sort((a, b) => a.x - b.x);
+  for (let i = 1; i < sorted.length; i++) {
+    const a = sorted[i - 1], b = sorted[i];
+    if (Math.abs(a.top - b.top) > 6) continue;
+    if (b.x < a.right - 0.5) bad.push(a.s + '/' + b.s + ' ' + (a.right - b.x).toFixed(1));
+  }
+  const past = vis.filter((v) => v.right > nr.right + 0.5).map((v) => v.s);
+  const brand = vis.find((v) => v.s === 'brand');
+  const rail = vis.find((v) => v.s === 'links');
+  const barCentre = (nr.x + nr.right) / 2;
+  return 'w=' + String(w).padStart(5)
+    + ' nav ' + nr.width.toFixed(0).padStart(5) + 'x' + nr.height.toFixed(1).padStart(5)
+    + ' bot=' + nr.bottom.toFixed(1).padStart(6)
+    + ' sW=' + String(nav.scrollWidth).padStart(5)
+    + (nav.scrollWidth > Math.ceil(nr.width) ? ' *OVF' + (nav.scrollWidth - nr.width).toFixed(0) : '')
+    + (past.length ? ' *PAST:' + past.join(',') : '')
+    + (bad.length ? ' *OVERLAP ' + bad.join('; ') : '')
+    + (rail ? '  railOff=' + (((rail.x + rail.right) / 2) - barCentre).toFixed(0)
+        + (rail.abs ? '(abs)' : '(flow)')
+        + ' gapToBrand=' + (rail.x - brand.right).toFixed(0)
+        + ' gapToSearch=' + (vis.find((v) => v.s === 'search').x - rail.right).toFixed(0)
+      : '  rail=hidden')
+    + '\n        ' + vis.map((v) => v.s + '=' + v.w.toFixed(0)).join(' ');
+}
+
+function go() {
+  const lines = [];
+  for (const f of frames) {
+    try { lines.push(measure(f)); } catch (e) { lines.push('w=' + f.dataset.w + ' ERROR ' + e.message); }
+  }
+  document.getElementById('probe').textContent = lines.join('\n');
+}
+window.addEventListener('load', () => setTimeout(go, 900));
+</script>
+</body>
+</html>

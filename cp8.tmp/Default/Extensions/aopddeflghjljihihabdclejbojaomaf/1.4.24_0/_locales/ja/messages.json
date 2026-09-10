@@ -1,0 +1,23 @@
+{
+   "commandExtractImageText": {
+      "message": "画像からテキストを抽出"
+   },
+   "commandImageTranslate": {
+      "message": "指定画像を翻訳"
+   },
+   "commandPolishText": {
+      "message": "文章の改善"
+   },
+   "commandSelectTranslate": {
+      "message": "選択テキストを翻訳"
+   },
+   "commandTranslatePage": {
+      "message": "現在のページを翻訳"
+   },
+   "extensionDescription": {
+      "message": "ウェブ、ファイル、電子書籍、学術論文、画像、テキストに対応する究極の AI 翻訳ツール"
+   },
+   "extensionName": {
+      "message": "AnyDoc Translatorー無料でウェブサイトとPDFを翻訳できる"
+   }
+}

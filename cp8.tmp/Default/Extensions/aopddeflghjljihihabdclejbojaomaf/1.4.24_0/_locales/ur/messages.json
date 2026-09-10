@@ -1,0 +1,23 @@
+{
+   "commandExtractImageText": {
+      "message": "تصویر سے متن نکالیں"
+   },
+   "commandImageTranslate": {
+      "message": "مخصوص تصویر کا ترجمہ کریں"
+   },
+   "commandPolishText": {
+      "message": "تحریر بہتر بنائیں"
+   },
+   "commandSelectTranslate": {
+      "message": "منتخب متن کا ترجمہ کریں"
+   },
+   "commandTranslatePage": {
+      "message": "موجودہ صفحہ کا ترجمہ کریں"
+   },
+   "extensionDescription": {
+      "message": "ویب، فائلوں، ای بکس، تعلیمی کاغذات، تصاویر اور متن کے لیے حتمی AI مترجم"
+   },
+   "extensionName": {
+      "message": "AnyDoc Translator - ویب اور PDF کا مفت میں ترجمہ کریں"
+   }
+}

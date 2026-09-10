@@ -1,0 +1,23 @@
+{
+   "commandExtractImageText": {
+      "message": "提取圖片中的文字"
+   },
+   "commandImageTranslate": {
+      "message": "翻譯指定圖片"
+   },
+   "commandPolishText": {
+      "message": "潤色輸入框文字"
+   },
+   "commandSelectTranslate": {
+      "message": "翻譯選取文字"
+   },
+   "commandTranslatePage": {
+      "message": "翻譯當前網頁"
+   },
+   "extensionDescription": {
+      "message": "適用於網頁、文件、電子書、學術論文、圖片與文字的終極 AI 翻譯器"
+   },
+   "extensionName": {
+      "message": "AnyDoc Translator - 免費翻譯網頁和 PDF"
+   }
+}

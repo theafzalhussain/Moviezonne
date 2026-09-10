@@ -860,7 +860,7 @@ body {
 
 #navbar {
   --nav-gold: 245, 197, 24;
-  --nav-ctl: 40px;
+  --nav-ctl: 38px;
   /* One control height for search / install / menu. */
   --nav-ease: cubic-bezier(0.22, 1, 0.36, 1);
 
@@ -869,14 +869,14 @@ body {
   left: 0;
   right: 0;
   z-index: 1000;
-  margin: 0.85rem auto 0;
-  width: min(1440px, calc(100% - 1.8rem));
-  padding: 0.5rem 0.8rem;
+  margin: 0.7rem auto 0;
+  width: min(1440px, calc(100% - 1.6rem));
+  padding: 0.42rem 0.7rem;
   display: flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.5rem;
   border: 1px solid rgba(255, 255, 255, 0.055);
-  border-radius: 24px;
+  border-radius: 21px;
   background:
     linear-gradient(180deg,
       rgba(26, 26, 42, 0.62) 0%,
@@ -984,15 +984,15 @@ body {
     rather than a settle. */
 @media (min-width: 1025px) {
   #navbar.scrolled {
-    padding-top: 0.4rem;
-    padding-bottom: 0.4rem;
+    padding-top: 0.34rem;
+    padding-bottom: 0.34rem;
   }
 }
 
 .nav-brand {
   display: flex;
   align-items: center;
-  gap: 0.65rem;
+  gap: 0.6rem;
   flex-shrink: 0;
   min-width: 0;
 }
@@ -1000,12 +1000,12 @@ body {
 .nav-logo {
   display: inline-flex;
   align-items: center;
-  gap: 0.7rem;
+  gap: 0.6rem;
   text-decoration: none;
   cursor: pointer;
   min-width: 0;
   padding: 2px;
-  border-radius: 16px;
+  border-radius: 14px;
 }
 
 .nav-logo:focus-visible {
@@ -1026,15 +1026,15 @@ body {
 .nav-logo-mark {
   position: relative;
   overflow: hidden;
-  width: 2.4rem;
-  height: 2.4rem;
+  width: 2.18rem;
+  height: 2.18rem;
   border-radius: 34%;
   display: grid;
   place-items: center;
   flex-shrink: 0;
   font-family: 'Bebas Neue', sans-serif;
-  font-size: 0.98rem;
-  letter-spacing: 1.5px;
+  font-size: 0.88rem;
+  letter-spacing: 1.3px;
   color: #1c1403;
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
   background: linear-gradient(160deg,
@@ -1119,9 +1119,9 @@ body {
     background, so only a filter can actually see their shape. */
 .nav-logo-main {
   font-family: 'Bebas Neue', sans-serif;
-  font-size: 1.78rem;
+  font-size: 1.58rem;
   line-height: 0.82;
-  letter-spacing: 4px;
+  letter-spacing: 3.4px;
   white-space: nowrap;
   background: linear-gradient(96deg,
       #fff7dc 0%, #ffe08a 18%, #f5c518 38%,
@@ -1151,11 +1151,11 @@ body {
 .nav-logo-sub {
   display: flex;
   align-items: center;
-  gap: 0.42rem;
+  gap: 0.38rem;
   font-family: 'Outfit', sans-serif;
-  font-size: 0.58rem;
+  font-size: 0.53rem;
   font-weight: 700;
-  letter-spacing: 3.4px;
+  letter-spacing: 2.9px;
   text-transform: uppercase;
   color: rgba(255, 226, 150, 0.62);
   white-space: nowrap;
@@ -1174,7 +1174,7 @@ body {
 
 .nav-logo-sub::after {
   content: '';
-  flex: 0 0 26px;
+  flex: 0 0 22px;
   height: 1px;
   background: linear-gradient(90deg, rgba(var(--nav-gold), 0.5), transparent);
 }
@@ -1197,11 +1197,20 @@ body {
   align-items: center;
   gap: 0.1rem;
   list-style: none;
-  /*  Auto margins on both sides, not a left margin: the rail floats in the space
-      between the brand and the right-hand cluster instead of being glued to the
-      wordmark. Above 1280px the block further down takes over and centres it on
-      the bar itself; auto margins are the safe fallback below that, because they
-      collapse to zero the moment the row runs out of room. */
+  /*  ── WHERE THE RAIL SITS ────────────────────────────────────────────────
+      Auto margins on BOTH sides, and .nav-search deliberately does NOT carry
+      `margin-left: auto`. That makes these two margins the only auto margins in
+      the row, so they absorb the whole free space and split it evenly — the rail
+      ends up exactly centred in the channel between the brand and the search, at
+      every width, with the search + install cluster still flush right.
+
+      This replaced an absolutely positioned rail centred on the BAR
+      (`left: 50%; translateX(-50%)`, gated at 1280px). Measured, that sat much
+      closer to the search than to the logo — the right-hand cluster is roughly
+      twice the width of the brand lockup, so the bar's midpoint is nowhere near
+      the midpoint of the empty space either side of the rail. Channel-centring is
+      what actually looks deliberate, it needs no breakpoint gate, and auto margins
+      collapse to zero when the row runs out of room, so it cannot overlap. */
   margin-inline: auto;
   padding: 4px;
   border-radius: 999px;
@@ -1252,10 +1261,14 @@ body {
   color: rgba(226, 226, 244, 0.7);
   text-decoration: none;
   font-family: 'Outfit', sans-serif;
-  font-size: 0.83rem;
+  /*  0.875rem (14px), up from 0.8rem. The labels are the bar's only body copy and
+      at 12.8px they read as a caption next to a 1.58rem wordmark; 14px is the
+      smallest size that still reads as navigation. Horizontal padding came down
+      0.02rem to pay for part of the extra width — see the two bands below. */
+  font-size: 0.875rem;
   font-weight: 600;
   letter-spacing: 0.25px;
-  padding: 0.44rem 0.82rem;
+  padding: 0.42rem 0.72rem;
   border-radius: 999px;
   white-space: nowrap;
   transition: color 0.28s ease, text-shadow 0.28s ease, transform 0.2s var(--nav-ease);
@@ -1286,36 +1299,62 @@ body {
   outline-offset: 1px;
 }
 
-/*  True centring, from 1280px up.
-    ─────────────────────────────────────────────────────────────────────────────
-    Taking the rail out of flow is the only way to centre it on the BAR rather
-    than on the gap between its neighbours: the brand lockup (~196px) and the
-    right-hand cluster (~390px) are not the same width, so any flow-based
-    centring — auto margins included — lands the rail left of true centre.
+/*  ── The rail's two squeeze bands (1025-1319px) ─────────────────────────────
+    The rail carries seven nowrap labels and cannot shrink; the search field is
+    `flex: 0 1 280px`, so it is the only thing in the row that can give — and
+    left alone it gives everything, ending up a ~30px stub with a truncated
+    placeholder at 1025px. These two bands take the width out of the tabs
+    instead, in two steps, so the field never drops below a usable ~165px.
 
-    It is gated at 1280px because out of flow also means it can no longer push
-    anything: the rail is ~415px wide, so centred it occupies the middle 415px,
-    and the search + install cluster has to fit in the space that is left. At
-    1280px that leaves ~10px of slack; below it, the two would start to overlap,
-    which is exactly why every narrower width keeps the auto-margin fallback.
-    If the link list ever gains a sixth item, re-measure this boundary. */
-@media (min-width: 1280px) {
+    Below 1025px the rail is `display: none` and both bands stop mattering; above
+    1319px the full-size tabs and a 280px field fit with room to spare. If an
+    eighth tab is ever added, re-measure: the binding constraint is
+    brand (~200px) + rail + install (~90px) + 3 gaps against the bar's inner width.
+
+    The dropdown has to be re-anchored in these bands too; that override lives
+    with the other .search-results-dropdown rules further down (search for
+    "re-anchored") because it has to come after the base rule to win. */
+@media (min-width: 1025px) and (max-width: 1319px) {
+  .nav-links a {
+    font-size: 0.82rem;
+    padding: 0.4rem 0.52rem;
+    letter-spacing: 0.1px;
+  }
+
+  .nav-search {
+    flex: 0 1 210px;
+    max-width: 210px;
+  }
+}
+
+@media (min-width: 1025px) and (max-width: 1140px) {
   .nav-links {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    margin-inline: 0;
+    gap: 0;
+  }
+
+  .nav-links a {
+    font-size: 0.76rem;
+    padding: 0.38rem 0.4rem;
+    letter-spacing: 0;
+  }
+
+  .nav-search {
+    flex: 0 1 165px;
+    max-width: 165px;
   }
 }
 
 /*  ── Command bar ──────────────────────────────────────────────────────────── */
 .nav-search {
   position: relative;
-  flex: 0 1 300px;
-  max-width: 300px;
+  flex: 0 1 280px;
+  max-width: 280px;
   min-width: 0;
-  margin-left: auto;
+  /*  No `margin-left: auto` here on purpose — .nav-links' auto margins are what
+      push this cluster right, and adding a third auto margin would steal a share
+      of the free space and pull the rail off the channel's centre. The ≤1024px
+      block puts it back, because the rail is hidden there and there is nothing
+      else left to do the pushing. */
 }
 
 /*  Bloom behind the field on focus. Blurred radial pair rather than a box-shadow
@@ -1346,7 +1385,7 @@ body {
   height: var(--nav-ctl);
   position: relative;
   z-index: 1;
-  padding: 0 3.9rem 0 2.65rem;
+  padding: 0 3.7rem 0 2.5rem;
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 999px;
   background:
@@ -1354,7 +1393,7 @@ body {
     rgba(6, 6, 14, 0.55);
   color: var(--text);
   font-family: 'Outfit', sans-serif;
-  font-size: 0.83rem;
+  font-size: 0.81rem;
   font-weight: 500;
   letter-spacing: 0.2px;
   outline: none;
@@ -1400,8 +1439,8 @@ body {
   left: 5px;
   top: 50%;
   transform: translateY(-50%);
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: 999px;
   display: grid;
   place-items: center;
@@ -1482,8 +1521,8 @@ body {
   right: -40px;
   /*  Kept equal to the field's width plus the two 40px overhangs, so the panel
       never grows past `right` and out over the install button. Re-derive it if
-      .nav-search's max-width changes: 300 + 40 + 40. */
-  min-width: 380px;
+      .nav-search's max-width changes: 280 + 40 + 40. */
+  min-width: 360px;
   background:
     radial-gradient(circle at 15% 0%, rgba(245, 197, 24, 0.08), transparent 34%),
     linear-gradient(180deg, rgba(15, 15, 28, 0.99) 0%, rgba(7, 7, 15, 0.995) 100%);
@@ -1752,14 +1791,40 @@ body {
   font-size: 1rem;
 }
 
-@media (max-width: 680px) {
+/*  Re-anchored for the 1025-1319px squeeze bands (see "squeeze bands" above,
+    where the field drops to 210px and then 165px). The default geometry —
+    `left: -40px; right: -40px; min-width: 360px` — is derived from a 280px
+    field: against a 165px one the min-width wins, `right` is overrun, and the
+    panel spills out under the install button. Anchoring to the field's RIGHT
+    edge and letting the panel extend left into the empty channel keeps the same
+    readable width and can never reach the button. This must stay AFTER the base
+    rule: a media query adds no specificity, so source order is what decides it. */
+@media (min-width: 1025px) and (max-width: 1319px) {
+  .search-results-dropdown {
+    left: auto;
+    right: -6px;
+    width: 340px;
+    min-width: 0;
+  }
+}
+
+/*  Phones. `top` is the one-row navbar's bottom edge plus a gap: 0.4rem margin
+    + 2×0.4rem padding + 38px control + 2px border ≈ 59px, so 68px. The bar was
+    two rows here (search on its own line) and this read 104px; it is re-derived
+    at ≤480px and ≤380px, where --nav-ctl and the padding both come down.
+
+    The query was max-width:680px and is now 768px, so it matches the phone
+    navbar block exactly. Between 681 and 768px the field is a collapsed token,
+    and an absolutely positioned panel would have been sized against its 0 width. */
+@media (max-width: 768px) {
   .search-results-dropdown {
     position: fixed;
-    top: 104px;
+    top: 68px;
     left: 10px;
     right: 10px;
+    width: auto;
     min-width: 0;
-    max-height: calc(100dvh - 120px);
+    max-height: calc(100dvh - 84px);
     border-radius: 18px;
   }
 
@@ -1774,6 +1839,48 @@ body {
   .search-result-item {
     padding-inline: 0.72rem;
   }
+}
+
+/*  ── Phone search token ─────────────────────────────────────────────────────
+    The collapsed state of the search field on a phone, and nothing else: it is
+    `display: none` at every width above 768px, where the real field is always
+    open. Deliberately the same gold token as `.nav-search .search-icon` — when it
+    is tapped, the magnifier the user pressed is the magnifier that ends up inside
+    the expanded field, so the transition reads as the icon splitting the bar open
+    rather than as one control being swapped for another.
+
+    Sized off --nav-ctl like the install pill and the old menu button, so the
+    right-hand cluster stays a row of equal parts at every phone breakpoint. */
+.nav-search-toggle {
+  display: none;
+  place-items: center;
+  width: var(--nav-ctl);
+  height: var(--nav-ctl);
+  padding: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+  color: #241a04;
+  border: 1px solid rgba(255, 246, 214, 0.55);
+  border-radius: 999px;
+  background: linear-gradient(150deg, #fff2bd 0%, #ffd75e 40%, #f0bb14 72%, #d79c08 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    inset 0 -2px 3px rgba(120, 76, 0, 0.3),
+    0 4px 12px -4px rgba(var(--nav-gold), 0.55);
+  transition: transform 0.3s var(--nav-ease), box-shadow 0.35s ease, filter 0.3s ease;
+}
+
+.nav-search-toggle svg {
+  flex-shrink: 0;
+}
+
+.nav-search-toggle:active {
+  transform: scale(0.94);
+}
+
+.nav-search-toggle:focus-visible {
+  outline: 2px solid #fff3c4;
+  outline-offset: 2px;
 }
 
 /*  ── Menu button ────────────────────────────────────────────────────────────
@@ -1877,7 +1984,7 @@ body {
   height: 95vh;
   min-height: 520px;
   overflow: hidden;
-  margin-top: 75px;
+  margin-top: 70px;
   background: #0a0a0a;
   contain: layout paint style;
 }
@@ -2947,6 +3054,45 @@ body {
  *  ID beats a class whatever the source order, so this holds at every width
  *  without needing to be repeated inside each media query.
  */
+/*  ── Search meta beside the banner heading ─────────────────────────────────
+    Second flex child of #movies-section > .section-header, so it sits to the
+    right of the title with the header's own 1rem gap.
+
+    It used to carry two more pills on every search: a result count, and a
+    tappable "Did you mean X" correction. Both were removed by request — the
+    heading is the query and nothing else. The count only restated what the grid
+    directly below already shows, and the correction was a second search control
+    sitting two lines under the field the user had just typed into; the dropdown's
+    own .search-correction offers the same suggestion at the moment it is actually
+    useful. Their styles (.section-note-count, .section-note-fix and its
+    strong/hover/focus rules) went with them.
+
+    What is left is the state pill, which appears only when a search fails. The
+    container is `hidden` whenever setSectionNote('') is passed, so an empty note
+    costs no layout at all. */
+.section-note {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  min-width: 0;
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.section-note-state {
+  padding: 0.28rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(255, 255, 255, 0.55);
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
 #movies-section > .section-header {
   justify-content: flex-start;
   gap: 1rem;
@@ -7278,14 +7424,16 @@ html[data-mz-tv="true"] .cat-group-menu {
 @media (max-width: 1024px) {
   #navbar {
     width: min(100% - 1rem, 1400px);
-    padding: 0.46rem 0.5rem;
-    gap: 0.45rem;
-    border-radius: 20px;
+    padding: 0.42rem 0.45rem;
+    gap: 0.42rem;
+    border-radius: 18px;
   }
 
   .nav-search {
     max-width: 300px;
     flex: 1 1 200px;
+    /* Rail is hidden in this band, so the search takes over pushing right. */
+    margin-left: auto;
   }
 
   .footer-inner {
@@ -7356,89 +7504,171 @@ html[data-mz-tv="true"] .cat-group-menu {
 
   /* Remove GPU-heavy grain */
 
-  /*  ── PHONE NAVBAR: two rows ────────────────────────────────────────────
-      Row 1  brand ....................... install · menu
-      Row 2  search, full width
+  /*  ── PHONE NAVBAR: one row ─────────────────────────────────────────────
+      Row 1  brand ................. [search token] · install
+      and when the token is tapped:
+             MZ · [────── search field ──────] · install
 
-      The search field used to live on row 1, collapsed to a gold token that
-      expanded on focus. It fitted the bar into ~54px, but three round gold
-      controls crowded into the top-right corner read as clutter rather than as
-      chrome, and a search box you have to open first is a worse deal on the
-      device where search is used most. A full-width field on its own row is the
-      layout every serious mobile catalogue uses, and it is what this is now.
+      Three things changed from the previous two-row bar.
 
-      Everything is sized off --nav-ctl, so the whole bar rescales from one number
-      at each breakpoint below. The field is deliberately shorter than the round
-      controls: it is a text input, not a tap target, and the 4px it gives back
-      comes straight off the height the hero has to be offset by. */
+      1. The menu button is gone. It opened a drawer that duplicated the link
+         rail, and on a phone every browse destination on that rail is also a
+         pill on the category strip directly below the hero. Removing it also
+         removes the third round control from the top-right corner, which is
+         what made that corner read as clutter.
+      2. The search field no longer owns a second row. A full-width field cost
+         ~45px of permanent vertical space — on a phone that is a tenth of the
+         viewport spent on a control used a few times a session — and it pushed
+         the hero's first line of type most of the way down the screen. It is a
+         collapsed gold token now (.nav-search-toggle) that expands in place.
+      3. The brand is larger, because it is no longer competing with a full-width
+         field for the row: 2.28rem medallion, 1.42rem wordmark.
+
+      The expand is one `max-width` transition on .nav-search from 0% to 100%,
+      with the token and the wordmark stepping out of the way — no reflow of the
+      medallion or the install pill, and the row's own `gap` guarantees clear
+      space between all three of MZ · field · install in the open state.
+
+      Everything is still sized off --nav-ctl, so the whole bar rescales from one
+      number at each breakpoint below. */
   #navbar {
     width: min(100% - 0.7rem, 1400px);
     margin-top: 0.4rem;
     padding: 0.4rem 0.45rem;
     gap: 0.42rem;
-    flex-wrap: wrap;
+    /*  Was `wrap`, which together with `flex: 1 1 100%` on .nav-search is what
+        produced the second row. Both are gone. */
+    flex-wrap: nowrap;
     border-radius: 18px;
     --nav-ctl: 38px;
+  }
+
+  /*  A touch more air between the three parts once the field is open — that row
+      is the only time all of MZ, field and install sit shoulder to shoulder. */
+  #navbar.mz-msearch-open {
+    gap: 0.5rem;
   }
 
   .nav-links {
     display: none !important;
   }
 
+  /*  The drawer trigger, removed on phones by request. !important because the
+      769-1024px band above sets `display: flex` on it and this block has no
+      higher specificity. The button stays in the DOM: initMobileNav() binds to
+      it, and its syncNavToViewport() watchdog reads this computed `none` to
+      force the drawer shut if a tablet is rotated down into phone width. */
+  .hamburger-btn {
+    display: none !important;
+  }
+
   .nav-brand {
-    gap: 0.5rem;
+    order: 0;
+    gap: 0.55rem;
     min-width: 0;
+    /*  Pushes the token and the install pill to the right edge while the field is
+        closed. It has to be released when the field opens: an auto margin absorbs
+        a flex line's free space BEFORE any flex-grow is honoured, so leaving it
+        on would starve .nav-search and it would open to its intrinsic width. */
     margin-right: auto;
   }
 
+  #navbar.mz-msearch-open .nav-brand {
+    margin-right: 0;
+  }
+
   .nav-logo {
-    gap: 0.5rem;
+    gap: 0.55rem;
     padding: 0;
   }
 
   .nav-logo-mark {
-    width: 2.05rem;
-    height: 2.05rem;
-    font-size: 0.78rem;
-    letter-spacing: 1px;
+    width: 2.28rem;
+    height: 2.28rem;
+    font-size: 0.86rem;
+    letter-spacing: 1.1px;
   }
 
   .nav-logo-main {
-    font-size: 1.26rem;
-    letter-spacing: 2px;
+    font-size: 1.42rem;
+    letter-spacing: 2.4px;
   }
 
   .nav-logo-sub {
-    font-size: 0.5rem;
-    letter-spacing: 1.8px;
-    gap: 0.3rem;
+    font-size: 0.53rem;
+    letter-spacing: 2.1px;
+    gap: 0.32rem;
   }
 
   .nav-logo-sub::after {
-    flex-basis: 14px;
+    flex-basis: 16px;
   }
 
-  .nav-install-btn {
+  /*  The wordmark yields the row to the field. A step rather than a transition:
+      max-width + overflow:hidden would have to clip .nav-logo-main's box, and
+      that box is smaller than the drop-shadow glow the metallic wordmark is
+      built from — the glow would be sheared off for the whole animation. The
+      motion the eye follows is the field growing; the wordmark leaving under it
+      does not need its own. */
+  #navbar.mz-msearch-open .nav-logo-copy {
+    display: none;
+  }
+
+  #navbar.mz-msearch-open .nav-logo {
+    gap: 0;
+  }
+
+  /*  Same `order` as .nav-search on purpose: the field expands into exactly the
+      slot the token occupies, so nothing either side of it moves. */
+  .nav-search-toggle {
+    display: grid;
     order: 1;
   }
 
-  .hamburger-btn {
-    display: flex;
-    order: 2;
-    border-radius: 12px;
+  #navbar.mz-msearch-open .nav-search-toggle {
+    display: none;
   }
 
-  /* Row 2. flex-basis 100% is what forces the wrap. */
-  .nav-search {
-    order: 3;
-    flex: 1 1 100%;
-    max-width: none;
+  .nav-install-btn {
+    order: 2;
+    /*  The desktop pair-separating margin is redundant here — the phone bar sets
+        its own gap, and the field is not always beside the button. */
     margin-left: 0;
+  }
+
+  /*  Collapsed by default. `flex: 1 1 auto` + `max-width: 0%` is what makes the
+      open state one interpolation: both ends of the max-width are percentages of
+      the same containing block, so there is no length↔percentage conversion in
+      the middle, and flex-grow then caps the open width at the real free space
+      rather than the literal 100%. visibility (not display) so the transition can
+      run, delayed on the way out so it lands after the width has finished. */
+  .nav-search {
+    order: 1;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 0%;
+    margin-left: 0;
+    opacity: 0;
+    visibility: hidden;
+    transition:
+      max-width 0.42s var(--nav-ease),
+      opacity 0.22s ease,
+      visibility 0s linear 0.42s;
+  }
+
+  #navbar.mz-msearch-open .nav-search {
+    max-width: 100%;
+    opacity: 1;
+    visibility: visible;
+    transition:
+      max-width 0.42s var(--nav-ease),
+      opacity 0.3s ease 0.1s,
+      visibility 0s linear 0s;
   }
 
   .nav-search input {
     height: 34px;
-    padding: 0 0.9rem 0 2.5rem;
+    padding: 0 2.4rem 0 2.5rem;
     font-size: 0.84rem;
   }
 
@@ -7451,10 +7681,10 @@ html[data-mz-tv="true"] .cat-group-menu {
   /*  Height and the whole text composition live in the mobile hero block up with
       the carousel CSS. Only the top offset is here, because it is the phone
       navbar's height and belongs with the navbar rules above it.
-      0.4rem margin + 2×0.4rem padding + 38px row 1 + 0.42rem gap + 34px row 2
-      + 2px border ≈ 100px. */
+      One row now: 0.4rem margin + 2×0.4rem padding + 38px control + 2px border
+      ≈ 59px, plus slack. It was 108px when the search had a row of its own. */
   #hero {
-    margin-top: 108px;
+    margin-top: 68px;
   }
 
   .carousel-thumbs {
@@ -7614,29 +7844,34 @@ html[data-mz-tv="true"] .cat-group-menu {
 
   .nav-logo,
   .nav-brand {
-    gap: 0.45rem;
+    gap: 0.5rem;
   }
 
   .nav-logo-mark {
-    width: 1.9rem;
-    height: 1.9rem;
-    font-size: 0.72rem;
+    width: 2.14rem;
+    height: 2.14rem;
+    font-size: 0.8rem;
   }
 
   .nav-logo-main {
-    font-size: 1.14rem;
-    letter-spacing: 1.6px;
+    font-size: 1.3rem;
+    letter-spacing: 1.9px;
   }
 
-  /*  The club line is the first piece of the lockup to go: at this width the
-      medallion plus wordmark already carry the brand, and the extra row of 8px
-      type only makes the bar taller. */
+  /*  The club line used to be the first piece of the lockup to go here: with a
+      full-width search field sharing the bar there was no room for a third line
+      of type. The field is a 36px token now, so the whole lockup fits with ~200px
+      to spare even at 320px — and the medallion plus a bare wordmark is a weaker
+      mark than the medallion + wordmark + rule the brand is actually drawn as.
+      It is still hidden while the field is open, via .mz-msearch-open above. */
   .nav-logo-sub {
-    display: none;
+    font-size: 0.5rem;
+    letter-spacing: 1.9px;
+    gap: 0.28rem;
   }
 
-  .hamburger-btn {
-    border-radius: 11px;
+  .nav-logo-sub::after {
+    flex-basis: 12px;
   }
 
   .nav-search input {
@@ -7644,14 +7879,15 @@ html[data-mz-tv="true"] .cat-group-menu {
     font-size: 0.8rem;
   }
 
-  /*  Two-row navbar bottom sits at ~94px here. max-height is left to the ≤1024px
-      rule further down, which caps the panel at 300px. */
+  /*  One-row navbar bottom sits at ~56px here (0.4rem margin + 2×0.36rem padding
+      + 36px control + 2px border). max-height is left to the ≤1024px rule further
+      down, which caps the panel at 300px. */
   .search-results-dropdown {
-    top: 98px;
+    top: 64px;
   }
 
   #hero {
-    margin-top: 99px;
+    margin-top: 64px;
   }
 
   /*  Modal play button only. This used to be a bare `.btn-play, .btn-info` rule,
@@ -7843,27 +8079,24 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 
   .nav-logo-main {
-    font-size: 1.02rem;
-    letter-spacing: 1.2px;
+    font-size: 1.16rem;
+    letter-spacing: 1.3px;
   }
 
   .nav-logo-mark {
-    width: 1.72rem;
-    height: 1.72rem;
-    font-size: 0.64rem;
+    width: 1.95rem;
+    height: 1.95rem;
+    font-size: 0.7rem;
     letter-spacing: 0.5px;
   }
 
-  .hamburger-btn {
-    border-radius: 10px;
+  .nav-logo-sub {
+    font-size: 0.48rem;
+    letter-spacing: 1.5px;
   }
 
-  .hamburger-btn span {
-    width: 15px;
-  }
-
-  .hamburger-btn span:nth-child(2) {
-    width: 10px;
+  .nav-logo-sub::after {
+    flex-basis: 10px;
   }
 
   .nav-search input {
@@ -7877,13 +8110,13 @@ html[data-mz-tv="true"] .cat-group-menu {
     height: 24px;
   }
 
-  /* Two-row navbar bottom sits at ~86px here. */
+  /* One-row navbar bottom sits at ~51px here. */
   .search-results-dropdown {
-    top: 92px;
+    top: 60px;
   }
 
   #hero {
-    margin-top: 94px;
+    margin-top: 60px;
   }
 
   /*  Hero type is NOT re-shrunk here any more. This band used to force
@@ -8306,13 +8539,14 @@ html[data-mz-tv="true"] .cat-group-menu {
   #navbar {
     width: min(92%, calc(100% - 2.5rem));
     max-width: 1800px;
-    --nav-ctl: 44px;
+    --nav-ctl: 42px;
   }
 
   /*  html{font-size:108%} above already scales every rem in the bar — padding,
       type, the whole logo lockup — so only the px control height is restated. */
   .nav-search {
-    max-width: 420px;
+    max-width: 340px;
+    flex: 0 1 340px;
   }
 
   .movie-grid {
@@ -8387,11 +8621,12 @@ html[data-mz-tv="true"] .cat-group-menu {
   #navbar {
     width: min(92%, calc(100% - 3rem));
     max-width: 2400px;
-    --nav-ctl: 48px;
+    --nav-ctl: 46px;
   }
 
   .nav-search {
-    max-width: 460px;
+    max-width: 420px;
+    flex: 0 1 420px;
   }
 
   .movie-grid {
@@ -8805,7 +9040,15 @@ html[data-mz-tv="true"] .cat-group-menu {
   justify-content: center;
   gap: 6px;
   height: var(--nav-ctl);
-  padding: 0 0.8rem;
+  padding: 0 0.72rem;
+  /*  #navbar's `gap: 0.5rem` is shared by every child, so it cannot be used to
+      separate just this pair. The search field and the install pill were the only
+      two adjacent controls in the bar with no visual boundary between them — a
+      dark capsule butting straight into a struck-gold one at 8px read as one
+      welded unit. This margin takes the pair to ~15px while leaving the brand and
+      the link rail on the row's own gap. Zeroed in the ≤768px block, where the
+      phone bar sets its own spacing. */
+  margin-left: 0.45rem;
   flex-shrink: 0;
   cursor: pointer;
   white-space: nowrap;
@@ -8814,7 +9057,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   background: linear-gradient(180deg, #ffe58f 0%, #f7cb2e 42%, #e3a413 100%);
   color: #1a1305;
   font-family: 'Outfit', sans-serif;
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   font-weight: 800;
   letter-spacing: 0.2px;
   box-shadow:
@@ -8832,8 +9075,8 @@ html[data-mz-tv="true"] .cat-group-menu {
 .nav-install-btn svg {
   flex-shrink: 0;
   position: relative;
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
   animation: navInstallArrow 2.4s ease-in-out infinite;
 }
 

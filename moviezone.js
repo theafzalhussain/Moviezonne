@@ -7966,6 +7966,8 @@ function filterCat(cat, e) {
   syncCatGroupTriggers();
   const h = document.getElementById('sectionHeading');
   if (h) h.textContent = CAT_HEADINGS[cat] || 'MOVIES';
+  // Leaving search mode: the search meta beside the heading goes with it.
+  setSectionNote('');
   // Anime ke liye extra sub-filter bar (Trending / Latest / Airing / Top Rated ...)
   if (cat === 'anime') { renderAnimeFilterBar(); updateAnimeHeading(); } else { hideAnimeFilterBar(); }
   // Cartoons ke liye apna sub-filter bar (Trending / Famous / Hindi / Doraemon & Co ...)
@@ -8285,6 +8287,7 @@ function showWatchlist(e) {
   isSearchResultsMode = false;
   isWatchlistMode = true;
   hideAnimeFilterBar();
+  setSectionNote('');
   // No hideOttFilterBar() any more — the OTT chip bar no longer exists.
   // Nothing to page here, so take the sentinel out of the viewport entirely
   // rather than relying on the observer callback to bail.
@@ -9285,7 +9288,15 @@ async function searchAndDisplay(query) {
   if (scrollTrigger) scrollTrigger.style.display = 'none';
   grid.innerHTML = Array(8).fill('<div class="skeleton skeleton-card"></div>').join('');
   const heading = document.getElementById('sectionHeading');
-  if (heading) heading.textContent = 'SEARCHING FOR "' + query.toUpperCase() + '"...';
+  /*  The heading is the QUERY, nothing else.
+      It used to be a whole sentence — 'SEARCHING FOR "PATHAAN"...', then
+      'BEST RESULTS FOR "PATHAAN" · DID YOU MEAN "FAHAD PATHAAN"?' — rendered in
+      Bebas at up to 2.3rem inside a banner that clips its overflow. On anything
+      narrower than a desktop the line simply ran off the panel and the first
+      words were the ones lost. Everything that is not the query moved to
+      .section-note beside it, which is small, muted, and allowed to be long. */
+  if (heading) heading.textContent = searchHeadingText(query);
+  setSectionNote('');
   const section = document.getElementById('movies-section');
   if (section) section.scrollIntoView({ behavior: isMzTVMode() ? 'auto' : 'smooth' });
 
@@ -9293,11 +9304,19 @@ async function searchAndDisplay(query) {
     const search = await intelligentMovieSearch(query, 40, signal);
     const movies = search.results.filter(item => item.poster_path && item.media_type !== 'person');
     allMovies = movies;
-    if (heading) {
-      heading.textContent = search.correction
-        ? 'BEST RESULTS FOR "' + query.toUpperCase() + '" · DID YOU MEAN "' + search.correction.toUpperCase() + '"?'
-        : 'RESULTS FOR "' + query.toUpperCase() + '"';
-    }
+    if (heading) heading.textContent = searchHeadingText(query);
+    /*  The banner shows the query and nothing else. It used to carry a result
+        count pill and a tappable "Did you mean <term>" correction beside the
+        heading; both are gone by request — the count restated what the grid below
+        already shows, and the correction put a second, competing search control
+        two lines under the one the user had just typed into.
+
+        The correction itself is NOT lost: renderSearchDropdown() still offers it
+        as .search-correction inside the live dropdown, which is where the user
+        still has the query in front of them and a suggestion is worth acting on.
+        setSectionNote('') is required rather than merely skippable — it is what
+        clears whatever the previous search left in #sectionNote. */
+    setSectionNote('');
     // Keeps the page title aligned with what the user is actually looking at.
     try { document.title = query.trim() + ' – Search results | MovieZone'; } catch (e) {}
     if (movies.length) renderMovies(movies);
@@ -9305,12 +9324,35 @@ async function searchAndDisplay(query) {
   } catch (error) {
     if (error && error.name === 'AbortError') return;
     console.warn('[MovieZone] Search page failed:', error);
+    setSectionNote('<span class="section-note-state">Search unavailable</span>');
     grid.innerHTML = '<div class="search-grid-empty"><strong>Search is temporarily unavailable</strong><span>Please try again in a moment.</span></div>';
   }
 
   const loadMoreBtn = document.getElementById('loadMoreMoviesBtn');
   if (loadMoreBtn) loadMoreBtn.style.display = 'none';
 }
+
+/*  A pasted sentence would still overflow a heading this size, so the displayed
+    query is capped. The real query is untouched — only the label is trimmed. */
+function searchHeadingText(query) {
+  const q = String(query || '').trim();
+  return (q.length > 40 ? q.slice(0, 39).trimEnd() + '…' : q).toUpperCase();
+}
+
+/*  #sectionNote is the second flex child of the movies banner, so an empty note
+    takes no space and a filled one sits to the right of the heading. Pass '' to
+    clear it — every path that leaves search mode does. */
+function setSectionNote(html) {
+  const note = document.getElementById('sectionNote');
+  if (!note) return;
+  note.innerHTML = html || '';
+  note.hidden = !html;
+}
+
+/*  The delegated [data-search-fix] click handler that used to live here is gone
+    with the pill that carried the attribute — nothing in the app emits it any
+    more. The equivalent path is renderSearchDropdown()'s .search-correction
+    button, which calls searchAndDisplay() with the corrected spelling directly. */
 
 function closeDropdown() {
   const dropdown = document.getElementById('searchDropdown');
@@ -11927,6 +11969,73 @@ window.addEventListener('scroll', () => {
   });
 })();
 
+/*  ── Phone search toggle ────────────────────────────────────────────────────
+ *  On a phone the search field is collapsed to a gold token (#navSearchToggle)
+ *  and expands in place into the bar; the whole animation is the ≤768px block in
+ *  moviezone.css. This owns only what CSS cannot do: the one class the stylesheet
+ *  keys off, the focus handoff, and the three ways back out.
+ *
+ *  The 768px here is the same boundary as the stylesheet's phone block and has to
+ *  move with it. Above that width the class is inert — .nav-search has no
+ *  collapsed state — but it would still strip .nav-brand's auto margin and hide
+ *  the wordmark, so a device rotated up into the tablet band is reset.
+ */
+(function initPhoneSearchToggle() {
+  const navbar = document.getElementById('navbar');
+  const toggle = document.getElementById('navSearchToggle');
+  const field = document.getElementById('searchInput');
+  if (!navbar || !toggle) return;
+
+  const phone = window.matchMedia('(max-width: 768px)');
+  const isOpen = () => navbar.classList.contains('mz-msearch-open');
+
+  function openField() {
+    if (isOpen()) return;
+    navbar.classList.add('mz-msearch-open');
+    toggle.setAttribute('aria-expanded', 'true');
+    /*  Focus on the next frame, not now. The field is visibility:hidden until the
+        class lands, and focusing a hidden element is a no-op in some engines; on
+        iOS a focus that arrives while the box is still 0-wide also scrolls the
+        page to a zero-size caret. The open state flips visibility at 0s, so one
+        frame is all it needs. */
+    requestAnimationFrame(() => { if (field && !isMzTV()) field.focus(); });
+  }
+
+  function closeField() {
+    if (!isOpen()) return;
+    navbar.classList.remove('mz-msearch-open');
+    toggle.setAttribute('aria-expanded', 'false');
+    if (field) field.blur();
+    closeDropdown();
+  }
+
+  toggle.addEventListener('click', event => {
+    event.preventDefault();
+    if (isOpen()) closeField(); else openField();
+  });
+
+  /*  Outside tap, in the capture phase so it beats the field's own blur timer.
+      #searchDropdown is a DOM descendant of .nav-search but renders as a fixed
+      panel below the bar, so a tap on a result is inside #navbar and does not
+      collapse the field out from under the tap that opened the movie. */
+  document.addEventListener('pointerdown', event => {
+    if (!isOpen()) return;
+    const target = event.target;
+    if (!target || typeof target.closest !== 'function') return;
+    if (target.closest('#navbar')) return;
+    closeField();
+  }, true);
+
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && isOpen()) closeField();
+  });
+
+  const syncSearchToViewport = () => { if (!phone.matches) closeField(); };
+  if (typeof phone.addEventListener === 'function') phone.addEventListener('change', syncSearchToViewport);
+  else if (typeof phone.addListener === 'function') phone.addListener(syncSearchToViewport);
+  window.addEventListener('orientationchange', syncSearchToViewport, { passive: true });
+})();
+
 /*  ── Nav link indicator ────────────────────────────────────────────────────
  *  The desktop link row is one recessed capsule with a single gold pill that
  *  slides between the items, instead of five links each carrying their own
@@ -12089,6 +12198,7 @@ function goHome(e) {
   isFullViewUpcoming = false;
   isSearchResultsMode = false;
   hideAnimeFilterBar();
+  setSectionNote('');
   const scrollTrigger = document.getElementById('infiniteScrollTrigger');
   if (scrollTrigger) scrollTrigger.style.display = '';
   

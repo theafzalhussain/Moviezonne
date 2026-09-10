@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>search heading view</title>
+<style>
+  body { margin:0; background:#16161c; color:#9ad; font:12px/1.4 ui-monospace, monospace; }
+  .cap { padding:4px 8px }
+  iframe { display:block; border:0 }
+  pre { padding:8px; color:#b6ffb6; white-space:pre-wrap }
+</style>
+</head>
+<body>
+<div class="cap">REAL PAGE 1440 — after searchAndDisplay('pathaan')</div>
+<iframe id="d" src="/" style="width:1440px;height:330px"></iframe>
+<div class="cap">REAL PAGE 390 — after searchAndDisplay('pathaan')</div>
+<iframe id="m" src="/" style="width:390px;height:330px"></iframe>
+<pre id="o"></pre>
+<script>
+window.addEventListener('load', () => {
+  const out = [];
+  [['d', 1440], ['m', 390]].forEach(([id, w]) => {
+    const f = document.getElementById(id);
+    const win = f.contentWindow, doc = f.contentDocument;
+    setTimeout(() => {
+      try {
+        win.scrollTo(0, 0);
+        if (typeof win.searchAndDisplay === 'function') win.searchAndDisplay('pathaan');
+        else out.push(w + ': searchAndDisplay MISSING');
+      } catch (e) { out.push(w + ': ' + e.message); }
+      setTimeout(() => {
+        const h = doc.getElementById('sectionHeading');
+        const n = doc.getElementById('sectionNote');
+        out.push(w + ' heading = ' + JSON.stringify(h && h.textContent)
+          + '\n     note hidden=' + (n && n.hidden) + ' text=' + JSON.stringify(n && n.textContent));
+        // Scroll the movies banner into view so the screenshot shows it.
+        const sec = doc.getElementById('movies-section');
+        if (sec) sec.scrollIntoView();
+        document.getElementById('o').textContent = out.join('\n');
+      }, 2500);
+    }, 2600);
+  });
+});
+</script>
+</body>
+</html>

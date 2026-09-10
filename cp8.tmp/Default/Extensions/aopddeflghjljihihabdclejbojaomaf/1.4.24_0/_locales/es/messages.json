@@ -1,0 +1,23 @@
+{
+   "commandExtractImageText": {
+      "message": "Extraer texto de la imagen"
+   },
+   "commandImageTranslate": {
+      "message": "Traducir imagen especificada"
+   },
+   "commandPolishText": {
+      "message": "Mejorar texto de entrada"
+   },
+   "commandSelectTranslate": {
+      "message": "Traducir texto seleccionado"
+   },
+   "commandTranslatePage": {
+      "message": "Traducir página actual"
+   },
+   "extensionDescription": {
+      "message": "El traductor de IA definitivo para la web, archivos, libros electrónicos, artículos académicos, imágenes y texto"
+   },
+   "extensionName": {
+      "message": "AnyDoc Translator: traduzca sitios web y PDF gratis"
+   }
+}

@@ -32,15 +32,17 @@
       .cat-tab at all: the OTT Platform dropdown was removed and a platform is
       opened from the Top Providers rail. ott-sections-check.js asserts each one
       has a data-provider-cat card and does NOT have a cat-tab. */
-  /*  'anime' and 'kids' are not here either: Anime has its own navbar entry, so
-      the duplicate strip pill was removed, and the Cartoons tab was dropped
-      outright. 'adult' was removed from the UI as well. All three still exist as
-      category ids in moviezone.js — they simply have no pill any more.
+  /*  'kids' is not here: the Cartoons tab was dropped outright, and 'adult' was
+      removed from the UI as well. Both still exist as category ids in
+      moviezone.js — they simply have no pill any more.
+      'anime' IS on the strip (and in the navbar): the pill is the only control
+      that also renders the anime sub-mode bar beside the grid, so the duplicate
+      is deliberate.
       'south' is gone from this list too: it merged into the Tollywood tab, which
       now serves Telugu + Tamil + Malayalam + Kannada. The id stays alive in
       moviezone.js as an alias so /movies/south and the footer links still work. */
   var REQUIRED = ['all', 'trending', 'uhd4k', 'toprated', 'hollywood', 'bollywood',
-    'kdrama', 'tv', 'tollywood',
+    'kdrama', 'tv', 'tollywood', 'anime',
     'action', 'comedy', 'horror', 'thriller',
     'romance', 'scifi', 'adventure', 'fantasy', 'crime', 'documentary', 'family',
     'animation'];
@@ -50,10 +52,10 @@
 
   // Only these belong on the strip itself (everything else moved to a dropdown).
   var DIRECT = ['all', 'trending', 'uhd4k', 'toprated', 'hollywood', 'bollywood',
-    'tollywood', 'tv', 'kdrama'];
+    'tollywood', 'tv', 'kdrama', 'anime'];
 
   // Removed from the UI entirely by request.
-  var REMOVED = ['dubbed', 'anime', 'kids', 'adult', 'south'];
+  var REMOVED = ['dubbed', 'kids', 'adult', 'south'];
 
   var frame = document.getElementById('app');
 

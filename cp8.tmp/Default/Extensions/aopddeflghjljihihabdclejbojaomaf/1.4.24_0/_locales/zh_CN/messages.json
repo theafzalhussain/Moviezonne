@@ -1,0 +1,23 @@
+{
+   "commandExtractImageText": {
+      "message": "提取图中文字"
+   },
+   "commandImageTranslate": {
+      "message": "翻译指定图片"
+   },
+   "commandPolishText": {
+      "message": "润色输入框文本"
+   },
+   "commandSelectTranslate": {
+      "message": "翻译选中文本"
+   },
+   "commandTranslatePage": {
+      "message": "翻译当前网页"
+   },
+   "extensionDescription": {
+      "message": "支持网页、文件、电子书、学术论文、图片和文本的全能 AI 翻译器"
+   },
+   "extensionName": {
+      "message": "AnyDoc翻译器｜免费翻译网站和PDF"
+   }
+}

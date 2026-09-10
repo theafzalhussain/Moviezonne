@@ -1,0 +1,23 @@
+{
+   "commandExtractImageText": {
+      "message": "Resimden metin çıkar"
+   },
+   "commandImageTranslate": {
+      "message": "Belirtilen resmi çevir"
+   },
+   "commandPolishText": {
+      "message": "Giriş metnini iyileştir"
+   },
+   "commandSelectTranslate": {
+      "message": "Seçili metni çevir"
+   },
+   "commandTranslatePage": {
+      "message": "Mevcut sayfayı çevir"
+   },
+   "extensionDescription": {
+      "message": "Web, dosyalar, e-kitaplar, akademik makaleler, görseller ve metinler için en gelişmiş AI çevirmen"
+   },
+   "extensionName": {
+      "message": "AnyDoc Translator - Web ve PDF'yi Ücretsiz olarak Çevir"
+   }
+}
