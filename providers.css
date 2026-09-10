@@ -214,7 +214,7 @@
 .providers-arrow:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
 @media (max-width: 600px) {
-  .providers-section { padding: 1.75rem 4% 1.25rem; }
+  .providers-section { padding: 1.75rem 4% 0.45rem; }
   .providers-header { align-items: flex-start; margin-bottom: 1rem; }
   .providers-subtitle { max-width: 220px; }
   .providers-rail { --provider-fade: 40px; gap: .85rem; padding: 8px 2px 12px; }
