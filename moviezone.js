@@ -344,6 +344,10 @@ const GENRE_MAP = {
 };
  
 let allMovies = [];
+// Monotonic ownership token: only the newest category/mode gather may mutate
+// the shared pool. Category alone is insufficient because OTT mode chips keep
+// the same category while switching between All, Movies and Web Series.
+let _mzFeedLoadGeneration = 0;
 
 /*  ══════════════════════════════════════════════════════════════════════
  *  ONE POOL PER CATEGORY, KEPT FOR THE SESSION
@@ -398,8 +402,8 @@ function _mzReadPool(cat) {
   return pool;
 }
 
-function _mzSavePool(cat) {
-  const key = _mzPoolKey(cat);
+function _mzSavePool(cat, capturedKey) {
+  const key = capturedKey || _mzPoolKey(cat);
   // Re-inserted rather than mutated so the Map's own iteration order stays
   // least-recently-used first, which is what the eviction below relies on.
   _mzFeedPools.delete(key);
@@ -2615,12 +2619,12 @@ function interleaveFeedByType(pool, allowCatalogueIndustrySlots) {
  *  inside LATEST_WINDOW_DAYS and freshnessTier needs a popularity/vote floor), so
  *  the only remaining key was popularity and a 1997 title ranked above a 2022 one.
  *
- *  So: group and tier still decide first, then _ottScore + a recency premium.
- *  _ottScore already carries the platform's own signals — popularity, vote weight,
- *  and a 'trend'/'latest' boost from the query that surfaced the title. The
- *  premium adds up to ~3200 for something released today, decaying to zero over
- *  about five years. That is deliberately smaller than the 'trend' tag boost
- *  (6000), so a genuine hit is never buried by a newer nobody, while between two
+ *  So: the provider-signal tier decides first, then the shared freshness group
+ *  and tier, then _ottScore + a recency premium. _ottScore carries cumulative
+ *  new/trending/popular discovery boosts plus popularity and vote confidence.
+ *  The premium adds up to ~3200 for something released today, decaying to zero
+ *  over about five years. It remains smaller than the trending boost (6000), so
+ *  a genuine current hit is not buried by a newer nobody, while between two
  *  comparably relevant titles the newer one wins.
  *
  *  ── the premium is GATED, and it has to be ──
@@ -2637,6 +2641,26 @@ function interleaveFeedByType(pool, allowCatalogueIndustrySlots) {
 const OTT_RECENCY_MIN_VOTES = 12;
 const OTT_RECENCY_MIN_POPULARITY = 8;
 
+/*  Keep at least one eligible representative of every available dynamic lane in
+ *  the opening cards. Selected titles retain their existing relative order, so
+ *  this fills signal gaps without turning the feed into three rigid sections. */
+function promoteOttSignalMix(pool) {
+  if (!Array.isArray(pool) || pool.length < 2) return pool || [];
+  const selected = [];
+  OTT_SIGNAL_NAMES.forEach(signal => {
+    const index = pool.findIndex((item, i) =>
+      selected.indexOf(i) === -1
+      && item._ottSignalTier === 0
+      && item._ottSignals
+      && item._ottSignals[signal]);
+    if (index !== -1) selected.push(index);
+  });
+  if (selected.length < 2) return pool.slice();
+  selected.sort((a, b) => a - b);
+  const chosen = new Set(selected);
+  return selected.map(i => pool[i]).concat(pool.filter((_, i) => !chosen.has(i)));
+}
+
 function ottRankLikeAllFeed(items) {
   if (!Array.isArray(items) || items.length < 2) return items || [];
   const now = Date.now();
@@ -2650,23 +2674,29 @@ function ottRankLikeAllFeed(items) {
     const yearsOld = isNaN(t) ? 99 : Math.max(0, (now - t) / 31557600000);
     const premium = relevant ? Math.max(0, 3200 - (yearsOld * 620)) : 0;
     /*  Same catalogue era weight the category tabs use, applied to the platform's
-     *  own relevance score. A provider library is mostly back catalogue, so
-     *  without it the decades-old titles with the biggest lifetime vote counts
-     *  opened the grid. It scales _ottScore rather than replacing it, so a
-     *  'trend'-tagged hit (TAG_BOOST 6000) still outranks a newer nobody. */
+     *  own relevance score. Provider discovery signals decide the outer tier;
+     *  freshness and era weighting decide relevance inside that tier. */
     m._eraFactor = catalogueEraFactor(m, now);
     m._ottFinal = ((m._ottScore || 0) * m._eraFactor) + premium;
   });
   items.sort((a, b) =>
-    (a._priorityGroup - b._priorityGroup)
+    ((a._ottSignalTier === 0 ? 0 : 1) - (b._ottSignalTier === 0 ? 0 : 1))
+    || (a._priorityGroup - b._priorityGroup)
     || (a._freshTier - b._freshTier)
+    || (b._ottSignalCount - a._ottSignalCount)
     || (b._ottFinal - a._ottFinal)
     || (a._eventAgeDays - b._eventAgeDays));
-  /*  `true` = a platform library may fall back to an industry's best CATALOGUE
-   *  title for its first-screen slot. A provider catalogue is mostly back
-   *  catalogue, so fresh-only promotion left MX Player's first screen with no
-   *  Indian title at all while its pool held 11 Hindi, 3 Telugu and 2 Tamil. */
-  return interleaveFeedByType(diversifyByLanguageWithinPriority(items), true);
+
+  /*  Interleave and language-balance each outer tier independently. The generic
+   *  interleaver may cross freshness groups to keep movies and series visible;
+   *  splitting first prevents it from pulling a catalogue-only card ahead of a
+   *  provider's new, trending or popular titles. */
+  const dynamic = items.filter(m => m._ottSignalTier === 0);
+  const catalogue = items.filter(m => m._ottSignalTier !== 0);
+  const balance = list => interleaveFeedByType(
+    diversifyByLanguageWithinPriority(list), true
+  );
+  return promoteOttSignalMix(balance(dynamic).concat(balance(catalogue)));
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -5233,7 +5263,8 @@ const LINEAR_TV_EXCLUDE_IDS = '71|105|70|118|194|2584|3294';
  *  on one endpoint — five /discover/movie pages instead of two, plus the US
  *  subscription page for the global platforms — so Netflix > Movies is a deep
  *  film catalogue rather than whichever half of a mixed pool happens to be films.
- *  It costs no extra requests either: ~6 per page in every mode.
+ *  It costs no extra browser round trips: 5-9 provider-scoped pages are still
+ *  collapsed into one edge batch for each requested feed page.
  *
  *  Single-type platforms only get the chip that has something behind it. See
  *  `catalogue` in the OTT table: discovery+ has 1 film for watch_region=IN and
@@ -5363,71 +5394,76 @@ function buildOttModeQueries(key, mode, page) {
   // Platforms whose subscription catalogue is language-scoped (see OTT table).
   if (cfg.langs) gate.with_original_language = cfg.langs;
   const q = [];
-  // tag: drives scoring in fetchOttMovies — 'trend' | 'latest' | 'top' | 'core'
+  // tag: cumulative provider-scoped discovery signal preserved through dedupe.
+  // 'trending' | 'new' | 'popular' | 'catalogue'
   const push = (endpoint, type, params, tag) =>
     q.push({ endpoint, type, tag, params: Object.assign({}, gate, params) });
 
   if (mode === 'webseries') {
     // TRENDING on this platform: most popular series in its own catalogue.
-    push('/discover/tv', 'tv', { sort_by: 'popularity.desc', page: p1 }, 'trend');
-    push('/discover/tv', 'tv', { sort_by: 'popularity.desc', page: p2 }, 'core');
+    push('/discover/tv', 'tv', { sort_by: 'popularity.desc', page: p1 }, 'trending');
+    push('/discover/tv', 'tv', { sort_by: 'popularity.desc', page: p2 }, 'catalogue');
     // LATEST: aired in the last 120 days, popular first (not date-sorted, so
     // obscure filler does not outrank the real new releases).
     push('/discover/tv', 'tv', {
       sort_by: 'popularity.desc',
       'first_air_date.gte': ottISTDate(-120), 'first_air_date.lte': today, page: pg
-    }, 'latest');
+    }, 'new');
     // NEWEST: strictly newest first, with a small vote floor to skip junk.
     push('/discover/tv', 'tv', {
       sort_by: 'first_air_date.desc', 'first_air_date.lte': today,
       'vote_count.gte': '5', page: pg
-    }, 'latest');
+    }, 'new');
     // PROVEN HITS: deep catalogue by vote volume.
-    push('/discover/tv', 'tv', { sort_by: 'vote_count.desc', page: p1 }, 'top');
+    push('/discover/tv', 'tv', { sort_by: 'vote_count.desc', page: p1 }, 'popular');
     // ORIGINALS: network AND provider, so it is "their original, still on
     // their platform" rather than "their original, wherever it lives now".
     if (cfg.networks) {
-      push('/discover/tv', 'tv', { with_networks: cfg.networks, sort_by: 'popularity.desc', page: p1 }, 'core');
+      push('/discover/tv', 'tv', { with_networks: cfg.networks, sort_by: 'popularity.desc', page: p1 }, 'catalogue');
     }
   } else if (mode === 'movies') {
     // TRENDING on this platform.
-    push('/discover/movie', 'movie', { sort_by: 'popularity.desc', page: p1 }, 'trend');
-    push('/discover/movie', 'movie', { sort_by: 'popularity.desc', page: p2 }, 'core');
+    push('/discover/movie', 'movie', { sort_by: 'popularity.desc', page: p1 }, 'trending');
+    push('/discover/movie', 'movie', { sort_by: 'popularity.desc', page: p2 }, 'catalogue');
     // LATEST: released in the last 120 days, popular first.
     push('/discover/movie', 'movie', {
       sort_by: 'popularity.desc',
       'primary_release_date.gte': ottISTDate(-120), 'primary_release_date.lte': today, page: pg
-    }, 'latest');
+    }, 'new');
     // NEWEST first, vote floor to skip junk.
     push('/discover/movie', 'movie', {
       sort_by: 'primary_release_date.desc', 'primary_release_date.lte': today,
       'vote_count.gte': '10', page: pg
-    }, 'latest');
+    }, 'new');
     // PROVEN HITS.
-    push('/discover/movie', 'movie', { sort_by: 'vote_count.desc', page: p1 }, 'top');
+    push('/discover/movie', 'movie', { sort_by: 'vote_count.desc', page: p1 }, 'popular');
     // US subscription catalogue for the global platforms — still provider-gated.
     if (cfg.regions.includes('US')) {
       push('/discover/movie', 'movie', {
         with_watch_providers: cfg.providerUS || cfg.provider, watch_region: 'US',
         sort_by: 'popularity.desc', page: p1
-      }, 'core');
+      }, 'catalogue');
     }
   } else {
-    // 'all' — both types, provider-gated, trending + latest of each on top.
-    push('/discover/tv', 'tv', { sort_by: 'popularity.desc', page: p1 }, 'trend');
-    push('/discover/movie', 'movie', { sort_by: 'popularity.desc', page: p1 }, 'trend');
-    push('/discover/tv', 'tv', { sort_by: 'popularity.desc', page: p2 }, 'core');
-    push('/discover/movie', 'movie', { sort_by: 'popularity.desc', page: p2 }, 'core');
+    // 'all' — both types, provider-gated, with every official-style discovery
+    // lane represented: current trending, genuinely new, proven popular, then
+    // the deeper catalogue. These labels survive dedupe in fetchOttMovies().
+    push('/discover/tv', 'tv', { sort_by: 'popularity.desc', page: p1 }, 'trending');
+    push('/discover/movie', 'movie', { sort_by: 'popularity.desc', page: p1 }, 'trending');
+    push('/discover/tv', 'tv', { sort_by: 'popularity.desc', page: p2 }, 'catalogue');
+    push('/discover/movie', 'movie', { sort_by: 'popularity.desc', page: p2 }, 'catalogue');
     push('/discover/tv', 'tv', {
       sort_by: 'popularity.desc',
       'first_air_date.gte': ottISTDate(-120), 'first_air_date.lte': today, page: pg
-    }, 'latest');
+    }, 'new');
     push('/discover/movie', 'movie', {
       sort_by: 'popularity.desc',
       'primary_release_date.gte': ottISTDate(-120), 'primary_release_date.lte': today, page: pg
-    }, 'latest');
+    }, 'new');
+    push('/discover/tv', 'tv', { sort_by: 'vote_count.desc', page: p1 }, 'popular');
+    push('/discover/movie', 'movie', { sort_by: 'vote_count.desc', page: p1 }, 'popular');
     if (cfg.networks) {
-      push('/discover/tv', 'tv', { with_networks: cfg.networks, sort_by: 'popularity.desc', page: p1 }, 'core');
+      push('/discover/tv', 'tv', { with_networks: cfg.networks, sort_by: 'popularity.desc', page: p1 }, 'catalogue');
     }
   }
   return q;
@@ -5616,9 +5652,35 @@ async function ottEnforceAccuracy(key, items) {
   return kept;
 }
 
+const OTT_SIGNAL_WEIGHTS = {
+  trending: 6000,
+  new: 4200,
+  popular: 1200,
+  catalogue: 0
+};
+const OTT_SIGNAL_NAMES = ['new', 'trending', 'popular'];
+
+/* Merge signal provenance when the same title is rediscovered on a later source
+ * page. The pool-level dedupe uses this before discarding the duplicate card. */
+function mergeOttSignalMetadata(target, incoming) {
+  if (!target || !incoming) return target;
+  const signals = Object.assign({
+    new: false, trending: false, popular: false, catalogue: false
+  }, target._ottSignals, incoming._ottSignals);
+  target._ottSignals = signals;
+  target._ottSignalCount = OTT_SIGNAL_NAMES.filter(name => signals[name]).length;
+  target._ottSignalTier = target._ottSignalTier === 0 || incoming._ottSignalTier === 0 ? 0 : 1;
+  target._ottBaseScore = Math.max(target._ottBaseScore || 0, incoming._ottBaseScore || 0);
+  target._ottScore = target._ottBaseScore + OTT_SIGNAL_NAMES.reduce(
+    (sum, name) => sum + (signals[name] ? OTT_SIGNAL_WEIGHTS[name] : 0), 0
+  );
+  return target;
+}
+
 /**
- * Fetch this platform's content for the active mode. Everything returned is
- * provider-verified; trending and latest are boosted to the top of the grid.
+ * Fetch this platform's content for the active mode. Every source is provider-
+ * gated, and duplicate titles retain every dynamic discovery signal that found
+ * them instead of losing provenance to whichever occurrence scored highest.
  */
 async function fetchOttMovies(key, mode, page) {
   const plan = buildOttModeQueries(key, mode, page);
@@ -5638,7 +5700,7 @@ async function fetchOttMovies(key, mode, page) {
    *    buildOttModeQueries        1 ms
    *    _ottPrimeBatch          5604 ms
    *    ottVerifiedTrending     9986 ms   <-- and no single request was slow
-   *    the 6 discover calls       0 ms   (already primed)
+   *    the provider discover calls  0 ms   (already primed)
    *
    *  A platform click was issuing ~50 requests, of which only 6 were catalogue
    *  and ~44 were verification, against a deliberate client cap of 30 requests
@@ -5649,7 +5711,7 @@ async function fetchOttMovies(key, mode, page) {
    *  The overlay was also the only provider-BLIND source in this function. Its
    *  job was to catch a platform hit that TMDB's discover index missed, but if a
    *  title really is on the platform then the plan's own popularity.desc query —
-   *  which is provider-gated and tagged 'trend' — already returns it. So it was
+   *  which is provider-gated and tagged 'trending' — already returns it. So it was
    *  paying ~44 requests to duplicate what 2 gated requests give for free, and
    *  the verification that made up most of those requests existed only because
    *  the overlay's own results could not be trusted.
@@ -5657,11 +5719,11 @@ async function fetchOttMovies(key, mode, page) {
    *  Dropping it takes a cold click from ~50 requests to ~16 and, because the
    *  remaining pool is gated end to end, costs nothing in accuracy:
    *  ott-sections-check re-checks a sample of what this returns against each
-   *  title's own /watch/providers record and all nine platforms measure 100%.
+   *  title's own /watch/providers record and every configured platform must
+   *  remain above the suite's provider-membership threshold.
    */
   const res = await Promise.allSettled(plan.map(p => tmdb(p.endpoint, p.params)));
 
-  const TAG_BOOST = { trend: 6000, latest: 4200, top: 1200, core: 0 };
   const picked = new Map();
 
   const consider = (raw, type, tag, extra) => {
@@ -5669,29 +5731,46 @@ async function fetchOttMovies(key, mode, page) {
     // Mode gate: Web Series tab me sirf series, Movies tab me sirf movies.
     if (mode === 'webseries' && type !== 'tv') return;
     if (mode === 'movies' && type !== 'movie') return;
-    const item = Object.assign({}, raw);
-    item.media_type = type;
-    const k = type + '-' + item.id;
 
-    let score = Math.min(item.popularity || 0, 500) * 8;
-    score += TAG_BOOST[tag] || 0;
-    score += extra || 0;
-    const v = item.vote_count || 0;
-    if (v > 0) score += Math.log10(v + 1) * 400;
-    // Freshness bonus computed from the title's own date, so a genuinely new
-    // release ranks high no matter which query surfaced it.
-    const d = item.first_air_date || item.release_date;
+    const candidate = Object.assign({}, raw, { media_type: type });
+    const k = type + '-' + candidate.id;
+    const prev = picked.get(k);
+
+    // Score the title itself separately from the source that surfaced it. This
+    // lets dedupe merge source provenance and apply every relevant signal once.
+    let baseScore = Math.min(candidate.popularity || 0, 500) * 8;
+    baseScore += extra || 0;
+    const votes = candidate.vote_count || 0;
+    if (votes > 0) baseScore += Math.log10(votes + 1) * 400;
+    const d = candidate.first_air_date || candidate.release_date;
     if (d) {
       const ageDays = (Date.now() - new Date(d).getTime()) / 86400000;
-      if (ageDays >= 0 && ageDays <= 30) score += 2500;
-      else if (ageDays > 30 && ageDays <= 120) score += 1200;
+      if (ageDays >= 0 && ageDays <= 30) baseScore += 2500;
+      else if (ageDays > 30 && ageDays <= 120) baseScore += 1200;
     }
 
-    const prev = picked.get(k);
-    if (!prev || score > prev._ottScore) {
-      item._ottScore = score;
-      picked.set(k, item);
-    }
+    const item = (!prev || baseScore > (prev._ottBaseScore || 0)) ? candidate : prev;
+    const signals = Object.assign({
+      new: false, trending: false, popular: false, catalogue: false
+    }, prev && prev._ottSignals);
+    const signal = Object.prototype.hasOwnProperty.call(OTT_SIGNAL_WEIGHTS, tag)
+      ? tag : 'catalogue';
+    signals[signal] = true;
+
+    const bestBase = Math.max(baseScore, (prev && prev._ottBaseScore) || 0);
+    const signalBoost = OTT_SIGNAL_NAMES.reduce(
+      (sum, name) => sum + (signals[name] ? OTT_SIGNAL_WEIGHTS[name] : 0), 0
+    );
+    const hasAudience = (item.vote_count || 0) >= OTT_RECENCY_MIN_VOTES
+      || (item.popularity || 0) >= OTT_RECENCY_MIN_POPULARITY;
+    const promoted = signals.trending || signals.popular || (signals.new && hasAudience);
+
+    item._ottSignals = signals;
+    item._ottSignalCount = OTT_SIGNAL_NAMES.filter(name => signals[name]).length;
+    item._ottSignalTier = promoted ? 0 : 1;
+    item._ottBaseScore = bestBase;
+    item._ottScore = bestBase + signalBoost;
+    picked.set(k, item);
   };
 
   res.forEach((r, idx) => {
@@ -5700,10 +5779,12 @@ async function fetchOttMovies(key, mode, page) {
     list.forEach(raw => consider(raw, src.type, src.tag));
   });
 
-  // The plan's own popularity.desc queries are tagged 'trend' and are already
-  // provider-gated, so this platform's hot titles are in `picked` above.
-
-  const ranked = Array.from(picked.values()).sort((a, b) => b._ottScore - a._ottScore);
+  // The popularity, recent-date and vote-volume lanes are all provider-gated.
+  // A title found by several lanes keeps all of those signals after dedupe.
+  const ranked = Array.from(picked.values()).sort((a, b) =>
+    (a._ottSignalTier - b._ottSignalTier)
+    || (b._ottSignalCount - a._ottSignalCount)
+    || (b._ottScore - a._ottScore));
 
   /*  ── ACCURACY IS AUDITED ONCE PER PLATFORM, NOT PER CLICK ──
    *
@@ -6945,9 +7026,15 @@ async function loadMovies(cat, isLoadMore = false) {
     mzFeedPoolExhausted = false;
   }
   mzFeedPagerCategory = cat;
+
+  // A refused extension must not supersede the request already extending this
+  // pool. Every accepted load, including an instant cache restore, does.
+  if (isLoadMore && isLoadingMore) return;
+  const loadGeneration = ++_mzFeedLoadGeneration;
+  const loadPoolKey = _mzPoolKey(cat);
+  const requestedOttMode = OTT[cat] ? currentOttMode : null;
   
   if (isLoadMore) {
-    if (isLoadingMore) return;
     isLoadingMore = true;
     const indicator = document.getElementById('loadingIndicator');
     if (indicator) indicator.style.display = 'block';
@@ -6980,6 +7067,10 @@ async function loadMovies(cat, isLoadMore = false) {
     grid.innerHTML = Array(8).fill('<div class="skeleton skeleton-card"></div>').join('');
     allMovies = [];
   }
+
+  // Capture after the fresh-load reset / extension increment. A newer request
+  // may change the globals while this one awaits the network.
+  const requestedMoviePage = currentMoviePage;
  
   let movies = [];
 
@@ -7013,7 +7104,7 @@ async function loadMovies(cat, isLoadMore = false) {
      *
      *  A null plan means the category owns its own fan-out: see _mzCatPlan.
      */
-    const plan = _mzCatPlan(cat, currentMoviePage);
+    const plan = _mzCatPlan(cat, requestedMoviePage);
     const vals = plan
       ? (await tmdbBatch(plan)).map(r => (r.status === 'fulfilled' && r.value) ? r.value : { results: [] })
       : null;
@@ -7149,7 +7240,7 @@ async function loadMovies(cat, isLoadMore = false) {
       // product priority as the ALL feed, so newest releases lead and movies
       // and web series interleave the way they do everywhere else.
       movies = movies.concat(
-        ottRankLikeAllFeed(await fetchOttMovies(cat, currentOttMode, currentMoviePage)));
+        ottRankLikeAllFeed(await fetchOttMovies(cat, requestedOttMode, requestedMoviePage)));
     } else {
       // hollywood and every CAT_PARAMS genre/industry tab: two pages, in order.
       vals.forEach(v => { movies = movies.concat(v.results || []); });
@@ -7162,9 +7253,12 @@ async function loadMovies(cat, isLoadMore = false) {
    *  already the NEW category's list — so these results would be concatenated
    *  into it and then saved under the OLD category's key, leaving both wrong.
    *  Before pools were kept this only caused a flash of the wrong grid; now it
-   *  would persist for the rest of the session. mzFeedPagerCategory is assigned
-   *  synchronously at the top of every call, so the newest caller always owns it. */
-  if (cat !== mzFeedPagerCategory) {
+   *  would persist for the rest of the session. Category, sub-filter key and a
+   *  monotonic generation all define ownership: an OTT mode switch keeps `cat`
+   *  unchanged, so the old category-only guard could not catch that race. */
+  if (cat !== mzFeedPagerCategory
+      || loadPoolKey !== _mzPoolKey(cat)
+      || loadGeneration !== _mzFeedLoadGeneration) {
     if (isLoadMore) {
       isLoadingMore = false;
       const supersededIndicator = document.getElementById('loadingIndicator');
@@ -7287,8 +7381,27 @@ async function loadMovies(cat, isLoadMore = false) {
   _mzFeedRetryState(cat).attempts = 0;
   const keyOf = (m) => (m.media_type || (m.name && !m.title ? 'tv' : 'movie')) + '-' + m.id;
   const existingIds = new Set(allMovies.map(keyOf));
-  const newMovies = movies.filter(m => { const k = keyOf(m); if (existingIds.has(k)) return false; existingIds.add(k); return true; });
+  const existingById = OTT[cat] ? new Map(allMovies.map(m => [keyOf(m), m])) : null;
+  const newMovies = movies.filter(m => {
+    const k = keyOf(m);
+    if (existingIds.has(k)) {
+      // A later page can rediscover an existing card through a new/trending/
+      // popular lane. Keep the card once, but never throw away that provenance.
+      if (existingById) mergeOttSignalMetadata(existingById.get(k), m);
+      return false;
+    }
+    existingIds.add(k);
+    if (existingById) existingById.set(k, m);
+    return true;
+  });
   allMovies = allMovies.concat(newMovies);
+
+  /*  Each OTT source page contains its own dynamic and catalogue tiers. A plain
+   *  append would produce dynamic-1, catalogue-1, dynamic-2, catalogue-2 and
+   *  bury later new/trending/popular results behind earlier catalogue cards.
+   *  Re-rank the accumulated provider pool after dedupe so the invariant holds
+   *  across every page the user has loaded, not just inside one fetch batch. */
+  if (OTT[cat]) allMovies = ottRankLikeAllFeed(allMovies);
  
   /*  FIRST PAINT SHOWS 8 CARDS, NOT 24.
    *
@@ -7367,7 +7480,7 @@ async function loadMovies(cat, isLoadMore = false) {
    *  a slice and a render instead of a full re-gather — see _mzFeedPools. Saved
    *  on the load-more path too, because the extension replaced allMovies with a
    *  new array and the stored reference would otherwise be the shorter one. */
-  _mzSavePool(cat);
+  _mzSavePool(cat, loadPoolKey);
  
   // Har load ke baad agle page ko chupke se fetch karke ready rakho
   if (!isMzTV()) {
