@@ -74,12 +74,18 @@ const extracted = [
   line('const OTT_SAMPLE_MIN_PASS ='),
   line('const OTT_DEEP_VERIFY_CAP ='),
   line('const _ottAudited ='),
+  line('const OTT_RECENCY_MIN_VOTES ='),
+  line('const OTT_RECENCY_MIN_POPULARITY ='),
+  block('const OTT_SIGNAL_WEIGHTS = {') + ';',
+  line('const OTT_SIGNAL_NAMES ='),
+  block('function promoteOttSignalMix('),
   block('async function ottEnforceAccuracy('),
   block('async function fetchOttMovies('),
   // `const` is lexical and never lands on the VM context object, so hand the
   // bindings out explicitly.
   'globalThis.__ott = { OTT, OTT_ALT_PROVIDERS, OTT_MONETIZATION,' +
-  ' buildOttModeQueries, fetchOttMovies, ottIsOnPlatform };'
+  ' OTT_SIGNAL_NAMES, buildOttModeQueries, fetchOttMovies, ottIsOnPlatform,' +
+  ' promoteOttSignalMix };'
 ].join('\n\n');
 
 // ── live TMDB access through the app's own proxy ───────────────────────────
@@ -115,7 +121,10 @@ sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
 vm.runInContext(extracted, sandbox);
 
-const { OTT, OTT_ALT_PROVIDERS, OTT_MONETIZATION, buildOttModeQueries, fetchOttMovies } = sandbox.__ott;
+const {
+  OTT, OTT_ALT_PROVIDERS, OTT_MONETIZATION, OTT_SIGNAL_NAMES,
+  buildOttModeQueries, fetchOttMovies, promoteOttSignalMix
+} = sandbox.__ott;
 
 // ── independent verification: does this title really stream on the platform? ──
 async function verifyOnPlatform(platform, type, id) {
@@ -278,6 +287,12 @@ async function catalogueSize(platform, type) {
         assert.strictEqual(bad.length, 0,
           'provider-blind trending source present: ' + bad.map((b) => b.endpoint).join(', '));
       });
+      check('plan contains new, trending and popular provider-scoped lanes', () => {
+        const tags = new Set(plan.map((q) => q.tag));
+        OTT_SIGNAL_NAMES.forEach((signal) => {
+          assert.ok(tags.has(signal), signal + ' lane missing from ' + platform + ' ' + mode);
+        });
+      });
       /*  The gate is per-platform now (free/ad-funded services need a wider one
        *  or most of their library is invisible), so this asserts against the
        *  platform's OWN configured value rather than the global default. The
@@ -305,6 +320,43 @@ async function catalogueSize(platform, type) {
       console.log('  returned ' + items.length + ' usable titles');
       console.log('  top 8: ' + items.slice(0, 8)
         .map((m) => titleOf(m) + ' (' + (dateOf(m) || '?').slice(0, 4) + ')').join(', '));
+
+      // Dynamic discovery provenance must survive type+id dedupe. The same
+      // title can be new AND trending/popular, and that overlap is intentional.
+      check('dedupe preserves explicit OTT discovery signals', () => {
+        items.forEach((m) => {
+          assert.ok(m._ottSignals && typeof m._ottSignals === 'object',
+            titleOf(m) + ' has no _ottSignals provenance');
+          OTT_SIGNAL_NAMES.forEach((signal) => {
+            assert.strictEqual(typeof m._ottSignals[signal], 'boolean',
+              titleOf(m) + ' has no boolean ' + signal + ' signal');
+          });
+          assert.ok(m._ottSignalTier === 0 || m._ottSignalTier === 1,
+            titleOf(m) + ' has invalid signal tier ' + m._ottSignalTier);
+        });
+      });
+
+      const signalOrdered = promoteOttSignalMix(items);
+      OTT_SIGNAL_NAMES.forEach((signal) => {
+        const cohort = items.filter((m) =>
+          m._ottSignalTier === 0 && m._ottSignals && m._ottSignals[signal]);
+        check(signal + ' titles surface in the first screen when eligible', () => {
+          if (!cohort.length) return;
+          assert.ok(signalOrdered.slice(0, 24).some((m) => m._ottSignals[signal]),
+            cohort.length + ' eligible ' + signal + ' title(s) exist but none reached the first 24');
+        });
+      });
+
+      check('dynamic signals lead catalogue-only titles', () => {
+        const firstCatalogue = signalOrdered.findIndex((m) => m._ottSignalTier !== 0);
+        const lastDynamic = signalOrdered.reduce(
+          (last, m, i) => m._ottSignalTier === 0 ? i : last, -1
+        );
+        if (firstCatalogue === -1 || lastDynamic === -1) return;
+        assert.ok(lastDynamic < firstCatalogue,
+          'a catalogue-only card appears at ' + firstCatalogue
+          + ' before the last dynamic card at ' + lastDynamic);
+      });
 
       // 3. PURITY
       check('mode purity — ' + (mode === 'webseries' ? 'series only' : 'movies only'), () => {
@@ -397,8 +449,29 @@ async function catalogueSize(platform, type) {
     assert.ok(!/\/trending\//.test(fn), 'global trending endpoint present in the query builder');
   });
   check('loadMovies routes OTT tabs through fetchOttMovies', () => {
-    assert.ok(/fetchOttMovies\(cat,\s*currentOttMode,\s*currentMoviePage\)/.test(src),
-      'loadMovies is not calling fetchOttMovies with the active mode');
+    assert.ok(/fetchOttMovies\(cat,\s*requestedOttMode,\s*requestedMoviePage\)/.test(src),
+      'loadMovies is not calling fetchOttMovies with its captured mode and page');
+  });
+  check('a stale OTT mode request cannot poison the active mode pool', () => {
+    const fn = block('async function loadMovies(');
+    assert.ok(/const loadGeneration = \+\+_mzFeedLoadGeneration;/.test(fn),
+      'loadMovies does not assign request ownership generations');
+    assert.ok(/const loadPoolKey = _mzPoolKey\(cat\);/.test(fn),
+      'loadMovies does not capture the requested mode-specific pool key');
+    assert.ok(/loadPoolKey !== _mzPoolKey\(cat\)/.test(fn)
+      && /loadGeneration !== _mzFeedLoadGeneration/.test(fn),
+      'the superseded-response guard checks category only, not mode and generation');
+    assert.ok(/_mzSavePool\(cat,\s*loadPoolKey\)/.test(fn),
+      'the completed result is not saved under its captured mode key');
+  });
+  check('OTT extensions globally merge signals and re-rank the provider pool', () => {
+    const fn = block('async function loadMovies(');
+    const append = fn.indexOf('allMovies = allMovies.concat(newMovies)');
+    const rerank = fn.indexOf('if (OTT[cat]) allMovies = ottRankLikeAllFeed(allMovies)');
+    assert.ok(/mergeOttSignalMetadata\(existingById\.get\(k\),\s*m\)/.test(fn),
+      'cross-page dedupe discards newly discovered signals for an existing title');
+    assert.ok(append !== -1 && rerank > append,
+      'later dynamic OTT pages remain appended behind earlier catalogue-only cards');
   });
   /*  The OTT prefetch was removed deliberately: it spent ~7 requests on a page the
    *  user may never scroll to, against a 30-per-10s client cap, and that is what
@@ -491,10 +564,11 @@ async function catalogueSize(platform, type) {
    *  A platform also must NOT have a .cat-tab any more, or the dropdown is back. */
   check('every platform is reachable from the provider rail only', () => {
     const html = fs.readFileSync('index.html', 'utf8');
+    const activeHtml = html.replace(/<!--[\s\S]*?-->/g, '');
     Object.keys(OTT).forEach((p) => {
-      assert.ok(new RegExp('data-provider-cat="' + p + '"').test(html),
-        p + ' has no provider card in index.html');
-      assert.ok(!new RegExp("filterCat\\('" + p + "'\\)").test(html),
+      assert.ok(new RegExp('data-provider-cat="' + p + '"').test(activeHtml),
+        p + ' has no active provider card in index.html');
+      assert.ok(!new RegExp("filterCat\\('" + p + "'\\)").test(activeHtml),
         p + ' still has a cat-tab entry — it should only be reachable from the rail');
     });
   });
@@ -514,20 +588,37 @@ async function catalogueSize(platform, type) {
    *  platform relevance; loadMovies then re-ranks with the ALL feed's product
    *  priority so newest releases lead. The ORDERING checks above therefore
    *  measure the fetcher, and this guards the step they cannot see. */
-  check('platform tabs are re-ranked with the ALL-feed priority', () => {
-    assert.ok(/ottRankLikeAllFeed\(await fetchOttMovies\(cat,\s*currentOttMode,\s*currentMoviePage\)\)/.test(src),
+  check('platform tabs preserve provider signals through final ranking', () => {
+    assert.ok(/ottRankLikeAllFeed\(await fetchOttMovies\(cat,\s*requestedOttMode,\s*requestedMoviePage\)\)/.test(src),
       'loadMovies does not pass the OTT result through ottRankLikeAllFeed');
     const fn = block('function ottRankLikeAllFeed(');
     assert.ok(/rankByFreshness\(items\)/.test(fn),
       'ottRankLikeAllFeed does not use the shared freshness ranking');
-    /*  Deliberately matched without the closing paren: the call now takes a second
-     *  argument (allowCatalogueIndustrySlots) so a provider library can give an
-     *  industry's best catalogue title a first-screen slot. The guard is that
-     *  neither stage is SKIPPED, not that the call takes no arguments. */
-    assert.ok(/interleaveFeedByType\(diversifyByLanguageWithinPriority\(items\)/.test(fn),
-      'ottRankLikeAllFeed skips language balancing or type interleave');
+    assert.ok(/_ottSignalTier === 0/.test(fn),
+      'ottRankLikeAllFeed does not place dynamic provider signals in the outer tier');
     assert.ok(/_priorityGroup - b\._priorityGroup/.test(fn),
-      'ottRankLikeAllFeed does not sort by priority group first — recency would lose to popularity');
+      'ottRankLikeAllFeed no longer preserves freshness priority inside a signal tier');
+    assert.ok(/balance\(dynamic\)\.concat\(balance\(catalogue\)\)/.test(fn),
+      'dynamic and catalogue items are interleaved together, so catalogue can jump the signal boundary');
+    assert.ok(/promoteOttSignalMix\(/.test(fn),
+      'the final user-visible order does not guarantee signal-lane representation');
+  });
+
+  check('signal mixer represents each eligible lane without hardcoded titles', () => {
+    const sample = [
+      { id: 1, _ottSignalTier: 0, _ottSignals: { new: false, trending: true, popular: false } },
+      { id: 2, _ottSignalTier: 0, _ottSignals: { new: false, trending: true, popular: false } },
+      { id: 3, _ottSignalTier: 0, _ottSignals: { new: true, trending: false, popular: false } },
+      { id: 4, _ottSignalTier: 0, _ottSignals: { new: false, trending: false, popular: true } },
+      { id: 5, _ottSignalTier: 1, _ottSignals: { new: false, trending: false, popular: false } }
+    ];
+    const mixed = promoteOttSignalMix(sample);
+    OTT_SIGNAL_NAMES.forEach((signal) => {
+      assert.ok(mixed.slice(0, 3).some((m) => m._ottSignals[signal]),
+        signal + ' is missing from the promoted signal mix');
+    });
+    assert.ok(mixed.findIndex((m) => m._ottSignalTier !== 0) > 2,
+      'catalogue-only content entered before the dynamic signal representatives');
   });
 
   check('every platform has a catalogue heading and a verification id list', () => {

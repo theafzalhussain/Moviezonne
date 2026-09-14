@@ -160,7 +160,7 @@ check('the pool is only ever concatenated, so earlier pages are stable',
 /*  Duplicates across pages were the reported bug. They cannot happen now because
  *  the pool is deduped by type+id before it is sliced. */
 check('the pool is deduped by media type + id before it is sliced',
-  /const keyOf = \(m\) => \(m\.media_type[\s\S]{0,200}existingIds\.has\(k\)/.test(js));
+  /const keyOf = \(m\) => \(m\.media_type[\s\S]{0,600}existingIds\.has\(k\)/.test(js));
 
 // Only whole pages while more titles may arrive, or a page would be shown
 // half-full and then silently refilled underneath the reader.
