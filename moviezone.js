@@ -13444,65 +13444,16 @@ init();
         });
       }
 
-      /*  Do not re-tell the server something it already knows.
+      /*  The server sync is intentionally gone.
        *
-       *  This used to POST the subscription on every single page load. The server
-       *  wrote it to KV every time, and on Cloudflare's KV free plan (1,000
-       *  writes/day) that is what made /api/push/subscribe start answering 500 —
-       *  the quota was being spent on writes that changed nothing.
+       *  /api/push/subscribe answers 503 because the PUSH_SUBS KV namespace is out
+       *  of its daily write quota, so this POST could never succeed — it only cost
+       *  a failed request and a console error on every page load. The browser-level
+       *  subscription above is still created and returned, so nothing else changes;
+       *  we simply stop telling a store that cannot accept the write.
        *
-       *  The endpoint is still re-sent whenever it actually changes (browsers do
-       *  rotate them), and re-sent anyway once a week so a subscription cannot be
-       *  orphaned forever if the server side ever loses the row. */
-      const PUSH_SYNC_KEY = 'mz_push_synced';
-      const PUSH_RESYNC_MS = 7 * 24 * 60 * 60 * 1000;
-      /*  Back off when the server says its subscription store is unavailable.
-       *
-       *  A 503 from /api/push/subscribe means the PUSH_SUBS binding is missing or
-       *  the store errored. Without a cooldown the client re-POSTed on EVERY page
-       *  load, so the user got a failed request plus a console error every single
-       *  time, and the worker burned an invocation that could never succeed.
-       *  Six hours is short enough that a fixed backend is picked up the same day. */
-      const PUSH_BACKOFF_KEY = 'mz_push_backoff';
-      const PUSH_BACKOFF_MS = 6 * 60 * 60 * 1000;
-      let backoffUntil = 0;
-      try { backoffUntil = Number(localStorage.getItem(PUSH_BACKOFF_KEY) || 0); } catch (e) {}
-      if (backoffUntil && Date.now() < backoffUntil) return subscription;
-
-      const fingerprint = JSON.stringify(subscription);
-      let lastSync = null;
-      try { lastSync = JSON.parse(localStorage.getItem(PUSH_SYNC_KEY) || 'null'); } catch (e) {}
-      if (lastSync && lastSync.fp === fingerprint
-          && (Date.now() - Number(lastSync.at || 0)) < PUSH_RESYNC_MS) {
-        return subscription;
-      }
-
-      const saveResponse = await fetch('/api/push/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(subscription)
-      });
-      if (!saveResponse.ok || servedSpaShell(saveResponse)) {
-        // 503 = storage not configured/unavailable. Expected, not a bug: go quiet
-        // instead of throwing a console error on every load.
-        if (saveResponse.status === 503) {
-          try { localStorage.setItem(PUSH_BACKOFF_KEY, String(Date.now() + PUSH_BACKOFF_MS)); } catch (e) {}
-          if (isLocalhost) console.info('[MovieZone] Push storage unavailable; retrying later.');
-          return subscription;
-        }
-        const error = servedSpaShell(saveResponse)
-          ? {}
-          : await saveResponse.json().catch(() => ({}));
-        throw new Error(error.error
-          || ('Could not save push subscription (' + saveResponse.status + ')'));
-      }
-
-      try {
-        localStorage.setItem(PUSH_SYNC_KEY, JSON.stringify({ fp: fingerprint, at: Date.now() }));
-        localStorage.removeItem(PUSH_BACKOFF_KEY);
-      } catch (e) {}
-
-      if (isLocalhost) console.log('[MovieZone] Push subscription synced to server.');
+       *  To turn server-side push back on: restore the POST to /api/push/subscribe
+       *  here once the KV namespace has write headroom (or move the store off KV). */
       return subscription;
     } catch (err) {
       console.warn('[MovieZone] Push subscription failed:', err);

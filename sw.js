@@ -39,7 +39,11 @@
 // quality dropdowns, and the removed language quick-buttons row. That moved
 // moviezone.min.js to 14.2 and moviezone.min.css to 9.13; the precached shell pins
 // both URLs, so this rename is what delivers them to returning visitors.
-const CACHE_NAME = 'moviezone-v143';
+// v144: the /api/push/subscribe POST was removed from the client — the PUSH_SUBS KV
+// namespace is out of daily write quota, so that request could only ever 503. That
+// moved moviezone.min.js to 14.3; the precached shell pins the URL, so this rename
+// is what delivers it to returning visitors.
+const CACHE_NAME = 'moviezone-v144';
 
 // Separate cache for TMDB posters/backdrops. Kept apart from the shell so the
 // activate handler can wipe an old shell without throwing away hundreds of
@@ -56,7 +60,7 @@ const STATIC_ASSETS = [
   '/moviezone.min.css?v=9.13',
   '/tv-mode.min.js?v=1.5',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=14.2',
+  '/moviezone.min.js?v=14.3',
   '/manifest.json',
   '/moviezone-logo.png?v=2',
   '/icon-192.png?v=2',
