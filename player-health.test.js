@@ -337,7 +337,8 @@ it('every shipped server yields a warmable origin', () => {
 
 /*  The regression this replaces: the warm list was a hand-copied array. It still
  *  named vidrock.ru and embed.smashystream.com (a commented-out source) while
- *  vidfast.pro, flicky.host and 111movies.com — live servers — were never warmed,
+ *  vidfast.pro, the Flicky player host and 111movies.com — live servers — were
+ *  never warmed,
  *  so switching to one of those paid a cold DNS + TLS handshake at the exact
  *  moment the user wanted video. Deriving the list is the fix; this keeps it. */
 it('the warm list is derived from playerSources, never hand-written', () => {

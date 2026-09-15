@@ -106,7 +106,35 @@ const brotliOf = (p) => zlib.brotliCompressSync(fs.readFileSync(p), {
   params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 }
 }).length;
 
-const CRITICAL_WIRE_BUDGET = 118 * 1024;
+const CRITICAL_WIRE_BUDGET = 119 * 1024;
+
+/*  Raised 118 -> 119 KB for the hero auto-refresh (Sep 2026).
+ *
+ *  It costs +0.3 KB brotli, all of it JS; CSS and index.html are untouched. Parse
+ *  weight moves 443.4 -> 445.2 KB, still 3.8 KB inside its own ceiling.
+ *
+ *  What it buys: the hero deck now re-asks TMDB while the tab stays open. It used
+ *  to be selected exactly once per page load, so an open tab kept the same ten
+ *  slides overnight — and on a TV, which is the device that is never closed, for
+ *  days. Every cache underneath was already tuned for freshness (tmdb() holds the
+ *  discovery endpoints 3h, the Worker's KV entry minutes, and the industry
+ *  /discover windows rewrite themselves at IST midnight); nothing re-asked the
+ *  question, so none of it reached the screen. The 0.3 KB is the scheduler, the
+ *  id-sequence comparison and the deferred swap — see HERO AUTO-REFRESH in
+ *  moviezone.js.
+ *
+ *  Why the ceiling moved rather than the feature being trimmed: 118 KB had 0.3 KB
+ *  of headroom left, i.e. any change at all was going to hit it, and the standing
+ *  deletion list recorded below is empty — a dead-code scan over moviezone.js
+ *  still finds ZERO unreferenced function declarations. The alternative was
+ *  shrinking a cache-freshness feature to fit an alarm threshold, which is the
+ *  wrong way round.
+ *
+ *  What it does NOT cost, and this is the part worth stating: no extra requests on
+ *  a normal visit. The staleness test is two string comparisons, it only fires a
+ *  fetch once the deck is older than the cache window it is read from, and an
+ *  unchanged line-up repaints nothing.
+ */
 
 /*  Raised 117 -> 118 KB for the TMDB cache-path work (Sep 2026).
  *

@@ -105,11 +105,17 @@ function getHeroBackdrop(path) {
  *  guess at what the ranking will surface; when the guess is in the deck this
  *  turns it into a cache hit for the LCP element, and when it is not, the deck
  *  is returned untouched rather than forced.
+ *
+ *  `wantPath` is the backdrop file_path to put on slide 0, and it is passed in
+ *  rather than read from <head> here so the auto-refresh can ask the same question
+ *  of LIVE data. On a first load it is heroBackdropMetaPath(), the copy that
+ *  shipped with the document; on a refresh it is this round's movie/popular[0],
+ *  which is the same source seo-ssr.js and inject-home-links.js resolve that tag
+ *  from. Everything below — the same-category swap, the age refusal — is shared.
  */
-function pinPreloadedHero(list, pool) {
+function pinPreloadedHero(list, pool, wantPath) {
   try {
-    const meta = document.querySelector('meta[name="mz-hero-backdrop"]');
-    const want = meta && meta.getAttribute('content');
+    const want = wantPath;
     if (!want || !Array.isArray(list) || !list.length) return list;
     const idx = list.findIndex(m => m && m.backdrop_path === want);
     if (idx === 0) return list;
@@ -163,6 +169,15 @@ function pinPreloadedHero(list, pool) {
     return list;
   } catch (e) { /* preload stays a miss — never break the carousel over it */ }
   return list;
+}
+
+/** The backdrop the document told us was preloaded, or '' when there is none.
+ *  Written into <head> by heroPreloadTag() in seo-ssr.js on the SSR path and by
+ *  scripts/inject-home-links.js on the static one; both resolve it from
+ *  movie/popular[0]. */
+function heroBackdropMetaPath() {
+  const meta = document.querySelector('meta[name="mz-hero-backdrop"]');
+  return (meta && meta.getAttribute('content')) || '';
 }
 
 function getResponsiveBackdrop(path) {
@@ -3834,7 +3849,18 @@ function fillCarouselByQuota(pool, out, usedIds, taken) {
   if (out.length < CAROUSEL_SLOTS) sweep(false, 'hard');
   return out;
 }
-async function loadCarousel() {
+/**
+ * Builds the hero deck from live TMDB data.
+ *
+ * @param {{refresh?: boolean}} [opts]  refresh:true means "a deck is already on
+ *        screen" — see the HERO AUTO-REFRESH block below. It changes NOTHING
+ *        about the selection: same sources, same score, same quotas, same bar,
+ *        same windows. It only changes what happens at the two ends of this
+ *        function — a failed round must not blank a working hero, and slide 0
+ *        must not be re-pinned to the <head> preload.
+ */
+async function loadCarousel(opts) {
+  const isRefresh = !!(opts && opts.refresh);
   const _mzCarouselFailureMark = _mzFetchFailureCount;
   // FETCH FROM ALL MAJOR CATEGORIES IN ONE ROUND-TRIP (Professional-grade discovery)
   // tmdbBatch returns exactly what Promise.allSettled returned here before, and
@@ -3976,6 +4002,16 @@ async function loadCarousel() {
    *  still terminal, because retrying it would return the same nothing.
    */
   if (masterPool.length === 0) {
+    /*  A REFRESH NEVER CLEARS WHAT IS ALREADY ON SCREEN. The deck currently
+     *  painted is a real answer from an earlier round; an empty pool now — TMDB
+     *  unreachable, or nothing inside today's windows — is not a reason to replace
+     *  ten working slides with a bare gradient. Back off and let the watcher ask
+     *  again later. The retry ladder below belongs to the FIRST load, where there
+     *  is genuinely nothing on screen to protect. */
+    if (isRefresh) {
+      _mzCarouselRetryAfter = Date.now() + CAROUSEL_REFRESH_RETRY_MS;
+      return;
+    }
     const networkFailed = _mzFetchFailureCount > _mzCarouselFailureMark ||
       navigator.onLine === false;
 
@@ -4138,15 +4174,192 @@ async function loadCarousel() {
     }
   });
 
-  carouselMovies = diverseCarousel.slice(0, 10);
-  if (carouselMovies.length === 0) carouselMovies = candidates.slice(0, 6); // Ultimate fallback
-  // Align slide 0 with the backdrop <head> already preloaded, so the LCP image
-  // is served from cache instead of being requested after the bundle parses.
-  carouselMovies = pinPreloadedHero(carouselMovies, candidates);
-  console.log('[MovieZone] carousel:', carouselMovies.map((m, n) =>
+  let deck = diverseCarousel.slice(0, CAROUSEL_SLOTS);
+  if (deck.length === 0) deck = candidates.slice(0, 6); // Ultimate fallback
+  /*  ── SLIDE 0 ──
+   *  Align slide 0 with the backdrop <head> already preloaded, so the LCP image is
+   *  served from cache instead of being requested after the bundle parses. That is
+   *  the FIRST-LOAD reason and it is unchanged.
+   *
+   *  A refresh asks the same question of live data instead. It has to:
+   *
+   *    - the preload has already been painted and consumed, so there is no LCP
+   *      left to win, and
+   *    - <meta name="mz-hero-backdrop"> is a fixed string in the document, so
+   *      pinning to it again would park a value that CANNOT have moved since the
+   *      page loaded on the one slide every visitor sees. That is exactly the
+   *      staleness this refresh exists to remove — on a TV, which is never closed,
+   *      for days at a time.
+   *
+   *  What replaces it is not a new rule, it is the SAME rule read from a newer
+   *  answer: heroPreloadTag() in seo-ssr.js and scripts/inject-home-links.js both
+   *  resolve that meta from movie/popular[0], and this round has already fetched
+   *  it. So slide 0 keeps tracking the title a reload at this moment would show.
+   *
+   *  A refresh still pins SOMETHING, deliberately. fillCarouselByQuota() returns
+   *  PLACEMENT order and placePins() runs before every sweep, so with no pin at all
+   *  deck[0] is the editorial pin — measured on the live page, slide 0 became Toxic,
+   *  a Kannada title sitting in the South Indian seat, on the first refresh. Either
+   *  way this is a REORDER inside the deck: pinPreloadedHero() trades the weakest
+   *  member of the pinned title's own category, so the fixed ten and every
+   *  per-category tally come out identical. */
+  const popularIdx = sourceNames.indexOf('popular');
+  const popularTop = ((results[popularIdx] && results[popularIdx].status === 'fulfilled'
+    && results[popularIdx].value && results[popularIdx].value.results) || [])[0];
+  deck = pinPreloadedHero(deck, candidates, isRefresh
+    ? (popularTop && popularTop.backdrop_path) || ''
+    : heroBackdropMetaPath());
+  console.log('[MovieZone] carousel' + (isRefresh ? ' (refresh)' : '') + ':', deck.map((m, n) =>
     `${n + 1}. ${m.title || m.name} [${m._carouselCategory || carouselCategoryOf(m)}] `
     + `${(m.vote_average || 0).toFixed(1)}/${m.vote_count || 0}v pop${Math.round(m.popularity || 0)}`).join('  |  '));
-  buildCarousel();
+  applyCarouselDeck(deck, isRefresh);
+}
+
+/*  ══════════════════════════════════════════════════════════════════════
+ *  HERO AUTO-REFRESH — the deck re-asks TMDB while the tab stays open
+ *  ══════════════════════════════════════════════════════════════════════
+ *  loadCarousel() ran exactly once per page load, so an open tab kept the same
+ *  ten slides for as long as it was open: overnight on a laptop, and for days on
+ *  a TV that is never closed. Every layer underneath was ALREADY live — tmdb()
+ *  holds the discovery endpoints for MZ_TMDB_VOLATILE_FRESH_MS rather than 12h,
+ *  the Worker's KV entry expires in minutes, and the industry /discover queries
+ *  rewrite their own release window at IST midnight. Nothing ever re-asked the
+ *  question, so none of that freshness reached the screen.
+ *
+ *  NOTHING ABOUT THE SELECTION CHANGES HERE, and that is the requirement. This
+ *  re-runs loadCarousel() unmodified: same twelve sources, same
+ *  calculateMovieScore(), same CAROUSEL_CATEGORY_QUOTA, same bar, same current-year
+ *  window, same four sweeps, same editorial pin. The line-up a refresh produces is
+ *  by construction the line-up a page reload at that same moment would produce —
+ *  4 Hollywood, 2 Bollywood, 1 Tollywood, 1 Hindi series, 1 English series, 1
+ *  anime — only with today's titles in it.
+ *
+ *  Three rules keep it invisible:
+ *
+ *    1. IT ONLY ASKS WHEN THE DECK IS STALE. A ten-minute visit sends no extra
+ *       requests at all; the staleness test is two string comparisons.
+ *    2. AN UNCHANGED LINE-UP REPAINTS NOTHING. Compared by id sequence, and on
+ *       most days TMDB's answer has not moved, so this is the branch that runs.
+ *    3. A CHANGED LINE-UP IS QUEUED, NOT SLAMMED IN. buildCarousel() resets to
+ *       slide 0, which would look like a glitch mid-cycle, so the swap waits for a
+ *       moment the viewer is not watching the hero: tab hidden, hero scrolled out
+ *       of view, or the instant the autoplay timer was about to wrap to slide 0
+ *       anyway. Worst case that is one autoplay lap, ~60s.
+ */
+
+/*  Deliberately the SAME constant tmdb() uses for /trending, /discover, /popular
+ *  and /now_playing. Refreshing more often than that cache window would replay
+ *  byte-identical cached bodies and repaint for nothing; refreshing less often
+ *  would throw away freshness the cache is already holding. Change one, this
+ *  follows. */
+const CAROUSEL_MAX_AGE_MS = MZ_TMDB_VOLATILE_FRESH_MS;
+
+/*  How often staleness is TESTED — not how often anything is fetched. Two
+ *  comparisons, and a background tab throttles this to roughly 1/min by itself. */
+const CAROUSEL_STALE_CHECK_MS = 5 * 60 * 1000;
+
+/*  Back-off after a refresh that could not produce a pool. Without it a device
+ *  that is online but cannot reach TMDB would send a batch every
+ *  CAROUSEL_STALE_CHECK_MS for the rest of the session. */
+const CAROUSEL_REFRESH_RETRY_MS = 15 * 60 * 1000;
+
+let _mzCarouselBuiltAt = 0;         // when the deck on screen was selected
+let _mzCarouselBuiltDay = null;     // IST calendar day it was selected on
+let _mzCarouselRetryAfter = 0;      // no refresh attempt before this timestamp
+let _mzCarouselPendingDeck = null;  // selected, waiting for a quiet moment to swap
+let _mzCarouselRefreshing = false;
+let _mzCarouselWatching = false;
+
+/** The ten ids in order — the only thing that decides whether a repaint is worth
+ *  doing. Order is part of it on purpose: the same ten titles in a new ranking is
+ *  a new hero, because slide 0 changed. */
+function carouselDeckSignature(list) {
+  return (list || []).map(m => (m && m.id) || 0).join(',');
+}
+
+/** Records a freshly selected deck as the current answer: paints it on the first
+ *  load, queues it on a refresh if it actually differs from what is up. */
+function applyCarouselDeck(deck, isRefresh) {
+  /*  Stamped BEFORE the no-change return below. Stamping after it would leave an
+   *  unchanged answer still marked stale, and the watcher would re-ask TMDB every
+   *  five minutes for as long as the ranking held steady — i.e. the quiet case
+   *  would be the expensive one. */
+  _mzCarouselBuiltAt = Date.now();
+  _mzCarouselBuiltDay = istDateStr(0);
+  _mzCarouselRetryAfter = 0;
+
+  if (!isRefresh) {
+    carouselMovies = deck;
+    buildCarousel();
+    startCarouselRefreshWatch();
+    return;
+  }
+
+  if (carouselDeckSignature(deck) === carouselDeckSignature(carouselMovies)) return;
+  _mzCarouselPendingDeck = deck;
+  maybeSwapCarouselDeck();
+}
+
+/** Swaps a queued deck in, but only when that cannot pull a slide out from under
+ *  someone who is looking at it. `force` is the autoplay wrap — see
+ *  _mzAutoSlideTick(), where a jump to slide 0 is the transition that was about to
+ *  happen regardless. */
+function maybeSwapCarouselDeck(force) {
+  const deck = _mzCarouselPendingDeck;
+  if (!deck) return;
+  const beingWatched = !force && !document.hidden && !autoSlideHolds.offscreen;
+  if (beingWatched) return;
+  _mzCarouselPendingDeck = null;
+  carouselMovies = deck;
+  buildCarousel();   // repaints from slide 0 and restarts the autoplay timer
+}
+
+/** Has the deck outlived its window, or has the IST day it was built on ended?
+ *
+ *  The day test is not redundant with the age test. carouselIndustryQuery() and
+ *  the /tv sources build their release windows from istDateStr(), so at IST
+ *  midnight they become a different question with a different answer — a deck
+ *  selected at 23:50 is stale at 00:05 however young it is. */
+function carouselIsStale() {
+  if (!_mzCarouselBuiltAt) return false;          // never built — the load path owns it
+  if (Date.now() < _mzCarouselRetryAfter) return false;
+  if (istDateStr(0) !== _mzCarouselBuiltDay) return true;
+  return (Date.now() - _mzCarouselBuiltAt) >= CAROUSEL_MAX_AGE_MS;
+}
+
+async function refreshCarouselIfStale() {
+  if (_mzCarouselRefreshing || !carouselIsStale()) return;
+  if (navigator.onLine === false) return;             // _mzWhenOnline covers the return
+  if (!document.getElementById('carouselTrack')) return;
+  _mzCarouselRefreshing = true;
+  try {
+    await loadCarousel({ refresh: true });
+  } catch (e) {
+    /*  Whatever is on screen stays on screen. A hero that is three hours old is
+     *  a far smaller failure than a hero that is empty. */
+    _mzCarouselRetryAfter = Date.now() + CAROUSEL_REFRESH_RETRY_MS;
+  } finally {
+    _mzCarouselRefreshing = false;
+  }
+}
+
+/*  Armed by the first successful build, so a page that never got a carousel never
+ *  gets a timer either. Idempotent, because buildCarousel() runs many times.
+ *
+ *  VISIBILITYCHANGE IS THE LOAD-BEARING TRIGGER, not the interval. A laptop lid
+ *  closed at 23:00 and opened at 08:00 had its timers frozen for nine hours, and
+ *  the first thing that runs on wake is this listener — which is also the exact
+ *  case where the deck is guaranteed to be a day out of date. The interval only
+ *  covers the tab that stays open AND visible for hours, which is a TV. `online`
+ *  covers the third case: a connection that came back after a dead spell. */
+function startCarouselRefreshWatch() {
+  if (_mzCarouselWatching) return;
+  _mzCarouselWatching = true;
+  setInterval(refreshCarouselIfStale, CAROUSEL_STALE_CHECK_MS);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshCarouselIfStale();
+  });
+  window.addEventListener('online', refreshCarouselIfStale);
 }
 
 /*  ══════════════════════════════════════════════════════════════════════
@@ -5111,7 +5324,22 @@ function startAutoSlide() {
   if (autoSlideTimer) { clearInterval(autoSlideTimer); autoSlideTimer = null; }
   if (autoSlideHeld()) return;
   restartProgressBar();
-  autoSlideTimer = setInterval(() => { goToSlide(currentSlide + 1); }, CAROUSEL_AUTOPLAY_MS);
+  autoSlideTimer = setInterval(_mzAutoSlideTick, CAROUSEL_AUTOPLAY_MS);
+}
+
+/*  ONE tick body, shared by the start and the resume path so they cannot drift.
+ *
+ *  A refresh queued by the auto-update watcher is consumed HERE, at the wrap, and
+ *  only at the wrap. That is the single slide change indistinguishable from a
+ *  rebuild: buildCarousel() paints slide 0, and slide 0 is where this tick was
+ *  already going. Consuming it anywhere else in the cycle would look to the viewer
+ *  like the carousel jumped backwards. */
+function _mzAutoSlideTick() {
+  if (_mzCarouselPendingDeck && currentSlide >= carouselMovies.length - 1) {
+    maybeSwapCarouselDeck(true);
+    return;
+  }
+  goToSlide(currentSlide + 1);
 }
 function resetAutoSlide() { startAutoSlide(); }
  
@@ -5138,7 +5366,7 @@ function resumeAutoSlide(reason) {
   if (autoSlideTimer || autoSlideHeld()) return;
   const bar = document.getElementById('carouselProgress');
   if (bar) bar.style.animationPlayState = 'running';
-  autoSlideTimer = setInterval(() => { goToSlide(currentSlide + 1); }, CAROUSEL_AUTOPLAY_MS);
+  autoSlideTimer = setInterval(_mzAutoSlideTick, CAROUSEL_AUTOPLAY_MS);
 }
  
 // -- HERO INTERACTIONS — pause-on-hover, swipe, arrow nav (premium UX) --
@@ -5163,8 +5391,12 @@ function resumeAutoSlide(reason) {
  
   // A hidden tab keeps firing setInterval, so slides raced ahead in the
   // background and the viewer came back to an arbitrary one.
+  //
+  // Also the best moment to consume a queued auto-update: nothing is on screen
+  // to flicker, so the viewer comes back to the new deck already painted from
+  // slide 0 rather than watching it rebuild.
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) pauseAutoSlide('hidden');
+    if (document.hidden) { pauseAutoSlide('hidden'); maybeSwapCarouselDeck(); }
     else resumeAutoSlide('hidden');
   });
  
@@ -5174,7 +5406,9 @@ function resumeAutoSlide(reason) {
     new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
         if (entry.isIntersecting) resumeAutoSlide('offscreen');
-        else pauseAutoSlide('offscreen');
+        // Same reasoning as the hidden-tab branch above — the hero is not being
+        // looked at, so a queued deck can be swapped in for free.
+        else { pauseAutoSlide('offscreen'); maybeSwapCarouselDeck(); }
       });
     }, { threshold: 0.15 }).observe(hero);
   }
@@ -11022,12 +11256,47 @@ const playerSources = [
       ? `https://vidfast.pro/tv/${id}/${s}/${e}?${opts}`
       : `https://vidfast.pro/movie/${id}?${opts}`;
   }},
-         { name: 'Flicky Stream', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
-    // #8: Flicky — Working embed, multiple servers
+  /*  #8: Flicky — multi-server, multi-audio, 4K. Same player as always; only the
+   *  address it lives at changed.
+   *
+   *  flicky.host now answers every request with a 301 to player.vidzee.wtf, and
+   *  in the same move the embed API stopped accepting the id as a query string:
+   *
+   *    /embed/movie/?id=550        -> 404   (what we were sending)
+   *    /embed/movie/550            -> 200   (the route is /embed/movie/$tmdb)
+   *    /embed/tv/?id=1399&s=1&e=1  -> 404
+   *    /embed/tv/1399/1/1          -> 200
+   *
+   *  That 404 is the white "Page not found" screen, and it was never a change on
+   *  our side — the URL builder below is byte-for-byte what it was when this
+   *  server last worked, which is why nothing in the recent commits explains it.
+   *
+   *  We target player.vidzee.wtf directly rather than riding the redirect. It is
+   *  the origin the iframe ends up on either way, so this drops a full redirect
+   *  round-trip before the first frame AND lets playerHostOrigins() preconnect
+   *  the host that actually serves the video instead of the one that only
+   *  bounces us. The chip keeps the name 'Flicky Stream' on purpose: the health
+   *  ranking stores per-server history under that name, so renaming it would
+   *  throw away everything this user's browser has learned about it. */
+  { name: 'Flicky Stream', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
     return type === 'tv'
-      ? `https://flicky.host/embed/tv/?id=${id}&s=${s}&e=${e}`
-      : `https://flicky.host/embed/movie/?id=${id}`;
+      ? `https://player.vidzee.wtf/embed/tv/${id}/${s}/${e}`
+      : `https://player.vidzee.wtf/embed/movie/${id}`;
   }},
+  /*  #8b: VidZen — the second server asked for alongside Flicky, picked to match
+   *  it feature-for-feature rather than just to pad the list: it races multiple
+   *  upstream sources in parallel with failover (so a dead source costs a moment,
+   *  not the whole playback), serves up to 4K with the dub/audio tracks the
+   *  upstreams carry, and covers movies and episodes off the same TMDB id.
+   *
+   *  Verified live before shipping: /movie/550 and /tv/94997/1/1 both answer 200
+   *  with `content-security-policy: frame-ancestors *` and `x-frame-options:
+   *  ALLOWALL`, so it embeds instead of throwing "refused to connect".
+   *
+   *  Note the paths carry no /embed/ segment — that spelling 404s here. Movie and
+   *  episode deliberately share the vidzen.fun origin so a series never pays a
+   *  cold handshake the movie probe already warmed. */
+
   { name: 'VidRock HD', dubbed: true, url: (id, lang, type, s, e) => {
     return type === 'tv'
       ? `https://vidrock.net/tv/${id}/${s}/${e}`
@@ -11042,25 +11311,18 @@ const playerSources = [
       ? `https://111movies.com/tv/${id}/${s}/${e}`
       : `https://111movies.com/movie/${id}`;
   }},
+    { name: 'VidZen 4K', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
+    return type === 'tv'
+      ? `https://vidzen.fun/tv/${id}/${s}/${e}`
+      : `https://vidzen.fun/movie/${id}`;
+  }},
     { name: 'Ultra HD', dubbed: true, url: (id, lang, type, s, e) => {
     // #6: AutoEmbed — India ke networks par blockage kam aati hai
     return (type === 'tv' ? `https://autoembed.co/tv/tmdb/${id}-${s}-${e}` : 'https://autoembed.co/movie/tmdb/' + id) + `?lang=${lang}`;
   }},
   { name: 'Pro Stream', dubbed: true, url: (id, lang, type, s, e) => {
     // #4: VidLink Pro — Clean interface with settings
-    /*  startAt is the ONE resume parameter in this list that its provider actually
-     *  documents (vidlink.pro publishes it, in seconds, alongside the postMessage
-     *  progress contract this app now listens to). The other nine servers document
-     *  nothing of the sort, so they get no offset: inventing a parameter name would
-     *  only append a query string they ignore, while still changing the URL string
-     *  that takePrewarmedFrame() matches on.
-     *
-     *  The typeof guard is not paranoia. A URL builder must never be able to throw:
-     *  playerHostOrigins() runs every builder inside a try/catch and simply SKIPS
-     *  the ones that fail, so a missing dependency here would quietly drop
-     *  vidlink.pro out of the preconnect list with no error anywhere. That is also
-     *  precisely how player-health.test.js caught this — it evaluates playerSources
-     *  in an isolated sandbox where only the array exists. */
+  
     const at = (typeof mzResumeSec === 'function') ? mzResumeSec(id, type, s, e) : 0;
     return (type === 'tv' ? `https://vidlink.pro/tv/${id}/${s}/${e}` : 'https://vidlink.pro/movie/' + id)
       + `?lang=${lang}` + (at ? '&startAt=' + at : '');
@@ -11515,10 +11777,16 @@ function playNextEpisode() {
  *
  *  The hand-written list had drifted badly and silently: it still warmed
  *  vidrock.ru and embed.smashystream.com (the latter is a commented-out source)
- *  while three live servers — vidfast.pro, flicky.host and 111movies.com — were
- *  never warmed at all. A user switching to one of those paid a full DNS + TCP +
+ *  while three live servers — vidfast.pro, the Flicky player host and
+ *  111movies.com — were never warmed at all. A user switching to one of those
+ *  paid a full DNS + TCP +
  *  TLS handshake at the exact moment they wanted video. Deriving the list means
  *  adding or replacing a server warms the right host automatically.
+ *
+ *  Deriving it is also what made the Flicky host move (flicky.host ->
+ *  player.vidzee.wtf) a one-line change instead of a hunt: the warm list, the
+ *  dns-prefetch hints and the fallback preconnects all followed the new origin
+ *  the moment the URL builder changed.
  *
  *  The URL builders read currentModalMovie for anime detection; with no modal
  *  open they take the plain movie branch, which is the origin we want. Each call

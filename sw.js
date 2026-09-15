@@ -43,7 +43,12 @@
 // namespace is out of daily write quota, so that request could only ever 503. That
 // moved moviezone.min.js to 14.3; the precached shell pins the URL, so this rename
 // is what delivers it to returning visitors.
-const CACHE_NAME = 'moviezone-v144';
+// v145: the hero carousel now re-selects itself while the tab stays open — it used
+// to be built once per page load, so an open tab (and a TV, which is never closed)
+// kept the same ten slides for hours. That moved moviezone.min.js to 14.4; the
+// precached shell pins the URL, so this rename is what delivers it to returning
+// visitors.
+const CACHE_NAME = 'moviezone-v145';
 
 // Separate cache for TMDB posters/backdrops. Kept apart from the shell so the
 // activate handler can wipe an old shell without throwing away hundreds of
@@ -60,7 +65,7 @@ const STATIC_ASSETS = [
   '/moviezone.min.css?v=9.13',
   '/tv-mode.min.js?v=1.5',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=14.3',
+  '/moviezone.min.js?v=14.4',
   '/manifest.json',
   '/moviezone-logo.png?v=2',
   '/icon-192.png?v=2',

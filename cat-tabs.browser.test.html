@@ -35,14 +35,17 @@
   /*  'kids' is not here: the Cartoons tab was dropped outright, and 'adult' was
       removed from the UI as well. Both still exist as category ids in
       moviezone.js — they simply have no pill any more.
-      'anime' IS on the strip (and in the navbar): the pill is the only control
-      that also renders the anime sub-mode bar beside the grid, so the duplicate
-      is deliberate.
+      'anime' joined them (Sep 2026): the pill was removed from the strip AND the
+      navbar by request. Nothing about the category itself was deleted — the id,
+      ANIME_MODES, buildAnimeQueries() and the anime sub-mode bar are all still
+      live, so /movies/anime, the footer links and the SSR category page work
+      exactly as before. It is listed in REMOVED below so this suite asserts the
+      pill is really gone rather than merely not looking for it.
       'south' is gone from this list too: it merged into the Tollywood tab, which
       now serves Telugu + Tamil + Malayalam + Kannada. The id stays alive in
       moviezone.js as an alias so /movies/south and the footer links still work. */
   var REQUIRED = ['all', 'trending', 'uhd4k', 'toprated', 'hollywood', 'bollywood',
-    'kdrama', 'tv', 'tollywood', 'anime',
+    'kdrama', 'tv', 'tollywood',
     'action', 'comedy', 'horror', 'thriller',
     'romance', 'scifi', 'adventure', 'fantasy', 'crime', 'documentary', 'family',
     'animation'];
@@ -52,10 +55,10 @@
 
   // Only these belong on the strip itself (everything else moved to a dropdown).
   var DIRECT = ['all', 'trending', 'uhd4k', 'toprated', 'hollywood', 'bollywood',
-    'tollywood', 'tv', 'kdrama', 'anime'];
+    'tollywood', 'tv', 'kdrama'];
 
   // Removed from the UI entirely by request.
-  var REMOVED = ['dubbed', 'kids', 'adult', 'south'];
+  var REMOVED = ['dubbed', 'kids', 'adult', 'south', 'anime'];
 
   var frame = document.getElementById('app');
 
