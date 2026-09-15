@@ -106,7 +106,54 @@ const brotliOf = (p) => zlib.brotliCompressSync(fs.readFileSync(p), {
   params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 }
 }).length;
 
-const CRITICAL_WIRE_BUDGET = 117 * 1024;
+const CRITICAL_WIRE_BUDGET = 118 * 1024;
+
+/*  Raised 117 -> 118 KB for the TMDB cache-path work (Sep 2026).
+ *
+ *  It costs +0.8 KB brotli: +0.6 JS, +0.2 index.html. CSS is untouched. What that
+ *  buys is entirely in how much NETWORK and MEMORY a real visit spends, which is
+ *  why it is worth paying wire bytes for:
+ *
+ *    - the pre-parse TMDB warm-up in <head> now skips itself when mz_warm_ts says
+ *      the app already holds a fresh cache. Those two fetches discard their
+ *      bodies by design — they exist to fill the edge cache before the bundle
+ *      parses — so on a warm load they were downloading 40-100 KB that nothing
+ *      would ever read. That is 50-100x this entire raise, per warm load.
+ *    - the localStorage TMDB cache cap went 30 -> 120. A cold homepage caches 32
+ *      paths, so the old cap meant the 60s housekeeping sweep DELETED part of the
+ *      first screen it had just cached, and the next visit re-fetched what it had
+ *      already paid for. A cold load caused by the cache, on every visit.
+ *    - both cache evictions are now oldest-first, read from a 48-character prefix
+ *      of each record instead of a JSON.parse of its 20-50 KB payload. Previously
+ *      they dropped entries in insertion order, so an overflow could evict the
+ *      screen being rendered and keep an 11-hour-old entry.
+ *    - the Upcoming feed is bounded at MZ_UPCOMING_MAX_PAGES and its observer is
+ *      disconnected at the cap. It was the last truly unbounded growth path on
+ *      the page: loadUpcoming(true) appended cards — each with its own click
+ *      closure — forever, reachable by nothing more unusual than scrolling.
+ *
+ *  Trimmed first, and this is all there was left to find:
+ *    - `<link rel=preload as=style>` for moviezone.min.css deleted. It sat two
+ *      lines BELOW the <link rel=stylesheet> for the same URL, which the preload
+ *      scanner already discovers at the same moment at the highest priority, so
+ *      it was a duplicate-priority warning buying nothing.
+ *    - a second, byte-identical `<link rel=icon sizes=192x192>` deleted.
+ *    - `<link rel=dns-prefetch>` for image.tmdb.org deleted: the line above it is
+ *      a `preconnect` to the same host, and preconnect subsumes DNS resolution.
+ *
+ *  What was considered and rejected, so it is not re-tried:
+ *    - cleancss -O2 on the stylesheet: measured at 0.1 KB brotli (28.9 -> 28.8)
+ *      while merging 41 rule blocks and warning on `font` shorthands. Not worth a
+ *      structural CSS change for a rounding error.
+ *    - deleting index.html's explanatory comments (22.9 KB raw, 18% of the file).
+ *      They document the RUM and ad gates that rum-gate.browser.test.js and
+ *      ad-gate-check.js assert against; trading that for 0.3 KB is a bad deal.
+ *    - a dead-code scan over moviezone.js found ZERO unreferenced function
+ *      declarations. The standing deletion list really is empty.
+ *
+ *  The number that actually hurts — parse weight — is at 442.5 of 449 KB, and
+ *  none of this is new CSS, so no extra style recalculation was added.
+ */
 
 /*  Raised 115 -> 117 KB for the navbar redesign (Sep 2026).
  *

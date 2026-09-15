@@ -850,6 +850,165 @@ try {
   console.error('⚠️  SEO SSR routes could not be registered:', err.message);
 }
 
+// ══════════════════════════════════════════════════════════════
+//  PER-PLATFORM OTT CHARTS  (/api/ott/charts)
+// ══════════════════════════════════════════════════════════════
+//
+//  What this adds that /api/tmdb could not: TMDB has no per-provider chart and
+//  no "date added to provider X" field, so "trending on JioHotstar" was being
+//  approximated with TMDB's GLOBAL popularity inside JioHotstar's catalogue, and
+//  "newly added" was not expressible at all. ott-charts.js reads both from
+//  JustWatch — the same dataset TMDB's own /watch/providers records come from,
+//  which is why merging it cannot contradict the provider gate the OTT sections
+//  already enforce. The long-form reasoning, including the probe results for
+//  every platform's own site, is at the top of ott-charts.js.
+//
+//  WHY THE SERVER HYDRATES INSTEAD OF THE CLIENT:
+//  the chart is ids and ranks. Turning 24 ids into renderable cards is 24 TMDB
+//  detail calls, and the client is deliberately capped at 30 requests per 10
+//  seconds (MZ_RATE_LIMIT in moviezone.js) — spending 24 of them on ordering
+//  would push the next platform click into a queue, which is the exact
+//  regression that removing the old global-trending overlay was meant to fix.
+//  Here those calls are coalesced and cached for two hours and shared by every
+//  visitor, so a platform click costs the client ONE request and arrives
+//  ready to render.
+
+const ottCharts = require('./ott-charts');
+
+// Fresh for 2h like everything else in apiCache; the stale copy is what a
+// JustWatch outage degrades into, so a platform tab never loses its ordering.
+const OTT_CHART_TTL_SECONDS = 7200;
+// How many chart entries reach the client. The grid is 24 cards and the chart is
+// only ever its HEAD — past this the provider-gated catalogue takes over, which
+// is deeper and does not cost a detail call per title.
+const OTT_CHART_HEAD = 24;
+
+/*  A chart card, trimmed to the fields the grid actually renders.
+ *
+ *  Trimmed rather than passed through because /movie/{id} is a ~4 KB record with
+ *  credits, companies and translations attached; 24 of those is a ~100 KB
+ *  response for a 24-card rail. `genres` is flattened back to `genre_ids`
+ *  because that is the shape every discover result has, and the card renderer,
+ *  the language balancer and the anime detector all read genre_ids.
+ */
+function slimChartTitle(detail, mediaType) {
+  if (!detail || !detail.id) return null;
+  return {
+    id: detail.id,
+    media_type: mediaType,
+    title: detail.title || detail.name || '',
+    name: detail.name || detail.title || '',
+    overview: detail.overview || '',
+    poster_path: detail.poster_path || null,
+    backdrop_path: detail.backdrop_path || null,
+    release_date: detail.release_date || '',
+    first_air_date: detail.first_air_date || '',
+    vote_average: detail.vote_average || 0,
+    vote_count: detail.vote_count || 0,
+    popularity: detail.popularity || 0,
+    original_language: detail.original_language || 'en',
+    genre_ids: Array.isArray(detail.genres)
+      ? detail.genres.map(g => g && g.id).filter(Boolean)
+      : (detail.genre_ids || [])
+  };
+}
+
+/**
+ * Chart ids -> renderable cards, in chart order.
+ *
+ * A title that cannot be hydrated (deleted from TMDB, or a request that failed)
+ * is DROPPED rather than rendered as a blank card, and one without a poster is
+ * dropped too — loadMovies would filter it out on the client anyway, so passing
+ * it would just waste a rank. Order is preserved from the chart, which is the
+ * whole point of the endpoint.
+ */
+async function hydrateChart(order) {
+  const settled = await Promise.allSettled(
+    order.map(entry => tmdbForSsr('/' + entry.media_type + '/' + entry.id, { language: 'en-US' }))
+  );
+  const cards = [];
+  settled.forEach((result, i) => {
+    if (result.status !== 'fulfilled') return;
+    const card = slimChartTitle(result.value, order[i].media_type);
+    if (!card || !card.poster_path) return;
+    card._chartRank = cards.length + 1;
+    card._chartSource = order[i].chartSource;
+    cards.push(card);
+  });
+  return cards;
+}
+
+app.get('/api/ott/charts', apiLimiter, async (req, res) => {
+  const platform = String(req.query.platform || '').trim().toLowerCase();
+  const region = String(req.query.region || 'IN').trim().toUpperCase().slice(0, 2);
+
+  if (!ottCharts.isKnownChartPlatform(platform)) {
+    return res.status(400).json({
+      error: 'Unknown platform',
+      platforms: ottCharts.chartPlatforms()
+    });
+  }
+
+  const cacheKey = `ott-chart:${platform}:${region}`;
+  const cached = apiCache.get(cacheKey);
+  if (cached) {
+    res.setHeader('Cache-Control', 'public, max-age=1800, s-maxage=7200, stale-while-revalidate=86400');
+    res.setHeader('X-Cache', 'HIT');
+    return res.json(cached);
+  }
+
+  try {
+    const chart = await ottCharts.fetchPlatformChart(platform, { region });
+    const order = ottCharts.mergeChartOrder(chart, OTT_CHART_HEAD);
+    const items = await hydrateChart(order);
+
+    /*  An empty chart is not an error and must not be cached as a success: a
+     *  transient JustWatch failure would otherwise pin the platform to the old
+     *  ordering for two hours. Fall through to the stale copy instead. */
+    if (!items.length) throw new Error('chart hydrated to zero cards');
+
+    const payload = {
+      platform,
+      region,
+      provider: chart.provider,
+      package: chart.package,
+      source: 'justwatch',
+      fetchedAt: chart.fetchedAt,
+      counts: { trending: chart.trending.length, newly: chart.newly.length },
+      items
+    };
+
+    apiCache.set(cacheKey, payload, OTT_CHART_TTL_SECONDS);
+    staleCache.set(cacheKey, payload);
+    res.setHeader('Cache-Control', 'public, max-age=1800, s-maxage=7200, stale-while-revalidate=86400');
+    res.setHeader('X-Cache', 'MISS');
+    return res.json(payload);
+  } catch (err) {
+    const stale = staleCache.get(cacheKey);
+    if (stale) {
+      res.setHeader('Cache-Control', 'public, max-age=60, must-revalidate');
+      res.setHeader('X-Cache', 'STALE');
+      return res.json(stale);
+    }
+    /*  200 with an empty list, NOT a 5xx.
+     *
+     *  The client treats a chart as "reorder the pool if you have one", so an
+     *  empty chart is a complete, meaningful answer: the platform tab falls back
+     *  to the provider-gated ordering it had before this endpoint existed. A 5xx
+     *  would be reported to Sentry and RUM as a site error when nothing is
+     *  broken for the user, and would make the client's retry logic fire against
+     *  an upstream that is already known to be down.
+     */
+    console.warn(`[ott-charts] ${platform}/${region} unavailable: ${err.message}`);
+    res.setHeader('Cache-Control', 'public, max-age=60, must-revalidate');
+    res.setHeader('X-Cache', 'MISS');
+    return res.json({
+      platform, region, source: 'justwatch', fetchedAt: Date.now(),
+      unavailable: true, counts: { trending: 0, newly: 0 }, items: []
+    });
+  }
+});
+
 // Health Check / Ping Endpoint: UptimeRobot ko server jagaye rakhne ke liye
 app.get('/ping', (req, res) => {
   res.status(200).send('Pong! Server is awake.');

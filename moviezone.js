@@ -741,16 +741,41 @@ const _mzOnIdle = (typeof requestIdleCallback === 'function')
 
 /*  Quota is ~5 MB and this cache has no natural bound, so a long-lived
  *  session will eventually fill it. On overflow we drop a batch of entries and
- *  move on. Which entries go is not important — every one of them is a
- *  re-fetchable copy of a TMDB response, and picking "the oldest" would mean
- *  parsing every record's timestamp, which is the very cost being avoided.
+ *  move on.
+ *
+ *  WHICH entries go was previously "the first N in localStorage.key() order",
+ *  justified by the fact that finding the oldest would mean parsing every
+ *  record's timestamp. That reasoning was one step short: the timestamp is the
+ *  FIRST field of every record this file writes, so it can be read off the first
+ *  few dozen characters of the raw string — no JSON.parse of the 20-50 KB
+ *  payload behind it, and no need to touch the payload at all. Oldest-first is
+ *  therefore affordable, and it matters: insertion order could evict the entry
+ *  written one second ago and keep an eleven-hour-old one, so an overflow could
+ *  throw away the screen currently being rendered.
  */
+function _mzCacheStamp(key) {
+  try {
+    const head = (localStorage.getItem(key) || '').slice(0, 48);
+    const at = head.indexOf('"timestamp":');
+    if (at === -1) return 0;
+    return parseInt(head.slice(at + 12), 10) || 0;
+  } catch (e) { return 0; }
+}
+
 function _mzEvictCacheEntries(count) {
-  const doomed = [];
-  for (let i = 0; i < localStorage.length && doomed.length < count; i++) {
+  const candidates = [];
+  for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
-    if (k && k.startsWith('mz_cache_')) doomed.push(k);
+    if (k && k.startsWith('mz_cache_')) candidates.push(k);
   }
+  // Only pay for the sort when there is a real choice to make.
+  const doomed = candidates.length <= count
+    ? candidates
+    : candidates
+      .map(k => [k, _mzCacheStamp(k)])
+      .sort((a, b) => a[1] - b[1])
+      .slice(0, count)
+      .map(([k]) => k);
   doomed.forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
   return doomed.length;
 }
@@ -772,6 +797,21 @@ function _mzFlushCacheWrites() {
       } catch (e2) { return; }
     }
   }
+  /*  A single small marker saying "this browser has a warm first-screen cache".
+   *
+   *  The pre-parse warm-up in index.html reads it to decide whether to fetch
+   *  /movie/popular and /trending/movie/week before the bundle has parsed. Those
+   *  two fetches discard their bodies by design — they exist to populate the edge
+   *  cache on a cold load — so on a warm load they were downloading 40-100 KB
+   *  that nobody would ever read. That script cannot make the decision from the
+   *  real cache records: they are 20-50 KB each and would need a JSON.parse
+   *  before paint, which is the very cost it is there to avoid. Hence a
+   *  ~13-byte timestamp it can read and compare with no parsing.
+   *
+   *  Written here rather than at queue time so it only ever claims a cache that
+   *  actually landed on disk.
+   */
+  try { localStorage.setItem('mz_warm_ts', String(Date.now())); } catch (e) {}
 }
 
 function _mzQueueCacheWrite(cacheKey, data) {
@@ -1835,19 +1875,63 @@ function setupInfiniteScroll() {
     observer.observe(trigger);
 }
  
+/*  ══════════════════════════════════════════════════════════════════════
+ *  UPCOMING IS THE ONE FEED THAT STILL GROWS WITHOUT A BOUND
+ *  ══════════════════════════════════════════════════════════════════════
+ *  The movie grid is paged (MZ_FEED_PAGED / MZ_FEED_PAGE_SIZE) so its DOM is
+ *  hard-capped at one 30-card page however long the session runs. Upcoming was
+ *  never converted: loadUpcoming(true) increments currentUpcomingPage forever,
+ *  concatenates into allUpcoming forever, and APPENDS its cards to the grid —
+ *  and each of those cards is heavier than a movie card (a w500 backdrop, three
+ *  badges, a description and a Notify button) and carries its OWN click closure
+ *  at the appendChild below rather than going through delegation.
+ *
+ *  So a user who keeps scrolling the Upcoming section accumulates DOM nodes,
+ *  detached-listener closures and array entries with nothing to reclaim them.
+ *  That is the "phone gets hot, then the tab dies" path, and it is reached by
+ *  scrolling — not by any unusual action.
+ *
+ *  Capping the page count is the smallest fix that removes the unbounded part:
+ *  10 pages is far past what anyone scrolls (the section exists to answer "what
+ *  is coming soon", and TMDB's own upcoming window does not extend indefinitely)
+ *  while turning an open-ended growth curve into a known ceiling. The observer
+ *  is disconnected at the cap too, so it also stops re-firing against a feed
+ *  that will not grow again.
+ */
+const MZ_UPCOMING_MAX_PAGES = 10;
+
+/*  Held at module scope so the cap can disconnect it. Previously the observer
+ *  was a local inside setupUpcomingInfiniteScroll(), which meant nothing could
+ *  ever stop it — it kept calling loadUpcoming(true) for the life of the page. */
+let _mzUpcomingObserver = null;
+
+function _mzStopUpcomingScroll() {
+  if (_mzUpcomingObserver) {
+    _mzUpcomingObserver.disconnect();
+    _mzUpcomingObserver = null;
+  }
+  const trigger = document.getElementById('infiniteScrollTriggerUpcoming');
+  if (trigger) trigger.style.display = 'none';
+}
+
 function setupUpcomingInfiniteScroll() {
     const trigger = document.getElementById('infiniteScrollTriggerUpcoming');
     if (!trigger) return;
+    // Re-entrant safety: a second call must not leave a first observer running.
+    if (_mzUpcomingObserver) _mzUpcomingObserver.disconnect();
 
-    const observer = new IntersectionObserver((entries) => {
+    _mzUpcomingObserver = new IntersectionObserver((entries) => {
         const entry = entries[0];
-        if (entry.isIntersecting && !isLoadingMore) {
-            loadUpcoming(true);
+        if (!entry.isIntersecting || isLoadingMore) return;
+        if (currentUpcomingPage >= MZ_UPCOMING_MAX_PAGES) {
+            _mzStopUpcomingScroll();
+            return;
         }
+        loadUpcoming(true);
     }, {
         rootMargin: '400px'
     });
-    observer.observe(trigger);
+    _mzUpcomingObserver.observe(trigger);
 }
  
 /*  ══════════════════════════════════════════════════════════════════════
@@ -2664,6 +2748,35 @@ function promoteOttSignalMix(pool) {
 function ottRankLikeAllFeed(items) {
   if (!Array.isArray(items) || items.length < 2) return items || [];
   const now = Date.now();
+
+  /*  ── THE PLATFORM'S OWN CHART IS NOT RE-RANKED ──
+   *
+   *  Everything after this block is a RELEVANCE model: priority group, freshness
+   *  tier, an era weight and a recency premium. Run over a chart it would
+   *  dissolve it — and correctly so, by its own rules, because "Bigg Boss is
+   *  what JioHotstar is leading with today" is not a fact any of those terms can
+   *  represent. The chart is an external claim about the platform, so it is
+   *  carried through in the platform's order and the model is applied to the
+   *  catalogue behind it.
+   *
+   *  Extracted BEFORE rankByFreshness rather than re-sorted afterwards, because
+   *  that function and the two at the end mutate and reorder in place; taking the
+   *  head out first means the ranking they do is over exactly the items that
+   *  should be ranked, and the pinned block never picks up a _priorityGroup that
+   *  a later pass could act on.
+   *
+   *  _chartRank is only ever set when /api/ott/charts answered, so with no chart
+   *  `pinned` is empty, `items` is the original array, and everything below is
+   *  the identical function it was before.
+   */
+  const pinned = items.filter(m => m && m._chartRank);
+  if (pinned.length) {
+    pinned.sort((a, b) => a._chartRank - b._chartRank);
+    items = items.filter(m => !(m && m._chartRank));
+    // A chart deep enough to BE the whole grid needs nothing ranked behind it.
+    if (items.length < 2) return pinned.concat(items);
+  }
+
   rankByFreshness(items);
   items.forEach(m => {
     const d = m.release_date || m.first_air_date;
@@ -2686,7 +2799,6 @@ function ottRankLikeAllFeed(items) {
     || (b._ottSignalCount - a._ottSignalCount)
     || (b._ottFinal - a._ottFinal)
     || (a._eventAgeDays - b._eventAgeDays));
-
   /*  Interleave and language-balance each outer tier independently. The generic
    *  interleaver may cross freshness groups to keep movies and series visible;
    *  splitting first prevents it from pulling a catalogue-only card ahead of a
@@ -2696,7 +2808,26 @@ function ottRankLikeAllFeed(items) {
   const balance = list => interleaveFeedByType(
     diversifyByLanguageWithinPriority(list), true
   );
-  return promoteOttSignalMix(balance(dynamic).concat(balance(catalogue)));
+  /*  ── TWO SOURCES OF TRUTH, STACKED IN ORDER OF AUTHORITY ──
+   *
+   *  `pinned` is the platform's OWN chart — its live trending ranking and its
+   *  recently-added list, read from the provider dataset TMDB's /watch/providers
+   *  records are built from. `dynamic` is what the TMDB provider queries could
+   *  infer about the same question: 'trending' there means global popularity
+   *  INSIDE the provider catalogue, and 'new' means recently RELEASED, because
+   *  TMDB carries no per-provider chart and no date-added-to-provider field.
+   *
+   *  So the chart goes first and is not re-ranked — it is the platform stating
+   *  the answer — and the signal tiers order everything behind it, which is
+   *  exactly where the inferred signals are the best information available.
+   *
+   *  promoteOttSignalMix runs on the unpinned remainder rather than the whole
+   *  list: its job is to guarantee one new / trending / popular card near the
+   *  head, and applied across the chart it would reorder a ranking that is
+   *  already the platform's own. With no chart, `pinned` is empty and this is
+   *  byte-for-byte the expression it replaced.
+   */
+  return pinned.concat(promoteOttSignalMix(balance(dynamic).concat(balance(catalogue))));
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -5677,6 +5808,93 @@ function mergeOttSignalMetadata(target, incoming) {
   return target;
 }
 
+/*  ══════════════════════════════════════════════════════════════════════
+ *  WHAT THE PLATFORM ITSELF IS PUSHING RIGHT NOW
+ *  ══════════════════════════════════════════════════════════════════════
+ *  The pool assembled below is provider-gated end to end, so it is ACCURATE —
+ *  ott-sections-check re-verifies a live sample of every grid against each
+ *  title's own /watch/providers record and all platforms measure 100%. What it
+ *  could not be was CURRENT, and the reason is a hole in TMDB rather than a bug
+ *  here: TMDB publishes no per-provider chart and no "date added to provider X"
+ *  field. So "trending on JioHotstar" had to be written as
+ *  `sort_by=popularity.desc` inside JioHotstar's catalogue — TMDB's GLOBAL,
+ *  lifetime-ish popularity — and "new on JioHotstar" could not be written at
+ *  all. Opening the tab gave you what is globally big and happens to be
+ *  licensed there, not what its own home screen leads with today.
+ *
+ *  /api/ott/charts closes that hole. It reads the platform's own TRENDING
+ *  ranking and its recently-added list from JustWatch — the same dataset TMDB's
+ *  /watch/providers records are built from, which is why a chart entry cannot
+ *  contradict the provider gate — and returns them already hydrated into TMDB
+ *  cards, in the platform's order. ott-charts.js documents why each service's
+ *  own site is not usable directly (every one of them token-gates its trays;
+ *  Netflix is the only one that publishes anything, weekly and without ids).
+ *
+ *  ── why this is ONE request and not twenty-four ──
+ *  A chart is ids and ranks; turning 24 ids into cards is 24 TMDB detail calls.
+ *  The client is capped at 30 requests per 10 seconds (MZ_RATE_LIMIT), so doing
+ *  that here would spend most of a click's budget on ORDERING and push the next
+ *  platform into a queue — precisely the regression that removing the old
+ *  global-trending overlay was meant to fix. The server hydrates and caches for
+ *  two hours instead, shared across visitors, so a platform click costs the
+ *  client exactly one extra request and arrives ready to render.
+ */
+const OTT_CHART_URL = BASE.replace(/\/api\/tmdb$/, '') + '/api/ott/charts';
+
+/*  Longer than a TMDB call because a cold chart is a JustWatch round trip plus
+ *  the server's hydration fan-out, and shorter than the section as a whole can
+ *  tolerate: past this the catalogue ordering is a perfectly good grid. */
+const OTT_CHART_TIMEOUT_MS = 7000;
+
+/*  Per-session, per-platform. A user flicking between platform tabs — the
+ *  common case — must not re-request a chart that is fresh for two hours
+ *  server-side anyway. Stores the PROMISE, so two clicks in the same second
+ *  share one request instead of racing. */
+const _ottChartCache = new Map();
+
+/**
+ * The platform's own trending + newly-added head, as renderable TMDB cards.
+ *
+ * Never rejects and never throws. Every caller treats [] as "order the pool the
+ * way it was ordered before this existed", which is a complete, correct grid —
+ * so an outage, a 404 on an older deploy, or a browser with no fetch degrades
+ * to the previous behaviour rather than to an empty section.
+ */
+function ottPlatformChart(key) {
+  if (_ottChartCache.has(key)) return _ottChartCache.get(key);
+
+  const p = (async () => {
+    if (typeof fetch !== 'function') return [];
+    /*  AbortController is guarded rather than assumed: without it a stalled
+     *  chart request would hold the platform grid for the whole default fetch
+     *  timeout, which is exactly what this must never do. */
+    const ctl = (typeof AbortController === 'function') ? new AbortController() : null;
+    const timer = ctl ? setTimeout(() => ctl.abort(), OTT_CHART_TIMEOUT_MS) : null;
+    try {
+      const res = await fetch(OTT_CHART_URL + '?platform=' + encodeURIComponent(key), {
+        headers: { accept: 'application/json' },
+        signal: ctl ? ctl.signal : undefined
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data && data.items) ? data.items : [];
+    } catch (e) {
+      return [];
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  })();
+
+  /*  A failed or empty chart is not cached, so the next click retries. Caching
+   *  it would pin the platform to the fallback ordering for the whole session
+   *  over one bad moment. */
+  p.then((items) => { if (!items.length) _ottChartCache.delete(key); }, () => {
+    _ottChartCache.delete(key);
+  });
+  _ottChartCache.set(key, p);
+  return p;
+}
+
 /**
  * Fetch this platform's content for the active mode. Every source is provider-
  * gated, and duplicate titles retain every dynamic discovery signal that found
@@ -5685,6 +5903,20 @@ function mergeOttSignalMetadata(target, incoming) {
 async function fetchOttMovies(key, mode, page) {
   const plan = buildOttModeQueries(key, mode, page);
   if (!plan.length) return [];
+
+  /*  The platform's own chart, started BEFORE the catalogue batch and awaited
+   *  after it, so it overlaps the request it would otherwise be added to and
+   *  costs no extra round trip.
+   *
+   *  Page 1 only: the chart is the grid's HEAD, and re-pinning it on an
+   *  infinite-scroll page would put the same 24 cards back at the top of every
+   *  page. `typeof` guarded because ott-sections-check.js extracts and runs this
+   *  function in a bare VM sandbox with no chart layer — there it evaluates to
+   *  null and the pool is ordered exactly as it was before this existed, which
+   *  is what keeps that suite measuring the provider gate rather than this. */
+  const chartPending = (page <= 1 && typeof ottPlatformChart === 'function')
+    ? ottPlatformChart(key)
+    : null;
 
   /*  Everything the first render needs, in ONE request: the provider-gated
    *  catalogue pages. Only primes the cache — the calls below are unchanged and
@@ -5779,12 +6011,68 @@ async function fetchOttMovies(key, mode, page) {
     list.forEach(raw => consider(raw, src.type, src.tag));
   });
 
-  // The popularity, recent-date and vote-volume lanes are all provider-gated.
-  // A title found by several lanes keeps all of those signals after dedupe.
-  const ranked = Array.from(picked.values()).sort((a, b) =>
-    (a._ottSignalTier - b._ottSignalTier)
-    || (b._ottSignalCount - a._ottSignalCount)
-    || (b._ottScore - a._ottScore));
+  /*  ── THE PLATFORM'S OWN ORDER, LAID OVER THE CATALOGUE ──
+   *
+   *  Each chart entry goes through consider() rather than being pushed straight
+   *  in, which is what keeps this from being a second, weaker code path: it
+   *  inherits the poster requirement, the mode gate, the dedupe key and the
+   *  exact same scoring and signal bookkeeping, so a chart title the catalogue
+   *  already returned keeps whichever record scored higher and MERGES the two
+   *  provenances instead of one overwriting the other. `picked.get(k)` afterwards
+   *  is how we learn whether it survived those gates — a movie on the Web Series
+   *  tab, or a title with no poster, is dropped here exactly as anywhere else.
+   *
+   *  ── the tag mapping is the whole point of this block ──
+   *  consider() maps any tag it does not recognise to 'catalogue', which carries
+   *  weight 0 and tier 1. So passing a chart entry through as 'trend' would file
+   *  the platform's own #1 title as back catalogue. The chart's two lists map
+   *  onto the two signals that mean the same thing:
+   *
+   *    chart 'trending' -> signal 'trending'   the platform's live demand curve
+   *    chart 'newly'    -> signal 'new'        what the platform just ADDED
+   *
+   *  That second mapping is strictly more information than the TMDB queries can
+   *  produce: their 'new' lane means recently RELEASED, because TMDB has no
+   *  date-added-to-provider field at all. Feeding the real added-recently list
+   *  into the same signal makes the tiering below better informed rather than
+   *  merely reordered.
+   *
+   *  _chartRank is assigned over the SURVIVORS, not over the raw list, so the
+   *  head has no gaps where a dropped entry used to be.
+   */
+  const chartCards = chartPending ? await chartPending : [];
+  let pinnedCount = 0;
+  chartCards.forEach((card) => {
+    if (!card || !card.id) return;
+    const type = card.media_type === 'tv' ? 'tv' : 'movie';
+    const k = type + '-' + card.id;
+    const source = card._chartSource === 'newly' ? 'new' : 'trending';
+    consider(card, type, source);
+    const entry = picked.get(k);
+    if (!entry) return;                       // failed the poster or mode gate
+    if (entry._chartRank) return;             // already pinned (duplicate entry)
+    entry._chartRank = ++pinnedCount;
+    entry._chartSource = card._chartSource || 'trending';
+  });
+
+  /*  Chart order first, then the provider-signal tiers for everything behind it.
+   *
+   *  Written as one comparator rather than two concatenated lists so that when
+   *  there is no chart — an outage, an older deploy, or the VM sandbox in
+   *  ott-sections-check.js — every _chartRank is undefined, both sides collapse
+   *  to Infinity, the first term yields NaN, and the remaining terms are
+   *  byte-for-byte the signal sort they replaced.
+   */
+  const ranked = Array.from(picked.values()).sort((a, b) => {
+    const ac = a._chartRank || Infinity;
+    const bc = b._chartRank || Infinity;
+    return (ac - bc)
+      // The popularity, recent-date and vote-volume lanes are all provider-gated.
+      // A title found by several lanes keeps all of those signals after dedupe.
+      || (a._ottSignalTier - b._ottSignalTier)
+      || (b._ottSignalCount - a._ottSignalCount)
+      || (b._ottScore - a._ottScore);
+  });
 
   /*  ── ACCURACY IS AUDITED ONCE PER PLATFORM, NOT PER CLICK ──
    *
@@ -8448,6 +8736,15 @@ async function loadUpcoming(isLoadMore = false) {
     grid.innerHTML = Array(12).fill('<div class="skeleton upcoming-skeleton" aria-hidden="true"></div>').join('');
     allUpcoming = [];
   } else {
+    /*  The ceiling, enforced here as well as in the observer: the observer is
+     *  not the only caller — the Load More button reaches this too — so putting
+     *  the guard only there would leave a second, unbounded way in. */
+    if (currentUpcomingPage >= MZ_UPCOMING_MAX_PAGES) {
+      _mzStopUpcomingScroll();
+      const capped = document.getElementById('loadMoreUpcomingBtn');
+      if (capped) capped.style.display = 'none';
+      return;
+    }
     currentUpcomingPage++;
     const btn = document.getElementById('loadMoreUpcomingBtn');
     if (btn) btn.innerHTML = 'Loading...';
@@ -8553,7 +8850,8 @@ async function loadUpcoming(isLoadMore = false) {
   } catch(e) { console.warn(e); }
  
   // Har load ke baad agle upcoming page ko chupke se fetch karke ready rakho
-  if (!isMzTV()) {
+  // — but not past the cap, where that page will never be requested.
+  if (!isMzTV() && currentUpcomingPage < MZ_UPCOMING_MAX_PAGES) {
     setTimeout(() => prefetchUpcomingPage(currentUpcomingPage + 1), 800);
   }
 }
@@ -12473,18 +12771,46 @@ scheduleIdleWork([extractTopKeywords], 5000);
     return MAX_CARDS_DESKTOP;
   };
   
+  /*  ══════════════════════════════════════════════════════════════════════
+   *  CACHE HOUSEKEEPING  —  the caps have to be bigger than one page load
+   *  ══════════════════════════════════════════════════════════════════════
+   *  The previous numbers were 50 in memory and 30 in localStorage, and the
+   *  localStorage one was actively harmful: a cold homepage caches 32 paths
+   *  (loadCarousel 12 + _mzCatPlan('all') 16 + loadTop10 2, before any tab
+   *  prefetch), so a cap of 30 meant this sweep ran 60 seconds later and deleted
+   *  part of the first screen it had just cached. The next visit then re-fetched
+   *  what it had already paid for — a cold load caused by the cache, forever.
+   *
+   *  Both evictions also dropped entries in iteration (insertion) order, so the
+   *  entry written one second ago could go while an eleven-hour-old one stayed.
+   *  _mzCacheStamp makes real oldest-first eviction cheap, which is what makes a
+   *  bigger cap safe: the entries that survive are the ones still worth having.
+   *
+   *  MZ_LS_CACHE_MAX is sized to hold a full homepage plan plus a few categories
+   *  and still stay clear of the ~5 MB localStorage quota; the quota-overflow
+   *  path in _mzFlushCacheWrites remains the real backstop.
+   */
+  const MZ_MEM_CACHE_MAX = (isMobile || isLowEnd) ? 150 : 320;
+  const MZ_LS_CACHE_MAX = 120;
+
   // 2. Periodic garbage collection hint
   setInterval(() => {
-    // Clean up old tmdb memory cache (keep only last 50 entries)
-    if (tmdbCache.size > 50) {
-      const entries = Array.from(tmdbCache.entries());
-      entries.slice(0, entries.length - 50).forEach(([key]) => tmdbCache.delete(key));
+    /*  Memory cache: a Map preserves insertion order and every write goes
+     *  through set(), so the front of the Map genuinely is the least recently
+     *  WRITTEN. Trimming from the front is correct here and needs no timestamps. */
+    if (tmdbCache.size > MZ_MEM_CACHE_MAX) {
+      const keys = Array.from(tmdbCache.keys());
+      for (let i = 0; i < keys.length - MZ_MEM_CACHE_MAX; i++) tmdbCache.delete(keys[i]);
     }
-    // Clean up old localStorage cache (keep only last 30)
+    // localStorage cache: oldest-first, by the stored timestamp.
     try {
       const keys = Object.keys(localStorage).filter(k => k.startsWith('mz_cache_'));
-      if (keys.length > 30) {
-        keys.slice(0, keys.length - 30).forEach(k => localStorage.removeItem(k));
+      if (keys.length > MZ_LS_CACHE_MAX) {
+        keys
+          .map(k => [k, _mzCacheStamp(k)])
+          .sort((a, b) => a[1] - b[1])
+          .slice(0, keys.length - MZ_LS_CACHE_MAX)
+          .forEach(([k]) => localStorage.removeItem(k));
       }
     } catch(e) {}
   }, 60000); // Every 60 seconds

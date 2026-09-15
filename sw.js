@@ -26,7 +26,15 @@
 // to ?v=4 in index.html, so both are bumped in OPTIONAL_ASSETS below and the
 // shell is renamed: the activate handler deletes every cache that is not
 // CACHE_NAME, which is what forces the re-download.
-const CACHE_NAME = 'moviezone-v141';
+// v142: two independent changes land together — PR #20's dynamic OTT provider
+// feeds (v141 / js 14.0) and the TMDB cache-path work. The latter raised the
+// localStorage cache cap above one homepage plan (the old 30-key cap deleted part
+// of the first screen it had just cached), made eviction oldest-first, and bounded
+// the Upcoming feed at MZ_UPCOMING_MAX_PAGES so it can no longer grow DOM without
+// end. index.html also changed: the pre-parse TMDB warm-up now skips itself on a
+// warm cache. The precached shell pins both URLs, so the bump is what delivers
+// them — and it has to sit above BOTH sides' numbers, not just this branch's.
+const CACHE_NAME = 'moviezone-v142';
 
 // Separate cache for TMDB posters/backdrops. Kept apart from the shell so the
 // activate handler can wipe an old shell without throwing away hundreds of
@@ -43,7 +51,7 @@ const STATIC_ASSETS = [
   '/moviezone.min.css?v=9.12',
   '/tv-mode.min.js?v=1.5',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=14.0',
+  '/moviezone.min.js?v=14.1',
   '/manifest.json',
   '/moviezone-logo.png?v=2',
   '/icon-192.png?v=2',

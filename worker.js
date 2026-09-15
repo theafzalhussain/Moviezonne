@@ -39,6 +39,11 @@
  */
 import seo from './seo-ssr.js';
 
+/*  Per-platform OTT charts. Imported the same way seo-ssr.js is — a CommonJS
+ *  module that the bundler resolves — so one implementation serves both the
+ *  Express server and this Worker and the two deployments cannot drift. */
+import ottCharts from './ott-charts.js';
+
 // ── Constants ───────────────────────────────────────────────────────────────
 
 /** RFC 8188 record size. One record is always enough for these payloads. */
@@ -1078,16 +1083,138 @@ function putBatch(planKey, body, env) {
 
 /*  Rebuilds a stale plan after its stale copy has already been sent. Cheap by
  *  construction: every path inside it is itself SWR-cached, so this is normally
- *  a handful of KV reads rather than a round of upstream requests. */
-async function refreshBatch(paths, planKey, env, ctx) {
+ *  a handful of KV reads rather than a round of upstream requests.
+ *
+ *  `planCacheKey` is optional and, when given, the colo copy is rewritten too.
+ *  It has to be: the colo layer is checked BEFORE KV, so refreshing only KV
+ *  would leave the stale colo entry answering every request in that colo until
+ *  its retention window expired — the refresh would run on every request and
+ *  never be observed by anyone.
+ */
+async function refreshBatch(paths, planKey, env, ctx, planCacheKey) {
   try {
-    const settled = await runBatchPlan(paths, env, ctx);
+    const settled = await runBatchPlanOnce(planKey, paths, env, ctx);
     if (settled.every((r) => r.status === 'fulfilled')) {
-      await putBatch(planKey, JSON.stringify({ results: settled }), env);
+      const body = JSON.stringify({ results: settled });
+      if (planCacheKey) {
+        await putBatchEverywhere(planCacheKey, planKey, body, env, ctx);
+      } else if (env.TMDB_CACHE) {
+        await putBatch(planKey, body, env);
+      }
     }
   } catch (err) {
     console.log('[batch] background refresh failed: ' + (err && err.message));
   }
+}
+
+/*  ══════════════════════════════════════════════════════════════════════════
+ *  A COLO CACHE LAYER IN FRONT OF THE BATCH  —  and why KV was not enough
+ *  ══════════════════════════════════════════════════════════════════════════
+ *  The batch entry IS the first screen, and until now the steady state for it
+ *  was: Worker invocation + one KV `getWithMetadata`. That is already fast, but
+ *  it is the wrong shape for the hottest object on the site, for two reasons.
+ *
+ *  1. EVERY visitor pays a KV read, forever. KV reads are a metered, rate-limited
+ *     resource, and the homepage plan is identical for every visitor on a given
+ *     day — so the site was spending its KV read budget re-answering one
+ *     question. `caches.default` is a local disk read in the same colo that
+ *     served the request, consumes no KV quota, and is measurably closer than KV
+ *     even on a KV hot-cache hit.
+ *
+ *  2. It cannot be reached by the generic edge-cache layer in fetch(). That layer
+ *     deliberately skips `/batch` (see the comment there) because the batch is a
+ *     POST and the Cache API rejects a non-GET key. So the one endpoint that
+ *     would benefit most from the colo cache was the one endpoint excluded from
+ *     it.
+ *
+ *  The fix is a SYNTHETIC key: the plan hash is already a content address, so
+ *  `/api/tmdb/batch/<planKey>` as a GET on this same origin is a perfectly good
+ *  cache key for a POST body's answer. Built on `url.origin` rather than an
+ *  invented hostname on purpose — the Cache API is zone-scoped, and an off-zone
+ *  key is silently unstorable, which would look exactly like a cache that never
+ *  hits while still costing a put on every request.
+ *
+ *  Freshness is decided by the stored-at header rather than by cache expiry, the
+ *  same way the KV read decides it, so a stale colo copy can still be served
+ *  instantly with a refresh running behind it. The colo TTL is only the
+ *  RETENTION bound.
+ */
+const BATCH_STORED_HEADER = 'x-mz-stored';
+
+/*  The colo cache, or null where there is no Cache API.
+ *
+ *  Not paranoia: worker-push.test.js runs this module under Node and calls
+ *  routeApi() directly, where `caches` is simply not defined — so an unguarded
+ *  `caches.default` here turns the batch endpoint into a ReferenceError in the
+ *  one harness that covers it. Treating the layer as optional is also the honest
+ *  model of what it is: a best-effort accelerator in front of KV, never the
+ *  source of truth.
+ */
+function coloCache() {
+  return (typeof caches !== 'undefined' && caches && caches.default) ? caches.default : null;
+}
+
+/** The synthetic, on-zone GET key a plan's assembled answer is cached under. */
+function batchCacheKey(url, planKey) {
+  return new Request(url.origin + '/api/tmdb/batch/' + planKey, { method: 'GET' });
+}
+
+/** The cacheable twin of a batch response: same body, colo-storable headers. */
+function batchCacheEntry(body, storedAt) {
+  return new Response(body, {
+    status: 200,
+    headers: {
+      'content-type': 'application/json',
+      // Retention only. Freshness is the stored-at header below, so this is
+      // deliberately the full stale window and not BATCH_CACHE_TTL.
+      'cache-control': 'public, s-maxage='
+        + Math.min(BATCH_CACHE_TTL * TMDB_STALE_MULT, TMDB_MAX_RETENTION),
+      [BATCH_STORED_HEADER]: String(storedAt)
+    }
+  });
+}
+
+/*  Stores an assembled plan in BOTH layers.
+ *
+ *  Both, not either: the colo cache is per-colo and evictable under pressure, so
+ *  KV remains the durable copy that a cold colo populates itself from. Writing
+ *  only to the colo would give every Cloudflare location its own cold start.
+ */
+function putBatchEverywhere(planCacheKey, planKey, body, env, ctx) {
+  const storedAt = Date.now();
+  const colo = coloCache();
+  const work = [];
+  if (env.TMDB_CACHE) work.push(putBatch(planKey, body, env));
+  if (colo) work.push(colo.put(planCacheKey, batchCacheEntry(body, storedAt)));
+  return Promise.all(work.map(p => p.catch((err) => {
+    // A cache write is an optimisation; a failed one must never surface as an
+    // unhandled rejection in the observability log used to diagnose real faults.
+    console.log('[batch] cache write failed: ' + (err && err.message));
+  })));
+}
+
+/*  Per-isolate, per-PLAN in-flight map.
+ *
+ *  `_tmdbInFlight` already collapses concurrent requests for the same PATH, but
+ *  nothing collapsed them at the plan level — so N visitors arriving together on
+ *  a cold plan each ran their own `runBatchPlan`: N Ã— the assemble, the
+ *  JSON.parse of every path, the re-serialise and the KV write, to produce N
+ *  identical bodies. The per-path map meant they at least shared the upstream
+ *  fetches, which is why this was invisible in TMDB request counts while still
+ *  burning CPU time and KV writes on every cold start.
+ */
+const _batchInFlight = new Map();
+
+/** One assemble per plan per isolate, however many callers ask for it at once. */
+function runBatchPlanOnce(planKey, paths, env, ctx) {
+  const pending = _batchInFlight.get(planKey);
+  if (pending) return pending;
+  const started = runBatchPlan(paths, env, ctx);
+  _batchInFlight.set(planKey, started);
+  // Cleared on both outcomes: a rejected promise must not become the permanent
+  // answer for this plan.
+  started.then(() => {}, () => {}).then(() => { _batchInFlight.delete(planKey); });
+  return started;
 }
 
 async function handleTmdbBatch(request, env, ctx, url) {
@@ -1115,38 +1242,282 @@ async function handleTmdbBatch(request, env, ctx, url) {
     await crypto.subtle.digest('SHA-256', TE.encode(paths.join('\n')))
   ).slice(0, 32);
 
+  const planCacheKey = batchCacheKey(url, planKey);
+
+  const batchHeaders = (cacheState) => ({
+    'content-type': 'application/json',
+    'x-cache': cacheState,
+    'x-batch-size': String(paths.length),
+    // The assembled copy lives in the colo cache and KV under the plan hash;
+    // nothing downstream of here should hold a per-visitor copy.
+    'cache-control': 'no-store'
+  });
+
+  /*  LAYER 1 — the colo cache. No KV quota, no Worker-side assemble, and it is
+   *  the layer that answers the overwhelming majority of homepage loads once a
+   *  colo is warm. Checked before KV precisely because it is cheaper than KV. */
+  const colo = coloCache();
+  if (colo) {
+    try {
+      const cached = await colo.match(planCacheKey);
+      if (cached) {
+        const storedAt = Number(cached.headers.get(BATCH_STORED_HEADER)) || 0;
+        const fresh = !storedAt || Date.now() - storedAt < BATCH_CACHE_TTL * 1000;
+        if (!fresh) {
+          ctx.waitUntil(refreshBatch(paths, planKey, env, ctx, planCacheKey));
+        }
+        return new Response(cached.body, {
+          status: 200,
+          headers: batchHeaders(fresh ? 'EDGE-HIT' : 'EDGE-STALE')
+        });
+      }
+    } catch (err) {
+      // A colo lookup must never be able to fail the request — fall through to KV.
+      console.log('[batch] colo lookup failed: ' + (err && err.message));
+    }
+  }
+
   if (env.TMDB_CACHE) {
-    /*  Same stale-while-revalidate read as fetchTmdbJson, and for a bigger
-     *  reason: this entry IS the first screen. Every BATCH_CACHE_TTL boundary
-     *  used to hand one visitor the whole fan-out — 16 to 40 paths — before a
-     *  single card could paint. Now that visitor is answered from the assembled
-     *  copy in one KV read and the fan-out happens behind the response. */
+    /*  LAYER 2 — KV. Same stale-while-revalidate read, and for a bigger reason
+     *  than the per-path one: this entry IS the first screen. Every
+     *  BATCH_CACHE_TTL boundary used to hand one visitor the whole fan-out — 16
+     *  to 40 paths — before a single card could paint. Now that visitor is
+     *  answered from the assembled copy in one KV read and the fan-out happens
+     *  behind the response. */
     const hit = await env.TMDB_CACHE.getWithMetadata(planKey, { type: 'text', cacheTtl: 60 });
     if (hit && hit.value) {
       const storedAt = hit.metadata && hit.metadata.t;
       const fresh = !storedAt || Date.now() - storedAt < BATCH_CACHE_TTL * 1000;
-      if (!fresh) ctx.waitUntil(refreshBatch(paths, planKey, env, ctx));
+      if (!fresh) ctx.waitUntil(refreshBatch(paths, planKey, env, ctx, planCacheKey));
+      /*  Promote a KV hit into the colo cache, which is what makes the NEXT
+       *  request in this colo skip KV entirely. Only a fresh body is promoted: a
+       *  stale one already has a refresh running behind it, and pinning it here
+       *  would mask the fresher copy that lands a moment later — the same rule
+       *  the generic edge layer in fetch() applies to STALE proxy responses. */
+      if (fresh) {
+        const promote = coloCache();
+        if (promote) {
+          ctx.waitUntil(promote
+            .put(planCacheKey, batchCacheEntry(hit.value, storedAt || Date.now()))
+            .catch(() => {}));
+        }
+      }
       return new Response(hit.value, {
         status: 200,
-        headers: {
-          'content-type': 'application/json',
-          'x-cache': fresh ? 'HIT' : 'STALE',
-          'x-batch-size': String(paths.length),
-          'cache-control': 'no-store'
-        }
+        headers: batchHeaders(fresh ? 'HIT' : 'STALE')
       });
     }
   }
 
-  const settled = await runBatchPlan(paths, env, ctx);
+  // LAYER 3 — assemble, collapsed to one run per plan per isolate.
+  const settled = await runBatchPlanOnce(planKey, paths, env, ctx);
 
   const body = JSON.stringify({ results: settled });
 
   // Only cache a batch that actually worked. Caching a half-empty first screen
   // for 30 minutes would turn one bad moment into a lasting one.
   const allOk = settled.every((r) => r.status === 'fulfilled');
-  if (env.TMDB_CACHE && allOk) {
-    ctx.waitUntil(putBatch(planKey, body, env));
+  if (allOk) {
+    ctx.waitUntil(putBatchEverywhere(planCacheKey, planKey, body, env, ctx));
+  }
+
+  return new Response(body, {
+    status: 200,
+    headers: Object.assign(batchHeaders('MISS'), {
+      // Whether this plan was worth remembering. Surfaced because a batch that
+      // keeps reporting "no" means a source is persistently failing, and the
+      // symptom on the client — a slightly thin feed — is easy to miss.
+      'x-batch-stored': allOk ? 'yes' : 'no'
+    })
+  });
+}
+
+/*  ── PER-PLATFORM OTT CHARTS  (/api/ott/charts) ─────────────────────────────
+ *
+ *  Parity with the Express handler in server.js, and it has to exist here or the
+ *  Cloudflare deployment would answer the JSON 404 at the bottom of routeApi()
+ *  for every platform click — which the client treats as "no chart", so the OTT
+ *  tabs would silently keep the old global-popularity ordering on production
+ *  while looking correct locally. That divergence is the whole reason this block
+ *  is not optional.
+ *
+ *  Same two-stage shape as fetchTmdbJson: the chart is read from KV when fresh,
+ *  served stale while a refresh runs in the background, and hydrated into TMDB
+ *  cards HERE rather than on the client, because 24 detail calls would eat most
+ *  of the client's 30-per-10s budget on ordering alone.
+ *
+ *  The reasoning for JustWatch as the source — including why each platform's own
+ *  site is not usable, and the proof that JustWatch's packageId IS TMDB's
+ *  provider id — is at the top of ott-charts.js.
+ */
+
+/** Fresh window for a platform chart. Matches OTT_CHART_TTL_SECONDS in server.js. */
+const OTT_CHART_TTL = 7200;            // 2 hours
+/** How long a chart is kept past freshness, to be served stale on an outage. */
+const OTT_CHART_STALE_MULT = 12;       // 24 hours of fallback
+/** Chart entries returned. The chart is the grid's HEAD, not the whole grid. */
+const OTT_CHART_HEAD = 24;
+
+/*  Trimmed to the fields the card renderer, the language balancer and the anime
+ *  detector actually read. A raw /movie/{id} is ~4 KB; 24 of them would be a
+ *  ~100 KB response for a 24-card rail. `genres` is flattened back to
+ *  `genre_ids` because that is the shape every discover result already has. */
+function slimChartCard(detail, mediaType) {
+  if (!detail || !detail.id) return null;
+  return {
+    id: detail.id,
+    media_type: mediaType,
+    title: detail.title || detail.name || '',
+    name: detail.name || detail.title || '',
+    overview: detail.overview || '',
+    poster_path: detail.poster_path || null,
+    backdrop_path: detail.backdrop_path || null,
+    release_date: detail.release_date || '',
+    first_air_date: detail.first_air_date || '',
+    vote_average: detail.vote_average || 0,
+    vote_count: detail.vote_count || 0,
+    popularity: detail.popularity || 0,
+    original_language: detail.original_language || 'en',
+    genre_ids: Array.isArray(detail.genres)
+      ? detail.genres.map((g) => g && g.id).filter(Boolean)
+      : (detail.genre_ids || [])
+  };
+}
+
+/*  Chart ids -> renderable cards, in chart order.
+ *
+ *  Each detail read goes through fetchTmdbJson, so it inherits the KV cache, the
+ *  single-flight collapse and the timeout the proxy already has — a chart
+ *  refresh mostly costs KV reads, not TMDB calls. A title that fails to hydrate,
+ *  or has no poster, is DROPPED rather than rendered blank: loadMovies filters
+ *  posterless titles on the client anyway, so passing one would waste a rank. */
+async function hydrateOttChart(order, env, ctx) {
+  const settled = await Promise.allSettled(
+    order.map((entry) => fetchTmdbJson(
+      '/' + entry.media_type + '/' + entry.id + '?language=en-US', env, ctx))
+  );
+
+  const cards = [];
+  settled.forEach((result, i) => {
+    if (result.status !== 'fulfilled' || result.value.status !== 200) return;
+    let detail;
+    try {
+      detail = JSON.parse(result.value.text);
+    } catch (err) {
+      return;
+    }
+    const card = slimChartCard(detail, order[i].media_type);
+    if (!card || !card.poster_path) return;
+    card._chartRank = cards.length + 1;
+    card._chartSource = order[i].chartSource;
+    cards.push(card);
+  });
+  return cards;
+}
+
+/** Fetch + hydrate one platform chart. Throws if it would be empty. */
+async function buildOttChart(platform, region, env, ctx) {
+  const chart = await ottCharts.fetchPlatformChart(platform, { region });
+  const order = ottCharts.mergeChartOrder(chart, OTT_CHART_HEAD);
+  const items = await hydrateOttChart(order, env, ctx);
+
+  /*  Throwing on empty is deliberate: a transient JustWatch failure that
+   *  hydrated to nothing must not be STORED as a successful answer, or the
+   *  platform would be pinned to no chart for the whole fresh window. */
+  if (!items.length) throw new Error('chart hydrated to zero cards');
+
+  return {
+    platform,
+    region,
+    provider: chart.provider,
+    package: chart.package,
+    source: 'justwatch',
+    fetchedAt: chart.fetchedAt,
+    counts: { trending: chart.trending.length, newly: chart.newly.length },
+    items
+  };
+}
+
+/** Background refresh behind a stale read. Never throws — the stale copy already went out. */
+async function refreshOttChart(platform, region, cacheKey, store, env, ctx) {
+  try {
+    const payload = await buildOttChart(platform, region, env, ctx);
+    await store.put(cacheKey, JSON.stringify(payload), {
+      expirationTtl: OTT_CHART_TTL * OTT_CHART_STALE_MULT,
+      metadata: { t: Date.now() }
+    });
+  } catch (err) {
+    console.log('[ott-charts] refresh failed for ' + platform + '/' + region
+      + ': ' + (err && err.message));
+  }
+}
+
+async function handleOttCharts(request, env, ctx, url) {
+  const platform = String(url.searchParams.get('platform') || '').trim().toLowerCase();
+  const region = String(url.searchParams.get('region') || 'IN').trim().toUpperCase().slice(0, 2);
+
+  if (!ottCharts.isKnownChartPlatform(platform)) {
+    return json({ error: 'Unknown platform', platforms: ottCharts.chartPlatforms() }, 400);
+  }
+
+  const cacheKey = 'ott-chart:' + platform + ':' + region;
+  /*  The chart cache rides on TMDB_CACHE rather than needing its own binding:
+   *  one namespace, distinct key prefix, and no wrangler.toml change required to
+   *  deploy — a missing binding would otherwise make every platform click a full
+   *  JustWatch + 24-hydration round trip. */
+  const store = env.OTT_CHART_CACHE || env.TMDB_CACHE;
+
+  if (store) {
+    const hit = await store.getWithMetadata(cacheKey, { type: 'text', cacheTtl: 60 });
+    if (hit && hit.value) {
+      const storedAt = hit.metadata && hit.metadata.t;
+      const fresh = !storedAt || Date.now() - storedAt < OTT_CHART_TTL * 1000;
+      if (!fresh) ctx.waitUntil(refreshOttChart(platform, region, cacheKey, store, env, ctx));
+      return new Response(hit.value, {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          'x-cache': fresh ? 'HIT' : 'STALE',
+          'cache-control': fresh
+            ? 'public, max-age=1800, s-maxage=7200, stale-while-revalidate=86400'
+            : 'public, max-age=60, must-revalidate'
+        }
+      });
+    }
+  }
+
+  let payload;
+  try {
+    payload = await buildOttChart(platform, region, env, ctx);
+  } catch (err) {
+    /*  200 with an empty list, NOT a 5xx.
+     *
+     *  The client reads a chart as "reorder the pool if you have one", so an
+     *  empty chart is a complete answer: the platform tab falls back to the
+     *  provider-gated ordering it had before this endpoint existed. A 5xx would
+     *  be logged as a site error when nothing is broken for the user, and would
+     *  make the client retry against an upstream already known to be down. */
+    console.log('[ott-charts] ' + platform + '/' + region + ' unavailable: '
+      + (err && err.message));
+    return new Response(JSON.stringify({
+      platform, region, source: 'justwatch', fetchedAt: Date.now(),
+      unavailable: true, counts: { trending: 0, newly: 0 }, items: []
+    }), {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'x-cache': 'MISS',
+        'cache-control': 'public, max-age=60, must-revalidate'
+      }
+    });
+  }
+
+  const body = JSON.stringify(payload);
+  if (store) {
+    ctx.waitUntil(store.put(cacheKey, body, {
+      expirationTtl: OTT_CHART_TTL * OTT_CHART_STALE_MULT,
+      metadata: { t: Date.now() }
+    }));
   }
 
   return new Response(body, {
@@ -1154,14 +1525,7 @@ async function handleTmdbBatch(request, env, ctx, url) {
     headers: {
       'content-type': 'application/json',
       'x-cache': 'MISS',
-      // Whether this plan was worth remembering. Surfaced because a batch that
-      // keeps reporting "no" means a source is persistently failing, and the
-      // symptom on the client — a slightly thin feed — is easy to miss.
-      'x-batch-stored': allOk ? 'yes' : 'no',
-      'x-batch-size': String(paths.length),
-      // The response is per-plan and served over POST; the KV entry above is the
-      // shared cache, so nothing downstream should hold a copy.
-      'cache-control': 'no-store'
+      'cache-control': 'public, max-age=1800, s-maxage=7200, stale-while-revalidate=86400'
     }
   });
 }
@@ -1186,8 +1550,31 @@ async function routeApi(request, env, ctx, url) {
     return handleTmdbBatch(request, env, ctx, url);
   }
 
+  /*  `/api/tmdb/batch/<planKey>` is the SYNTHETIC colo cache key an assembled
+   *  plan is stored under (see batchCacheKey). It is not a real endpoint, and it
+   *  is answered 404 here for a specific reason rather than left to fall through:
+   *
+   *  the generic edge layer in fetch() stores any 200 it sees for a GET under
+   *  /api/tmdb/. If this path fell through to the TMDB proxy — or worse, to the
+   *  SPA fallback — a single GET to a guessed plan key could overwrite that
+   *  plan's cached batch body with a TMDB error or with index.html, and the next
+   *  homepage load would read HTML where it expected its first screen. A
+   *  non-200 is never stored, so answering 404 makes that unreachable.
+   */
+  if (pathname.startsWith('/api/tmdb/batch/')) {
+    return json({ error: 'Not an endpoint' }, 404);
+  }
+
   if (pathname.startsWith('/api/tmdb/')) {
     return handleTmdbProxy(request, env, ctx, url);
+  }
+
+  /*  Per-platform OTT chart. GET-only and read-only: the platform key is matched
+   *  against ott-charts.js's own table before anything is fetched, so this can
+   *  never be turned into a proxy for an arbitrary upstream. */
+  if (pathname === '/api/ott/charts') {
+    if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
+    return handleOttCharts(request, env, ctx, url);
   }
 
   const post = request.method === 'POST';
