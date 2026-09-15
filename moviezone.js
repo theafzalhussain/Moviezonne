@@ -10053,6 +10053,8 @@ async function openModal(id, type = 'movie', activationEvent) {
             if (!tc) return;
             tc.style.display = 'block';
             setTimeout(() => { tc.style.opacity = '1'; }, 50);
+            // Hide the play button while the trailer is actually playing
+            if (trailerIndicator) trailerIndicator.classList.add('is-hidden');
             // Hide only the meta section (cast, genres, crew, production) when trailer plays
             const modalMeta = document.getElementById('modalMeta');
             if (modalMeta) modalMeta.classList.add('meta-hidden');
@@ -10093,6 +10095,14 @@ async function openModal(id, type = 'movie', activationEvent) {
                 if ((d.event === 'onStateChange' && d.info === 1) || (d.event === 'infoDelivery' && d.info && d.info.playerState === 1)) {
                   if (ytLoader) { ytLoader.style.opacity = '0'; setTimeout(() => { if (ytLoader.parentNode) ytLoader.remove(); }, 400); }
                   if (ytFrame) ytFrame.style.opacity = '1';
+                  // Playing → hide the play button
+                  if (trailerIndicator) trailerIndicator.classList.add('is-hidden');
+                }
+
+                // Paused (2) or ended (0) → bring the play button back
+                const _ps = (d.event === 'onStateChange') ? d.info : (d.info && d.info.playerState);
+                if (_ps === 2 || _ps === 0) {
+                  if (trailerIndicator) trailerIndicator.classList.remove('is-hidden');
                 }
  
                 if (d.event === 'onError' || d.event === 'error' || d.info === 150 || d.info === 153 || d.info === 101 || (d.info && d.info.playerState === -1 && d.info.videoData && d.info.videoData.errorCode)) {
@@ -10138,6 +10148,8 @@ async function openModal(id, type = 'movie', activationEvent) {
 
         const stopTrailer = () => {
             clearTimeout(trailerTimeout);
+            // Bring the play button back when the trailer stops/pauses
+            if (trailerIndicator) trailerIndicator.classList.remove('is-hidden');
             if (ytErrHandler) {
                 window.removeEventListener('message', ytErrHandler);
                 ytErrHandler = null;
@@ -10169,32 +10181,19 @@ async function openModal(id, type = 'movie', activationEvent) {
                     trailerIsPlaying = false;
                 }
             };
-        } else { // Desktop hover & click logic
+        } else { // Desktop: click-to-play only (hover-play disabled as requested)
             let trailerIsPlaying = false; // Keep track of state
-            
-            // Hover to play
-            eventContainer.onmouseenter = () => {
-              // Only start hover-play if not already playing from a click
-              if (!trailerIsPlaying) {
-                trailerTimeout = setTimeout(playTrailer, 600);
-              }
-            };
-        
-            // Leave to stop
-            eventContainer.onmouseleave = () => {
-              // Only stop if it was started by hover (i.e., user hasn't clicked to lock it on)
-              if (!trailerIsPlaying) {
-                stopTrailer();
-              }
-            };
-        
+
+            // Hover no longer auto-plays the trailer. The thumbnail stays put and
+            // only the play indicator gently reacts, so nothing starts until the
+            // user actually clicks.
+
             // Click to toggle play/stop
             eventContainer.onclick = (e) => {
                 // Ignore clicks on buttons inside the container
                 if (e.target.closest('button, a, select, input')) return;
-                
+
                 if (!trailerIsPlaying) {
-                    stopTrailer(); // Clear any pending hover-play timeout
                     playTrailer();
                     trailerIsPlaying = true;
                 } else {
@@ -11097,7 +11096,17 @@ function renderLanguageButtons(spokenLangs) {
   if (!ext) return;
   const old = document.getElementById('mz-lang-section');
   if (old) old.remove();
-  const tmdbCodes = (spokenLangs || []).map(l => l.iso_639_1);
+  // Language quick-buttons section removed from the UI as requested. The player
+  // still resolves the audio language from getSelectedLang() (stored preference
+  // or default), so playback is unaffected.
+  return;
+}
+
+function _removedRenderLanguageButtons_unused(spokenLangs) {
+  const ext = document.getElementById('externalSources');
+  if (!ext) return;
+  const old = document.getElementById('mz-lang-section');
+  if (old) old.remove();
   const extra = EXTRA_LANGS.filter(c => tmdbCodes.includes(c));
   const toShow = [...CORE_LANGS, ...extra];
   const curLang = getSelectedLang();
@@ -11197,7 +11206,8 @@ function renderExternalSources(id, srcIdx, lang) {
     + '<span class="srv-master-header__title">Playback Servers</span>'
     + '</div>'
     + '<span class="srv-master-header__live"><span class="srv-live-dot"></span>LIVE</span>'
-    + '</div>';
+    + '</div>'
+    + '<p class="srv-master-header__hint">If a server isn\'t playing, simply <strong>switch to another one</strong></p>';
 
   const sectionsHtml = buildSection(
     'Premium 4K • Hindi Dub',
@@ -11952,6 +11962,7 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   controlsHtml += '<button onclick="togglePlayerFS()" class="player-chip player-chip--fs" id="fsBtn">' +
         '<svg class="player-chip__icon" viewBox="0 0 24 24"><path d="M7 3H3v4h2V5h2V3zm10 0v2h2v2h2V3h-4zM5 17H3v4h4v-2H5v-2zm16 0h-2v2h-2v2h4v-4z"></path></svg>' +
         '<span>Fullscreen</span></button></div>';
+
  
   const existingControls = document.getElementById('playerControls');
   if (existingControls) existingControls.outerHTML = controlsHtml;

@@ -1067,7 +1067,7 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
     <li><a href="#" onclick="filterCat('bollywood', event)">Bollywood</a></li>
     <li><a href="#" onclick="filterCat('tv', event)">Web Series</a></li>
     <li><a href="#" onclick="filterCat('kdrama', event)">K-Drama</a></li>
-    <li><a href="#" onclick="filterCat('anime', event)">Anime</a></li>
+    <!-- <li><a href="#" onclick="filterCat('anime', event)">Anime</a></li> -->
     <li><a href="#upcoming" onclick="goHome(event)">Upcoming</a></li>
     <li><a href="#" onclick="showWatchlist(event)">Watchlist</a></li>
   </ul>
@@ -1296,7 +1296,7 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
           additionally renders the anime sub-mode bar (renderAnimeFilterBar), so
           the pill is the only control that puts that bar next to the grid it
           filters. cat-tabs.browser.test.html lists 'anime' under DIRECT. -->
-    <button class="cat-tab" onclick="filterCat('anime')"><span>Anime</span></button>
+    <!-- <button class="cat-tab" onclick="filterCat('anime')"><span>Anime</span></button> -->
     <!-- Watchlist deliberately not repeated here: it is a personal list rather
          than a filter, and the navbar already links to showWatchlist(). -->
 
@@ -1705,21 +1705,9 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
               <span>Download</span>
             </button>
-            <div class="select-group">
-              <select class="lang-select" id="langSelect">
-                <option value="hi" selected>🇮🇳 Hindi</option>
-                <option value="en">🇬🇧 English</option>
-                <option value="ta">🎬 Tamil</option>
-                <option value="te">🎭 Telugu</option>
-                <option value="ml">🌴 Malayalam</option>
-                <option value="kn">🟣 Kannada</option>
-              </select>
-              <select class="quality-select" id="qualitySelect">
-                <option value="4k">4K UHD</option>
-                <option value="fhd">1080p</option>
-                <option value="hd">720p</option>
-                <option value="sd">480p</option>
-              </select>
+            <!-- Language & quality dropdowns hidden from UI (kept in DOM so player
+                 still reads defaults and the language quick-buttons can update them). -->
+            
             </div>
             <div class="select-group" id="tvSelectGroup" style="display:none; margin-top: 10px;">
               <div style="display:flex; align-items:center; gap: 0.5rem; background: rgba(30, 30, 42, 0.4); border: 1px solid rgba(255,255,255,0.18); border-radius: 12px; padding: 0.25rem 0.75rem;">

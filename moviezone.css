@@ -5273,22 +5273,22 @@ html[data-mz-tv="true"] .cat-group-menu {
   top: 30%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 72px;
-  height: 72px;
+  width: 84px;
+  height: 84px;
   display: grid;
   place-items: center;
-  background: rgba(10, 10, 22, 0.35);
-  backdrop-filter: blur(14px) saturate(160%);
-  -webkit-backdrop-filter: blur(14px) saturate(160%);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: radial-gradient(circle at 50% 42%, rgba(124, 58, 237, 0.55), rgba(10, 10, 22, 0.72));
+  backdrop-filter: blur(10px) saturate(170%);
+  -webkit-backdrop-filter: blur(10px) saturate(170%);
+  border: 2px solid rgba(255, 255, 255, 0.85);
   border-radius: 50%;
-  color: rgba(255, 255, 255, 0.8);
-  z-index: 3;
-  /* Above image, below trailer */
+  color: #ffffff;
+  z-index: 40;
+  /* Above image and gradient overlay so the play affordance is always clearly visible */
   opacity: 0;
-  transition: opacity 0.4s ease, transform 0.4s ease;
+  transition: opacity 0.4s ease, transform 0.4s ease, box-shadow 0.4s ease;
   pointer-events: none;
-  box-shadow: 0 12px 35px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6), 0 0 26px rgba(124, 58, 237, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
 .modal-trailer-indicator::before,
@@ -5297,8 +5297,9 @@ html[data-mz-tv="true"] .cat-group-menu {
   position: absolute;
   inset: -2px;
   border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  animation: waterRipple 2.2s infinite cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  border: 2px solid rgba(150, 120, 255, 0.6);
+  box-shadow: 0 0 12px rgba(124, 58, 237, 0.4);
+  animation: waterRipple 2.4s infinite cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
 .modal-trailer-indicator::after {
@@ -5306,20 +5307,64 @@ html[data-mz-tv="true"] .cat-group-menu {
 }
 
 .modal-trailer-indicator svg {
-  width: 32px;
-  height: 32px;
+  width: 38px;
+  height: 38px;
   filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.6));
 }
 
-/* Show the icon when the modal is open and not being hovered */
-.modal-top:not(:hover) .modal-trailer-indicator {
-  opacity: 0.8;
+/* Gentle water-like breathing glow on the play button */
+.modal-trailer-indicator {
+  animation: mzTrailerBreath 3.2s ease-in-out infinite;
 }
 
-/* Hide it on hover when the trailer is about to play */
+@keyframes mzTrailerBreath {
+  0%, 100% {
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6), 0 0 22px rgba(124, 58, 237, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  }
+  50% {
+    box-shadow: 0 16px 46px rgba(0, 0, 0, 0.62), 0 0 40px rgba(124, 58, 237, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.42);
+  }
+}
+
+/* Hide the play button while the trailer actually plays; show it back on pause/stop */
+.modal-trailer-indicator.is-hidden {
+  opacity: 0 !important;
+  transform: translate(-50%, -50%) scale(0.6) !important;
+  pointer-events: none !important;
+  animation: none !important;
+}
+.modal-top:hover .modal-trailer-indicator.is-hidden {
+  opacity: 0 !important;
+  transform: translate(-50%, -50%) scale(0.6) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-trailer-indicator,
+  .modal-trailer-indicator::before,
+  .modal-trailer-indicator::after { animation: none; }
+}
+
+/* Play indicator stays visible — trailer is click-to-play now, not hover.
+   The whole poster area behaves like a button, so it gets a pointer cursor
+   and the indicator lifts gently on hover to invite the click. */
+.modal-top:not(:hover) .modal-trailer-indicator {
+  opacity: 1;
+}
+
 .modal-top:hover .modal-trailer-indicator {
-  opacity: 0;
-  transform: translate(-50%, -50%) scale(0.8);
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1.12);
+  background: radial-gradient(circle at 50% 42%, rgba(140, 82, 255, 0.75), rgba(10, 10, 22, 0.78));
+  border-color: #ffffff;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.65), 0 0 34px rgba(124, 58, 237, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+/* Poster is clickable to launch the trailer */
+.modal-top .modal-image-wrapper .modal-trailer-indicator {
+  cursor: pointer;
+}
+.modal-top:has(.modal-trailer-indicator) {
+  cursor: pointer;
 }
 
 /* TV styles moved to tv-mode.css */
@@ -5938,6 +5983,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   flex-wrap: wrap;
   position: relative;
   z-index: 10;
+  margin-top: 0.35rem;
 }
 
 /* Premium play button in modal */
@@ -5980,6 +6026,49 @@ html[data-mz-tv="true"] .cat-group-menu {
 
 .premium-play-btn:hover::before {
   opacity: 1;
+}
+
+/* Attractive shine sweep that runs across the Play button */
+.premium-play-btn::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -60%;
+  width: 45%;
+  height: 100%;
+  background: linear-gradient(120deg, transparent, rgba(255, 255, 255, 0.38), transparent);
+  transform: skewX(-20deg);
+  pointer-events: none;
+  animation: mzPlayShine 4.2s ease-in-out infinite;
+}
+
+@keyframes mzPlayShine {
+  0%   { left: -60%; }
+  55%  { left: 130%; }
+  100% { left: 130%; }
+}
+
+.premium-play-btn:hover::after {
+  animation-duration: 1.6s;
+}
+
+/* Gentle attention pulse so the primary CTA stands out */
+.premium-play-btn {
+  animation: mzPlayPulse 3.2s ease-in-out infinite;
+}
+
+@keyframes mzPlayPulse {
+  0%, 100% { box-shadow: 0 12px 36px rgba(124, 58, 237, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.18); }
+  50%      { box-shadow: 0 14px 42px rgba(124, 58, 237, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.22); }
+}
+
+.premium-play-btn:hover {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .premium-play-btn,
+  .premium-play-btn::after { animation: none; }
 }
 
 .btn-watchlist {
@@ -6578,32 +6667,71 @@ html[data-mz-tv="true"] .cat-group-menu {
 /* ── Master Header ── */
 .srv-master-header {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-  padding: 10px 16px;
-  background: linear-gradient(135deg, rgba(15, 15, 25, 0.85), rgba(25, 20, 40, 0.75));
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  justify-content: center;
+  text-align: center;
+  row-gap: 12px;
+  margin: 0 auto 16px;
+  max-width: 720px;
+  padding: 18px 26px;
+  background:
+    radial-gradient(120% 140% at 50% 0%, rgba(245, 197, 24, 0.06), transparent 60%),
+    linear-gradient(135deg, rgba(18, 18, 30, 0.92), rgba(28, 22, 44, 0.82));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  backdrop-filter: blur(22px) saturate(180%);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  box-shadow:
+    0 18px 50px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.srv-master-header__hint {
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 1.05rem;
+  font-weight: 600;
+  line-height: 1.6;
+  letter-spacing: 0.2px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.srv-master-header__hint strong,
+.srv-master-header__hint b {
+  display: inline-block;
+  font-size: 1.22rem;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  background: linear-gradient(135deg, #ffd750 0%, #ffc107 45%, #ff9d2f 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: var(--gold, #ffc107);
+  text-shadow: 0 0 18px rgba(245, 197, 24, 0.35);
+  transform: translateY(1px);
 }
 
 .srv-master-header__left {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  gap: 12px;
 }
 
 .srv-master-header__icon {
   color: #ffc107;
-  filter: drop-shadow(0 0 6px rgba(255, 193, 7, 0.5));
+  filter: drop-shadow(0 0 8px rgba(255, 193, 7, 0.55));
 }
 
 .srv-master-header__title {
-  font-size: 0.82rem;
+  font-size: 1.05rem;
   font-weight: 800;
-  letter-spacing: 2px;
+  letter-spacing: 3px;
   text-transform: uppercase;
   background: linear-gradient(135deg, #fff, rgba(255, 255, 255, 0.7));
   -webkit-background-clip: text;
