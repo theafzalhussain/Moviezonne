@@ -34,7 +34,12 @@
 // end. index.html also changed: the pre-parse TMDB warm-up now skips itself on a
 // warm cache. The precached shell pins both URLs, so the bump is what delivers
 // them — and it has to sit above BOTH sides' numbers, not just this branch's.
-const CACHE_NAME = 'moviezone-v142';
+// v143: the watch-page UI work lands — server-switch hint, click-to-play trailer
+// with a water-ripple play button that hides during playback, hidden language and
+// quality dropdowns, and the removed language quick-buttons row. That moved
+// moviezone.min.js to 14.2 and moviezone.min.css to 9.13; the precached shell pins
+// both URLs, so this rename is what delivers them to returning visitors.
+const CACHE_NAME = 'moviezone-v143';
 
 // Separate cache for TMDB posters/backdrops. Kept apart from the shell so the
 // activate handler can wipe an old shell without throwing away hundreds of
@@ -48,10 +53,10 @@ const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/tv-mode.min.css?v=1.3',
-  '/moviezone.min.css?v=9.12',
+  '/moviezone.min.css?v=9.13',
   '/tv-mode.min.js?v=1.5',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=14.1',
+  '/moviezone.min.js?v=14.2',
   '/manifest.json',
   '/moviezone-logo.png?v=2',
   '/icon-192.png?v=2',

@@ -11102,7 +11102,8 @@ function renderLanguageButtons(spokenLangs) {
   return;
 }
 
-function _removedRenderLanguageButtons_unused(spokenLangs) {
+function _removedRenderLanguageButtons_unused() {}
+/*  Former body kept as a comment only, so it ships zero bytes after minification:
   const ext = document.getElementById('externalSources');
   if (!ext) return;
   const old = document.getElementById('mz-lang-section');
@@ -11150,6 +11151,8 @@ function _removedRenderLanguageButtons_unused(spokenLangs) {
     });
   });
 }
+
+*/
 
 function renderExternalSources(id, srcIdx, lang) {
   const ext = document.getElementById('externalSources');
@@ -12709,7 +12712,9 @@ function extractTopKeywords() {
     .slice(0, 3)
     .map(entry => ({ word: entry[0], count: entry[1] }));
 
-  console.log('Top 3 Keywords on this page:', top3);
+  // Debug-only: this used to log on every production page load, adding console
+  // noise for no benefit. The keywords are still computed and returned.
+  if (isLocalhost) console.log('Top 3 Keywords on this page:', top3);
   return top3;
 }
 
@@ -13451,6 +13456,19 @@ init();
        *  orphaned forever if the server side ever loses the row. */
       const PUSH_SYNC_KEY = 'mz_push_synced';
       const PUSH_RESYNC_MS = 7 * 24 * 60 * 60 * 1000;
+      /*  Back off when the server says its subscription store is unavailable.
+       *
+       *  A 503 from /api/push/subscribe means the PUSH_SUBS binding is missing or
+       *  the store errored. Without a cooldown the client re-POSTed on EVERY page
+       *  load, so the user got a failed request plus a console error every single
+       *  time, and the worker burned an invocation that could never succeed.
+       *  Six hours is short enough that a fixed backend is picked up the same day. */
+      const PUSH_BACKOFF_KEY = 'mz_push_backoff';
+      const PUSH_BACKOFF_MS = 6 * 60 * 60 * 1000;
+      let backoffUntil = 0;
+      try { backoffUntil = Number(localStorage.getItem(PUSH_BACKOFF_KEY) || 0); } catch (e) {}
+      if (backoffUntil && Date.now() < backoffUntil) return subscription;
+
       const fingerprint = JSON.stringify(subscription);
       let lastSync = null;
       try { lastSync = JSON.parse(localStorage.getItem(PUSH_SYNC_KEY) || 'null'); } catch (e) {}
@@ -13465,6 +13483,13 @@ init();
         body: JSON.stringify(subscription)
       });
       if (!saveResponse.ok || servedSpaShell(saveResponse)) {
+        // 503 = storage not configured/unavailable. Expected, not a bug: go quiet
+        // instead of throwing a console error on every load.
+        if (saveResponse.status === 503) {
+          try { localStorage.setItem(PUSH_BACKOFF_KEY, String(Date.now() + PUSH_BACKOFF_MS)); } catch (e) {}
+          if (isLocalhost) console.info('[MovieZone] Push storage unavailable; retrying later.');
+          return subscription;
+        }
         const error = servedSpaShell(saveResponse)
           ? {}
           : await saveResponse.json().catch(() => ({}));
@@ -13474,9 +13499,10 @@ init();
 
       try {
         localStorage.setItem(PUSH_SYNC_KEY, JSON.stringify({ fp: fingerprint, at: Date.now() }));
+        localStorage.removeItem(PUSH_BACKOFF_KEY);
       } catch (e) {}
 
-      console.log('[MovieZone] Push subscription synced to server.');
+      if (isLocalhost) console.log('[MovieZone] Push subscription synced to server.');
       return subscription;
     } catch (err) {
       console.warn('[MovieZone] Push subscription failed:', err);
