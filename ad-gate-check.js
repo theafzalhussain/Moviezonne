@@ -41,6 +41,21 @@ const block = html.slice(start, close);
  *  re-asserted automatically. */
 const SPA_PAUSED = /var MZ_ADS_PAUSED\s*=\s*true/.test(block);
 
+/*  ── PER-UNIT SWITCHES ──
+ *  A unit may be individually switched off (enabled:false) while ads as a whole
+ *  are live. When a unit is off it is still DECLARED — it stays in UNITS and in
+ *  the "all units configured" check — but the loader must never inject it. These
+ *  flags let the per-unit guarantees below assert the OFF state instead of the
+ *  ON state, exactly like SPA_PAUSED does for the whole layer. Flip a unit's
+ *  enabled back to true in index.html and its original guarantees re-assert
+ *  automatically. */
+function unitOff(name) {
+  const re = new RegExp("name:\\s*'" + name + "'[^}]*enabled:\\s*false");
+  return re.test(block);
+}
+const SPA_POP_OFF = unitOff('popunder');
+const SPA_NATIVE_OFF = unitOff('native');
+
 /** A fresh sandbox per run, so no state leaks between branches.
  *  Models just enough DOM to observe what the loader actually does: what it
  *  appended, what it observed, and what class it put on <html>. */
@@ -211,15 +226,15 @@ check('production desktop Chrome: the click-activated units are injected', () =>
   });
 });
 
-check('popunder and Social Bar are both on the idle path', () => {
+check('the Social Bar is the only live unit on the idle path', () => {
   if (SPA_PAUSED) {
     const { ads: a } = envFor(CHROME, 'moviezone.dev', false);
     equal(a.state.injected.length, 0, 'a unit loaded on the idle path while ads are paused');
     return;
   }
   const { ads: a } = envFor(CHROME, 'moviezone.dev', false);
-  equal(a.state.injected.indexOf('popunder') !== -1, true, 'popunder was not loaded');
   equal(a.state.injected.indexOf('socialbar') !== -1, true, 'Social Bar was not loaded');
+  equal(a.state.injected.indexOf('popunder'), -1, 'the popunder is switched off but still loaded');
 });
 
 check('the Native Banner is NOT loaded by the idle path', () => {
@@ -231,9 +246,11 @@ check('the Native Banner is NOT loaded by the idle path', () => {
 
 check('the Native Banner loads when its slot comes near the viewport', () => {
   const r = run(CHROME, 'moviezone.dev', false).ready();
-  if (SPA_PAUSED) {
+  if (SPA_PAUSED || SPA_NATIVE_OFF) {
     r.intersect();
-    assert(!r.appended.some((el) => /invoke\.js/.test(el.src)), 'the banner loaded while ads are paused');
+    assert(!r.appended.some((el) => /invoke\.js/.test(el.src)),
+      SPA_NATIVE_OFF ? 'the Native Banner is switched off but still loaded on approach'
+                     : 'the banner loaded while ads are paused');
     return;
   }
   assert(r.io.targets.length === 1, 'the slot is not being observed at all');
@@ -248,7 +265,7 @@ check('the Native Banner loads when its slot comes near the viewport', () => {
 });
 
 check('the slot is loaded before it is actually seen, not once it is', () => {
-  if (SPA_PAUSED) return;   // no observer is registered while ads are paused
+  if (SPA_PAUSED || SPA_NATIVE_OFF) return;   // no observer is registered when the native unit is off
   const r = run(CHROME, 'moviezone.dev', false).ready();
   assert(r.io.opts && /^\d+px$/.test(String(r.io.opts.rootMargin)),
     'no rootMargin, so the banner starts loading only once it is already on screen');
@@ -257,7 +274,7 @@ check('the slot is loaded before it is actually seen, not once it is', () => {
 });
 
 check('invoke.js carries data-cfasync="false", as Adsterra ships it', () => {
-  if (SPA_PAUSED) return;   // invoke.js is never injected while ads are paused
+  if (SPA_PAUSED || SPA_NATIVE_OFF) return;   // invoke.js is never injected when the native unit is off
   const r = run(CHROME, 'moviezone.dev', false).ready().intersect();
   const native = r.appended.filter((el) => /invoke\.js/.test(el.src))[0];
   assert(native, 'invoke.js was never injected');
@@ -272,7 +289,7 @@ check('a TV is not served ads even if it is only recognised later', () => {
 });
 
 check('the "Sponsored" label appears only once the widget has rendered', () => {
-  if (SPA_PAUSED) return;   // the widget never renders while ads are paused
+  if (SPA_PAUSED || SPA_NATIVE_OFF) return;   // the widget never renders when the native unit is off
   const r = run(CHROME, 'moviezone.dev', false).ready().intersect();
   assert(!/is-filled/.test(r.slot.className),
     'the label is revealed before the ad exists — a label with nothing under it is worse than none');
@@ -281,7 +298,7 @@ check('the "Sponsored" label appears only once the widget has rendered', () => {
 });
 
 check('an already-filled container is labelled without waiting for a mutation', () => {
-  if (SPA_PAUSED) return;   // no slot is observed while ads are paused
+  if (SPA_PAUSED || SPA_NATIVE_OFF) return;   // no slot is observed when the native unit is off
   const r = run(CHROME, 'moviezone.dev', false).ready();
   r.container.childElementCount = 1;
   r.intersect();
@@ -299,6 +316,18 @@ check('the reserved slot is collapsed before paint when ads are gated off', () =
   if (SPA_PAUSED) {
     assert(/mz-no-ads/.test(ok.htmlClass()),
       'ads are paused, so even a real visitor must get mz-no-ads to collapse the reserved slot');
+    return;
+  }
+  if (SPA_NATIVE_OFF) {
+    // Ads as a whole are live (the Social Bar runs), so the gate does NOT set
+    // mz-no-ads. The reserved native slot is instead collapsed on its own by the
+    // mz-ad-native-off class so it is never a permanent empty hole.
+    assert(!/mz-no-ads/.test(ok.htmlClass()),
+      'a real visitor got mz-no-ads while ads are live — that would also hide the Social Bar path');
+    assert(/mz-ad-native-off/.test(ok.htmlClass()),
+      'the Native Banner is off but its reserved slot was not collapsed — a permanent empty hole');
+    assert(/html\.mz-ad-native-off \.mz-ad-slot\{display:none\}/.test(html),
+      'no collapse rule for the switched-off native slot');
     return;
   }
   assert(!/mz-no-ads/.test(ok.htmlClass()),
@@ -414,7 +443,7 @@ check('data-mz-tv alone is enough, for a TV whose UA we do not know', () => {
 });
 
 check('a second intersection cannot double-inject the banner', () => {
-  if (SPA_PAUSED) return;   // the banner is never injected while ads are paused
+  if (SPA_PAUSED || SPA_NATIVE_OFF) return;   // the banner is never injected when the native unit is off
   const r = run(CHROME, 'moviezone.dev', false).ready();
   r.intersect(); r.intersect();
   equal(r.appended.filter((el) => /invoke\.js/.test(el.src)).length, 1,
@@ -538,6 +567,10 @@ check('a fresh visitor gets the popunder', () => {
     equal(r.ads.state.injected.indexOf('popunder'), -1, 'a popunder fired while ads are paused');
     return;
   }
+  if (SPA_POP_OFF) {
+    equal(r.ads.state.injected.indexOf('popunder'), -1, 'the popunder is switched off but still fired');
+    return;
+  }
   assert(r.ads.state.injected.indexOf('popunder') !== -1, 'the first popunder was suppressed — that is the one that earns');
   assert(r.store['mz_ad_pop_at'], 'the cap was never recorded, so the next page would pop again');
 });
@@ -548,12 +581,12 @@ check('a visitor who just had one does NOT get a second', () => {
   r.ads.load();
   equal(r.ads.state.injected.indexOf('popunder'), -1,
     'a second popunder inside the window — this is exactly what makes people install an ad blocker');
-  if (SPA_PAUSED) return;   // when paused the cap logic is never reached, only the gate
+  if (SPA_PAUSED || SPA_POP_OFF) return;   // when paused or off the cap logic is never reached, only the gate/switch
   assert(r.ads.state.capped.indexOf('popunder') !== -1, 'the suppression was not recorded');
 });
 
 check('the cap expires, so a later visit can earn again', () => {
-  if (SPA_PAUSED) return;   // nothing earns while ads are paused
+  if (SPA_PAUSED || SPA_POP_OFF) return;   // nothing earns while ads are paused / the popunder is off
   const store = { mz_ad_pop_at: String(Date.now() - 60 * 60 * 1000) };
   const r = run(CHROME, 'moviezone.dev', false, store);
   r.ads.load();
@@ -566,6 +599,7 @@ check('the cap never suppresses Social Bar or the banner', () => {
   const r = run(CHROME, 'moviezone.dev', false, store);
   r.ads.load();
   assert(r.ads.state.injected.indexOf('socialbar') !== -1, 'Social Bar was caught by the popunder cap');
+  if (SPA_NATIVE_OFF) return;   // the banner is switched off, so there is nothing for the cap to catch
   r.ready().intersect();
   assert(r.appended.some((el) => /invoke\.js/.test(el.src)), 'the banner was caught by the popunder cap');
 });
@@ -812,9 +846,26 @@ check('MASTER PAUSE — the SSR watch page serves a real visitor no ads', () => 
   equal(r.appended.length, 0, 'the SSR watch page injected a unit while paused');
   assert(/mz-no-ads/.test(r.htmlClass()), 'the SSR reserved slot was not collapsed while paused');
 });
-check('MASTER PAUSE — both surfaces agree (no half-applied pause)', () => {
+check('MASTER PAUSE — the two surfaces are consistent (no half-applied pause)', () => {
+  /*  The SSR watch/detail layer only ever runs the Native Banner and the
+   *  Popunder. The Social Bar — the one unit currently live — runs on the SPA
+   *  only. So the two switches do NOT have to be equal: they only have to be
+   *  CONSISTENT with which units are on.
+   *
+   *    • If BOTH the native and popunder units are switched off on the SPA, the
+   *      SSR layer has nothing left to run, so SSR must be paused (PAUSED=true)
+   *      even though the SPA is live for the Social Bar. That is this state.
+   *    • Otherwise the SSR layer still has a live unit, so the two master
+   *      switches must agree, exactly as before. */
+  if (SPA_NATIVE_OFF && SPA_POP_OFF) {
+    assert(SSR_PAUSED,
+      'both SSR units (Native Banner + Popunder) are switched off on the SPA, so the SSR watch/detail '
+      + 'layer must be paused (PAUSED=true) — it has nothing left to serve');
+    return;
+  }
   equal(SPA_PAUSED, SSR_PAUSED,
-    'index.html (MZ_ADS_PAUSED) and seo-ssr.js (PAUSED) disagree — flip BOTH to the same value');
+    'the SSR layer still has a live unit, so index.html (MZ_ADS_PAUSED) and seo-ssr.js (PAUSED) '
+    + 'must match — flip BOTH to the same value');
 });
 
 console.log('-'.repeat(70));

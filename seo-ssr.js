@@ -995,10 +995,12 @@ function adLoaderScript() {
   var TV_UA_RE = /\b(?:smart-?tv|smarttv|googletv|android\s*tv|appletv|tvos|crkey|roku|web0?s|tizen|vidaa|hbbtv|netcast|viera|bravia|aquos)\b|\bAFT[A-Z0-9]/i;
   var local = /^(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)$/.test(host)
     || /^(?:192\.168\.|10\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(host);
-  // TEMPORARY MASTER PAUSE — flip to true to turn ads OFF on the SSR
-  // watch/detail pages. Mirrors MZ_ADS_PAUSED in index.html; set BOTH to pause
-  // the whole site, set BOTH back to false to re-enable. When paused the slot
-  // collapses via mz-no-ads and nothing is injected.
+  // AD STATE — this SSR watch/detail layer only ever carried the Native Banner
+  // and the (capped) Popunder; the Social Bar deliberately never ran here. Both
+  // of those units are currently switched OFF site-wide, so this layer stays
+  // paused: nothing is injected, the slot collapses via mz-no-ads. The live
+  // Social Bar runs on the SPA (index.html). If the Native Banner or Popunder is
+  // ever re-enabled, flip this to false to bring them back on the watch pages.
   var PAUSED = true;
   var enabled = !PAUSED && !local && !CRAWLER_RE.test(ua) && !TV_UA_RE.test(ua);
   window.__mzAds = { enabled: enabled, injected: [], blocked: [], capped: [] };

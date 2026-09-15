@@ -553,6 +553,11 @@ html.mz-has-cw #continueWatchingGrid{min-height:236px}
    The class is set by the monetisation gate in <head>, i.e. before first paint,
    so this is never a shift. */
 html.mz-no-ads .mz-ad-slot{display:none}
+/* Native Banner unit switched off (enabled:false) while ads as a whole are still
+   live (the Social Bar keeps running). The reserved slot would otherwise be a
+   permanent empty hole, so collapse it. Set before first paint by the gate in
+   <head>, so it is never a shift. */
+html.mz-ad-native-off .mz-ad-slot{display:none}
 </style>
 
 <!-- ════════════════════════════════════════════════════════════════════
@@ -821,14 +826,20 @@ html.mz-no-ads .mz-ad-slot{display:none}
    *  pause the whole site. */
   var POP_CAP_KEY = 'mz_ad_pop_at';
   var POP_CAP_MS = 30 * 60 * 1000;
-  var MZ_ADS_PAUSED = true;
+  var MZ_ADS_PAUSED = false;
 
+  /*  ── PER-UNIT ON/OFF SWITCH ──
+   *  enabled:false keeps the unit fully DECLARED (so it still shows in the
+   *  dashboard/config and the "all units configured" check stays green) but the
+   *  loader never injects it — it is skipped in both the idle and viewport paths.
+   *  Right now only the Social Bar is live; Popunder and the Native Banner are
+   *  switched off. To bring one back, flip its enabled to true. */
   var UNITS = [
-    { name: 'popunder', trigger: 'idle', cap: POP_CAP_KEY, capMs: POP_CAP_MS,
+    { name: 'popunder', enabled: false, trigger: 'idle', cap: POP_CAP_KEY, capMs: POP_CAP_MS,
       src: 'https://pl30971623.profitableratecpmnetwork.com/c7/2e/b8/c72eb8605ed50b20e9de4938ed2680fe.js' },
-    { name: 'socialbar', trigger: 'idle',
+    { name: 'socialbar', enabled: true, trigger: 'idle',
       src: 'https://pl30971624.profitableratecpmnetwork.com/cf/b1/0b/cfb10bc21fd62d40b8a3e0fbe59427b3.js' },
-    { name: 'native', trigger: 'viewport', cfasync: false,
+    { name: 'native', enabled: false, trigger: 'viewport', cfasync: false,
       src: 'https://pl30971625.profitableratecpmnetwork.com/6c53da276868df37c1f0c6fc771e2d97/invoke.js',
       slot: '#mz-ad-native', container: 'container-6c53da276868df37c1f0c6fc771e2d97' }
   ];
@@ -881,6 +892,14 @@ html.mz-no-ads .mz-ad-slot{display:none}
   state.profile = decide(readEnv());
   if (!state.profile.enabled) {
     document.documentElement.className += ' mz-no-ads';
+  } else {
+    /*  Ads are live, but if the inline Native Banner unit is switched off its
+     *  reserved ~300px slot would be a permanent empty hole. Collapse it before
+     *  first paint (never a shift), independently of the whole-layer gate. */
+    var nativeUnit = UNITS.filter(function (u) { return u.name === 'native'; })[0];
+    if (nativeUnit && nativeUnit.enabled === false) {
+      document.documentElement.className += ' mz-ad-native-off';
+    }
   }
 
   /*  Has this capped unit already fired inside the cap window? Wrapped because
@@ -900,6 +919,8 @@ html.mz-no-ads .mz-ad-slot{display:none}
 
   function inject(unit) {
     if (unit._injected) return;
+    // A unit switched off in UNITS is declared but never requested.
+    if (unit.enabled === false) return;
     // Re-check TV: tv-mode.js has run by now and is the authority.
     if (document.documentElement.getAttribute('data-mz-tv') === 'true') return;
     if (capSpent(unit)) { state.capped.push(unit.name); return; }
@@ -946,6 +967,7 @@ html.mz-no-ads .mz-ad-slot{display:none}
     if (!state.profile.enabled) return;
     UNITS.forEach(function (unit) {
       if (unit.trigger !== 'viewport') return;
+      if (unit.enabled === false) return;
       var slot = document.querySelector(unit.slot);
       if (!slot) return;
 
