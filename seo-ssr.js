@@ -2430,8 +2430,8 @@ const WATCH_SOURCES = [
     build: (id, type, s, e) => {
       const opts = 'autoPlay=true&theme=FFC107&title=true&poster=true&autoNext=true&nextButton=true';
       return type === 'tv'
-        ? 'https://vidfast.pro/tv/' + id + '/' + s + '/' + e + '?' + opts
-        : 'https://vidfast.pro/movie/' + id + '?' + opts;
+        ? 'https://vidfast.vc/tv/' + id + '/' + s + '/' + e + '?' + opts
+        : 'https://vidfast.vc/movie/' + id + '?' + opts;
     }
   },
   {
@@ -2444,15 +2444,22 @@ const WATCH_SOURCES = [
       const opts = 'color=ffc107&autoplay=true&nextEpisode=true&episodeSelector=true'
         + '&autoplayNextEpisode=true';
       return type === 'tv'
-        ? 'https://player.videasy.net/tv/' + id + '/' + s + '/' + e + '?' + opts
-        : 'https://player.videasy.net/movie/' + id + '?' + opts;
+        ? 'https://player.videasy.to/tv/' + id + '/' + s + '/' + e + '?' + opts
+        : 'https://player.videasy.to/movie/' + id + '?' + opts;
     }
   },
   {
-    name: 'VidRock HD',
+    /*  Replaces the old VidRock entry: vidrock.net still answers 200 but its
+     *  resolver returns every upstream with a null url, so the player renders
+     *  "Content unavailable" for every title. This host is verified to decode real
+     *  frames for both movies and episodes. The in-app-browser limitation the SPA
+     *  guards against does not apply here — this page is a link target, not an
+     *  embed inside another app's WebView, and there is no scripted fallback
+     *  chain on it to confuse either way. */
+    name: 'VidSrc HD',
     build: (id, type, s, e) => (type === 'tv'
-      ? 'https://vidrock.net/tv/' + id + '/' + s + '/' + e
-      : 'https://vidrock.net/movie/' + id)
+      ? 'https://vidsrc.su/embed/tv/' + id + '/' + s + '/' + e + '?autoplay=true&autonext=true'
+      : 'https://vidsrc.su/embed/movie/' + id + '?autoplay=true')
   },
   {
     /*  Best for older / long-running anime and cartoons in the app. The alfa and
@@ -2465,8 +2472,8 @@ const WATCH_SOURCES = [
   {
     name: 'Turbo Stream',
     build: (id, type, s, e) => (type === 'tv'
-      ? 'https://111movies.com/tv/' + id + '/' + s + '/' + e
-      : 'https://111movies.com/movie/' + id)
+      ? 'https://player.vidlove.cc/embed/tv/' + id + '/' + s + '/' + e
+      : 'https://player.vidlove.cc/embed/movie/' + id)
   }
 ];
 

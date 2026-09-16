@@ -291,13 +291,19 @@
      openModal() warms the exact server the user is about to stream from.
      ════════════════════════════════════════════════════════════════════ -->
 
-<!-- Playback providers: DNS resolved early, handshake deferred to idle -->
+<!-- Playback providers: DNS resolved early, handshake deferred to idle.
+     Kept in sync with playerSources in moviezone.js — this list had drifted and was
+     still resolving vidrock.ru and embed.smashystream.com (both long gone, the
+     latter a commented-out source) while five live provider hosts were missing. -->
+<link rel="dns-prefetch" href="https://player.videasy.to">
 <link rel="dns-prefetch" href="https://vidnest.fun">
-<link rel="dns-prefetch" href="https://player.videasy.net">
 <link rel="dns-prefetch" href="https://www.viduki.net">
-<link rel="dns-prefetch" href="https://vidrock.net">
-<link rel="dns-prefetch" href="https://vidrock.ru">
-<link rel="dns-prefetch" href="https://embed.smashystream.com">
+<link rel="dns-prefetch" href="https://vidfast.vc">
+<link rel="dns-prefetch" href="https://player.vidzee.wtf">
+<link rel="dns-prefetch" href="https://vidcore.io">
+<link rel="dns-prefetch" href="https://vidsrc.su">
+<link rel="dns-prefetch" href="https://player.vidlove.cc">
+<link rel="dns-prefetch" href="https://vidsrc.buzz">
 <link rel="dns-prefetch" href="https://autoembed.co">
 <link rel="dns-prefetch" href="https://vidlink.pro">
 <link rel="dns-prefetch" href="https://vidsrc.pm">

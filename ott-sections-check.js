@@ -55,6 +55,15 @@ function line(marker) {
   return src.slice(at, src.indexOf('\n', at));
 }
 
+/** Slice an array literal at `marker`, terminated by its first `];`. */
+function arr(marker) {
+  const at = src.indexOf(marker);
+  if (at === -1) throw new Error('not found in moviezone.js: ' + marker);
+  const end = src.indexOf('];', at);
+  if (end === -1) throw new Error('unterminated array literal at: ' + marker);
+  return src.slice(at, end + 2);
+}
+
 const extracted = [
   block('const OTT = {') + ';',
   line("const OTT_MONETIZATION ="),
@@ -81,11 +90,75 @@ const extracted = [
   block('function promoteOttSignalMix('),
   block('async function ottEnforceAccuracy('),
   block('async function fetchOttMovies('),
+
+  /*  ── THE ORDER THE USER ACTUALLY SEES ──────────────────────────────────
+   *  fetchOttMovies answers "what is big on this service": it ranks by chart
+   *  position, then provider signal tier, then signal count, then score. That
+   *  is NOT the grid. For an OTT tab loadMovies renders
+   *  ottRankLikeAllFeed(allMovies) — the regression guard at the bottom of this
+   *  file asserts that exact line — which re-ranks by priority group, freshness
+   *  tier, an era weight and a gated recency premium.
+   *
+   *  The two ORDERING checks below used to measure `items`, an intermediate
+   *  array nobody ever looks at, and so they read the first screen wrong in both
+   *  directions. Measured live: Vi > Web Series' newest audience-backed title
+   *  sat at position 33 in `items` and at position 7 once rendered; ShemarooMe's
+   *  went 31 -> 6. Netflix > Web Series carried 4 recent titles in the fetcher's
+   *  first 24 and 22 in the rendered first 24.
+   *
+   *  So the whole pipeline is extracted, for the same reason everything else in
+   *  this file is: a copy would drift, and the ranking is the thing under test.
+   */
+  line('const DAY_MS ='),
+  line('const CATALOGUE_ERA_GRACE_YEARS ='),
+  line('const CATALOGUE_ERA_DECAY ='),
+  line('const YEAR_MS ='),
+  line('const RATING_PRIOR_VOTES ='),
+  line('const RATING_PRIOR_MEAN ='),
+  line('const TRENDING_MIN_VOTES ='),
+  line('const FRESH_TIER_DAYS ='),
+  line('const FRESH_TIER_MIN_POPULARITY ='),
+  line('const FRESH_TIER_MIN_VOTES ='),
+  line('const QUALITY_UPGRADE_BADGE_DAYS ='),
+  line('const REGIONAL_INDUSTRY_LANGUAGES ='),
+  line('const REGIONAL_FRESH_MIN_POPULARITY ='),
+  line('const REGIONAL_FRESH_MIN_VOTES ='),
+  line('const LATEST_WINDOW_DAYS ='),
+  line('const FEED_FIRST_SCREEN_INDUSTRIES ='),
+  line('const FEED_PROMOTABLE_GROUPS ='),
+  line('const FEED_SERIES_PROMOTABLE_GROUPS ='),
+  line('const FEED_CATALOGUE_MOVIE_GROUPS ='),
+  line('const FEED_CATALOGUE_SERIES_GROUPS ='),
+  arr('const FEED_SLOT_PATTERN ='),
+  arr('const MOVIE_QUALITY_TIMELINE = ['),
+  arr('const TV_QUALITY_TIMELINE = ['),
+  block('function mediaTypeOf('),
+  block('function qualityTimelineFor('),
+  block('function qualityAtStage('),
+  block('function titleQualityState('),
+  block('function catalogueEventAgeDays('),
+  block('function freshTierFloors('),
+  block('function freshnessTier('),
+  block('function allFeedPriorityGroup('),
+  block('function calculateMovieScore('),
+  block('function rankByFreshness('),
+  block('function feedLaneOf('),
+  block('function diversifyByLanguageWithinPriority('),
+  block('function industryRepresentative('),
+  block('function promotableToFirstScreen('),
+  block('function promoteFreshIndustryMix('),
+  block('function interleaveFeedByType('),
+  block('function catalogueEraFactor('),
+  block('function isAnimeContent('),
+  block('function isCartoonContent('),
+  block('function ottRankLikeAllFeed('),
+
   // `const` is lexical and never lands on the VM context object, so hand the
   // bindings out explicitly.
   'globalThis.__ott = { OTT, OTT_ALT_PROVIDERS, OTT_MONETIZATION,' +
   ' OTT_SIGNAL_NAMES, buildOttModeQueries, fetchOttMovies, ottIsOnPlatform,' +
-  ' promoteOttSignalMix };'
+  ' promoteOttSignalMix, ottRankLikeAllFeed,' +
+  ' OTT_RECENCY_MIN_VOTES, OTT_RECENCY_MIN_POPULARITY };'
 ].join('\n\n');
 
 // ── live TMDB access through the app's own proxy ───────────────────────────
@@ -116,14 +189,18 @@ function api(endpoint, params) {
   });
 }
 
-const sandbox = { tmdb: api, console, Date, Math, Promise, Map, Set, Object, Array, String, Number, JSON };
+const sandbox = {
+  tmdb: api, console, Date, Math, Promise, Map, Set, Object, Array, String, Number, JSON,
+  isFinite, isNaN, parseInt, parseFloat
+};
 sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
 vm.runInContext(extracted, sandbox);
 
 const {
   OTT, OTT_ALT_PROVIDERS, OTT_MONETIZATION, OTT_SIGNAL_NAMES,
-  buildOttModeQueries, fetchOttMovies, promoteOttSignalMix
+  buildOttModeQueries, fetchOttMovies, promoteOttSignalMix, ottRankLikeAllFeed,
+  OTT_RECENCY_MIN_VOTES, OTT_RECENCY_MIN_POPULARITY
 } = sandbox.__ott;
 
 // ── independent verification: does this title really stream on the platform? ──
@@ -408,36 +485,113 @@ async function catalogueSize(platform, type) {
       });
 
       // 6. ORDERING — trending/latest must actually be at the top.
+      /*  Everything below measures `rendered`, not `items`, wherever the claim is
+       *  about the first SCREEN. See the extraction note at the top: `items` is
+       *  the fetcher's relevance order and `rendered` is what loadMovies paints. */
+      const rendered = ottRankLikeAllFeed(items.slice());
       const meanPop = (list) => list.reduce((s, m) => s + (m.popularity || 0), 0) / (list.length || 1);
       /*  The head must be a STRICT subset or the comparison is vacuous: aha has
        *  12 series in TMDB's Indian data, so slice(0, 12) was the entire list and
        *  "head mean > overall mean" could never hold no matter how well the
        *  ranking worked. Full catalogues still use 12, exactly as before. */
       const headSize = Math.min(12, Math.max(2, Math.floor(items.length / 2)));
-      const topPop = meanPop(items.slice(0, headSize));
-      const allPop = meanPop(items);
-      console.log('  mean popularity: top-' + headSize + ' ' + topPop.toFixed(1)
-        + ' vs overall ' + allPop.toFixed(1));
-      check('trending sits at the top (top-' + headSize + ' more popular than average)', () => {
+      const head = items.slice(0, headSize);
+      const tail = items.slice(headSize);
+
+      /*  ── WHY "TRENDING AT THE TOP" IS NOT A RAW POPULARITY COMPARISON ──
+       *
+       *  This used to assert mean(popularity) of the head > mean(popularity) of
+       *  the pool, over every title. On ZEE5 > Web Series that reported a
+       *  failure — head 16.1 vs overall 17.0 — and the ranking was right while
+       *  the assertion was wrong. The head there is Bhagya Lakshmi (110 votes),
+       *  Rabb Se Hai Dua (92), Shiv Shakti (57), Radha Mohan (18): titles ZEE5's
+       *  own provider queries returned in TWO discovery lanes. The titles with
+       *  higher TMDB `popularity` sitting behind them are Kanaa (popularity
+       *  55.7, ZERO votes), Ninaithen Vandhai (53.5, ZERO votes), Savdhaan India
+       *  (46.2, ONE vote) — daily-soap catalogue entries whose popularity number
+       *  has no audience behind it.
+       *
+       *  That is the same trap OTT_RECENCY_MIN_VOTES exists to avoid, quoted
+       *  from its own comment in moviezone.js: popularity 1, zero votes. So
+       *  popularity is compared only across titles that clear the audience floor
+       *  the ranking itself uses — where the field means something — and the
+       *  ordering contract the fetcher genuinely implements (signal tier, then
+       *  signal count) is asserted directly instead of through a proxy.
+       */
+      const voted = items.filter((m) => (m.vote_count || 0) >= OTT_RECENCY_MIN_VOTES);
+      const votedHead = head.filter((m) => (m.vote_count || 0) >= OTT_RECENCY_MIN_VOTES);
+      console.log('  mean popularity (audience-backed only): top-' + headSize + ' '
+        + meanPop(votedHead).toFixed(1) + ' vs pool ' + meanPop(voted).toFixed(1)
+        + '  [' + voted.length + '/' + items.length + ' titles clear '
+        + OTT_RECENCY_MIN_VOTES + ' votes]');
+      check('trending sits at the top (audience-backed head more popular than average)', () => {
         assert.ok(items.length >= 4, 'only ' + items.length + ' items — nothing to order');
-        assert.ok(topPop > allPop,
-          'top-' + headSize + ' mean ' + topPop.toFixed(1) + ' is not above overall ' + allPop.toFixed(1));
+        if (voted.length < 8 || votedHead.length < 2) {
+          console.log('    (too few audience-backed titles to compare popularity honestly)');
+          return;
+        }
+        assert.ok(meanPop(votedHead) > meanPop(voted),
+          'audience-backed head mean ' + meanPop(votedHead).toFixed(1)
+          + ' is not above pool ' + meanPop(voted).toFixed(1));
+      });
+      /*  The contract fetchOttMovies actually implements, asserted directly: a
+       *  title the provider surfaced in more discovery lanes outranks one it
+       *  surfaced in fewer, and no catalogue-only card takes a head slot while a
+       *  signalled title is still waiting for one. */
+      check('the head is what the provider discovery lanes surfaced', () => {
+        assert.ok(items.length >= 4, 'only ' + items.length + ' items — nothing to order');
+        const sigMean = (l) => l.reduce((s, m) => s + (m._ottSignalCount || 0), 0) / (l.length || 1);
+        const multi = items.filter((m) => (m._ottSignalCount || 0) > 1).length;
+        const hs = sigMean(head), ts = sigMean(tail);
+        assert.ok(multi ? hs > ts : hs >= ts,
+          'head mean signal count ' + hs.toFixed(2) + ' does not lead the tail ' + ts.toFixed(2)
+          + ' (' + multi + ' multi-signal titles in the pool)');
+        const tier0 = items.filter((m) => m._ottSignalTier === 0).length;
+        const headTier1 = head.filter((m) => m._ottSignalTier !== 0).length;
+        assert.ok(headTier1 === 0 || tier0 <= headSize,
+          headTier1 + ' catalogue-only card(s) hold head slots while '
+          + tier0 + ' signalled titles exist');
       });
       /*  Asserting "there is always something from the last 13 months" asserts a
        *  fact about TMDB, not about this code — aha's 12 series are all older
        *  than that. What this code is actually responsible for is: WHEN the pool
        *  contains recent titles, the ranking must put one on the first screen.
-       *  That is the stronger claim, and it is what is checked. */
+       *
+       *  Two things make that the real guarantee rather than an overreach:
+       *
+       *  1. It is measured on `rendered`. The recency premium that lifts a new
+       *     release lives in ottRankLikeAllFeed, so asking `items` about it was
+       *     asking the wrong array — see the extraction note above.
+       *
+       *  2. The cohort is gated by the audience floor the premium itself is
+       *     gated by. moviezone.js refuses to promote a brand-new title nobody
+       *     has rated, on purpose and with a measured reason recorded at
+       *     OTT_RECENCY_MIN_VOTES. Demanding a first-screen slot for a zero-vote
+       *     title would demand exactly the regression that gate prevents: the
+       *     five reports this replaces were all such titles, e.g. ZEE5's "Brown"
+       *     (0 votes, popularity 2.6) and an MX Player entry with 0 votes and
+       *     popularity 0.6.
+       */
       const cutoff = new Date(Date.now() - 400 * 86400000).toISOString().slice(0, 10);
+      const audienceBacked = (m) => (m.vote_count || 0) >= OTT_RECENCY_MIN_VOTES
+        || (m.popularity || 0) >= OTT_RECENCY_MIN_POPULARITY;
       const freshInPool = items.filter((m) => dateOf(m) && dateOf(m) >= cutoff);
+      const freshEligible = freshInPool.filter(audienceBacked);
       check('latest releases surface in the first screen', () => {
         if (!freshInPool.length) {
           console.log('    (no title newer than ' + cutoff + ' exists in this catalogue at all)');
           return;
         }
-        const freshUpTop = items.slice(0, 24).filter((m) => dateOf(m) && dateOf(m) >= cutoff);
-        assert.ok(freshUpTop.length >= 1,
-          freshInPool.length + ' title(s) from the last ~13 months exist but none reached the first 24');
+        if (!freshEligible.length) {
+          console.log('    (' + freshInPool.length + ' recent title(s), none with an audience yet — '
+            + 'the recency premium is gated, so none is owed a first-screen slot)');
+          return;
+        }
+        const sameTitle = (a, b) => a.id === b.id && a.media_type === b.media_type;
+        const upTop = rendered.slice(0, 24).filter((m) => freshEligible.some((f) => sameTitle(f, m)));
+        assert.ok(upTop.length >= 1,
+          freshEligible.length + ' audience-backed title(s) from the last ~13 months exist but none '
+          + 'reached the first 24 of the rendered grid (pool has ' + freshInPool.length + ' recent)');
       });
     }
   }

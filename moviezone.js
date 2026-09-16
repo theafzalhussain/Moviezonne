@@ -11211,6 +11211,13 @@ const playerSources = [
   // ⚡ #0 ALL-ROUNDER: Anime + Cartoons + Movies + Web Series, with real Hindi dub tracks.
   // Anime ke liye AniList route (hindi/dub/sub), baaki sab ke liye TMDB route.
   // ⚡ #1 ALL-ROUNDER 4K: Videasy — anime + movies + series, high bitrate, multi-audio
+  //    Host is player.videasy.to, not .net. The .net address still works but only as
+  //    a 301 to .to (the .to page's own <link rel=canonical> points at .to, so that
+  //    is the origin the provider treats as home). Riding that redirect cost this
+  //    server — the app's first pick — a cold DNS + TLS handshake on the critical
+  //    path, because playerHostOrigins() was preconnecting the host that merely
+  //    bounces us. Measured: ~3.2s to first byte through .net, ~0.69s straight to
+  //    .to. Same reasoning already applied to Flicky further down.
   { name: 'OmniPlay 4K', dubbed: true, is4K: true, anime: true, url: (id, lang, type, s, e) => {
     const m = currentModalMovie;
     const wantDub = (lang === 'hi' || lang === 'en');
@@ -11219,12 +11226,12 @@ const playerSources = [
       const anilistId = getAnilistIdSync(m, s);
       if (anilistId) {
         const ep = String(parseInt(e, 10) || 1);
-        return `https://player.videasy.net/anime/${anilistId}/${ep}?dub=${wantDub}&${common}`;
+        return `https://player.videasy.to/anime/${anilistId}/${ep}?dub=${wantDub}&${common}`;
       }
     }
     return type === 'tv'
-      ? `https://player.videasy.net/tv/${id}/${s}/${e}?${common}&lang=${lang}`
-      : `https://player.videasy.net/movie/${id}?${common}&lang=${lang}`;
+      ? `https://player.videasy.to/tv/${id}/${s}/${e}?${common}&lang=${lang}`
+      : `https://player.videasy.to/movie/${id}?${common}&lang=${lang}`;
   }},
   // 🌸 ANIME SPECIALIST: AnimePahe mirror — purane/long-running anime & cartoons ke liye best
   { name: 'AnimePahe HD', dubbed: true, is4K: true, anime: true, url: (id, lang, type, s, e) => {
@@ -11250,11 +11257,13 @@ const playerSources = [
   }},
   // 🔁 Cinextream (cinextream.net) ka domain dead ho gaya (DNS record hi nahi bacha),
   //    uski jagah VidFast — 4K/multi-audio, tez CDN, movies + series dono
+  //    Host is vidfast.vc: vidfast.pro now only 301s here, and the page identifies
+  //    itself as .vc, so we skip the bounce and preconnect the real origin.
   { name: 'VidFast 4K', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
     const opts = `autoPlay=true&theme=FFC107&title=true&poster=true&autoNext=true&nextButton=true&lang=${lang}`;
     return type === 'tv'
-      ? `https://vidfast.pro/tv/${id}/${s}/${e}?${opts}`
-      : `https://vidfast.pro/movie/${id}?${opts}`;
+      ? `https://vidfast.vc/tv/${id}/${s}/${e}?${opts}`
+      : `https://vidfast.vc/movie/${id}?${opts}`;
   }},
   /*  #8: Flicky — multi-server, multi-audio, 4K. Same player as always; only the
    *  address it lives at changed.
@@ -11283,43 +11292,188 @@ const playerSources = [
       ? `https://player.vidzee.wtf/embed/tv/${id}/${s}/${e}`
       : `https://player.vidzee.wtf/embed/movie/${id}`;
   }},
-  /*  #8b: VidZen — the second server asked for alongside Flicky, picked to match
-   *  it feature-for-feature rather than just to pad the list: it races multiple
-   *  upstream sources in parallel with failover (so a dead source costs a moment,
-   *  not the whole playback), serves up to 4K with the dub/audio tracks the
-   *  upstreams carry, and covers movies and episodes off the same TMDB id.
+  /*  #9: VidCore — same player as the old 'CoreStream HD' entry, on the domain it
+   *  actually lives on now, with its query string corrected against the provider's
+   *  own parameter table.
    *
-   *  Verified live before shipping: /movie/550 and /tv/94997/1/1 both answer 200
-   *  with `content-security-policy: frame-ancestors *` and `x-frame-options:
-   *  ALLOWALL`, so it embeds instead of throwing "refused to connect".
+   *  vidcore.org is gone for good, not slow and not blocked here: it answers
    *
-   *  Note the paths carry no /embed/ segment — that spelling 404s here. Movie and
-   *  episode deliberately share the vidzen.fun origin so a series never pays a
-   *  cold handshake the movie probe already warmed. */
-
-  { name: 'VidRock HD', dubbed: true, url: (id, lang, type, s, e) => {
+   *    HTTP/1.1 451 Unavailable For Legal Reasons
+   *    X-Vercel-Error: DEPLOYMENT_DISABLED
+   *
+   *  which is the hosting platform disabling the deployment, so it fails the same
+   *  way on every network and will not come back. Every user on this build was
+   *  paying a full give-up timer on it before the chain moved on.
+   *
+   *  vidcore.net is the live front door but 301s to vidcore.io, so we target
+   *  vidcore.io directly — same reasoning as Flicky above: it drops a redirect
+   *  round-trip before the first frame and lets playerHostOrigins() preconnect the
+   *  host that actually serves the video. Measured from an Indian connection: the
+   *  movie and episode routes both answer 200 in ~0.32s with no X-Frame-Options
+   *  and no CSP frame-ancestors, so it embeds. The player bundle carries no
+   *  popunder, no ad library and no in-app-browser block.
+   *
+   *  Two parameters and the path were wrong, and are fixed here against the
+   *  provider's own documented table (read out of its bundle):
+   *    - The `/embed/` segment is gone. On vidcore.io that prefix is not a route:
+   *      it falls through to the marketing SPA's catch-all, which answers 200 with
+   *      a 1.2 KB landing shell and no player at all — a "working" status code that
+   *      would never have produced video. The real routes are bare, and they are
+   *      server-rendered: /movie/550 returns a 49 KB document already carrying
+   *      Fight Club's poster, and /tv/1399/1/1 carries Game of Thrones S1E1's.
+   *    - `autoplay` -> `autoPlay`. The capital P is the spelling it reads, so the
+   *      old lowercase form was silently ignored. warmUrlVariant neutralises both
+   *      spellings, so a prewarm still cannot start audio in a hidden frame.
+   *    - `lang` -> `sub`. There is no `lang` parameter on this player; the old
+   *      comment's claim that it selected an audio track was simply wrong, and the
+   *      value went nowhere. `sub` is the real one and takes the same language
+   *      codes, so the language the user picked now sets the subtitle track. Audio
+   *      tracks are chosen in-player, and MultiAudio 4K above is the entry that
+   *      carries the Hindi-dub case for real.
+   *
+   *  `theme` and `startAt` were already correct; `startAt` stays wired to the same
+   *  resume store Pro Stream reads, so switching to this server mid-film continues
+   *  instead of restarting. Episodes additionally ask for the next-episode button
+   *  and auto-advance, which this provider gates behind `nextButton=true`.
+   *
+   *  It stays in HD Streams rather than Premium 4K: the section split at
+   *  buildServerCard is `is4K || anime`, and that is where this was asked for. The
+   *  chip is renamed because the health ranking keys per-server history off the
+   *  name — 'CoreStream HD' has been recording nothing but failures against a dead
+   *  deployment, and a new key lets this compete on its real 0.32s from the first
+   *  visit instead of clawing its way out of that penalty box.
+   */
+  { name: 'VidCore HD', dubbed: true, url: (id, lang, type, s, e) => {
+    const at = (typeof mzResumeSec === 'function') ? mzResumeSec(id, type, s, e) : 0;
+    const opts = `autoPlay=true&theme=FFC107&sub=${lang}` + (at ? '&startAt=' + at : '');
     return type === 'tv'
-      ? `https://vidrock.net/tv/${id}/${s}/${e}`
-      : `https://vidrock.net/movie/${id}`;
+      ? `https://vidcore.io/tv/${id}/${s}/${e}?${opts}&nextButton=true&autoNext=true`
+      : `https://vidcore.io/movie/${id}?${opts}`;
   }},
+
+  /*  Replaces VidRock, which is dead in a way no status code reveals — and this is
+   *  exactly the "Content unavailable / please try again later" screen that was
+   *  reported. vidrock.net still answers 200 with a normal SPA shell, so every
+   *  reachability check passes; the failure is one level down, in the provider's
+   *  own resolver:
+   *
+   *    GET vidrock.net/api/movie/550
+   *    {"Nova":{"url":null},"Atlas":{"url":null},"Luna":{"url":null},
+   *     "Orion":{"url":null},"Astra":{"url":null}}
+   *
+   *  All five upstreams come back with a null url, the player drops every entry
+   *  without one, ends up with zero sources and paints that panel. Same empty
+   *  answer for every title and every mirror (vidrock.ru and vidrock.to share the
+   *  backend), so it was not per-title and not a domain move. Reproduced in real
+   *  Chrome: the frame contains no <video> element at all, only a placeholder
+   *  demo-video.mp4. Worth noting because it is the nastiest failure mode we have:
+   *  the iframe LOADS, so recordPlayerLoad() counts it as a success and the health
+   *  ranking keeps this server near the top while it shows an error to everyone.
+   *
+   *  vidsrc.su is the replacement, chosen on measured behaviour rather than a 200:
+   *  driven in headless Chrome inside a real unsandboxed iframe, it decodes actual
+   *  frames — Fight Club at 1920x800 (duration 2:19:08, readyState 4) and House of
+   *  the Dragon S1E1 at 1920x960 — so movies and episodes both genuinely play. It
+   *  is also the fastest host in the list from an Indian connection (~0.26-0.5s to
+   *  first byte) and its bundle carries no popunder, no ad library and no
+   *  analytics beacon, which additionally removes one of the three ad-heavy
+   *  providers this list was carrying.
+   *
+   *  Known parameters (read out of its bundle): autoplay, autonext, pausescreen,
+   *  idlecheck, logo, colour, backbutton. Only the two that matter are sent, and
+   *  `autoplay=true` is neutralised by warmUrlVariant on warm-ups.
+   *
+   *  `skip` is why the entry needs a capability hook: this player deliberately
+   *  refuses to run inside an Android in-app browser (Instagram, Facebook,
+   *  Telegram WebViews), showing "In-App Browser Detected" instead of video —
+   *  verified by spoofing a `; wv)` user agent. That frame still fires `load`, so
+   *  the auto-retry chain would never rescue the viewer. Excluding it from the
+   *  candidate pool on those user agents means they are simply routed elsewhere.
+   */
+  { name: 'VidSrc HD', dubbed: true,
+    skip: () => {
+      try {
+        const ua = navigator.userAgent || '';
+        if (/Android/.test(ua) && (/;\s*wv\)/.test(ua) || /\bwv\b/.test(ua))) return true;
+        const brands = navigator.userAgentData && navigator.userAgentData.brands;
+        return !!(brands && brands.some(b => b.brand === 'Android WebView'));
+      } catch (err) { return false; }
+    },
+    url: (id, lang, type, s, e) => {
+      return type === 'tv'
+        ? `https://vidsrc.su/embed/tv/${id}/${s}/${e}?autoplay=true&autonext=true`
+        : `https://vidsrc.su/embed/movie/${id}?autoplay=true`;
+    }},
   // { name: 'Hindi Multi-Audio', dubbed: true, url: (id, lang, type, s, e) => {
   //   const base = `https://embed.smashystream.com/playere.php?tmdb=${id}`;
   //   return type === 'tv' ? `${base}&season=${s}&episode=${e}` : base;
   // }},
+  /*  Turbo Stream — the provider behind this chip rebranded, and the old address is
+   *  now a two-hop detour rather than a home:
+   *
+   *    111movies.com/movie/550  -> 301 -> 111movies.net/movie/550
+   *                             -> 302 -> player.vidlove.cc/embed/movie/550
+   *
+   *  Nothing on the served page mentions 111movies any more; it identifies itself
+   *  as vidlove throughout. So both hops were pure latency, and worse, the host
+   *  playerHostOrigins() was warming (111movies.com) is one that never serves a
+   *  frame. Straight to the end of the chain: ~0.07s to first byte against ~0.39s
+   *  through the redirects. Note the new route carries an /embed/ segment, which
+   *  the old one did not. The chip name is unchanged so the learned ranking keeps
+   *  the history it has for this provider. */
   { name: 'Turbo Stream', dubbed: true, url: (id, lang, type, s, e) => {
     return type === 'tv'
-      ? `https://111movies.com/tv/${id}/${s}/${e}`
-      : `https://111movies.com/movie/${id}`;
+      ? `https://player.vidlove.cc/embed/tv/${id}/${s}/${e}`
+      : `https://player.vidlove.cc/embed/movie/${id}`;
   }},
-    { name: 'VidZen 4K', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
+  /*  #8b: MultiAudio — replaces VidZen, which was pulled for the two reasons it
+   *  was reported for: most titles never resolved a source at all, and the ones
+   *  that did carried an English track only.
+   *
+   *  This provider is the opposite trade. Every title is resolved server-side
+   *  against a pool of independent upstreams and the whole list arrives inside the
+   *  embed document, so there is no blank rectangle while sources resolve and a
+   *  dead upstream is skipped in-player instead of ending the session. Measured on
+   *  an Indian connection before shipping (TMDB ids unless noted):
+   *
+   *    3 Idiots (20453)              7 sources
+   *    Game of Thrones S1E1 (1399)   8 sources
+   *    Superman (1061474)            9 sources  <- incl. "Server SWM2-Hindi" (IN)
+   *    Animal (tt13751694)           3 sources  <- Kannada + Malayalam labelled
+   *    One Piece S1E1 (37854)        6 sources
+   *    Doraemon S1E1 (30983)         5 sources
+   *    RRR (579974) / Oppenheimer    4 / 5 sources
+   *
+   *  The language story is the point. Sources come back tagged with their audio
+   *  language and country flag, so a Hindi dub shows up as its own entry in the
+   *  player's server menu rather than being buried; on top of that the player
+   *  reads the audio tracks out of the HLS manifest and exposes them as a separate
+   *  Audio menu with the viewer's choice remembered. That is real multi-audio,
+   *  which is what the `lang=` query string on some of the other servers here only
+   *  claims. Quality is adaptive HLS with a manual pin, 2160p included.
+   *
+   *  Two provider rules this integration has to respect, both already satisfied:
+   *    - It answers inside an iframe only; a direct hit 404s. The warm-up path
+   *      fetches with `mode: 'no-cors'`, where a 404 resolves as an opaque
+   *      response, so it never mistakes that 404 for a dead host and demotes it.
+   *      The two frames that do get built (prewarm + loadPlayer) are real iframes.
+   *    - A `sandbox` attribute on the frame — or on any ancestor frame — makes it
+   *      refuse to play. Neither frame sets one, and nothing must start.
+   *
+   *  `autoplay=true` is the only query parameter it takes (verified: `st`, `srv`
+   *  and `ad` are all ignored from the query string), and warmUrlVariant flips it
+   *  to false on warm-ups, so a prewarm can never start audio in a hidden frame.
+   *  Movie and episode share the vidsrc.buzz origin, so a series never pays a cold
+   *  handshake the movie probe already warmed. */
+  { name: 'MultiAudio 4K', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
     return type === 'tv'
-      ? `https://vidzen.fun/tv/${id}/${s}/${e}`
-      : `https://vidzen.fun/movie/${id}`;
+      ? `https://vidsrc.buzz/embed/tv/${id}/${s}/${e}?autoplay=true`
+      : `https://vidsrc.buzz/embed/movie/${id}?autoplay=true`;
   }},
-    { name: 'Ultra HD', dubbed: true, url: (id, lang, type, s, e) => {
-    // #6: AutoEmbed — India ke networks par blockage kam aati hai
-    return (type === 'tv' ? `https://autoembed.co/tv/tmdb/${id}-${s}-${e}` : 'https://autoembed.co/movie/tmdb/' + id) + `?lang=${lang}`;
-  }},
+  // { name: 'Ultra HD', dubbed: true, url: (id, lang, type, s, e) => {
+  //   // #6: AutoEmbed — India ke networks par blockage kam aati hai
+  //   return (type === 'tv' ? `https://autoembed.co/tv/tmdb/${id}-${s}-${e}` : 'https://autoembed.co/movie/tmdb/' + id) + `?lang=${lang}`;
+  // }},
   { name: 'Pro Stream', dubbed: true, url: (id, lang, type, s, e) => {
     // #4: VidLink Pro — Clean interface with settings
   
@@ -11656,7 +11810,19 @@ function rankSourceIdxs(idxs) {
 
 /** Servers eligible for this content, honouring the anime and dub rules. */
 function candidateSourceIdxs(lang, movie) {
-  const all = playerSources.map((_, i) => i);
+  /*  A server may declare itself unusable on this browser via `skip()`. Only one
+   *  entry does today: VidSrc HD refuses to run inside Android in-app browsers and
+   *  shows its own "unsupported browser" panel instead — and because that panel
+   *  still fires the iframe's load event, the auto-retry chain cannot detect it.
+   *  Filtering it out here is what keeps those viewers out of that dead end.
+   *  Applied first so the anime and dub rules below only ever see usable servers,
+   *  and guarded so it can never empty the pool. */
+  const usable = playerSources.map((_, i) => i).filter(i => {
+    const s = playerSources[i];
+    if (typeof s.skip !== 'function') return true;
+    try { return !s.skip(); } catch (err) { return true; }
+  });
+  const all = usable.length ? usable : playerSources.map((_, i) => i);
   const isAnime = movie && (isAnimeContent(movie) || isCartoonContent(movie));
   if (isAnime) {
     const a = all.filter(i => playerSources[i].anime);
@@ -11684,7 +11850,18 @@ function resetTriedSources() { _mzTriedSources = new Set(); }
 function getSelectedSourceIdx() {
   const raw = localStorage.getItem('moviezone.playerSourceIdx');
   const saved = parseInt(raw === null ? '-1' : raw, 10);
-  const ranked = rankSourceIdxs(playerSources.map((_, i) => i));
+  /*  candidateSourceIdxs (not the raw index list) so a server that declares
+   *  itself unusable on this browser is never the opening pick either — otherwise
+   *  an in-app-browser viewer would land straight on its "unsupported" panel
+   *  before the retry chain has any say.
+   *
+   *  getSelectedLang is guarded rather than assumed: player-health.test.js extracts
+   *  this function into a bare VM sandbox that has no DOM and no language helper,
+   *  and 'en' is the neutral value there — it selects the full pool, which is the
+   *  behaviour that test asserts. */
+  const lang = (typeof getSelectedLang === 'function') ? getSelectedLang() : 'en';
+  const pool = candidateSourceIdxs(lang, currentModalMovie);
+  const ranked = rankSourceIdxs(pool.length ? pool : playerSources.map((_, i) => i));
   const best = ranked.length ? ranked[0] : 0;
 
   // Nothing stored yet — open on whatever has actually performed best here
