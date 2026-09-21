@@ -268,6 +268,44 @@ eq('4K panels never claim the high tier',
 eq('a strong Android TV can reach high',
   TV.computePerfProfile({ platform: 'android-tv', deviceMemory: 8, hardwareConcurrency: 8 }).tier, 'high');
 
+/*  ── THE BIG-SCREEN RENDERING BUDGET ──
+ *
+ *  shouldThrottleBigScreen() decides whether html[data-mz-bigscreen] is set, and
+ *  that attribute drops the per-card GPU layer, the backdrop blurs and smooth
+ *  scrolling. It is the fix for "very slow on a 55/65 inch TV", where the TV
+ *  detection above returns false — verified on the real page at 3840×2160, where
+ *  data-mz-tv came back null.
+ *
+ *  The false cases matter as much as the true ones: a capable workstation is
+ *  measurably FASTER with the per-card layers (removing them took scroll p95 from
+ *  23ms to 200ms on a desktop GPU), so matching one would be a regression, not a
+ *  saving. That is the whole reason this is not a CSS width query. */
+const throttle = (env) => TV.shouldThrottleBigScreen(env);
+
+eq('a 4K panel driven by a remote is throttled',
+  throttle({ screenWidth: 3840, hasFinePointer: false }), true);
+eq('a 1080p TV with no fine pointer is throttled',
+  throttle({ screenWidth: 1920, hasFinePointer: false }), true);
+eq('a 4K panel on 4GB is throttled even if it reports a pointer',
+  throttle({ screenWidth: 3840, hasFinePointer: true, deviceMemory: 4 }), true);
+eq('a 2560px panel on 4 cores is throttled',
+  throttle({ screenWidth: 2560, hasFinePointer: true, hardwareConcurrency: 4 }), true);
+
+eq('a 4K workstation with a mouse is NOT throttled',
+  throttle({ screenWidth: 3840, hasFinePointer: true, deviceMemory: 32, hardwareConcurrency: 16 }), false);
+eq('an ordinary 1920 desktop with 4 cores is NOT throttled',
+  throttle({ screenWidth: 1920, hasFinePointer: true, hardwareConcurrency: 4 }), false);
+eq('a laptop that reports no memory figure is NOT throttled',
+  throttle({ screenWidth: 2560, hasFinePointer: true, hardwareConcurrency: 8 }), false);
+eq('a phone is NOT throttled by this rule',
+  throttle({ screenWidth: 390, hasFinePointer: false }), false);
+eq('a 1024px tablet is NOT throttled by this rule',
+  throttle({ screenWidth: 1024, hasFinePointer: false }), false);
+eq('an empty environment is safe',
+  throttle({}), false);
+eq('a missing environment is safe',
+  throttle(), false);
+
 const lowProfile = TV.computePerfProfile({ platform: 'fire-tv' });
 eq('low tier caps cards at 24', lowProfile.maxCards, 24);
 check('low tier disables animations', lowProfile.animations === false);

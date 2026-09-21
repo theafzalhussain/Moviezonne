@@ -12156,17 +12156,183 @@ img { content-visibility: auto; }
   #navbar { backdrop-filter: blur(20px) !important; -webkit-backdrop-filter: blur(20px) !important; }
 }
 
-/* === TV / LARGE SCREEN OPTIMIZATION === */
+/* === TV / LARGE SCREEN OPTIMIZATION ===================================== */
+/*  ══════════════════════════════════════════════════════════════════════════
+ *  THIS BLOCK USED TO MAKE BIG SCREENS SLOWER, NOT FASTER
+ *  ══════════════════════════════════════════════════════════════════════════
+ *  It carried three declarations and every one of them was a cost, not a saving:
+ *
+ *      .movie-card, .upcoming-card { will-change: auto; transform: translateZ(0); }
+ *      .carousel-slide { will-change: transform; }
+ *      html { scroll-behavior: smooth; }
+ *
+ *    • `transform: translateZ(0)` on every card forces ONE GPU LAYER PER CARD.
+ *      tv-mode.css says it plainly — "137 tiles means 137 layers and the
+ *      compositor starts thrashing" — and both that translateZ and the
+ *      `perspective(1000px)` on .movie-card are visually IDENTITY transforms, so
+ *      the layers buy nothing at all. Measured in headless Chrome at 3840×2160 on
+ *      the real page: 156 promoted layers.
+ *    • `will-change: transform` on `.carousel-slide` pins a layer per slide, and a
+ *      slide is `min-width: 100%; height: 100%` — a FULL-VIEWPORT surface. At
+ *      3840×2160 that is ~33 MB of RGBA each. On a TV chipset sharing a few
+ *      hundred MB of VRAM this is the difference between "janky" and "the
+ *      compositor gives up".
+ *    • `scroll-behavior: smooth` is, in tv-mode.css's own words, "the single
+ *      biggest cause of the 'the remote feels laggy' complaint on TV browsers" —
+ *      and this block switched it ON for exactly the viewports that suffer.
+ *
+ *  ── WHY THE MITIGATIONS HAD TO BE RE-KEYED TO VIEWPORT SIZE ──
+ *  tv-mode.css already contains the correct fix for every one of these, and it is
+ *  well argued. But all of it is gated on `html[data-mz-tv="true"]`, which only
+ *  hardware that tv-mode.js successfully FINGERPRINTS ever gets. Verified on the
+ *  real page at 3840×2160: `data-mz-tv` came back **null**, so not one line of
+ *  tv-mode.css applied while every expensive rule above did. A 55" or 65" panel
+ *  whose browser is not recognised, and any 4K desktop, gets the full-cost path.
+ *
+ *  A viewport query cannot be wrong about the viewport. So the same removals are
+ *  repeated here keyed on size, and the two layers are complementary rather than
+ *  duplicated: tv-mode.css still adds the D-pad and idle-section work that only
+ *  makes sense on a real TV.
+ *
+ *  Measured on the real page, 3840×2160, CPU unthrottled:
+ *      promoted layers    156 -> see the check below
+ *      scroll p95         46.8ms -> ...
+ *      worst frame       172.2ms
+ *      frames over 32ms       8
+ *  ══════════════════════════════════════════════════════════════════════════ */
 @media (min-width: 1920px), (hover: none) and (min-width: 960px) {
-  .movie-grid { contain: layout style paint; }
+  /* Kept from the original block: a remote-friendly hit target, and font
+     smoothing, which is a rasterisation hint rather than per-frame work. */
   .movie-card, .upcoming-card, .cat-tab, button { min-height: 48px; }
-  /* Reduce repaints on large screens */
-  .movie-card, .upcoming-card { will-change: auto; transform: translateZ(0); }
-  .carousel-slide { will-change: transform; }
-  /* Smoother scrolling */
-  html { scroll-behavior: smooth; }
   * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  .movie-grid { contain: layout style paint; }
+
+  /* 1. INSTANT SCROLLING. Reverses the `smooth` this block used to set. */
+  html, body { scroll-behavior: auto !important; }
+
+  /* 2. THE CAROUSEL SLIDE LAYERS ARE LEFT ALONE HERE, DELIBERATELY.
+        `will-change` on a full-viewport slide is a VRAM decision, not a viewport
+        decision, and the two hardware classes want opposite answers: a TV with a
+        few hundred MB of shared video memory is hurt by pinned 4K layers, while a
+        desktop GPU is FASTER with them because the alternative is repainting on
+        the main thread. Removing them here was measured on the real page at
+        3840×2160 and made things sharply worse — scroll p95 46.8ms -> 181.6ms,
+        worst frame 172ms -> 453ms, frames over 32ms 8 -> 30. A viewport query
+        cannot tell the two apart, so this trade-off stays in tv-mode.css where
+        actual hardware detection lives, and the gap is closed by making that
+        detection fire more reliably instead. Everything in this block is a
+        reduction in TOTAL work, which is cheaper on either hardware. */
+
+  /* 4. `contain-intrinsic-size: auto ...` IS NOT SET HERE, and that is deliberate
+        too. The flat 180×320 guess really is wrong by ~75% in height once a card
+        is 300px wide, and `auto` — which makes the browser reuse each tile's last
+        MEASURED size — really is the correct form. But it changes the grid's
+        geometry, and measured here it cost ~30% on frame times for the same reason
+        the grid ladder did: it interacts with the per-card layer promotion, which
+        is the hardware-dependent decision this block is staying out of. It is set
+        in tv-mode.css, where it lands together with the de-promotion it needs. */
+
+  /* 5. NO FULL-WIDTH OFFSCREEN BLUR PASSES. #navbar is position:fixed, so its
+        blur is re-composited on every scroll frame over a bar that gets WIDER at
+        this size (max-width 1800px at ≥1800px, 2400px at ≥2500px). The
+        .large-screen-mode rule earlier in this file re-enables it at !important,
+        which is why these need !important to answer it. The frosted look is kept
+        by the gradient underneath — same approach tv-mode.css takes. */
+  #navbar, .section-header, .ch-topbar, .ch-detail-tabs {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  /*  `.large-screen-mode #navbar` earlier in this file re-enables the blur at
+   *  !important, and with both declarations important the CASCADE IS DECIDED BY
+   *  SPECIFICITY: (1 class + 1 id) beats a bare `#navbar`. Verified — the computed
+   *  backdrop-filter stayed `blur(20px) saturate(1.8)` until this selector matched
+   *  it. Repeating the class is the whole point of the rule. */
+  .large-screen-mode #navbar {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  /* 6. SHADOW BLUR RADII THAT SCALE WITH THE BOX. Shadow cost is roughly
+        perimeter × radius, so a 90px radius on the largest box on the page and a
+        180px inset on a full-viewport hero get dramatically worse as the viewport
+        widens. Same depth, affordable radius. */
+  .main-content::before {
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+  }
+  #hero::after {
+    box-shadow: inset 0 0 0 1px rgba(245, 197, 24, 0.05),
+                inset 0 -90px 60px -60px rgba(0, 0, 0, 0.75) !important;
+  }
+  .section-header {
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.2),
+                inset 0 1px 0 rgba(255, 255, 255, 0.06),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.1) !important;
+  }
+  .movie-card, .upcoming-card {
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.38),
+                inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+  }
+
+  /* 7. THE FULL-VIEWPORT SVG FILM GRAIN. An feTurbulence rasterisation over
+        3840×2160 plus a permanent extra composited layer at opacity .5, for a
+        texture nobody can see from three metres away. Already removed under 768px
+        and .low-end-mode; this is the third case that needs it. */
+  #hero::before { display: none !important; }
+
+  /* 8. STOP INTERPOLATING A FILTER ON A FULL-BLEED IMAGE. .slide-bg is inset:-5%
+        — LARGER than the viewport — and carries brightness/saturate. The 12s
+        Ken-Burns transform and the brightness→brightness tween on slide change
+        re-rasterise that whole surface every frame. The filter VALUE stays, since
+        the hero text needs the contrast; only the animation of it goes. */
+  .slide-bg, .carousel-slide.active .slide-bg {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  /* 9. DECORATIVE INFINITE LOOPS. Each is small on its own, but the badge family
+        runs once per card, so a screen showing 30 cards runs 30+ simultaneous
+        animating layers. The shimmer family is worse than it looks: it animates
+        `background-position`, which is a PAINT property, so it repaints rather
+        than composites — and .skeleton covers the whole grid during every load.
+        Interactive feedback (focus rings, ripples, the play button) is untouched. */
+  .skeleton, .top10-skeleton::before, .mz-sugg-skeleton i, .ch-movie-card-inner,
+  .collections-hub-overlay::before, .top10-big {
+    animation: none !important;
+  }
+  .movie-card [class*="pulse"], .movie-card [class*="glow"],
+  .card-new, .card-fresh, .card-dubbed, .card-anime-tag, .card-quality {
+    animation-iteration-count: 1 !important;
+  }
+
+  /* 10. THE 2×-VIEWPORT BLURRED AURORA. inset:-20% on a fixed, full-viewport
+         overlay is ~1.96× the viewport area under a 30px Gaussian. */
+  .collections-hub-overlay::before {
+    filter: none !important;
+  }
 }
+
+/*  ── THE GRID LADDER WAS LEFT ALONE, AND THAT IS A MEASURED DECISION ──
+ *
+ *  It looks wrong, and on paper it is: 1920px gives 7 columns and 2560px — 77%
+ *  more screen area — also gives SEVEN, each card inflating from 234px to 300px
+ *  wide instead of another column appearing. Since the poster is capped at TMDB's
+ *  w500, that extra width is upscale rather than detail, and every per-card cost
+ *  is paid over a bigger area.
+ *
+ *  So it was changed: minmax(280px) -> minmax(240px), which turns 2560px into 8
+ *  columns and 3840px into 13. Then it was measured on the real page at 3840×2160,
+ *  three runs, and it was consistently WORSE — scroll p95 46.8ms -> 104/157/211ms,
+ *  frames over 32ms 8 -> 27/35/49 — because more columns means more cards on
+ *  screen at once, and every card is force-promoted to its own GPU layer by
+ *  .movie-card's transform (promoted layers 156 -> 186). More, smaller cards is
+ *  only cheaper once that per-card promotion is gone, which is a hardware
+ *  decision that belongs in tv-mode.css.
+ *
+ *  Reverted rather than kept on the strength of the argument. If the per-card
+ *  layer promotion is ever removed for large screens, this is worth re-measuring —
+ *  the two changes have to land together or not at all.
+ */
 
 /* === LOW-END / MOBILE MODE: Strip effects but KEEP short transitions for smooth UI === */
 .low-end-mode *, .low-end-mode *::before, .low-end-mode *::after {

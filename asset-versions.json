@@ -1,19 +1,19 @@
 {
   "moviezone.min.js": {
-    "version": "14.4",
-    "sha256": "7724d50e086f3b7f"
+    "version": "14.7",
+    "sha256": "3bb83fcaa30ed8e0"
   },
   "moviezone.min.css": {
-    "version": "9.13",
-    "sha256": "aa3a3062df3dea58"
+    "version": "9.14",
+    "sha256": "4c655c98f38fa8a2"
   },
   "tv-mode.min.js": {
-    "version": "1.5",
-    "sha256": "a5e70943258e77d9"
+    "version": "1.7",
+    "sha256": "84d6afe706aa13d7"
   },
   "tv-mode.min.css": {
-    "version": "1.3",
-    "sha256": "fe060859b14e8356"
+    "version": "1.4",
+    "sha256": "8f88671846b20afc"
   },
   "search-engine.min.js": {
     "version": "2.1",

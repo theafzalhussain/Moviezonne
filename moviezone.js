@@ -22,6 +22,70 @@ const mzLowTier =
 // 1. Mark document as loading for instant visual feedback
 document.documentElement.style.setProperty('--page-loaded', '0');
 
+/*  ══════════════════════════════════════════════════════════════════════
+ *  HOW FAR AHEAD TO PREFETCH — counted from the VIEWPORT, not from zero
+ *  ══════════════════════════════════════════════════════════════════════
+ *  Every prefetch observer in this file used a hard-coded rootMargin: 300px for
+ *  images, 200px for the section loader, 400px for both infinite-scroll triggers.
+ *  A fixed pixel margin answers the wrong question, because the lead time a
+ *  loader actually gets is `viewport height + margin`, and viewport height varies
+ *  by a factor of three across the devices this site runs on.
+ *
+ *  On a 2160px TV panel a 400px margin means the trigger is armed 2560px before
+ *  it is needed — and since the whole 30-card grid is about 2500px tall, that is
+ *  "load everything, now, in one burst" on exactly the hardware least able to
+ *  absorb it. On an 800px phone the same 400px is a sensible 1200px of lead.
+ *
+ *  So the lead is what gets fixed, and the margin is derived from it. The margin
+ *  SHRINKS as the viewport grows, which is the opposite of scaling it with `vh` —
+ *  a taller viewport already supplies the lead time, so buying more of it is pure
+ *  over-fetch.
+ *
+ *  Calibrated so nothing regresses on the common cases:
+ *      viewport  800px (phone)    -> 400px, i.e. exactly today's value
+ *      viewport 1080px (laptop)   -> 320px
+ *      viewport 1440px            -> 120px
+ *      viewport 2160px (4K panel) -> 120px, the floor
+ *  The floor exists so a very tall viewport still arms slightly early rather than
+ *  exactly on contact, which would show a visible gap while the fetch lands.
+ */
+const MZ_PREFETCH_LEAD_PX = 1200;
+const MZ_PREFETCH_MIN_MARGIN_PX = 120;
+
+/** rootMargin string for a prefetch observer, capped at the caller's old value so
+ *  this can only ever reduce eagerness, never increase it.
+ *  @param {number} maxPx the margin this observer used before
+ */
+function mzPrefetchRootMargin(maxPx) {
+  const vh = (typeof window !== 'undefined' && window.innerHeight) || 800;
+  const lead = Math.max(MZ_PREFETCH_MIN_MARGIN_PX, MZ_PREFETCH_LEAD_PX - vh);
+  return Math.round(Math.min(maxPx || MZ_PREFETCH_LEAD_PX, lead)) + 'px';
+}
+
+/*  ── ONE FRAME, ONE RUN ──
+ *
+ *  A `scroll` listener fires many times per frame, and the rail handlers it wraps
+ *  READ layout (scrollWidth, clientWidth, getBoundingClientRect) and then WRITE to
+ *  the DOM. Interleaved like that, every read after a write forces the browser to
+ *  flush layout synchronously — the classic layout-thrash — and the cost grows
+ *  with how many elements are on screen, which is why it shows up on a big panel
+ *  first. Collapsing to one run per animation frame removes the repeats, and the
+ *  handlers below additionally batch all their reads ahead of their writes so a
+ *  single run cannot thrash either.
+ *
+ *  Not a debounce: a debounce would leave the arrows stale for the whole gesture.
+ *  This still updates every frame, just never more than once per frame. */
+function mzRafThrottle(fn) {
+  let queued = false;
+  return function () {
+    if (queued) return;
+    queued = true;
+    const run = () => { queued = false; fn(); };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+    else setTimeout(run, 16);
+  };
+}
+
 // 2. Lazy Image Observer (loads images only when near viewport - saves bandwidth + speed)
 const lazyImageObserver = ('IntersectionObserver' in window) ? new IntersectionObserver((entries) => {
   entries.forEach(entry => {
@@ -31,7 +95,7 @@ const lazyImageObserver = ('IntersectionObserver' in window) ? new IntersectionO
       lazyImageObserver.unobserve(img);
     }
   });
-}, { rootMargin: '300px' }) : null;
+}, { rootMargin: mzPrefetchRootMargin(300) }) : null;
 
 // 3. Passive event listeners globally (smoother scroll)
 if (typeof EventTarget !== 'undefined') {
@@ -109,9 +173,10 @@ function getHeroBackdrop(path) {
  *  `wantPath` is the backdrop file_path to put on slide 0, and it is passed in
  *  rather than read from <head> here so the auto-refresh can ask the same question
  *  of LIVE data. On a first load it is heroBackdropMetaPath(), the copy that
- *  shipped with the document; on a refresh it is this round's movie/popular[0],
- *  which is the same source seo-ssr.js and inject-home-links.js resolve that tag
- *  from. Everything below — the same-category swap, the age refusal — is shared.
+ *  shipped with the document; on a refresh it is this round's
+ *  trending/movie/week[0], which is the same source seo-ssr.js and
+ *  inject-home-links.js resolve that tag from. Everything below — the
+ *  same-category swap, the age refusal — is shared.
  */
 function pinPreloadedHero(list, pool, wantPath) {
   try {
@@ -174,7 +239,7 @@ function pinPreloadedHero(list, pool, wantPath) {
 /** The backdrop the document told us was preloaded, or '' when there is none.
  *  Written into <head> by heroPreloadTag() in seo-ssr.js on the SSR path and by
  *  scripts/inject-home-links.js on the static one; both resolve it from
- *  movie/popular[0]. */
+ *  trending/movie/week[0]. */
 function heroBackdropMetaPath() {
   const meta = document.querySelector('meta[name="mz-hero-backdrop"]');
   return (meta && meta.getAttribute('content')) || '';
@@ -750,6 +815,11 @@ let abortControllers = new Map(); // Track controllers to cancel stale requests
 const _mzCacheWriteQueue = new Map();
 let _mzCacheFlushScheduled = false;
 
+/*  Set by _mzFlushCacheWrites, read and cleared by the 60s housekeeping sweep.
+ *  Starts true so the first sweep still runs once — a previous session's entries
+ *  are exactly what needs trimming on a fresh load. */
+let _mzCacheDirty = true;
+
 const _mzOnIdle = (typeof requestIdleCallback === 'function')
   ? (fn) => requestIdleCallback(fn, { timeout: 2000 })
   : (fn) => setTimeout(fn, 300);
@@ -798,6 +868,12 @@ function _mzEvictCacheEntries(count) {
 function _mzFlushCacheWrites() {
   _mzCacheFlushScheduled = false;
   if (!_mzCacheWriteQueue.size) return;
+  /*  Tells the 60s housekeeping sweep that there is something new to trim. Without
+   *  it the sweep enumerated the WHOLE of localStorage, filtered, stamped and
+   *  sorted every mz_cache_ key once a minute for the life of the tab, whether or
+   *  not a single byte had been written — a synchronous main-thread pass for
+   *  nothing. See the sweep for why that matters most on a weak device. */
+  _mzCacheDirty = true;
   const entries = Array.from(_mzCacheWriteQueue);
   _mzCacheWriteQueue.clear();
   for (const [cacheKey, data] of entries) {
@@ -1814,7 +1890,7 @@ async function init() {
           break;
         }
       }
-    }, { rootMargin: '200px' });
+    }, { rootMargin: mzPrefetchRootMargin(200) });
     observer.observe(section);
   }
 
@@ -1885,7 +1961,8 @@ function setupInfiniteScroll() {
             loadMoreMoviesAction();
         }
     }, {
-        rootMargin: '400px' // Start loading 400px before the element is visible
+        // Lead time counted from the viewport — see mzPrefetchRootMargin.
+        rootMargin: mzPrefetchRootMargin(400)
     });
     observer.observe(trigger);
 }
@@ -1944,7 +2021,7 @@ function setupUpcomingInfiniteScroll() {
         }
         loadUpcoming(true);
     }, {
-        rootMargin: '400px'
+        rootMargin: mzPrefetchRootMargin(400)
     });
     _mzUpcomingObserver.observe(trigger);
 }
@@ -2351,6 +2428,33 @@ const REGIONAL_INDUSTRY_LANGUAGES = ['hi', 'ta', 'te'];
 const REGIONAL_FRESH_MIN_POPULARITY = 12;
 const REGIONAL_FRESH_MIN_VOTES = 8;
 
+/*  ── THE SAME FLOOR, EXTENDED TO K-DRAMA AND C-DRAMA — SERIES ONLY ──
+ *
+ *  The list above is the three industries with MOVIE tabs, and for movies that is
+ *  the right scope. Web series are a different catalogue: the ALL feed is meant
+ *  to carry a newly released series from any OTT, and after Hindi and English the
+ *  two that actually matter to this audience are Korean and Chinese drama.
+ *
+ *  They were failing for precisely the reason the Hindi half of this floor was
+ *  written for. A K-drama premiering on TVING or a C-drama on iQiyi carries a
+ *  fraction of the vote count an English Netflix premiere collects in week one,
+ *  so judged by the same 20/20 bar it missed the fresh web-series group and fell
+ *  to the stale fallback — reachable only by scrolling past the whole catalogue.
+ *
+ *  MOVIES ARE NOT ON THIS LIST, and that is deliberate rather than an oversight:
+ *  a Korean or Chinese FILM has no tab on this site and no guaranteed slot, so
+ *  lowering its bar would only let a no-name release jump ahead of a real one.
+ *  There is a dedicated K-Drama tab for the series side, which is what this
+ *  serves.
+ *
+ *  Hindi and English still lead, and not through this floor. They lead through
+ *  FEED_FIRST_SCREEN_INDUSTRIES, which reserves a guaranteed front-row series
+ *  slot for 'en' and 'hi' (and 'ta'/'te') and reserves nothing for 'ko'/'zh'. So
+ *  Korean and Chinese drama compete on merit with a fair bar — present, ordered
+ *  by real demand, and never ahead of a Hindi or English premiere that exists.
+ */
+const SERIES_INDUSTRY_LANGUAGES = ['hi', 'ta', 'te', 'ko', 'zh'];
+
 /** The popularity/vote bar a title must clear to be treated as a relevant fresh
  *  release. Movies and web series from the tabbed industries get the smaller
  *  bar; everything else, and all anime whatever its language, keeps the original
@@ -2358,8 +2462,19 @@ const REGIONAL_FRESH_MIN_VOTES = 8;
  *  popularity and no votes fails it exactly as before. */
 function freshTierFloors(title) {
   const lang = title.original_language || 'en';
-  if (REGIONAL_INDUSTRY_LANGUAGES.indexOf(lang) !== -1 && !isAnimeContent(title)) {
-    return { popularity: REGIONAL_FRESH_MIN_POPULARITY, votes: REGIONAL_FRESH_MIN_VOTES };
+  if (!isAnimeContent(title)) {
+    /*  Anime is checked first and excluded outright. It keeps the 20/20 bar
+     *  whatever its language — a whole seasonal cohort crosses a print stage in
+     *  the same week with almost no votes behind it, which is the exact case the
+     *  floor was written to stop. It is also why 'zh'/'ko' below are safe to add:
+     *  Chinese and Korean ANIMATION is filtered out here, before language is
+     *  consulted at all. */
+    const scoped = mediaTypeOf(title) === 'movie'
+      ? REGIONAL_INDUSTRY_LANGUAGES     // movies: only the three tabbed industries
+      : SERIES_INDUSTRY_LANGUAGES;      // series: plus K-drama and C-drama
+    if (scoped.indexOf(lang) !== -1) {
+      return { popularity: REGIONAL_FRESH_MIN_POPULARITY, votes: REGIONAL_FRESH_MIN_VOTES };
+    }
   }
   return { popularity: FRESH_TIER_MIN_POPULARITY, votes: FRESH_TIER_MIN_VOTES };
 }
@@ -2488,10 +2603,10 @@ function diversifyByLanguageWithinPriority(pool) {
  *  The pattern below is one screen's worth of cards, and it encodes the product
  *  order directly: movies first, then web series, then anime.
  *
- *  Movies take three quarters of it and the whole top of it — the feed is still a
- *  movie feed, and the two fresh movie groups still open it. A web series lands at
- *  slot 5 and another at 9; anime waits until slot 11, so at least two web series
- *  are always ahead of the first anime. Nothing is blocked off into a section: the
+ *  Movies take the majority of it and the whole top of it — the feed is still a
+ *  movie feed, and the two fresh movie groups still open it. Web series land at
+ *  slots 5, 7, 10 and 12; anime waits until slot 9, so at least two web series are
+ *  always ahead of the first anime. Nothing is blocked off into a section: the
  *  pattern repeats for as long as the pool lasts, so someone scrolling sees a mix
  *  the whole way down instead of a page of films, then a page of series, then a
  *  page of anime.
@@ -2499,9 +2614,40 @@ function diversifyByLanguageWithinPriority(pool) {
  *  Every lane is already sorted by rankByFreshness, so taking from the front of a
  *  lane always takes its best remaining title. A lane that runs dry never leaves
  *  a hole: the slot falls through to whatever is left, movies first.
+ *
+ *  ── THE PATTERN WAS REBALANCED (Sep 2026) ──
+ *
+ *  It used to be 9 movie / 2 series / 1 anime, i.e. movies took three quarters of
+ *  every screen. That is where "web series get the same priority as movies"
+ *  actually failed, and it failed at this layer rather than in the priority
+ *  groups: a fresh premiere was correctly ranked at the top of the series lane
+ *  and then had to wait for slot 5, and the next one for slot 9. With only two
+ *  series seats per twelve cards, a week with six new premieres put the sixth at
+ *  card 33 — present, ranked, and unreachable.
+ *
+ *  It is now 7 movie / 4 series / 1 anime per twelve, and three properties are
+ *  preserved deliberately:
+ *
+ *    • MOVIES STILL OPEN THE FEED. The first four slots are movies, unchanged, so
+ *      the two fresh movie groups still take the top of the surface.
+ *    • ANIME'S SHARE IS UNTOUCHED. It keeps its one slot in twelve. The four series
+ *      seats were paid for out of the movie majority, not out of the anime lane —
+ *      anime already has its own tab and was not the thing being rationed.
+ *    • MOVIES ARE STILL THE MAJORITY IN PRACTICE. The pattern is a REQUEST, not a
+ *      quota: the ALL pool is eleven movie sources against five TV ones, so the
+ *      series lane runs dry long before the movie lane and the extra slots fall
+ *      through to movies. What the change really does is bring every fresh series
+ *      that exists forward, rather than rationing them.
+ *
+ *  WEB SERIES STILL PRECEDE ANIME: slots 5 and 7 are series, so two of them are
+ *  always ahead of the anime at slot 9.
+ *
+ *  So the effect is exactly the requested one — a new web series from any OTT is
+ *  visible on the first screen next to the new movies — without turning a movie
+ *  feed into a series feed on a week when nothing premiered.
  */
 const FEED_SLOT_PATTERN = ['movie', 'movie', 'movie', 'movie', 'series',
-  'movie', 'movie', 'movie', 'series', 'movie', 'anime', 'movie'];
+  'movie', 'series', 'movie', 'anime', 'series', 'movie', 'series'];
 
 function feedLaneOf(title) {
   if (mediaTypeOf(title) === 'movie') return 'movie';
@@ -2613,16 +2759,44 @@ function industryRepresentative(item) {
     || (item.popularity || 0) >= REGIONAL_FRESH_MIN_POPULARITY;
 }
 
-function promoteFreshIndustryMix(pool, allowCatalogue) {
+function promoteFreshIndustryMix(pool, allowCatalogue, leadLanguage) {
   const freshChosen = [];
   const catalogueChosen = [];
   const takenIndexes = new Set();
 
+  /*  Which industries have already been given a slot, kept PER LANE.
+   *
+   *  ── why this exists (Sep 2026) ──
+   *  The catalogue fallback below documents itself as "only industries that did
+   *  not already win a fresh slot are considered", and reasons that claimSlots
+   *  breaks out of its group loop on success so a language cannot be picked
+   *  twice. That reasoning does not hold: `takenIndexes` remembers INDEXES, not
+   *  languages, and each call to claimSlots walks
+   *  FEED_FIRST_SCREEN_INDUSTRIES from the start again. `break` leaves the group
+   *  loop for one language inside ONE call; it says nothing about the next call.
+   *
+   *  So every industry that won a fresh slot was silently handed a second,
+   *  catalogue slot as well. Measured on the Web Series tab: English took card 1
+   *  with Lanterns (2026) and then card 3 with Reacher (2022); Hindi took card 2
+   *  with a 2026 premiere and then card 4 with C.I.D. — first aired 1998. Two of
+   *  the top four cards on a "latest web series" surface were back catalogue,
+   *  which is the opposite of what the fallback was written to do: it exists to
+   *  give a slot to an industry that has NOTHING fresh, not to give a second one
+   *  to an industry that already led the feed.
+   *
+   *  Per LANE rather than globally, because a language claiming a fresh movie
+   *  slot must still be able to claim a fresh series slot — that is the
+   *  "one per industry among the movies, and one per industry among the web
+   *  series" rule the two fresh passes are there to implement. */
+  const claimedByLane = { movie: new Set(), series: new Set() };
+
   /*  One pass per lane. `inLane` keeps the movie pass from stealing the slot the
    *  series pass is about to fill, and vice versa — without it a tab holding both
    *  would hand all four industry slots to whichever lane ranked higher. */
-  const claimSlots = (groups, inLane, sink) => {
+  const claimSlots = (groups, inLane, sink, laneKey) => {
+    const claimed = claimedByLane[laneKey];
     FEED_FIRST_SCREEN_INDUSTRIES.forEach((lang) => {
+      if (claimed.has(lang)) return;        // already represented in this lane
       for (const group of groups) {
         let found = -1;
         for (let i = 0; i < pool.length; i++) {
@@ -2634,7 +2808,12 @@ function promoteFreshIndustryMix(pool, allowCatalogue) {
           found = i;
           break;                                          // pool is ranked: first is best
         }
-        if (found !== -1) { takenIndexes.add(found); sink.push(found); break; }
+        if (found !== -1) {
+          takenIndexes.add(found);
+          claimed.add(lang);
+          sink.push(found);
+          break;
+        }
       }
     });
   };
@@ -2642,16 +2821,14 @@ function promoteFreshIndustryMix(pool, allowCatalogue) {
   const isMovie = (m) => mediaTypeOf(m) === 'movie';
   const isSeries = (m) => mediaTypeOf(m) !== 'movie';
 
-  claimSlots(FEED_PROMOTABLE_GROUPS, isMovie, freshChosen);
-  claimSlots(FEED_SERIES_PROMOTABLE_GROUPS, isSeries, freshChosen);
+  claimSlots(FEED_PROMOTABLE_GROUPS, isMovie, freshChosen, 'movie');
+  claimSlots(FEED_SERIES_PROMOTABLE_GROUPS, isSeries, freshChosen, 'series');
 
   if (allowCatalogue) {
-    /*  Only industries that did not already win a fresh slot are considered:
-     *  claimSlots skips a language once one of its titles is taken, because the
-     *  fresh pass breaks out of the group loop on success. An industry with a
-     *  fresh title therefore never also gets a catalogue slot. */
-    claimSlots(FEED_CATALOGUE_MOVIE_GROUPS, isMovie, catalogueChosen);
-    claimSlots(FEED_CATALOGUE_SERIES_GROUPS, isSeries, catalogueChosen);
+    /*  Only industries that did not already win a fresh slot are considered —
+     *  enforced by claimedByLane above, which is what actually makes this true. */
+    claimSlots(FEED_CATALOGUE_MOVIE_GROUPS, isMovie, catalogueChosen, 'movie');
+    claimSlots(FEED_CATALOGUE_SERIES_GROUPS, isSeries, catalogueChosen, 'series');
   }
 
   if (freshChosen.length + catalogueChosen.length < 2) return pool.slice();
@@ -2661,15 +2838,48 @@ function promoteFreshIndustryMix(pool, allowCatalogue) {
    *  surface and the fallback sits just behind it rather than above it. */
   freshChosen.sort((a, b) => a - b);
   catalogueChosen.sort((a, b) => a - b);
+
+  /*  ── ONE INDUSTRY MAY BE ASKED TO LEAD (Sep 2026) ──
+   *
+   *  Opt-in, and only one surface asks for it today: the Web Series tab passes
+   *  'hi'. The requirement there is that a Hindi web series opens the tab while
+   *  the rest of the front row stays whatever is newest from any language and any
+   *  OTT — and ranking alone cannot deliver that, because an English premiere
+   *  carries an order of magnitude more popularity and votes than a Hindi one in
+   *  its first week, so English wins the lower pool index and therefore the first
+   *  promoted position.
+   *
+   *  This is a REORDER of the promoted set only. It does not add, drop or re-pick
+   *  anything: the same industries hold the same number of slots, and inside each
+   *  side rank order is still preserved (a stable partition, not a sort by
+   *  language). Everything after the promoted set is untouched.
+   *
+   *  The ALL feed does not pass it, deliberately — there the opening card should
+   *  be the strongest new release whatever language it is in, and forcing Hindi
+   *  into that position would be a different product decision than the one asked
+   *  for here. */
+  if (leadLanguage) {
+    const leads = (indexes) => {
+      const first = [], rest = [];
+      indexes.forEach((i) => {
+        const lang = (pool[i] && pool[i].original_language) || 'en';
+        (lang === leadLanguage ? first : rest).push(i);
+      });
+      return first.concat(rest);
+    };
+    return leads(freshChosen).concat(leads(catalogueChosen)).map((i) => pool[i])
+      .concat(pool.filter((_, i) => !takenIndexes.has(i)));
+  }
+
   return freshChosen.concat(catalogueChosen).map((i) => pool[i])
     .concat(pool.filter((_, i) => !takenIndexes.has(i)));
 }
 
-function interleaveFeedByType(pool, allowCatalogueIndustrySlots) {
+function interleaveFeedByType(pool, allowCatalogueIndustrySlots, leadLanguage) {
   /*  The industry mix is applied first and kept whatever happens next: if the tv
    *  queries failed and this pool is movies only, the early return below must
    *  still hand back the balanced order, not the raw one. */
-  const promoted = promoteFreshIndustryMix(pool, allowCatalogueIndustrySlots);
+  const promoted = promoteFreshIndustryMix(pool, allowCatalogueIndustrySlots, leadLanguage);
 
   const lanes = { movie: [], series: [], anime: [] };
   promoted.forEach((item) => { lanes[feedLaneOf(item)].push(item); });
@@ -2887,6 +3097,56 @@ function ottRankLikeAllFeed(items) {
                              about how current it is, so the decay is movies-only
    ══════════════════════════════════════════════════════════════════════════ */
 
+/*  ── THE PRE-2000 FLOOR ON BROWSE FEEDS ──
+ *
+ *  A 1990s film reaching page 1 or 2 of Hollywood / Bollywood / Tollywood is not
+ *  a ranking accident that can be tuned away. Those tabs are popularity pages,
+ *  TMDB popularity is a lifetime-ish signal, and the era weight in
+ *  catalogueEraFactor() is a smooth DECAY — it demotes an old title, it never
+ *  excludes one, so on a thin week the 1990s simply float back up. The era weight
+ *  is still doing its job on 2000s-vs-2020s ordering; this is the hard edge it was
+ *  deliberately never given.
+ *
+ *  BROWSING and SEARCHING are different promises, and only browsing is filtered.
+ *  The intent is: nobody scrolling a category should be handed a 1995 release, but
+ *  somebody who types its name must still find it and watch it. Search is a
+ *  separate path — it runs /search/multi into its own result list and never passes
+ *  through loadMovies() — so this floor does not touch it. Deep links, the watch
+ *  page, Continue Watching and the sitemap are likewise unaffected.
+ *
+ *  Scope, and the two deliberate exemptions:
+ *    • MOVIES ONLY. A series is matched on first_air_date, which is the date its
+ *      FIRST season aired — a show that premiered in 1999 and is still releasing
+ *      seasons today is current, and dropping it would be wrong on the facts.
+ *    • 'anime' and 'kids' keep their classics. Those two sections are largely
+ *      about a canon: a Kids grid with no Totoro (1988) is a worse grid, and the
+ *      filter on the line above already carves out exactly these two categories
+ *      for the same "their catalogue works differently" reason.
+ *
+ *  'toprated' IS included, and that is a decision rather than an oversight. Two
+ *  comments elsewhere in this file say the tab is exempt from age treatment; they
+ *  are about the era WEIGHT (catalogueEraFactor), which still never runs there —
+ *  toprated is in FEED_SELF_RANKED. This is a different mechanism and a product
+ *  rule: a tab that opens on 1957 while every other tab starts at 2000 reads as
+ *  broken, not as curated. Measured after the floor, the tab still fills its
+ *  thirty cards and opens 9.2 / 9.1 / 8.9, with The Dark Knight, Spirited Away,
+ *  the LOTR trilogy, Parasite, Interstellar, 3 Idiots and Dangal all present.
+ *  The Godfather is one search away, which is the whole bargain here.
+ */
+const FEED_MIN_RELEASE_YEAR = 2000;
+const FEED_ERA_EXEMPT_CATEGORIES = new Set(['anime', 'kids']);
+
+/** True for a MOVIE released before FEED_MIN_RELEASE_YEAR on a surface that is
+ *  meant to carry only modern releases. Series are never matched — see above. */
+function isPreMillenniumMovie(item, cat) {
+  if (FEED_ERA_EXEMPT_CATEGORIES.has(cat)) return false;
+  if (mediaTypeOf(item) !== 'movie') return false;
+  const date = item.release_date;
+  if (!date) return false;                       // undated rows are judged by votes above
+  const year = parseInt(String(date).slice(0, 4), 10);
+  return isFinite(year) && year < FEED_MIN_RELEASE_YEAR;
+}
+
 /*  Titles that must never reach the grid, whatever endpoint returned them.
  *  Kept tiny and explicit: this is an editorial removal list, not a filter.
  *  Matched by TMDB id first (exact, survives title edits upstream) with a
@@ -2938,7 +3198,7 @@ function catalogueEraFactor(item, nowMs) {
  *  one surface-specific tiebreak, then diversify by language and interleave by
  *  type. Runs entirely on an already-fetched pool, so it costs no requests.
  */
-function rankCategoryFeed(items, nowMs) {
+function rankCategoryFeed(items, nowMs, leadLanguage) {
   if (!Array.isArray(items) || items.length < 2) return items || [];
   const now = nowMs || Date.now();
   rankByFreshness(items, now);
@@ -2954,9 +3214,27 @@ function rankCategoryFeed(items, nowMs) {
   /*  `true` = this surface may give an industry's best CATALOGUE title a
    *  first-screen slot when it has no fresh one. A category tab promises the best
    *  of that category rather than only this week's arrivals, so — unlike the ALL
-   *  feed — that is not a lie. Fresh titles still lead; see promoteFreshIndustryMix. */
-  return interleaveFeedByType(diversifyByLanguageWithinPriority(items), true);
+   *  feed — that is not a lie. Fresh titles still lead; see promoteFreshIndustryMix.
+   *
+   *  `leadLanguage` is optional and only reorders the promoted front row — see the
+   *  note in promoteFreshIndustryMix. FEED_LEAD_LANGUAGE_BY_CATEGORY decides who
+   *  asks for it. */
+  return interleaveFeedByType(diversifyByLanguageWithinPriority(items), true, leadLanguage);
 }
+
+/*  ── WHICH TABS ASK AN INDUSTRY TO LEAD ──
+ *
+ *  Only the Web Series tab, and only for Hindi. The tab's pool is deliberately
+ *  every language and every OTT — English, Hindi, Tamil, Telugu, Korean and
+ *  Chinese all have their own source in the plan — and inside that pool a Hindi
+ *  premiere cannot win the opening card on merit: in its first week it carries a
+ *  fraction of an English premiere's popularity and votes, so English takes the
+ *  lower pool index and with it the first promoted slot.
+ *
+ *  A table rather than an `if` because the question "should a tab lead with an
+ *  industry" is per-surface product policy, and the next one to want it should be
+ *  a one-line entry here instead of another branch in loadMovies(). */
+const FEED_LEAD_LANGUAGE_BY_CATEGORY = { tv: 'hi' };
 
 /*  Categories that own their ordering, so loadMovies() must NOT re-rank them:
  *
@@ -3146,6 +3424,113 @@ function seriesUpgradeWindowQuery(page) {
     'first_air_date.gte': istDateStr(uhdDay + 15),
     'first_air_date.lte': istDateStr(fhdDay - 2),
     'vote_count.gte': SERIES_MIN_VOTES,
+    page: page,
+    language: 'en-US'
+  };
+}
+
+/*  ── THE "ANY OTT, ANY OF OUR LANGUAGES" PREMIERE WINDOW ──
+ *
+ *  latestSeriesWindowQuery() above is network-gated, and that gate is doing real
+ *  work: without it a "latest series" window fills with daily soaps. But it also
+ *  means a premiere reaches the ALL feed only if TMDB happens to carry one of the
+ *  listed networks on it, and it is sorted by global popularity — which an
+ *  English Netflix premiere wins every time. Measured consequence: a Hindi
+ *  original that dropped last week, a Korean drama on a service that is not on
+ *  the network list, and every C-drama were all absent from the ALL feed
+ *  entirely, however new and however popular in their own market.
+ *
+ *  So this window asks the question the other one cannot: what premiered
+ *  recently in the languages this audience actually watches, on ANY service.
+ *
+ *  It is network-FREE by design — that is the "kisi bhi OTT" requirement — and
+ *  the junk the network gate was protecting against is excluded directly instead:
+ *    • without_networks still drops the Indian linear channels;
+ *    • without_genres drops News (10763), Reality (10764), Soap (10766) and Talk
+ *      (10767), which is what a daily-soap or reality slot actually is in TMDB's
+ *      taxonomy. That is a tighter filter than a network allow-list, not a looser
+ *      one: it also catches soaps on services the allow-list never covered.
+ *
+ *  The vote floor is deliberately lower than SERIES_MIN_VOTES for exactly the
+ *  reason the regional relevance floor exists — an Indian or Chinese premiere
+ *  collects a fraction of an English one's votes in week one. freshnessTier()
+ *  still applies the 12/8 relevance bar afterwards, so this is a pool widener,
+ *  not an open door.
+ *
+ *  Hindi and English still lead the series lane: they hold guaranteed slots in
+ *  FEED_FIRST_SCREEN_INDUSTRIES and Korean/Chinese do not. This window only
+ *  ensures those two are actually IN the pool to be ranked.
+ */
+const REGIONAL_SERIES_LANGUAGES = 'hi|ta|te|ko|zh';
+const REGIONAL_SERIES_MIN_VOTES = '3';
+const NON_DRAMA_TV_GENRES = '10763,10764,10766,10767';   // News, Reality, Soap, Talk
+
+/*  The same four ids as a Set, for the one place the exclusion cannot be pushed
+ *  into the query: /trending/tv/week takes no without_genres parameter. It is
+ *  TMDB's real trending signal and the Web Series tab wants it, but ungated it
+ *  also carries whatever daily soap or reality show is trending that week — which
+ *  is precisely what a tab called "Web Series" must not open with. So the same
+ *  rule is applied to that source's rows after they arrive.
+ *
+ *  Genre, not network, is the right test here. A network allow-list cannot answer
+ *  it: a soap and an original drama sit on the same network. */
+const NON_DRAMA_TV_GENRE_IDS = new Set([10763, 10764, 10766, 10767]);
+
+/** True for the rows a web-series surface should never carry: news bulletins,
+ *  reality formats, daily soaps and talk shows. */
+function isNonDramaTvRow(item) {
+  const ids = item && item.genre_ids;
+  if (!Array.isArray(ids)) return false;
+  for (const id of ids) {
+    if (NON_DRAMA_TV_GENRE_IDS.has(id)) return true;
+  }
+  return false;
+}
+
+/** Newest premieres in the Indian + Korean + Chinese languages, from any OTT.
+ *
+ *  `languages` narrows it to one industry when a surface needs that industry
+ *  guaranteed rather than competing — the Web Series tab asks for 'hi' separately
+ *  because a five-language popularity page is won by Korean drama most weeks.
+ *  Defaults to all five, which is what the ALL feed uses. */
+function latestRegionalSeriesWindowQuery(page, languages) {
+  return {
+    with_original_language: languages || REGIONAL_SERIES_LANGUAGES,
+    without_networks: LINEAR_TV_EXCLUDE_IDS,
+    without_genres: NON_DRAMA_TV_GENRES,
+    sort_by: 'popularity.desc',
+    'first_air_date.gte': istDateStr(LATEST_SERIES_WINDOW_DAYS),
+    'first_air_date.lte': istDateStr(0),
+    'vote_count.gte': REGIONAL_SERIES_MIN_VOTES,
+    page: page,
+    language: 'en-US'
+  };
+}
+
+/*  ── TELUGU AND TAMIL GET THEIR OWN RELEASE WINDOW ──
+ *
+ *  Bollywood already has latestBollywoodWindowQuery() for a documented reason:
+ *  the shared with_origin_country=IN window is a single popularity sort, and one
+ *  big release week in one industry pushes the others off page one. Telugu and
+ *  Tamil had no such window, so they reached the ALL feed only through that
+ *  shared page — and lost it to Hindi exactly as Hindi used to lose it to the
+ *  global sort. That is why "Tollywood gets the same priority as Hollywood" was
+ *  not true in practice: the ranking never saw a fresh Telugu release to rank.
+ *
+ *  One request covers both, `te|ta` in the same OR form the Zee5 gate uses, and
+ *  it carries no vote floor for the same reason the other industry windows carry
+ *  none: a South release in its first days has a handful of votes and real
+ *  demand, and a floor here is precisely what used to hide it.
+ */
+const SOUTH_INDIAN_LANGUAGES = 'te|ta';
+
+/** Newest Telugu and Tamil releases, asked as their own question. */
+function latestSouthWindowQuery(page) {
+  return {
+    with_original_language: SOUTH_INDIAN_LANGUAGES,
+    sort_by: 'popularity.desc',
+    'primary_release_date.gte': istDateStr(LATEST_WINDOW_DAYS),
+    'primary_release_date.lte': istDateStr(0),
     page: page,
     language: 'en-US'
   };
@@ -3545,7 +3930,6 @@ const CAROUSEL_CATEGORY_QUOTA = {
  *  choice any more.
  */
 const CAROUSEL_YEAR_WINDOW_MIN_DAYS = 240;
-const CAROUSEL_INDUSTRY_MIN_VOTES = 20;
 const CAROUSEL_TV_AIRED_WITHIN_DAYS = 120;
 
 /** Earliest release / premiere date a hero slide may carry, as YYYY-MM-DD.
@@ -3585,19 +3969,34 @@ function carouselIndustryQuery(lang) {
     sort_by: 'popularity.desc',
     'primary_release_date.gte': carouselWindowStartStr(),
     'primary_release_date.lte': istDateStr(0),
-    /*  The vote floor belongs HERE, not only in the bar downstream. Without it
-     *  page 1 was over half 2-to-6-vote entries, and those are not merely weak
-     *  picks - calculateMovieScore() actively prefers them. Its rating term is
-     *  Bayesian-shrunk towards 6.2 with a 50-vote prior, so a 2-vote 8.0 shrinks
-     *  to 6.27 while a 69-vote 5.8 shrinks to 5.96: the title nobody has seen
-     *  outranks the one everybody has. Correct shrinkage, wrong pool. Excluding
-     *  them at the source is the fix; nothing downstream has to fight the score.
+    /*  ── THE VOTE FLOOR WAS REMOVED (Sep 2026) ──
      *
-     *  20 and not higher, and it matters more now that the window is one year
-     *  rather than 550 days. Measured over 2026 to date: at a 20-vote floor Hindi
-     *  fields 11 titles and Telugu 3; at 40 Hindi drops to 5 and Telugu to 1,
-     *  which cannot fill a two-slot quota on a bad week. */
-    'vote_count.gte': String(CAROUSEL_INDUSTRY_MIN_VOTES),
+     *  It was `vote_count.gte: 20`, and the reasoning below was sound for the
+     *  scoring this source was written against: page 1 filled with 2-to-6-vote
+     *  entries, and calculateMovieScore() actively PREFERS those, because its
+     *  rating term is Bayesian-shrunk towards 6.2 on a 50-vote prior — a 2-vote
+     *  8.0 shrinks to 6.27 while a 69-vote 5.8 shrinks to 5.96, so the title
+     *  nobody has seen outranks the one everybody has.
+     *
+     *  Two things have changed since, and together they move the guard downstream
+     *  where it belongs:
+     *    • the carousel no longer ranks with calculateMovieScore(). It ranks with
+     *      carouselHeroScore(), whose freshness term is worth 140 points on a
+     *      21-day half-life — a hundred times the rating gap the floor was
+     *      protecting. And that term is itself gated on a liveness signal now, so
+     *      a no-name row cannot buy its way in with recency alone.
+     *    • clearsCarouselBar() has a new-release path that judges a days-old title
+     *      on popularity, precisely because its votes cannot exist yet.
+     *
+     *  Keeping the floor here meant the pool never SAW the titles that path was
+     *  written for: Lust Stories 3 (3 days old, popularity 54) has four votes, so
+     *  20 excluded it, and the Bollywood seats were left choosing between a
+     *  129-day-old film and a 102-day-old one. The floor was solving a scoring
+     *  problem by deleting the answer.
+     *
+     *  What still keeps the junk out: the bar (25 votes, or popularity 10 inside
+     *  45 days), the rating floor, and the liveness gate on the freshness award.
+     *  Nothing downstream has to fight the score either way. */
     language: 'en-US',
     page: '1'
   };
@@ -3762,13 +4161,310 @@ function carouselCategoryOf(item) {
   return 'world';
 }
 
+/*  ══════════════════════════════════════════════════════════════════════
+ *  THE NEW-RELEASE PATH THROUGH THE BAR
+ *  ══════════════════════════════════════════════════════════════════════
+ *  The regional bar asks for 25 votes, and the comment above explains why votes
+ *  are the honest demand signal for an industry whose popularity numbers are not
+ *  comparable to Hollywood's. All of that is correct — for a title that has been
+ *  out long enough to HAVE votes. For one that dropped this week it is not a bar,
+ *  it is a physical impossibility, and the Hindi seats are where that showed.
+ *
+ *  Measured on the live API, Hindi releases of this year sorted by popularity:
+ *      Lust Stories 3        3 days old   popularity 54   FOUR votes
+ *      Gandhari             18 days old   popularity 31   16 votes
+ *      Hanuman Ansh         45 days old   popularity 26   11 votes
+ *      Mirzapur: The Movie  18 days old   popularity 13   18 votes
+ *  Every one of them is under 25 votes, so every one of them failed the bar — and
+ *  carouselIndustryQuery() had already dropped them at the SOURCE with
+ *  vote_count.gte=20, so they never even reached the pool. What was left of the
+ *  year was eighteen older titles, and after the current-year ceiling exactly two
+ *  of those cleared the bar: Kartavya (129 days, popularity 6) and Main Vaapas
+ *  Aaunga (102 days, popularity 5). Those are the two slides that were sitting in
+ *  the Bollywood seats while Lust Stories 3 was three days old.
+ *
+ *  The Hindi web-series seat was worse, because a series premiere starts at
+ *  literally zero: Ali Baba Aur 40 Bhoot (10 days, popularity 30), Chumbak (11
+ *  days, popularity 21), The Revolutionaries (10 days, popularity 15) and Waiting
+ *  Hai (5 days, popularity 12) all carry ZERO votes and therefore a 0.0 rating —
+ *  they failed the vote floor AND the rating floor. Nothing recent could clear the
+ *  bar at all, so the seat fell back to Taskaree, from January.
+ *
+ *  So: a title inside the new-release window is judged on POPULARITY instead,
+ *  because that is the only signal that exists on day three. This is an ADDITIONAL
+ *  path, never a replacement — everything that cleared the bar before still does,
+ *  so no seat can get worse.
+ *
+ *  Three guards, and each one is answering a specific way this could go wrong:
+ *    • THE POPULARITY FLOOR IS THE CATEGORY'S OWN, never a flat number. It is
+ *      max(bar.popularity, MIN) — 25 for a global seat, 10 for a regional one.
+ *      A flat 10 was tried first and it quietly demolished the distinction the
+ *      whole bar is built on: Hollywood popularity runs in the hundreds, so 10 is
+ *      no filter at all there, and a no-name English release could have taken a
+ *      seat off a 1,339-vote hit. Regional keeps 10 because that IS a real signal
+ *      on that scale — on the measured Hindi page the tail is Vibe (popularity 5,
+ *      0 votes), Haiwaan (5, 0) and Zakir Khan: Papa Yaar (9, one vote rating
+ *      10.0), which is exactly the "an 8.0 with two votes took the slot" failure
+ *      the vote floor was written to stop. 10 admits all four real titles in both
+ *      lists and none of the filler.
+ *    • THE RATING FLOOR STILL APPLIES once the rating means anything. Below
+ *      MIN_RATED_VOTES a 0.0 is "unknown", not "bad", so it is waived; at or above
+ *      it the title must clear its category's rating floor like everything else.
+ *      That is what keeps Dhamaal 4 (4.3 with 13 votes) out.
+ *    • THE WINDOW IS SHORT. 45 days, so this is about titles whose votes have not
+ *      had time to arrive — not about old titles that never earned any. A film
+ *      that is four months old with no votes is filler, and still fails.
+ */
+const CAROUSEL_NEW_RELEASE_DAYS = 45;
+const CAROUSEL_NEW_RELEASE_MIN_POPULARITY = 10;
+const CAROUSEL_NEW_RELEASE_MIN_RATED_VOTES = 5;
+
+/** Days since release/premiere, or Infinity when the date is unusable.
+ *  Shared with carouselHeroScore() — see carouselAgeDays below, which this is. */
+function carouselAgeDaysOf(item, nowMs) {
+  return carouselAgeDays(item, nowMs || Date.now());
+}
+
 /** Does this title clear the bar for its own category? */
-function clearsCarouselBar(item, category) {
+function clearsCarouselBar(item, category, nowMs) {
   const bar = CAROUSEL_REGIONAL_CATEGORIES.indexOf(category) !== -1
     ? CAROUSEL_BAR_REGIONAL : CAROUSEL_BAR_GLOBAL;
-  return (item.vote_average || 0) >= bar.rating
-    && (item.vote_count || 0) >= bar.votes
-    && (item.popularity || 0) >= bar.popularity;
+
+  const rating = item.vote_average || 0;
+  const votes = item.vote_count || 0;
+  const popularity = item.popularity || 0;
+
+  if (rating >= bar.rating && votes >= bar.votes && popularity >= bar.popularity) {
+    return true;
+  }
+
+  // New-release path — see the note above for every number in here.
+  if (carouselAgeDaysOf(item, nowMs) > CAROUSEL_NEW_RELEASE_DAYS) return false;
+  const liveFloor = Math.max(bar.popularity, CAROUSEL_NEW_RELEASE_MIN_POPULARITY);
+  if (popularity < liveFloor) return false;
+  if (votes >= CAROUSEL_NEW_RELEASE_MIN_RATED_VOTES && rating < bar.rating) return false;
+  return true;
+}
+
+/*  ══════════════════════════════════════════════════════════════════════
+ *  THE HERO SCORE — WHY THE CAROUSEL DOES NOT USE calculateMovieScore()
+ *  ══════════════════════════════════════════════════════════════════════
+ *  It used to, and that is exactly why the hero kept showing LAST week's
+ *  trending titles. calculateMovieScore() is a CATALOGUE score: its two largest
+ *  terms are the Bayesian rating (~200 points at the top) and popularity (up to
+ *  150), both of which move over months. Freshness is worth at most 80 and
+ *  trending velocity at most 40. So a title that trended three weeks ago, having
+ *  by then accumulated the votes and the popularity, outranks this week's new
+ *  trending entry — and because the quota selection walks a pool sorted by that
+ *  score, the same ten slides kept winning for weeks. The deck signature never
+ *  changed, so the auto-refresh subsystem correctly decided there was nothing to
+ *  repaint. Nothing was broken; the ranking was simply answering a different
+ *  question from the one the hero asks.
+ *
+ *  The hero asks: WHAT IS NEW AND WHAT IS TRENDING RIGHT NOW. So it gets its own
+ *  score, built from three signals the catalogue score either ignores or
+ *  under-weights, and it costs zero extra TMDB requests:
+ *
+ *  1. TRENDING ORDINAL. /trending/movie/week and /trending/tv/week return TMDB's
+ *     own live trending ORDER, and that order was being thrown away the moment
+ *     the rows were merged into the pool. It is the single best "trending now"
+ *     signal available and it is free: position 0 is the title the world is
+ *     actually watching this week. Only the first CAROUSEL_TREND_RANK_DEPTH rows
+ *     carry it — past that the ordering is noise.
+ *
+ *  2. CONTINUOUS RELEASE FRESHNESS. calculateMovieScore() buckets recency at
+ *     7/14/30 days, so everything released this week ties and the tie is broken
+ *     by rating and popularity — which is a vote for the older title, since it
+ *     has had longer to collect both. A half-life decay instead makes a film
+ *     released three days ago genuinely beat one released six days ago.
+ *
+ *  3. HERO TENURE. This is the "auto-update" half of the requirement: when a new
+ *     trending title arrives, the trending title that has been in the hero
+ *     longest should make way for it. Every id that appears in a painted deck is
+ *     stamped with the time it FIRST appeared; after a short grace period a
+ *     slide starts paying a penalty that grows once per IST day. Quantising to
+ *     whole days matters — the deck must stay stable within a day (the refresh
+ *     runs every three hours and a churning hero looks broken) and rotate across
+ *     days. A title that has held a seat for a week is under real pressure from
+ *     any fresher rival, so the line-up turns over on its own with nothing to
+ *     maintain.
+ *
+ *  WHAT THIS DOES NOT TOUCH: the category quotas. CAROUSEL_CATEGORY_QUOTA and
+ *  fillCarouselByQuota() are untouched, and the hero score only re-orders the
+ *  pool those sweeps walk. The fixed ten — 4 Hollywood, 2 Bollywood, 1
+ *  Tollywood, 1 Hindi series, 1 English series, 1 anime — is exactly as before.
+ *  All that changes is WHICH title takes each of those reserved seats.
+ */
+
+/*  How far down a trending page the ordinal is still meaningful, and what
+ *  position 0 is worth. 120 is deliberately in the same league as the rating
+ *  term rather than above it: being #1 on TMDB's trending list should decide a
+ *  seat between two comparable titles, not hand one to something nobody rates. */
+const CAROUSEL_TREND_RANK_DEPTH = 20;
+const CAROUSEL_TREND_RANK_POINTS = 120;
+
+/*  A title that came back from several independent live sources at once —
+ *  trending AND now_playing AND popular — is hot in a way one list cannot show.
+ *  Small per-source award, capped, because the sources overlap by design. */
+const CAROUSEL_MULTI_SOURCE_POINTS = 18;
+const CAROUSEL_MULTI_SOURCE_CAP = 3;
+
+/*  Freshness decay. 140 at day 0, half of it every three weeks: day 0 → 140,
+ *  day 21 → 70, day 42 → 35. Continuous, so same-week releases no longer tie. */
+const CAROUSEL_FRESH_POINTS = 140;
+const CAROUSEL_FRESH_HALF_LIFE_DAYS = 21;
+
+/*  A SERIES CARRIES first_air_date, WHICH IS WHEN THE SHOW STARTED. Season 4 of
+ *  an ongoing hit reads 2019 and would score zero freshness, so a series that
+ *  arrived through one of the date-windowed /discover/tv sources — whose query
+ *  ALREADY proved recent activity, that is the whole point of air_date.gte — is
+ *  granted this fraction of the full award. Deliberately well under 1: a genuine
+ *  premiere this month must still beat a new season of an old show. */
+const CAROUSEL_SERIES_ACTIVITY_FRACTION = 0.45;
+const CAROUSEL_DATED_TV_SOURCES = ['webseries_en', 'webseries_hi', 'anime_tv'];
+
+/*  Rotation. Nothing is penalised for its first two days in the hero, then the
+ *  penalty steps once per whole day up to its ceiling. 22/day to a max of 110
+ *  means a five-day-old slide has given up roughly what being #1 on trending is
+ *  worth — enough for a newcomer to take the seat, not enough to evict a title
+ *  that is still far and away the biggest thing in its category. */
+const CAROUSEL_TENURE_GRACE_DAYS = 2;
+const CAROUSEL_TENURE_PENALTY_PER_DAY = 22;
+const CAROUSEL_TENURE_PENALTY_MAX = 110;
+
+/*  Forgotten this long after its last hero appearance, so a title that rotated
+ *  out is eligible again later instead of being penalised forever — and so the
+ *  stored map cannot grow without bound. */
+const CAROUSEL_TENURE_FORGET_DAYS = 30;
+const CAROUSEL_TENURE_KEY = 'mz_hero_tenure';
+
+/*  Read once per selection pass rather than per title: the pool is a few hundred
+ *  rows and localStorage.getItem + JSON.parse per row is a measurable stall on a
+ *  low-end phone during the first paint. */
+let _mzHeroTenure = null;
+
+/** { id: [firstSeenMs, lastSeenMs] } for everything that has held a hero slot
+ *  recently. Never throws: a corrupt or unavailable store just means no
+ *  rotation pressure, which degrades to the old behaviour. */
+function heroTenureStore() {
+  if (_mzHeroTenure) return _mzHeroTenure;
+  _mzHeroTenure = {};
+  try {
+    const raw = localStorage.getItem(CAROUSEL_TENURE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed && typeof parsed === 'object') {
+      Object.keys(parsed).forEach((id) => {
+        const entry = parsed[id];
+        if (Array.isArray(entry) && isFinite(entry[0]) && isFinite(entry[1])) {
+          _mzHeroTenure[id] = [Number(entry[0]), Number(entry[1])];
+        }
+      });
+    }
+  } catch (e) { /* private mode, quota, bad JSON — no rotation pressure */ }
+  return _mzHeroTenure;
+}
+
+/** Whole days this id has been in the hero, counted from the FIRST time it was
+ *  painted. Whole days on purpose — see the tenure note above. */
+function heroTenureDays(id, nowMs) {
+  const entry = heroTenureStore()[String(id)];
+  if (!entry) return 0;
+  return Math.max(0, Math.floor((nowMs - entry[0]) / 86400000));
+}
+
+/** Stamps a freshly selected deck and drops anything that has not been in the
+ *  hero for CAROUSEL_TENURE_FORGET_DAYS, so the store stays small and a rotated
+ *  title can eventually come back. */
+function recordHeroTenure(deck, nowMs) {
+  const now = nowMs || Date.now();
+  const store = heroTenureStore();
+  (deck || []).forEach((m) => {
+    if (!m || !m.id) return;
+    const key = String(m.id);
+    if (store[key]) store[key][1] = now;
+    else store[key] = [now, now];
+  });
+  const cutoff = now - (CAROUSEL_TENURE_FORGET_DAYS * 86400000);
+  Object.keys(store).forEach((key) => { if (store[key][1] < cutoff) delete store[key]; });
+  try {
+    localStorage.setItem(CAROUSEL_TENURE_KEY, JSON.stringify(store));
+  } catch (e) { /* full or blocked — the in-memory copy still rotates this session */ }
+}
+
+/** How many points this title has given up for time already served in the hero. */
+function carouselTenurePenalty(item, nowMs) {
+  const served = heroTenureDays(item.id, nowMs) - CAROUSEL_TENURE_GRACE_DAYS;
+  if (served <= 0) return 0;
+  return Math.min(served * CAROUSEL_TENURE_PENALTY_PER_DAY, CAROUSEL_TENURE_PENALTY_MAX);
+}
+
+/** Days since the title released or premiered; Infinity when TMDB carries no
+ *  date at all, which scores zero freshness rather than crashing the sort. */
+function carouselAgeDays(item, nowMs) {
+  const dateStr = item.release_date || item.first_air_date;
+  if (!dateStr) return Infinity;
+  const ms = new Date(dateStr).getTime();
+  if (!isFinite(ms)) return Infinity;
+  return Math.max(0, (nowMs - ms) / 86400000);
+}
+
+/**
+ * The hero's own ranking: latest and trending first, quality still counted.
+ *
+ * calculateMovieScore() is kept as the base term so nothing that was considered
+ * a weak slide becomes a strong one — the rating floor, the vote confidence and
+ * the print-upgrade boost all still apply. The four terms added on top are what
+ * turn a catalogue ranking into a "what is new and hot right now" ranking.
+ *
+ * @param {object} item  a pool row, already tagged with _source/_trendRank/_srcCount
+ * @param {number} nowMs single timestamp for the whole pass, so the sort is stable
+ */
+function carouselHeroScore(item, nowMs) {
+  const now = nowMs || Date.now();
+  let score = calculateMovieScore(item);
+
+  // 1. TMDB's own live trending position, linearly decayed over the useful depth.
+  if (item._trendRank != null && item._trendRank < CAROUSEL_TREND_RANK_DEPTH) {
+    score += CAROUSEL_TREND_RANK_POINTS
+      * (1 - (item._trendRank / CAROUSEL_TREND_RANK_DEPTH));
+  }
+
+  // 2. Corroboration across independent live sources.
+  const extraSources = Math.min((item._srcCount || 1) - 1, CAROUSEL_MULTI_SOURCE_CAP);
+  if (extraSources > 0) score += extraSources * CAROUSEL_MULTI_SOURCE_POINTS;
+
+  // 3. Continuous freshness, so same-week releases do not tie.
+  /*  GATED on a liveness signal, and the gate is the reason the vote floors could
+   *  safely come off the source queries. 140 points for being new is far more than
+   *  any rating gap, so ungated it would hand the seat to whatever obscure row
+   *  happened to be released yesterday — the same failure the OTT recency premium
+   *  documents measuring live ("正义必胜, popularity 1, ZERO votes, became the top
+   *  card"). Popularity OR votes, because a premiere has the first before the
+   *  second; this is the same either/or that freshnessTier() uses for the ALL feed. */
+  const ageDays = carouselAgeDays(item, now);
+  const alive = (item.popularity || 0) >= CAROUSEL_NEW_RELEASE_MIN_POPULARITY
+    || (item.vote_count || 0) >= CAROUSEL_NEW_RELEASE_MIN_RATED_VOTES;
+  if (isFinite(ageDays) && alive) {
+    score += CAROUSEL_FRESH_POINTS
+      * Math.pow(0.5, ageDays / CAROUSEL_FRESH_HALF_LIFE_DAYS);
+  }
+
+  /*  ...and the ongoing-series case the date alone cannot express. Applied as a
+   *  floor, not an addition, so a series that premiered this week keeps the
+   *  larger award its real date already earned it. */
+  if (mediaTypeOf(item) === 'tv'
+      && CAROUSEL_DATED_TV_SOURCES.indexOf(item._source) !== -1) {
+    const activityFloor = CAROUSEL_FRESH_POINTS * CAROUSEL_SERIES_ACTIVITY_FRACTION;
+    const earned = isFinite(ageDays)
+      ? CAROUSEL_FRESH_POINTS * Math.pow(0.5, ageDays / CAROUSEL_FRESH_HALF_LIFE_DAYS)
+      : 0;
+    if (earned < activityFloor) score += (activityFloor - earned);
+  }
+
+  // 4. Time already served in the hero — the rotation pressure.
+  score -= carouselTenurePenalty(item, now);
+
+  return score;
 }
 
 /**
@@ -3948,8 +4644,23 @@ async function loadCarousel(opts) {
       with_networks: STREAMING_NETWORK_IDS,
       without_networks: LINEAR_TV_EXCLUDE_IDS,
       sort_by: 'popularity.desc',
-      'vote_count.gte': String(CAROUSEL_BAR_REGIONAL.votes),
-      'vote_average.gte': String(CAROUSEL_BAR_REGIONAL.rating),
+      /*  ── NO VOTE OR RATING FLOOR ON THIS SOURCE (Sep 2026) ──
+       *
+       *  It asked for 25 votes AND a 6.0 rating, and for a SERIES PREMIERE both
+       *  are unanswerable: a show that dropped this week has zero votes, and TMDB
+       *  reports zero votes as vote_average 0.0. So the query was excluding, by
+       *  construction, every title this seat exists to show. Measured on the live
+       *  API, Hindi premieres of the last 120 days by popularity: Ali Baba Aur 40
+       *  Bhoot (10 days, popularity 30, 0 votes), Chumbak (11 days, 21, 0), The
+       *  Revolutionaries (10 days, 15, 0), Waiting Hai (5 days, 12, 0) — all four
+       *  rejected here, which is why the reserved Hindi slot was being filled by
+       *  Taskaree, from January.
+       *
+       *  The floors now live downstream in clearsCarouselBar(), which has a
+       *  new-release path that judges a days-old title on popularity and only
+       *  applies the rating floor once the rating means something. That is the
+       *  right place for them: the bar can tell "no votes YET" from "no votes
+       *  EVER", and a query parameter cannot. */
       'air_date.gte': istDateStr(CAROUSEL_TV_HI_AIRED_WITHIN_DAYS),
       language: 'en-US', page: '1'
     }],
@@ -3978,14 +4689,24 @@ async function loadCarousel(opts) {
    *  Hollywood. Tag at the source instead, where the answer is known. */
   const CAROUSEL_TV_SOURCES = ['trending_tv', 'webseries_en', 'webseries_hi', 'anime_tv'];
 
+  /*  The two sources whose ROW ORDER is itself a signal. TMDB returns these
+   *  ranked by live trending position, and that ordinal used to be discarded the
+   *  moment the rows were flattened into the pool — see the note at
+   *  carouselHeroScore() for why throwing it away is what kept last week's
+   *  trending titles in the hero. */
+  const CAROUSEL_TREND_SOURCES = ['trending_week', 'trending_tv'];
+
   // Combine all results into a master pool with source tags (safely handle null/undefined)
   const masterPool = [];
   results.forEach((r, idx) => {
     if (r.status === 'fulfilled' && r.value && r.value.results) {
-      const isTvSource = CAROUSEL_TV_SOURCES.indexOf(sourceNames[idx]) !== -1;
-      r.value.results.forEach(m => {
+      const sourceName = sourceNames[idx];
+      const isTvSource = CAROUSEL_TV_SOURCES.indexOf(sourceName) !== -1;
+      const isTrendSource = CAROUSEL_TREND_SOURCES.indexOf(sourceName) !== -1;
+      r.value.results.forEach((m, position) => {
         if (!m) return;
-        m._source = sourceNames[idx];
+        m._source = sourceName;
+        if (isTrendSource) m._trendRank = position;
         if (isTvSource) m.media_type = 'tv';
         masterPool.push(m);
       });
@@ -4030,14 +4751,37 @@ async function loadCarousel(opts) {
   }
   _mzCarouselAttempts = 0;
 
-  // Deduplicate: Keep best version (highest popularity) of each movie
+  /*  Deduplicate, keeping the best-populated row — but MERGING the signals first.
+   *
+   *  This loop used to simply drop the loser, which quietly threw away everything
+   *  the duplicate knew. A film sitting at position 2 of /trending/movie/week and
+   *  also in /movie/popular arrives twice; if the popular row won on popularity,
+   *  the trending ordinal went with the row that was discarded and the hero score
+   *  never saw that the title is trending at all. So the ordinal, the source count
+   *  and the trending flag are unioned across duplicates and only then is the
+   *  surviving row chosen. */
   const movieMap = new Map();
   masterPool.forEach(m => {
     if (!m || !m.id) return;
     const existing = movieMap.get(m.id);
-    if (!existing || (m.popularity || 0) > (existing.popularity || 0)) {
+    if (!existing) {
+      m._srcCount = 1;
+      m._isTrending = m._trendRank != null;
       movieMap.set(m.id, m);
+      return;
     }
+
+    const keep = (m.popularity || 0) > (existing.popularity || 0) ? m : existing;
+    const drop = keep === m ? existing : m;
+
+    keep._srcCount = (existing._srcCount || 1) + 1;
+    keep._isTrending = !!existing._isTrending || m._trendRank != null;
+    // Best (lowest) trending position wins — being #2 anywhere beats being #40.
+    if (drop._trendRank != null
+        && (keep._trendRank == null || drop._trendRank < keep._trendRank)) {
+      keep._trendRank = drop._trendRank;
+    }
+    if (keep !== existing) movieMap.set(m.id, keep);
   });
 
   const realToday = new Date(Date.now() + (5.5 * 60 * 60 * 1000)).toISOString().split('T')[0]; // IST date
@@ -4055,19 +4799,28 @@ async function loadCarousel(opts) {
   
   let candidates = allReleased.filter(m => m.backdrop_path);
 
-  // Score ALL released movies
-  allReleased.forEach(m => { m._score = calculateMovieScore(m); });
-  
-  // Sort by composite score (highest first)
-  candidates.sort((a, b) => b._score - a._score);
-  allReleased.sort((a, b) => b._score - a._score);
+  /*  ONE timestamp for the whole pass. Calling Date.now() per title would let the
+   *  clock tick between the freshness term of the first row and the last, which is
+   *  a non-deterministic comparator — cheap to avoid, expensive to debug. */
+  const mzNow = Date.now();
+
+  /*  Ranked by the HERO score, not the catalogue score. See carouselHeroScore():
+   *  latest + trending decides the order here, and time already served in the
+   *  hero is subtracted so the line-up turns over on its own. */
+  allReleased.forEach(m => { m._heroScore = carouselHeroScore(m, mzNow); });
+
+  // Sort by hero score (highest first)
+  candidates.sort((a, b) => b._heroScore - a._heroScore);
+  allReleased.sort((a, b) => b._heroScore - a._heroScore);
 
   /*  CATEGORY-QUOTA SELECTION
    *  Replaces the old "one guaranteed slot per original_language, then max three
    *  each" pass. See CAROUSEL_CATEGORY_QUOTA for why language was the wrong key
-   *  and what the quotas are. calculateMovieScore() still does all the ranking -
+   *  and what the quotas are. carouselHeroScore() still does all the ranking -
    *  both pools below are already sorted by it - so this only decides who is
-   *  eligible for which slot, never who is better than whom.
+   *  eligible for which slot, never who is better than whom. The quotas
+   *  themselves are UNCHANGED; re-ranking the pool changes which title takes
+   *  each reserved seat, never how many seats a category has.
    *
    *  Backdrop pool first, poster-only pool second, exactly as before: the hero
    *  paints a 16:9 backdrop and a 2:3 poster stretched into that box looks
@@ -4080,7 +4833,6 @@ async function loadCarousel(opts) {
   /*  Recency is applied to the POOLS, not inside the sweeps. If it were a sweep
    *  condition, the third (max) sweep would relax it again and the classics would
    *  walk straight back in - which is the whole thing being fixed. */
-  const mzNow = Date.now();
   /*  Four ordered attempts, and the ORDER is the feature. The first two ask for
    *  titles from this year and nothing else - that is what a normal day uses, and
    *  it is what makes every slide a current release. Only if those cannot fill
@@ -4165,7 +4917,12 @@ async function loadCarousel(opts) {
       m._badge = '🎌 ANIME TRENDING';
     } else if (m._source === 'trending_day') {
       m._badge = '📈 TRENDING TODAY';
-    } else if (m._source === 'trending_week') {
+    } else if (m._source === 'trending_week' || m._isTrending) {
+      /*  `_isTrending` is the merged flag, not the surviving row's own _source. A
+       *  title that is on TMDB's trending list AND in /movie/popular keeps the
+       *  popular row when that row carries more popularity, and it was then
+       *  labelled POPULAR NOW while genuinely being one of the week's trending
+       *  titles — the exact signal the hero exists to show. */
       m._badge = '🔥 TRENDING NOW';
     } else if (m.vote_average >= 8.0) {
       m._badge = '⭐ CRITICALLY ACCLAIMED';
@@ -4192,9 +4949,26 @@ async function loadCarousel(opts) {
    *      for days at a time.
    *
    *  What replaces it is not a new rule, it is the SAME rule read from a newer
-   *  answer: heroPreloadTag() in seo-ssr.js and scripts/inject-home-links.js both
-   *  resolve that meta from movie/popular[0], and this round has already fetched
-   *  it. So slide 0 keeps tracking the title a reload at this moment would show.
+   *  answer — and the SOURCE of that answer changed in Sep 2026.
+   *
+   *  ── WHY IT IS NO LONGER movie/popular[0] ──
+   *  Because movie/popular[0] barely moves, and that made slide 0 the one part of
+   *  the hero the refresh could never change. Measured on the live API on the same
+   *  day: /movie/popular[0] was Spider-Man: Brand New Day, released 54 days
+   *  earlier, and it had held that position for weeks; /trending/movie/week[0] was
+   *  Resident Evil, released 5 days earlier. Pinning to the popular page meant the
+   *  hero re-asked TMDB every three hours and then pinned the same two-month-old
+   *  film to the slot every visitor looks at first.
+   *
+   *  Trending is also the answer that AGREES with the deck. carouselHeroScore()
+   *  now weights TMDB's trending ordinal more heavily than anything else it adds,
+   *  so trending[0] is very often what the score would put at the top anyway —
+   *  the pin has gone from fighting the ranking to confirming it, and slide 0 can
+   *  finally turn over on its own.
+   *
+   *  heroPreloadTag() in seo-ssr.js and scripts/inject-home-links.js resolve the
+   *  <meta> from the same endpoint, so a first load and a refresh still pin the
+   *  same title and the preload is still a cache hit for the LCP element.
    *
    *  A refresh still pins SOMETHING, deliberately. fillCarouselByQuota() returns
    *  PLACEMENT order and placePins() runs before every sweep, so with no pin at all
@@ -4203,11 +4977,11 @@ async function loadCarousel(opts) {
    *  way this is a REORDER inside the deck: pinPreloadedHero() trades the weakest
    *  member of the pinned title's own category, so the fixed ten and every
    *  per-category tally come out identical. */
-  const popularIdx = sourceNames.indexOf('popular');
-  const popularTop = ((results[popularIdx] && results[popularIdx].status === 'fulfilled'
-    && results[popularIdx].value && results[popularIdx].value.results) || [])[0];
+  const heroPinIdx = sourceNames.indexOf('trending_week');
+  const heroPinTop = ((results[heroPinIdx] && results[heroPinIdx].status === 'fulfilled'
+    && results[heroPinIdx].value && results[heroPinIdx].value.results) || [])[0];
   deck = pinPreloadedHero(deck, candidates, isRefresh
-    ? (popularTop && popularTop.backdrop_path) || ''
+    ? (heroPinTop && heroPinTop.backdrop_path) || ''
     : heroBackdropMetaPath());
   console.log('[MovieZone] carousel' + (isRefresh ? ' (refresh)' : '') + ':', deck.map((m, n) =>
     `${n + 1}. ${m.title || m.name} [${m._carouselCategory || carouselCategoryOf(m)}] `
@@ -4287,6 +5061,15 @@ function applyCarouselDeck(deck, isRefresh) {
   _mzCarouselBuiltAt = Date.now();
   _mzCarouselBuiltDay = istDateStr(0);
   _mzCarouselRetryAfter = 0;
+
+  /*  Stamp the tenure clock for every id in the answer we are about to stand
+   *  behind. This is what makes the hero rotate on its own: carouselHeroScore()
+   *  subtracts a penalty that grows once per whole day of service, so a slide
+   *  that has held its seat for days loses it to the next comparable newcomer
+   *  without anyone editing a list. Idempotent — re-stamping an id only moves its
+   *  last-seen, never its first-seen, so a title that stays in the deck keeps
+   *  accruing tenure rather than resetting it every refresh. */
+  recordHeroTenure(deck, _mzCarouselBuiltAt);
 
   if (!isRefresh) {
     carouselMovies = deck;
@@ -4786,10 +5569,18 @@ function _mzUpdateTop10Arrows() {
   if (!rail || !wrap) return;
   const prev = wrap.querySelector('.top10-arrow--prev');
   const next = wrap.querySelector('.top10-arrow--next');
-  const scrollable = rail.scrollWidth - rail.clientWidth > 8;
-  if (prev) prev.hidden = !scrollable || rail.scrollLeft <= 4;
-  if (next) next.hidden = !scrollable || rail.scrollLeft >= (rail.scrollWidth - rail.clientWidth - 4);
+  /*  Every read first, then every write. Previously `prev.hidden = ...` sat
+   *  between two reads of rail.scrollLeft/scrollWidth, so the second read had to
+   *  flush the layout the first write had just invalidated. */
+  const scrollLeft = rail.scrollLeft;
+  const maxScroll = rail.scrollWidth - rail.clientWidth;
+  const scrollable = maxScroll > 8;
+  if (prev) prev.hidden = !scrollable || scrollLeft <= 4;
+  if (next) next.hidden = !scrollable || scrollLeft >= (maxScroll - 4);
 }
+
+/** The scroll/resize-facing wrapper: at most one run per frame. */
+const _mzUpdateTop10ArrowsThrottled = mzRafThrottle(_mzUpdateTop10Arrows);
 
 function initTop10() {
   const section = document.getElementById('top10-trending');
@@ -4831,7 +5622,7 @@ function initTop10() {
     const next = section.querySelector('.top10-arrow--next');
     if (prev) prev.addEventListener('click', () => rail.scrollBy({ left: -step(), behavior: 'smooth' }));
     if (next) next.addEventListener('click', () => rail.scrollBy({ left: step(), behavior: 'smooth' }));
-    rail.addEventListener('scroll', _mzUpdateTop10Arrows, { passive: true });
+    rail.addEventListener('scroll', _mzUpdateTop10ArrowsThrottled, { passive: true });
 
     /*  Arrow visibility depends on scrollWidth vs clientWidth, and both change on
      *  any resize, orientation flip, or when the poster size variable steps to a
@@ -4839,7 +5630,11 @@ function initTop10() {
      *  exactly the same events — the 560px breakpoint changes the pill's padding
      *  and font size — so one callback does both. ResizeObserver catches all of
      *  them; the window listener is the fallback for engines without it. */
-    const resync = () => { _mzUpdateTop10Arrows(); _mzSyncTop10Ind(); };
+    /*  ResizeObserver can fire several times for one gesture and `resize` fires
+     *  continuously while a window is dragged; both callbacks read layout and then
+     *  write inline styles. rAF-throttled so a drag costs one measure per frame
+     *  instead of one per event. */
+    const resync = mzRafThrottle(() => { _mzUpdateTop10Arrows(); _mzSyncTop10Ind(); });
     if (typeof ResizeObserver === 'function') new ResizeObserver(resync).observe(rail);
     window.addEventListener('resize', resync, { passive: true });
     window.addEventListener('orientationchange', () => setTimeout(resync, 150));
@@ -5599,8 +6394,55 @@ const STREAMING_NETWORK_IDS = [
   '2552',  // Apple TV+
   '3353',  // Peacock
   '4330',  // Paramount+
-  '2531',  // SonyLIV
-  '4238'   // MX Player
+
+  /*  ── TWO CORRECTIONS AND TWELVE ADDITIONS (Sep 2026) ──
+   *
+   *  CORRECTIONS. This list carried '2531' labelled "SonyLIV" and '4238'
+   *  labelled "MX Player". Neither is what it says, and the OTT table's own
+   *  comment ~150 lines below had already recorded it without the list ever being
+   *  fixed. Re-confirmed against /network/{id} on the live API:
+   *      2531 -> DMAX  [ES]        a Spanish linear channel
+   *      4238 -> 404               no such network
+   *  So the "SonyLIV" entry was injecting Spanish factual TV into every
+   *  web-series surface, and the "MX Player" entry was contributing nothing at
+   *  all. The real ids, read off the shows themselves rather than remembered:
+   *      Scam 1992  -> 2646 SonyLIV
+   *      Aashram    -> 2964 MX Player
+   *
+   *  ADDITIONS. The ALL feed's promise is now "a newly released web series from
+   *  ANY OTT reaches this section", and eleven networks cannot deliver that: an
+   *  Indian original on JioCinema or aha, a K-drama on TVING or wavve, and a
+   *  C-drama on iQiyi, Youku or Tencent were all invisible to every
+   *  with_networks query on the site however new or popular they were.
+   *
+   *  Every id below was resolved through /network/{id} or read off a known show
+   *  of that platform, never recalled — that is the discipline this list's own
+   *  history argues for, since its previous revision shipped five 404s and three
+   *  unrelated broadcasters.
+   *
+   *  Deliberately NOT added: tvN (866) and JTBC (885). Both are real and both
+   *  produce most of the K-dramas worth showing, but both are linear Korean
+   *  cable channels, so they also carry variety and daily programming that
+   *  LINEAR_TV_EXCLUDE_IDS (Indian channels only) would not filter. Their dramas
+   *  reach the feed through the simulcast entries below and through the
+   *  network-free regional window in _mzCatPlan, so nothing is lost.
+   */
+  '2646',  // SonyLIV            (was wrongly 2531 = DMAX Spain)
+  '2964',  // MX Player          (was wrongly 4238 = 404)
+  '7774',  // Amazon MX Player   — the post-acquisition network record
+  '4008',  // JioCinema
+  '2532',  // VOOT               — still the network on pre-merger JioCinema originals
+  '3758',  // aha                (Telugu / Tamil originals)
+  '2739',  // Disney+
+  '3186',  // HBO Max
+  '4353',  // discovery+
+  '1112',  // Crunchyroll
+  '3897',  // TVING              (Korean)
+  '3357',  // wavve              (Korean)
+  '5169',  // Coupang Play       (Korean)
+  '1330',  // iQiyi              (Chinese)
+  '2007',  // Tencent Video      (Chinese)
+  '1419'   // Youku              (Chinese)
 ].join('|');
 
 // Linear Indian TV channels: daily soaps swamp the grid, so keep them out of
@@ -6511,53 +7353,119 @@ function _mzCatPlan(cat, pageNum) {
     //   • PRINT-UPGRADE WINDOWS — the cohorts that just crossed a real print
     //     stage, so a four-month-old film whose HD print just dropped can
     //     surface at all.
+    //
+    /*  ── TWO SOURCES SWAPPED, NOT ADDED (Sep 2026) ──
+     *
+     *  The request budget is the constraint here and it is a hard one: the first
+     *  screen already sits at MZ_RATE_LIMIT requests, so anything new has to be
+     *  paid for. Both payments come from sources that were the wrong shape for a
+     *  "what just arrived" feed in the first place:
+     *
+     *    OUT  /discover/movie?with_original_language=ko&sort_by=popularity.desc
+     *    IN   /discover/movie latestSouthWindowQuery  (Telugu + Tamil, dated)
+     *
+     *    OUT  /discover/movie?with_genres=16&with_original_language=ja&sort_by=…
+     *    IN   /discover/tv    latestRegionalSeriesWindowQuery  (hi|ta|te|ko|zh)
+     *
+     *  Both removed sources were UNWINDOWED all-time popularity pages. On a feed
+     *  whose whole promise is recency they returned catalogue: every row landed in
+     *  group 4 or 5 and sat past the first several screens. Korean film has its own
+     *  K-Drama tab and anime film has the Anime tab, and anime SERIES still arrive
+     *  through latestAnimeWindowQuery below, so neither surface loses anything a
+     *  user can reach.
+     *
+     *  What is gained is what the ranking could not previously see at all: a fresh
+     *  Telugu or Tamil release asked as its own question rather than losing the
+     *  shared Indian page to Hindi, and a fresh Hindi / Tamil / Telugu / Korean /
+     *  Chinese premiere from ANY streaming service rather than only the eleven
+     *  networks the allow-list names.
+     *
+     *  Net change: 16 sources before, 16 after.
+     */
     return [
       ['/movie/now_playing', { language: L, page: pageStr }],
       ['/trending/movie/week', { language: L, page: pageStr }],
       ['/trending/movie/day', { language: L, page: pageStr }],
       ['/movie/popular', { language: L, page: pageStr }],
-      ['/discover/movie', { with_original_language: 'ko', sort_by: POP, page: pageStr, language: L }],
-      ['/discover/movie', { with_genres: '16', with_original_language: 'ja', sort_by: POP, page: pageStr, language: L }],
       ['/discover/movie', latestWindowQuery(pageStr)],
       ['/discover/movie', printUpgradeWindowQuery(pageStr)],
       ['/discover/movie', latestIndianWindowQuery(pageStr)],
       ['/discover/movie', latestBollywoodWindowQuery(pageStr)],
+      ['/discover/movie', latestSouthWindowQuery(pageStr)],
       ['/discover/movie', indianUpgradeWindowQuery(pageStr)],
       ['/discover/movie', indianCatalogueQuery(pageStr)],
-      // ── index 12 onward is TV; TV_SOURCE_FROM in loadMovies must match ──
+      // ── index 11 onward is TV; TV_SOURCE_FROM in loadMovies must match ──
       ['/trending/tv/week', { language: L, page: pageStr }],
       ['/discover/tv', latestSeriesWindowQuery(pageStr)],
+      ['/discover/tv', latestRegionalSeriesWindowQuery(pageStr)],
       ['/discover/tv', seriesUpgradeWindowQuery(pageStr)],
       ['/discover/tv', latestAnimeWindowQuery(pageStr)]
     ];
   }
 
   if (cat === 'tv') {
+    /*  ── THE WEB SERIES TAB ASKS THE SAME QUESTIONS THE ALL FEED DOES ──
+     *
+     *  This plan used to be four popularity pages (hi / en / ko / any) plus one
+     *  dated Hindi-Tamil-Telugu window. Sorted by TMDB popularity, which is a
+     *  lifetime-ish signal, so what the tab actually opened with was the
+     *  catalogue's biggest long-runners: measured live, C.I.D. (first aired 1998,
+     *  popularity 209) and Reacher (2022) sat at cards 4 and 3 while The Scandal
+     *  and Neagley — both 2026, both wearing a NEW ribbon — were at 5 and 6.
+     *
+     *  rankCategoryFeed() was not the problem. It orders fresh group 2 ahead of
+     *  the stale group 5 correctly; it simply had almost nothing to PUT in group
+     *  2, because a popularity page returns this week's premiere on page three.
+     *  A ranking cannot promote what was never fetched.
+     *
+     *  So the plan is now built in the order the tab promises — latest, then
+     *  trending, then popular — and each of those is a real source rather than a
+     *  hoped-for side effect of a popularity sort:
+     *
+     *    LATEST    three dated windows. The global one (network-gated, all 25 OTT
+     *              platforms), the regional one (hi/ta/te/ko/zh on ANY service,
+     *              which is the only source that can see a premiere on a platform
+     *              TMDB does not carry a network record for), and the print-upgrade
+     *              cohort — a series whose clean full-season encode or 4K master
+     *              just landed is news on this tab for the same reason it is on
+     *              the ALL feed.
+     *    TRENDING  /trending/tv/week, TMDB's own live signal. Filtered through
+     *              isNonDramaTvRow() on arrival — see NON_DRAMA_TV_GENRE_IDS for
+     *              why that has to happen client-side for this one source.
+     *    POPULAR   the popularity pages, kept, because a category tab promises the
+     *              best of the category and not only this week's arrivals. Chinese
+     *              is added: C-drama had NO source at all here, so however large a
+     *              title was it could not appear.
+     *
+     *  Request cost: 5 sources -> 10. This is a tab click rather than the first
+     *  screen, and tmdbBatch() collapses the whole wave into one round trip, so
+     *  the first-screen budget MZ_RATE_LIMIT protects is untouched.
+     */
     // Web series only: streaming networks in, traditional Indian TV channels out.
     const N = STREAMING_NETWORK_IDS;
     const X = LINEAR_TV_EXCLUDE_IDS;
     return [
+      // ── LATEST ──
+      ['/discover/tv', latestSeriesWindowQuery(pageStr)],
+      ['/discover/tv', latestRegionalSeriesWindowQuery(pageStr)],
+      /*  Hindi, asked on its own. The regional window above covers five languages
+       *  in ONE popularity-sorted page, and Korean drama outweighs Hindi on that
+       *  axis every week — so "Hindi is in the pool" was never actually guaranteed
+       *  by it. This tab leads with Hindi (FEED_LEAD_LANGUAGE_BY_CATEGORY), and a
+       *  lead slot is worth nothing if the language has no candidate to put in it.
+       *  Network-free for the same reason as the regional window: a new Hindi
+       *  original on a service TMDB carries no network record for is exactly the
+       *  title this is here to find. */
+      ['/discover/tv', latestRegionalSeriesWindowQuery(pageStr, 'hi')],
+      ['/discover/tv', seriesUpgradeWindowQuery(pageStr)],
+      // ── TRENDING ──
+      ['/trending/tv/week', { language: L, page: pageStr }],
+      // ── POPULAR CATALOGUE ──
       ['/discover/tv', { with_networks: N, without_networks: X, with_original_language: 'hi', sort_by: POP, page: pageStr, language: L }],
       ['/discover/tv', { with_networks: N, without_networks: X, with_original_language: 'en', sort_by: POP, page: pageStr, language: L }],
       ['/discover/tv', { with_networks: N, without_networks: X, with_original_language: 'ko', sort_by: POP, page: pageStr, language: L }],
-      ['/discover/tv', { with_networks: N, without_networks: X, sort_by: POP, page: pageStr, language: L }],
-      /*  Fresh Indian premieres, as a dated window rather than a popularity page.
-       *
-       *  The Hindi source above is sorted by popularity, which surfaces the
-       *  long-running favourites — Mirzapur, Panchayat — and buries the show that
-       *  dropped last week somewhere on page three. So the ranking never saw a
-       *  fresh Hindi series to put in the latest group, and the first screen came
-       *  out Korean and English (measured: 7 ko / 5 en, zero hi).
-       *
-       *  Pipe-separated languages is the same OR form the Zee5 provider gate uses.
-       *  The vote floor is deliberately lower than SERIES_MIN_VOTES: an Indian
-       *  premiere collects a fraction of an English one's votes in week one, which
-       *  is the whole reason the regional relevance floor exists. */
-      ['/discover/tv', { with_networks: N, without_networks: X,
-        with_original_language: 'hi|ta|te', sort_by: POP,
-        'first_air_date.gte': istDateStr(LATEST_SERIES_WINDOW_DAYS),
-        'first_air_date.lte': istDateStr(0),
-        'vote_count.gte': '3', page: pageStr, language: L }]
+      ['/discover/tv', { with_networks: N, without_networks: X, with_original_language: 'zh', sort_by: POP, page: pageStr, language: L }],
+      ['/discover/tv', { with_networks: N, without_networks: X, sort_by: POP, page: pageStr, language: L }]
     ];
   }
 
@@ -7634,8 +8542,10 @@ async function loadMovies(cat, isLoadMore = false) {
     if (cat === 'all') {
       /*  /discover/tv results carry no media_type, so tag them by position.
        *  TV_SOURCE_FROM is an index into the ALL plan in _mzCatPlan and must move
-       *  with it, or series would be tagged as movies and vice versa. */
-      const TV_SOURCE_FROM = 12;
+       *  with it, or series would be tagged as movies and vice versa. It moved
+       *  from 12 to 11 when the two unwindowed movie sources were swapped for one
+       *  movie window and one TV window — see the note in _mzCatPlan. */
+      const TV_SOURCE_FROM = 11;
       const combinedMovies = [];
       vals.forEach((v, idx) => {
         if (!v.results) return;
@@ -7680,14 +8590,18 @@ async function loadMovies(cat, isLoadMore = false) {
       const combinedShows = [];
       vals.forEach(v => { if (v.results) combinedShows.push(...v.results); });
 
-      // Remove duplicates, keeping the first occurrence
+      /*  Remove duplicates, keeping the first occurrence — and drop the rows a
+       *  web-series tab must not carry. The genre gate is here rather than in the
+       *  query because /trending/tv/week accepts no without_genres parameter; the
+       *  eight /discover/tv sources are filtered server-side already, so for them
+       *  this is a no-op. See NON_DRAMA_TV_GENRE_IDS. */
       const uniqueShows = [];
       const seenIds = new Set();
       for (const show of combinedShows) {
-        if (show && show.id && !seenIds.has(show.id)) {
-          uniqueShows.push(show);
-          seenIds.add(show.id);
-        }
+        if (!show || !show.id || seenIds.has(show.id)) continue;
+        if (isNonDramaTvRow(show)) continue;
+        uniqueShows.push(show);
+        seenIds.add(show.id);
       }
 
       /*  No sort here on purpose. This used to be a plain first_air_date
@@ -7802,6 +8716,7 @@ async function loadMovies(cat, isLoadMore = false) {
     if (!rDate) return (m.vote_count > 50 || cat === 'anime' || cat === 'kids');
     // Agar date future ki hai, toh isko normal list se strict block kar do
     if (rDate > realToday) return false;
+    if (isPreMillenniumMovie(m, cat)) return false;
     return true;
   });
 
@@ -7819,7 +8734,7 @@ async function loadMovies(cat, isLoadMore = false) {
    *  On the isLoadMore path `movies` holds only the newly fetched batch, so the
    *  pages already on screen keep the order the user is looking at. */
   if (!FEED_SELF_RANKED.has(cat) && !OTT[cat]) {
-    movies = rankCategoryFeed(movies);
+    movies = rankCategoryFeed(movies, Date.now(), FEED_LEAD_LANGUAGE_BY_CATEGORY[cat]);
   }
 
   if (!movies.length && !isLoadMore) {
@@ -8521,11 +9436,15 @@ document.addEventListener('keydown', (e) => {
 
     function updateControls() {
       scrollFrame = 0;
+      /*  Reads first, writes after. `controls.hidden` used to be written between
+       *  the scrollWidth read and the two scrollLeft reads, which forced a layout
+       *  flush in the middle of the measurement. */
       const maximum = rail.scrollWidth - rail.clientWidth;
+      const scrollLeft = rail.scrollLeft;
       const overflows = maximum > 2;
+      const atStart = scrollLeft <= 2;
+      const atEnd = scrollLeft >= maximum - 2;
       controls.hidden = !overflows;
-      const atStart = rail.scrollLeft <= 2;
-      const atEnd = rail.scrollLeft >= maximum - 2;
       previous.disabled = atStart;
       next.disabled = atEnd;
       //  The native scrollbar is hidden, so the only remaining cue that the row
@@ -8581,8 +9500,13 @@ document.addEventListener('keydown', (e) => {
      *  a platform the user may never open now makes the click they DO make slower,
      *  not faster. The fix belongs at the source, and that is where it is. */
 
-    if (typeof ResizeObserver === 'function') new ResizeObserver(updateControls).observe(rail);
-    else window.addEventListener('resize', updateControls, { passive: true });
+    /*  Resize path is rAF-throttled: a ResizeObserver can fire several times for
+     *  one gesture and `resize` fires continuously while a window is dragged, and
+     *  updateControls both reads layout and writes to the DOM. The scroll path
+     *  above already coalesces through `scrollFrame`. */
+    const updateControlsThrottled = mzRafThrottle(updateControls);
+    if (typeof ResizeObserver === 'function') new ResizeObserver(updateControlsThrottled).observe(rail);
+    else window.addEventListener('resize', updateControlsThrottled, { passive: true });
     updateControls();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true });
@@ -11035,15 +11959,21 @@ async function loadRelatedMovies(id, type) {
       const nextBtn = document.getElementById('relatedNext');
       const scrollAmount = 380;
 
+      /*  Reads batched ahead of writes, and one run per frame. Previously
+       *  `prevBtn.disabled = ...` sat between two reads of grid.scrollLeft /
+       *  scrollWidth / clientWidth, so the second read flushed the layout the
+       *  first write had invalidated — on every scroll event, not every frame. */
       const updateArrowState = () => {
-        if (prevBtn) prevBtn.disabled = grid.scrollLeft <= 10;
-        if (nextBtn) nextBtn.disabled = grid.scrollLeft >= (grid.scrollWidth - grid.clientWidth - 10);
+        const scrollLeft = grid.scrollLeft;
+        const maxScroll = grid.scrollWidth - grid.clientWidth;
+        if (prevBtn) prevBtn.disabled = scrollLeft <= 10;
+        if (nextBtn) nextBtn.disabled = scrollLeft >= (maxScroll - 10);
       };
 
       if (prevBtn) prevBtn.onclick = () => { grid.scrollBy({ left: -scrollAmount, behavior: isMzTVMode() ? 'auto' : 'smooth' }); };
       if (nextBtn) nextBtn.onclick = () => { grid.scrollBy({ left: scrollAmount, behavior: isMzTVMode() ? 'auto' : 'smooth' }); };
 
-      grid.addEventListener('scroll', updateArrowState, { passive: true });
+      grid.addEventListener('scroll', mzRafThrottle(updateArrowState), { passive: true });
       updateArrowState();
 
     } else {
@@ -13255,7 +14185,28 @@ scheduleIdleWork([extractTopKeywords], 5000);
   const MZ_LS_CACHE_MAX = 120;
 
   // 2. Periodic garbage collection hint
+  /*  ── THREE GUARDS, ALL OF THEM ADDED BECAUSE THIS RAN UNCONDITIONALLY ──
+   *
+   *  The body below is cheap in isolation and expensive as a habit: it enumerated
+   *  the entire localStorage keyspace, filtered it, read a timestamp out of every
+   *  mz_cache_ record and sorted them — once a minute, on the main thread, for as
+   *  long as the tab stayed open. A TV is the device that is never closed, so it is
+   *  the device that paid this the most times, and it paid it while scrolling.
+   *
+   *    • HIDDEN TABS DO NOTHING. Nothing is being written, so there is nothing to
+   *      trim, and a background tab has no reason to touch localStorage at all.
+   *    • NOTHING WRITTEN, NOTHING TO SWEEP. _mzCacheDirty is set by
+   *      _mzFlushCacheWrites, so a session that is reading from cache and writing
+   *      nothing now sweeps once and then stays quiet.
+   *    • THE localStorage HALF RUNS IN IDLE TIME. The Map trim is O(size) on
+   *      in-memory keys and stays inline; the enumerate-and-sort is the part worth
+   *      deferring off a frame, and it has no deadline of its own.
+   *
+   *  Every guard is conservative: the cap itself is unchanged, and the real
+   *  backstop for quota overflow remains the catch in _mzFlushCacheWrites. */
   setInterval(() => {
+    if (document.visibilityState === 'hidden') return;
+
     /*  Memory cache: a Map preserves insertion order and every write goes
      *  through set(), so the front of the Map genuinely is the least recently
      *  WRITTEN. Trimming from the front is correct here and needs no timestamps. */
@@ -13263,26 +14214,41 @@ scheduleIdleWork([extractTopKeywords], 5000);
       const keys = Array.from(tmdbCache.keys());
       for (let i = 0; i < keys.length - MZ_MEM_CACHE_MAX; i++) tmdbCache.delete(keys[i]);
     }
+
+    if (!_mzCacheDirty) return;
+    _mzCacheDirty = false;
+
     // localStorage cache: oldest-first, by the stored timestamp.
-    try {
-      const keys = Object.keys(localStorage).filter(k => k.startsWith('mz_cache_'));
-      if (keys.length > MZ_LS_CACHE_MAX) {
-        keys
-          .map(k => [k, _mzCacheStamp(k)])
-          .sort((a, b) => a[1] - b[1])
-          .slice(0, keys.length - MZ_LS_CACHE_MAX)
-          .forEach(([k]) => localStorage.removeItem(k));
-      }
-    } catch(e) {}
+    const sweep = () => {
+      try {
+        const keys = Object.keys(localStorage).filter(k => k.startsWith('mz_cache_'));
+        if (keys.length > MZ_LS_CACHE_MAX) {
+          keys
+            .map(k => [k, _mzCacheStamp(k)])
+            .sort((a, b) => a[1] - b[1])
+            .slice(0, keys.length - MZ_LS_CACHE_MAX)
+            .forEach(([k]) => localStorage.removeItem(k));
+        }
+      } catch(e) {}
+    };
+    if ('requestIdleCallback' in window) requestIdleCallback(sweep, { timeout: 4000 });
+    else sweep();
   }, 60000); // Every 60 seconds
   
   // 3. Reduce image quality on low memory warning
+  /*  Once low-end-mode is on it is never taken off again, so the poll has nothing
+   *  left to decide — it was re-reading performance.memory every 10 seconds for the
+   *  life of the tab to re-add a class that was already there. It now stops on the
+   *  first trip, and skips hidden tabs, where a heap reading says nothing about
+   *  what the user is looking at. */
   if ('memory' in performance) {
-    setInterval(() => {
+    const memTimer = setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
       const mem = performance.memory;
       if (mem.usedJSHeapSize > mem.jsHeapSizeLimit * 0.85) {
         // Memory critical - disable heavy features
         document.documentElement.classList.add('low-end-mode');
+        clearInterval(memTimer);
       }
     }, 10000);
   }
@@ -13582,8 +14548,39 @@ init();
       Math.round(session.watchedSec), Math.round(session.runtimeSec)));
     renderContinueWatching();
 
-    // Tick every 5s: accrue visible time, persist, refresh the bar.
-    session.timer = setInterval(() => { accrue(); persistSessionProgress(); }, 5000);
+    /*  Tick every 5s: accrue visible time, refresh the bar — but PERSIST only
+     *  every third tick.
+     *
+     *  accrue() is arithmetic on two numbers and liveUpdateCard() writes one CSS
+     *  width; both are trivial. persistSessionProgress() is the expensive half: it
+     *  rebuilds the Continue Watching list and hands it to localStorage.setItem,
+     *  which is a SYNCHRONOUS main-thread write. At 5s that is twelve blocking
+     *  writes a minute for the whole length of a film, and on a TV chipset each one
+     *  lands in the middle of whatever else is being composited.
+     *
+     *  15s is safe because it is not the only thing that persists: onVisibility
+     *  (visibilitychange, blur) and stopWatchSession both call
+     *  persistSessionProgress() directly, so leaving the player, hiding the tab,
+     *  switching windows or closing the page all flush immediately. The only thing
+     *  a longer interval can cost is resume accuracy after a HARD kill — a crash or
+     *  a power cut — and there the worst case moves from 5s to 15s of a rewatch.
+     *
+     *  Nothing is repainted on the skipped ticks, deliberately. Calling
+     *  liveUpdateCard() there was tried and is not the cheap option it looks like:
+     *  it does a localStorage read plus a JSON.parse to refresh the label, and
+     *  falls back to a full renderContinueWatching() when the card is not in the
+     *  DOM. The only thing it drives is the progress bar on a Continue Watching
+     *  card that is behind the open player, so 15s is the right cadence for it too.
+     *
+     *  accrue() still runs every 5s, so watch time keeps its existing accuracy —
+     *  it is two numbers and a visibility check, with no I/O at all. */
+    let ticksSincePersist = 0;
+    session.timer = setInterval(() => {
+      accrue();
+      if (++ticksSincePersist < 3) return;
+      ticksSincePersist = 0;
+      persistSessionProgress();
+    }, 5000);
     document.addEventListener('visibilitychange', onVisibility);
     /*  blur/focus as well as visibilitychange. A tab that is still VISIBLE but not
      *  focused — another window on top, a second monitor — kept accruing "watch

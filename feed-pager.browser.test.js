@@ -116,10 +116,14 @@ async function main() {
   server.close();
 
   let failed = 0;
+  let skipped = 0;
   console.log('\nfeed pager on screen — real page, headless browser');
   console.log('─'.repeat(70));
   results.forEach((c) => {
-    if (c.pass) {
+    if (c.skip) {
+      skipped++;
+      console.log('  SKIP  ' + c.name + (c.detail ? '\n          ' + c.detail : ''));
+    } else if (c.pass) {
       console.log('  PASS  ' + c.name);
     } else {
       failed++;
@@ -127,7 +131,17 @@ async function main() {
     }
   });
   console.log('─'.repeat(70));
-  console.log('  ' + (results.length - failed) + '/' + results.length + ' checks passed\n');
+  console.log('  ' + (results.length - failed - skipped) + '/' + (results.length - skipped)
+    + ' checks passed' + (skipped ? '  (' + skipped + ' skipped)' : ''));
+
+  /*  A skipped precondition is not a pass and not a failure. Saying so out loud
+   *  matters: the pager went unverified on this run, and a green tick would hide
+   *  that while a red cross would blame the wrong component. */
+  if (skipped && !failed) {
+    console.log('  the pager was NOT verified on this run — re-run when TMDB is reachable\n');
+  } else {
+    console.log('');
+  }
 
   process.exit(failed ? 1 : 0);
 }

@@ -123,6 +123,11 @@ const extracted = [
   line('const REGIONAL_INDUSTRY_LANGUAGES ='),
   line('const REGIONAL_FRESH_MIN_POPULARITY ='),
   line('const REGIONAL_FRESH_MIN_VOTES ='),
+  /*  freshTierFloors() now scopes the regional floor by media type: the three
+   *  tabbed industries for movies, plus K-drama and C-drama for SERIES only. Both
+   *  lists have to come across or the floor lookup throws — which is exactly how
+   *  this line earned its place here. */
+  line('const SERIES_INDUSTRY_LANGUAGES ='),
   line('const LATEST_WINDOW_DAYS ='),
   line('const FEED_FIRST_SCREEN_INDUSTRIES ='),
   line('const FEED_PROMOTABLE_GROUPS ='),

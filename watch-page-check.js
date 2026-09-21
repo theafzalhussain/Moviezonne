@@ -252,15 +252,57 @@ BUNDLES.forEach(function (name) {
 check('every bundle really is referenced in index.html',
   BUNDLES.every(function (name) { return indexHtml.includes('/' + name); }));
 
-// The head optimizer rewrites those same tags, so its patterns must accept the
-// absolute form or it silently turns into a no-op on the next nightly run.
-const reoptimised = seo.optimizeHomeHead(indexHtml, 'https://image.tmdb.org/t/p/w780/x.jpg');
-check('optimizeHomeHead can still rewrite the real index.html',
-  reoptimised !== indexHtml && reoptimised.includes('<!--MZ_PERF_HEAD-->'),
-  'it returned the file unchanged, which means its regexes stopped matching');
-check('and it preloads the absolute stylesheet URL',
-  /<link rel="preload" href="\/moviezone\.min\.css\?v=[\d.]+" as="style"/.test(reoptimised),
-  (reoptimised.match(/<link rel="preload" href="[^"]*\.css[^"]*"/) || [''])[0]);
+/*  ── THE HEAD OPTIMISER MUST BE A NO-OP ON THE FILE IT SHIPPED ──
+ *
+ *  This used to assert only that optimizeHomeHead() CHANGED index.html, plus that
+ *  its output carried a `<link rel="preload" as="style">` for the stylesheet. Both
+ *  were the wrong way round and together they hid a live regression:
+ *
+ *    • "it changed the file" is satisfied by a function that REVERTS hand tuning.
+ *      That is what was happening. optimizeHomeHead() deletes the delimited head
+ *      region and rewrites it from its own template, so every nightly
+ *      `npm run seo:refresh` put back the duplicate stylesheet preload and the
+ *      un-guarded TMDB warm-up that asset-perf-check.js documents as deliberately
+ *      removed — and, because the removal patterns could not consume a CRLF, added
+ *      one blank line to <head> per run on top.
+ *    • the preload assertion LOCKED IN the duplicate. The block is inserted
+ *      immediately after the `<link rel="stylesheet">` for the same URL, which the
+ *      preload scanner already discovers at top priority in the same pass.
+ *
+ *  So the invariant is now stated directly: given the file as shipped and its own
+ *  hero URL, the optimiser must return it unchanged. Anything the template and the
+ *  file disagree about — a tag, a comment, a line ending — fails here instead of
+ *  silently landing in the next nightly commit. The "regexes still match" property
+ *  the old check was reaching for is proven separately below, by stripping the
+ *  block and watching it come back.
+ */
+const shippedHero = (indexHtml.match(/<meta name="mz-hero-backdrop" content="([^"]+)"/) || [])[1];
+check('index.html still carries a hero backdrop meta to read', !!shippedHero);
+
+const shippedHeroUrl = 'https://image.tmdb.org/t/p/w780' + (shippedHero || '');
+const reoptimised = seo.optimizeHomeHead(indexHtml, shippedHeroUrl);
+check('optimizeHomeHead is a no-op on the index.html it generated',
+  reoptimised === indexHtml,
+  'the nightly seo:refresh would rewrite <head> — run it and read the diff');
+check('and running it twice changes nothing further',
+  seo.optimizeHomeHead(reoptimised, shippedHeroUrl) === reoptimised,
+  'not idempotent: each build would drift the head again');
+
+// Regexes still match — proven by removing the block and watching it return.
+const stripped = indexHtml.replace(/<!--MZ_PERF_HEAD-->[\s\S]*?<!--\/MZ_PERF_HEAD-->\r?\n?/, '');
+const rebuilt = seo.optimizeHomeHead(stripped, shippedHeroUrl);
+check('optimizeHomeHead can still find its anchors in the real index.html',
+  stripped !== indexHtml && rebuilt.includes('<!--MZ_PERF_HEAD-->'),
+  'its regexes stopped matching, so the nightly run became a silent no-op');
+check('the rebuilt head is byte-identical to the shipped one',
+  rebuilt === indexHtml,
+  'template and shipped file have drifted apart');
+check('it does NOT duplicate the stylesheet preload',
+  !/<link rel="preload" href="\/?moviezone\.min\.css[^"]*" as="style"/.test(rebuilt),
+  'a preload for a stylesheet the scanner already found at top priority');
+check('and the hero image preload is still emitted',
+  /<link rel="preload" as="image" media="\(min-width: 1025px\)"/.test(rebuilt),
+  'the LCP preload is the one thing this block exists for');
 
 console.log('-'.repeat(70));
 console.log('  watch-page-check: ' + pass + ' passed, ' + fail + ' failed\n');

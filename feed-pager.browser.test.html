@@ -20,6 +20,24 @@
     checks.push({ name: name, pass: !!pass, detail: detail === undefined ? '' : String(detail) });
   }
 
+  /*  ── WHY THERE IS A SKIP AT ALL ──
+   *
+   *  Every check in this file is downstream of one precondition: the feed has to
+   *  have fetched something. If TMDB is unreachable, slow, or throttling this
+   *  machine, the grid stays empty and EVERY check below becomes unanswerable —
+   *  but the old code reported that as `FAIL the feed rendered its first page of
+   *  cards / null cards`, which reads as "the pager is broken" and is a different
+   *  claim entirely. Observed: this file failed twice in a row on a cold link and
+   *  then passed four times unchanged, including immediately after a suite that
+   *  had just spent 645 TMDB requests. Nothing about the pager was ever involved.
+   *
+   *  So an unanswerable run now says so. The harness asks the app's own proxy
+   *  whether it can reach TMDB at all, and only calls it a failure when the proxy
+   *  is healthy and the feed still did not paint — which IS a real defect. */
+  function skip(name, detail) {
+    checks.push({ name: name, pass: false, skip: true, detail: detail === undefined ? '' : String(detail) });
+  }
+
   function report() {
     try {
       fetch('/__results', {
@@ -84,10 +102,40 @@
     var pagerNav = function () { return doc.querySelector('#feedPager .mz-pager'); };
     var pagerBtns = function () { return doc.querySelectorAll('#feedPager .mz-pager-btn'); };
 
-    // ── the feed has to render before anything can be said about its pager ──
-    var cards = await waitFor(function () { return cardCount() >= 8 ? cardCount() : 0; }, 40000, 250);
+    /*  ── the feed has to render before anything can be said about its pager ──
+     *
+     *  60s, not 40s: the homepage pool is sixteen discover sources, and on this
+     *  path they go out as sixteen separate proxy requests (tmdbBatch needs the
+     *  Worker, which is not what `node server.js` serves). 40s was inside the
+     *  range a cold link actually takes. */
+    var cards = await waitFor(function () { return cardCount() >= 8 ? cardCount() : 0; }, 60000, 250);
+    if (!cards) {
+      /*  Ask the proxy directly rather than guessing from an empty grid. A
+       *  non-200, or a 200 carrying no results, means the environment could not
+       *  answer — see the note at skip(). */
+      var probe = { status: 0, results: -1, error: '' };
+      try {
+        var res = await fetch('/api/tmdb/trending/movie/week?language=en-US&page=1');
+        probe.status = res.status;
+        if (res.status === 200) {
+          var body = await res.json();
+          probe.results = (body && body.results) ? body.results.length : 0;
+        }
+      } catch (e) { probe.error = e && e.message ? e.message : String(e); }
+
+      var reachable = probe.status === 200 && probe.results > 0;
+      var detail = 'grid stayed empty for 60s; proxy probe status=' + probe.status
+        + ' results=' + probe.results + (probe.error ? ' error=' + probe.error : '');
+      if (reachable) {
+        ok('the feed rendered its first page of cards', false,
+          detail + ' — the proxy IS healthy, so this is a real feed defect');
+      } else {
+        skip('the feed rendered its first page of cards', detail
+          + ' — TMDB is unreachable from here, so the pager cannot be judged');
+      }
+      return;
+    }
     ok('the feed rendered its first page of cards', cards >= 8, cards + ' cards');
-    if (!cards) return;
 
     // ── 1. the pager exists AND is on screen ────────────────────────────────
     var nav = await waitFor(pagerNav, 15000, 200);

@@ -48,7 +48,134 @@
 // kept the same ten slides for hours. That moved moviezone.min.js to 14.4; the
 // precached shell pins the URL, so this rename is what delivers it to returning
 // visitors.
-const CACHE_NAME = 'moviezone-v145';
+// v146: the hero now ranks its pool by a TRENDING score instead of the catalogue
+// score, so the re-selection added in v145 can actually change its answer — that
+// re-ask was reaching a comparator in which a title that trended three weeks ago
+// always beat this week's, so the deck kept rebuilding itself identically. Landing
+// with it: the ALL feed gained dated premiere windows for South-Indian films and
+// for web series on ANY OTT in Hindi/Tamil/Telugu/Korean/Chinese (paid for by
+// dropping two unwindowed popularity pages, so the request count is unchanged),
+// and two network ids that were not what they claimed — 2531 is DMAX [ES], 4238 is
+// a 404 — were removed from the OTT list. That moved moviezone.min.js to 14.5; the
+// precached shell pins the URL, so this rename is what delivers it.
+// v147: the Web Series tab is rebuilt on the same latest -> trending -> popular
+// order. It was five popularity pages, and TMDB popularity is lifetime-ish, so the
+// tab opened on its biggest long-runners: C.I.D. (first aired 1998) at card 4 and
+// Reacher (2022) at card 3, while two 2026 premieres wearing NEW ribbons sat at 5
+// and 6. It now fetches three dated windows and /trending/tv/week, adds Chinese
+// (which had no source at all), and drops news/reality/soap/talk rows. The reason
+// those two old titles were on the FIRST screen is a separate bug fixed here:
+// promoteFreshIndustryMix() gave every industry a catalogue slot IN ADDITION to the
+// fresh slot it had already won, because it remembered claimed indexes but not
+// claimed languages — so English and Hindi each took two of the top four cards.
+// Shipping in the same version, because none of the above was deployed yet:
+//   • The Web Series tab now LEADS WITH HINDI. Ranking could not do it: a Hindi
+//     premiere carries a fraction of an English one's popularity and votes in week
+//     one, so English always won the lower pool index and with it the opening
+//     card. promoteFreshIndustryMix() takes an optional lead language and the tab
+//     asks for 'hi'; it reorders the promoted front row only, so the same
+//     industries hold the same slots. A Hindi-only premiere window was added
+//     alongside, because a lead slot is worthless if the language has no
+//     candidate — the five-language window is won by K-drama most weeks.
+//   • SLIDE 0 IS NO LONGER FROZEN. pinPreloadedHero() pinned movie/popular[0],
+//     which barely moves: measured the same day, popular[0] was Spider-Man (54
+//     days old, holding for weeks) while trending/movie/week[0] was Resident Evil
+//     (5 days old). Both the refresh path and scripts/inject-home-links.js now
+//     resolve it from trending, which is also what the hero score would pick — so
+//     the preload is still an LCP cache hit and slide 0 turns over on its own.
+//     index.html's hero preload + meta + SSR slide move with it.
+//   • PRE-2000 MOVIES ARE OUT OF EVERY BROWSE FEED. The era weight is a smooth
+//     decay, so on a thin week the 1990s floated back onto page 1-2 of Bollywood
+//     and Hollywood. isPreMillenniumMovie() is a hard floor at 2000. SEARCH IS
+//     UNAFFECTED — it runs /search/multi and never passes through loadMovies() —
+//     so an old film is still findable and watchable by name. Series are exempt
+//     (first_air_date is season 1, not currency) and so are 'anime'/'kids', whose
+//     canon is the point of those sections.
+// That moved moviezone.min.js to 14.6; the precached shell pins the URL.
+// Also in v147, and none of it was deployed yet either:
+//   • optimizeHomeHead() in seo-ssr.js is now a TRUE NO-OP on the index.html it
+//     generated. It was not: its removal patterns used `\n?` against a CRLF file,
+//     so every nightly `npm run seo:refresh` added a blank line to <head>, and its
+//     template still emitted the duplicate stylesheet preload and the un-guarded
+//     TMDB warm-up that the 117->118 KB tuning had deliberately removed. The
+//     workflow was quietly reverting that tuning on a schedule. The template is now
+//     the source of truth, line endings are taken from the host file, and
+//     watch-page-check.js asserts the no-op instead of asserting the duplicate.
+//   • The homepage SSR link block is filtered like the grid — in BOTH places that
+//     build it. It was /tv/popular and /movie/popular raw, so "Popular web series
+//     and shows" linked to The Tonight Show Starring Johnny Carson (1962),
+//     Tagesschau (1952) and four late-night talk shows, and "Popular movies"
+//     carried Zero Woman 2 (1995) — crawl budget spent on pages this site does not
+//     carry. The series list now asks the app's own question (streaming networks
+//     in, linear channels and news/reality/soap/talk out, ids read out of
+//     moviezone.js so there is no second copy to drift) and the movie lists take
+//     the same 2000 floor as the feed. The rules live in seo-ssr.js because
+//     registerHomeSsr() rebuilds this block at REQUEST time on the Node deployment
+//     and overwrites whatever the build script baked in — fixing only the script
+//     would have looked right locally and changed nothing in production.
+// v148: big screens and TVs. A 55/65-inch panel was getting NONE of tv-mode.css —
+// verified on the real page at 3840x2160, where data-mz-tv came back null, because
+// that stylesheet is gated on a user-agent fingerprint and most smart-TV browsers
+// are not in the list. Meanwhile moviezone.css's own block named "TV / LARGE SCREEN
+// OPTIMIZATION" was switching ON `scroll-behavior: smooth` and a GPU layer per card
+// — the two things tv-mode.css names as the top TV performance mistakes. That block
+// is now a genuine budget (no full-width backdrop blur, no 90/180px shadow radii,
+// no full-viewport SVG film grain, no filter interpolation on the hero image, no
+// decorative infinite loops, instant scrolling), and tv-mode.js sets a new
+// data-mz-bigscreen attribute from real hardware signals — a >=1920px screen with
+// no fine pointer, or a >=2560px screen on <=4 GB / <=4 cores — which applies the
+// VRAM-sensitive half (per-card de-promotion, contain-intrinsic-size auto) without
+// the TV interaction model. A 4K workstation with a mouse matches neither and is
+// deliberately untouched: removing its card layers was measured at scroll p95 23ms
+// -> 200ms, because a desktop GPU is FASTER with them.
+// Also in v148: the hero's Bollywood and Hindi web-series seats now carry genuinely
+// new releases. carouselIndustryQuery asked for 20+ votes and the Hindi series query
+// for 25 votes AND a 6.0 rating, which a title that dropped this week cannot have —
+// Lust Stories 3 (3 days old, popularity 54) has FOUR votes, and Hindi premieres
+// start at literally zero. Both seats were therefore stuck on months-old filler.
+// clearsCarouselBar now has a new-release path that judges a title inside 45 days on
+// popularity instead, with the floor taken from its own category.
+// That moved moviezone.min.css to 9.14, tv-mode.min.css to 1.4, tv-mode.min.js to
+// 1.6 and moviezone.min.js to 14.6; the precached shell pins all four URLs.
+const CACHE_NAME = 'moviezone-v149';
+
+/*  v149: the four remaining main-thread costs on the big-screen path.
+ *
+ *    • PREFETCH DISTANCE IS DERIVED FROM THE VIEWPORT. Every observer used a hard
+ *      -coded rootMargin (300/200/400px), and the lead time a loader actually gets
+ *      is `viewport height + margin`. On a 2160px panel a 400px margin armed the
+ *      infinite-scroll and section loaders 2560px early against a grid ~2500px
+ *      tall — "fetch everything now" on the weakest hardware. mzPrefetchRootMargin
+ *      fixes the LEAD instead, so the margin shrinks as the viewport grows: an
+ *      800px phone keeps exactly today's 400px, a 4K panel drops to 120px.
+ *    • tv-mode.js's DOM SWEEP IS FILTERED AND SCOPED. It observed document.body
+ *      with no filter, so any insertion anywhere — a toast, a search suggestion, a
+ *      carousel slide swap — cost two document-wide querySelectorAll passes and
+ *      discarded the focus cache, which made the next D-pad press rebuild ~150
+ *      getBoundingClientRect reads. It now only reacts to batches that added
+ *      something focusable, visits just those subtrees, and only invalidates the
+ *      cache when a tabindex genuinely appeared. Also fixed a real drift there: the
+ *      poster-parking branch stripped `src` from images that were STILL IN FLIGHT,
+ *      on the assumption that posters are marked loading="eager" on TV — they are
+ *      not, and have not been for some time, so it was cancelling fetches and
+ *      causing the same bytes to be downloaded twice.
+ *    • THE RAIL HANDLERS NO LONGER THRASH LAYOUT. updateArrowState,
+ *      _mzUpdateTop10Arrows and updateControls each read scrollWidth / clientWidth
+ *      / scrollLeft either side of a `.disabled` or `.hidden` write, forcing a
+ *      synchronous layout flush — on every scroll EVENT, not every frame. Reads are
+ *      now batched ahead of writes and the listeners are rAF-throttled.
+ *    • THE PERIODIC localStorage WORK IS CUT. The 60s sweep enumerated and sorted
+ *      the whole keyspace unconditionally; it now skips hidden tabs, skips when
+ *      nothing has been written since the last pass, and does the sort in idle
+ *      time. The watch-session write went 5s -> 15s (every exit path still flushes
+ *      immediately, so only a hard kill loses anything, and it loses 15s not 5s).
+ *      The performance.memory poll now stops after it fires once instead of
+ *      re-adding a class it had already added, every 10s, forever.
+ *
+ *  Verified on the real page at 3840x2160: rootMargin resolves to 120px, and 20s of
+ *  idling produced ZERO localStorage keyspace enumerations. That moved
+ *  moviezone.min.js to 14.7 and tv-mode.min.js to 1.7; the precached shell pins
+ *  both URLs, so this rename is what delivers them to returning visitors. */
 
 // Separate cache for TMDB posters/backdrops. Kept apart from the shell so the
 // activate handler can wipe an old shell without throwing away hundreds of
@@ -61,11 +188,11 @@ const IMAGE_CACHE_MAX_ENTRIES = 400;
 const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/tv-mode.min.css?v=1.3',
-  '/moviezone.min.css?v=9.13',
-  '/tv-mode.min.js?v=1.5',
+  '/tv-mode.min.css?v=1.4',
+  '/moviezone.min.css?v=9.14',
+  '/tv-mode.min.js?v=1.7',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=14.4',
+  '/moviezone.min.js?v=14.7',
   '/manifest.json',
   '/moviezone-logo.png?v=2',
   '/icon-192.png?v=2',

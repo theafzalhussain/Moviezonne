@@ -318,6 +318,59 @@
       animations: false, particles: false, blur: false, prefetch: 2, focusScrollBlock: 'center' };
   }
 
+  /*  ── WEAK BIG SCREENS THAT ARE NOT "A TV" ──────────────────────────────
+   *
+   *  Everything above this point decides whether to turn on TV MODE, which is a
+   *  whole interaction model: D-pad focus, a remote key map, no cursor. Getting
+   *  that wrong on a desktop would be a serious bug, so the detection is
+   *  deliberately strict — a user-agent match, an explicit ?tv=1, or no pointing
+   *  device at all.
+   *
+   *  But tv-mode.css carries two very different kinds of rule under the same
+   *  attribute, and only one of them is about interaction. The other is a pure
+   *  RENDERING BUDGET: no per-card GPU layer, no full-width backdrop blur, no
+   *  pinned full-viewport layers, instant scrolling. Those exist because the
+   *  panel has a lot of pixels and the chipset has little memory and fill rate —
+   *  which has nothing to do with whether the user holds a remote.
+   *
+   *  Measured on the real page at 3840×2160 in headless Chrome: `data-mz-tv` came
+   *  back NULL. So a 55" or 65" panel whose browser is not in TV_UA_PATTERNS and
+   *  which reports a pointer — most modern smart-TV browsers do — got the full
+   *  desktop rendering cost, and moviezone.css's own "large screen optimisation"
+   *  block was additionally switching ON smooth scrolling and a GPU layer per
+   *  card. That is the reported "very slow and laggy on a big TV".
+   *
+   *  This returns the RENDERING half only, and the two clauses are chosen so an
+   *  ordinary desktop cannot match:
+   *
+   *    • a big screen with NO fine pointer. A mouse is the thing a TV does not
+   *      have, so this is the honest "driven by a remote on a large panel" case.
+   *      It does not need a memory figure, which Safari never reports anyway.
+   *    • a 2560px-or-wider screen on visibly weak silicon (≤4 GB or ≤4 cores).
+   *      2560 rather than 1920 on purpose: a 1920-wide office PC with four cores
+   *      and a mouse is a normal desktop and must keep the full visual design.
+   *
+   *  Deliberately NOT a plain width query — that is what moviezone.css already
+   *  tried, and a 4K workstation with 32 GB and a discrete GPU is measurably
+   *  FASTER with the per-card layers than without them. Width alone cannot tell
+   *  the two apart; these signals can.
+   *
+   *  @param {Object} env { screenWidth, hasFinePointer, deviceMemory, hardwareConcurrency }
+   *  @returns {boolean}
+   */
+  function shouldThrottleBigScreen(env) {
+    var e = env || {};
+    var width = typeof e.screenWidth === 'number' ? e.screenWidth : 0;
+    if (width < 1920) return false;
+
+    if (e.hasFinePointer === false) return true;
+
+    var memory = typeof e.deviceMemory === 'number' ? e.deviceMemory : null;
+    var cores = typeof e.hardwareConcurrency === 'number' ? e.hardwareConcurrency : null;
+    var weak = (memory !== null && memory <= 4) || (cores !== null && cores <= 4);
+    return width >= 2560 && weak;
+  }
+
   var core = {
     TV_UA_PATTERNS: TV_UA_PATTERNS,
     detectTvPlatform: detectTvPlatform,
@@ -327,7 +380,8 @@
     isDirection: isDirection,
     pickNextFocus: pickNextFocus,
     overlap1D: overlap1D,
-    computePerfProfile: computePerfProfile
+    computePerfProfile: computePerfProfile,
+    shouldThrottleBigScreen: shouldThrottleBigScreen
   };
 
   /* ═══════════════════════════════════════════════════════════════
@@ -352,6 +406,7 @@
     pickNextFocus: pickNextFocus,
     overlap1D: overlap1D,
     computePerfProfile: computePerfProfile,
+    shouldThrottleBigScreen: shouldThrottleBigScreen,
 
     /** moviezone.js registers its internal state accessors + close handlers here. */
     configure: function (callbacks) {
@@ -398,6 +453,20 @@
   state.isTv = detection.isTv;
   state.platform = detection.platform;
   state.confidence = detection.confidence;
+
+  /*  The rendering budget is decided BEFORE the early return below, because it
+   *  applies to devices that are not TVs by any interaction measure but are still
+   *  a lot of pixels on weak silicon. See shouldThrottleBigScreen() for why this
+   *  cannot be a CSS width query. tv-mode.css mirrors its performance rules under
+   *  this attribute; none of the D-pad or cursor behaviour is attached to it. */
+  if (shouldThrottleBigScreen({
+    screenWidth: window.screen ? window.screen.width : window.innerWidth,
+    hasFinePointer: safeMatchMedia('(pointer: fine)'),
+    deviceMemory: typeof nav.deviceMemory === 'number' ? nav.deviceMemory : null,
+    hardwareConcurrency: typeof nav.hardwareConcurrency === 'number' ? nav.hardwareConcurrency : null
+  })) {
+    try { document.documentElement.setAttribute('data-mz-bigscreen', 'true'); } catch (err) { /* non-fatal */ }
+  }
 
   if (!state.isTv) return; // Phones, tablets and desktops leave here untouched.
 
@@ -1033,10 +1102,14 @@
      cards, carousel thumbs and dots are plain divs. Without a tab index the
      D-pad simply cannot reach them, so we grant one.
 
-     Images: moviezone.js marks posters loading="eager" on TV to avoid lazy-load
-     pops while D-padding. On a low-tier stick that means dozens of simultaneous
-     decodes and a multi-second freeze. We park far-offscreen posters and restore
-     them through an IntersectionObserver well before they are needed. */
+     Images: posters that the page loads EAGERLY are parked far off screen and
+     restored through an IntersectionObserver well before they are needed, because
+     on a low-tier stick dozens of simultaneous decodes is a multi-second freeze.
+     This used to say that moviezone.js marks posters loading="eager" on TV; it does
+     not, and has not for some time — createMovieCardHTML emits loading="lazy"
+     unconditionally. Natively lazy posters are therefore skipped, since an
+     off-screen lazy image was never fetched and cancelling one that IS in flight
+     only causes it to be downloaded twice. See the park branch for the detail. */
 
   var FOCUSABLE_PROMOTIONS = '.movie-card, .upcoming-card, .ch-card, .search-result-item, .carousel-thumb, .carousel-dot, .cw-card, .continue-watching-card';
 
@@ -1044,13 +1117,102 @@
   var sweepInstalled = false;
   var sweepScheduled = false;
 
-  function ensureFocusable() {
-    var nodes = document.querySelectorAll(FOCUSABLE_PROMOTIONS);
-    for (var i = 0; i < nodes.length; i++) {
-      var el = nodes[i];
-      if (el.hasAttribute('tabindex')) continue;
-      el.setAttribute('tabindex', '0');
+  /*  How far outside the viewport a poster is kept loaded.
+   *
+   *  This was a flat '400px 0px', and a fixed pixel margin answers the wrong
+   *  question: the range a poster is actually held over is `viewport height +
+   *  margin`, and that first term is 800px on a phone and 2160px on a 4K panel. On
+   *  the panel the flat margin meant an unparking range of 2560px against a grid
+   *  about 2500px tall — i.e. nothing was ever parked, on the one device the
+   *  parking was written for. The margin therefore shrinks as the viewport grows,
+   *  and is capped at the old 400px so it can only become more conservative.
+   *  Mirrors mzPrefetchRootMargin in moviezone.js; the two files share no scope. */
+  function posterParkMargin() {
+    var vh = (window.innerHeight || 800);
+    var lead = Math.max(120, 1200 - vh);
+    return Math.round(Math.min(400, lead)) + 'px 0px';
+  }
+
+  /*  ══════════════════════════════════════════════════════════════════════
+   *  THE SWEEP IS SCOPED TO WHAT ACTUALLY CHANGED
+   *  ══════════════════════════════════════════════════════════════════════
+   *  This used to be `new MutationObserver(scheduleSweep).observe(document.body,
+   *  { childList: true, subtree: true })` with no filter, and runSweep() then did
+   *  two document-wide querySelectorAll passes plus a focus-cache invalidation.
+   *  So ANY DOM insertion anywhere — a toast, a search suggestion, the carousel
+   *  swapping a slide, a modal opening — cost a full-document re-scan of eight
+   *  selectors, and threw away the focus cache, which means the NEXT D-pad press
+   *  rebuilt the whole focusable list with one getBoundingClientRect per node
+   *  (~100-150 rect reads with 30 cards and 27 category pills on screen).
+   *  O(total nodes) per mutation batch, on the device with the least CPU.
+   *
+   *  Two changes, and neither weakens the guarantee the sweep exists for — that
+   *  every new card is reachable by the remote:
+   *
+   *    • MUTATIONS ARE FILTERED. A batch only schedules a sweep if it actually
+   *      added something focus-relevant, and the nodes it added are remembered.
+   *      Testing an inserted node is work proportional to the INSERTION, not to
+   *      the document.
+   *    • THE SWEEP VISITS THOSE NODES ONLY. ensureFocusable() takes the collected
+   *      roots and walks them; the first run still does the whole document once,
+   *      because the initial markup was never inserted through an observer.
+   *
+   *  And the focus cache is only invalidated when a tabindex was genuinely added,
+   *  so a mutation that changed nothing relevant no longer costs the next keypress
+   *  a full rebuild. */
+  var pendingRoots = [];
+  var sweepWholeDocument = true;
+
+  /** Collects focus-relevant inserted nodes. Returns true if a sweep is needed. */
+  function collectSweepRoots(records) {
+    var found = false;
+    for (var i = 0; i < records.length; i++) {
+      var added = records[i].addedNodes;
+      if (!added || !added.length) continue;
+      for (var j = 0; j < added.length; j++) {
+        var node = added[j];
+        if (!node || node.nodeType !== 1) continue;   // text nodes cannot hold focus
+        var relevant = false;
+        try {
+          relevant = (typeof node.matches === 'function' && node.matches(FOCUSABLE_PROMOTIONS))
+            || (typeof node.querySelector === 'function' && !!node.querySelector(FOCUSABLE_PROMOTIONS));
+        } catch (err) { relevant = true; }            // unknown shape: sweep rather than miss a card
+        if (!relevant) continue;
+        pendingRoots.push(node);
+        found = true;
+      }
     }
+    return found;
+  }
+
+  /** Gives every card a tabindex so the D-pad can reach it.
+   *  @param {Element[]|null} roots subtrees to visit; null means the whole document
+   *  @returns {boolean} whether anything was actually changed
+   */
+  function ensureFocusable(roots) {
+    var changed = false;
+    var promote = function (el) {
+      if (!el || el.nodeType !== 1 || el.hasAttribute('tabindex')) return;
+      el.setAttribute('tabindex', '0');
+      changed = true;
+    };
+
+    if (!roots) {
+      var all = document.querySelectorAll(FOCUSABLE_PROMOTIONS);
+      for (var i = 0; i < all.length; i++) promote(all[i]);
+      return changed;
+    }
+
+    for (var r = 0; r < roots.length; r++) {
+      var root = roots[r];
+      if (!root || root.nodeType !== 1) continue;
+      try {
+        if (typeof root.matches === 'function' && root.matches(FOCUSABLE_PROMOTIONS)) promote(root);
+        var inner = root.querySelectorAll(FOCUSABLE_PROMOTIONS);
+        for (var k = 0; k < inner.length; k++) promote(inner[k]);
+      } catch (err) { /* detached or exotic node — nothing to promote */ }
+    }
+    return changed;
   }
 
   function ensurePosterObserver() {
@@ -1069,13 +1231,30 @@
           continue;
         }
         // Out of range and still loading: park the download/decode until needed.
+        /*  ── AN IMAGE THE BROWSER IS ALREADY DEFERRING IS LEFT ALONE ──
+         *
+         *  The comment above this block says "moviezone.js marks posters
+         *  loading='eager' on TV to avoid lazy-load pops". It does not — and has
+         *  not for some time: createMovieCardHTML emits `loading="lazy"
+         *  fetchpriority="low"` unconditionally. So this branch was fighting images
+         *  the browser had already decided to defer, and doing real harm while it
+         *  did: the test below is `!img.complete`, i.e. it only ever parked images
+         *  that were STILL IN FLIGHT, and stripping src cancels that fetch. The
+         *  image is then re-requested when it scrolls back into range — the same
+         *  bytes twice, on the slowest connection of any device class.
+         *
+         *  With native lazy loading there is nothing left to save here: an
+         *  off-screen lazy poster was never fetched in the first place. Parking is
+         *  therefore limited to images the page asked for eagerly, which is what
+         *  the mechanism was written for and what it is still correct for. */
+        if (img.loading === 'lazy') continue;
         if (img.complete || img.getAttribute('data-mztv-src')) continue;
         var src = img.getAttribute('src');
         if (!src) continue;
         img.setAttribute('data-mztv-src', src);
         img.removeAttribute('src'); // width/height attributes keep the layout stable
       }
-    }, { rootMargin: '400px 0px' });
+    }, { rootMargin: posterParkMargin() });
     return posterObserver;
   }
 
@@ -1093,24 +1272,35 @@
 
   function runSweep() {
     sweepScheduled = false;
-    ensureFocusable();
+    /*  The first run covers the whole document — the initial markup was rendered
+     *  before this observer existed, so there are no mutation records for it. Every
+     *  run after that visits only the subtrees that were inserted. */
+    var roots = sweepWholeDocument ? null : pendingRoots;
+    sweepWholeDocument = false;
+    var changed = ensureFocusable(roots);
+    pendingRoots = [];
     parkOffscreenPosters();
-    invalidateFocusCache(); // tab indexes may have changed the candidate set
+    // Only if a tabindex actually appeared: otherwise the next D-pad press would
+    // rebuild ~150 rects for a mutation that changed nothing it cares about.
+    if (changed) invalidateFocusCache();
   }
 
   function scheduleSweep() {
     if (sweepScheduled) return;
     sweepScheduled = true;
     var ran = false;
+    var safety = 0;
     function once() {
       if (ran) return;
       ran = true;
+      if (safety) { clearTimeout(safety); safety = 0; }
       runSweep();
     }
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(once);
     // Safety net: several TV browsers throttle rAF once they decide the page is
-    // idle, and the sweep is what makes new cards reachable by the D-pad.
-    setTimeout(once, 60);
+    // idle, and the sweep is what makes new cards reachable by the D-pad. Cleared
+    // as soon as rAF wins, so a busy page does not accumulate pending timers.
+    safety = setTimeout(once, 60);
   }
 
   /* ── Render-budget containment ────────────────────────────────────────────
@@ -1163,7 +1353,13 @@
     if (sweepInstalled) { scheduleSweep(); return; }
     sweepInstalled = true;
     if (typeof MutationObserver === 'function' && document.body) {
-      new MutationObserver(scheduleSweep).observe(document.body, { childList: true, subtree: true });
+      /*  Filtered, not unconditional — see collectSweepRoots. A batch that added
+       *  nothing focus-relevant now costs one loop over its addedNodes and stops
+       *  there, instead of two document-wide querySelectorAll passes plus a focus
+       *  cache rebuild on the next keypress. */
+      new MutationObserver(function (records) {
+        if (collectSweepRoots(records)) scheduleSweep();
+      }).observe(document.body, { childList: true, subtree: true });
     }
     scheduleSweep();
   }

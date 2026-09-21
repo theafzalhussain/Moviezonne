@@ -2069,6 +2069,98 @@ function injectHomeLinks(shell, block) {
 let homeShellMemo = null;
 let homeShellMtime = 0;
 
+/*  ══════════════════════════════════════════════════════════════════════════
+ *  WHAT THE HOMEPAGE LINK BLOCK IS ALLOWED TO LINK TO
+ *  ══════════════════════════════════════════════════════════════════════════
+ *  This block is the homepage's entire internal link graph — the homepage earns
+ *  ~82% of the site's clicks, and these are the links that pass that authority on.
+ *  It was built from /trending/movie/week, /movie/popular and /tv/popular raw,
+ *  sliced to 20, and that is the wrong shape twice over:
+ *
+ *    • TMDB popularity is lifetime-ish, so "Popular movies right now" carried
+ *      Zero Woman 2 (1995) while the grid itself no longer shows pre-2000 films.
+ *    • /tv/popular is a BROADCAST chart. "Popular web series and shows" came back
+ *      as The Tonight Show Starring Johnny Carson (1962), Tagesschau (1952),
+ *      What's My Line? (1950), four late-night talk shows and Law & Order (1990).
+ *      Filtering the genres out of one page leaves NINETEEN of forty rows.
+ *
+ *  Both ways it linked to pages this site does not carry — bad for a visitor,
+ *  worse for a crawl budget.
+ *
+ *  ── AND IT IS BUILT IN TWO PLACES, WHICH IS WHY THIS LIVES HERE ──
+ *  scripts/inject-home-links.js bakes it into index.html at build time, and
+ *  registerHomeSsr() below rebuilds it at REQUEST time on the Node deployment and
+ *  then overwrites the baked one. Fixing only the script would have looked correct
+ *  locally and changed nothing in production. So the rules are defined once and
+ *  both callers import them.
+ *
+ *  (The Cloudflare deployment is not affected either way: `/` is not in
+ *  run_worker_first, so the asset router serves the baked index.html and worker.js
+ *  returns null for '/'.)
+ */
+const HOME_LINK_MIN_MOVIE_YEAR = 2000;
+
+/*  News, Reality, Soap, Talk. Series are NOT year-filtered, deliberately:
+ *  first_air_date is season one's date, so a show that premiered in 1999 and is
+ *  still releasing seasons is current — the same reason the feed exempts them. */
+const HOME_LINK_NON_DRAMA_TV = new Set([10763, 10764, 10766, 10767]);
+
+/** Keeps a row if it belongs on a surface that carries modern streaming titles. */
+function homeLinkKeeps(row, kind) {
+  if (!row || !row.id) return false;
+  if (kind === 'tv') {
+    return !(Array.isArray(row.genre_ids) && row.genre_ids.some((g) => HOME_LINK_NON_DRAMA_TV.has(g)));
+  }
+  const year = parseInt(String(row.release_date || '').slice(0, 4), 10);
+  return !isFinite(year) || year >= HOME_LINK_MIN_MOVIE_YEAR;
+}
+
+/** Flattens several TMDB pages into at most `n` unique, eligible rows. */
+function pickHomeLinks(pages, n, kind) {
+  const seen = new Set();
+  const out = [];
+  (pages || []).forEach((page) => ((page && page.results) || []).forEach((row) => {
+    if (out.length >= n || !homeLinkKeeps(row, kind) || seen.has(row.id)) return;
+    seen.add(row.id);
+    out.push(row);
+  }));
+  return out;
+}
+
+/*  The series source, asked the way the APP defines "web series": streaming
+ *  networks in, Indian linear channels and the non-drama formats out.
+ *
+ *  The ids are read out of moviezone.js rather than copied, because a second
+ *  hand-maintained copy of that list is a drift waiting to happen — it grew by
+ *  twelve platforms and had two wrong ids corrected this month alone. Memoised,
+ *  and if the shape ever changes the caller falls back to /tv/popular, which the
+ *  genre filter above still cleans up. */
+let homeSeriesQueryMemo;
+function homeLinkSeriesQuery() {
+  if (homeSeriesQueryMemo !== undefined) return homeSeriesQueryMemo;
+  homeSeriesQueryMemo = null;
+  try {
+    const src = fs.readFileSync(path.join(APP_DIR, 'moviezone.js'), 'utf8');
+    const block = (src.match(/const STREAMING_NETWORK_IDS = \[([\s\S]*?)\]\.join\('\|'\)/) || [])[1];
+    const networks = block
+      ? (block.match(/'(\d+)'/g) || []).map((s) => s.replace(/'/g, '')).join('|')
+      : '';
+    if (!networks) return homeSeriesQueryMemo;
+    const linear = (src.match(/const LINEAR_TV_EXCLUDE_IDS = '([^']+)'/) || [])[1] || '';
+    homeSeriesQueryMemo = {
+      endpoint: '/discover/tv',
+      params: {
+        with_networks: networks,
+        without_networks: linear,
+        without_genres: '10763,10764,10766,10767',
+        sort_by: 'popularity.desc',
+        'vote_count.gte': '40'
+      }
+    };
+  } catch (e) { /* fall back to /tv/popular */ }
+  return homeSeriesQueryMemo;
+}
+
 function readHomeShell() {
   const stat = fs.statSync(HOME_FILE);
   if (homeShellMemo && stat.mtimeMs === homeShellMtime) return homeShellMemo;
@@ -3000,13 +3092,59 @@ function injectHeroSlide(shell, heroUrl) {
 }
 
 const PERF_HEAD_MARK = '<!--MZ_PERF_HEAD-->';
-const PERF_HEAD_RE = /<!--MZ_PERF_HEAD-->[\s\S]*?<!--\/MZ_PERF_HEAD-->\n?/;
+/*  `\r?\n?` and not `\n?`, and that one character is the whole drift story.
+ *
+ *  index.html is stored CRLF. With `\n?` this pattern could not consume the line
+ *  break after the closing marker — `\n?` sees `\r` and matches zero — so every
+ *  run removed the block, left the orphaned `\r\n`, and then wrote the block back
+ *  with its own break: one extra blank line added to <head> per nightly build,
+ *  forever. optimizeHomeHead() documents itself as "a pure function of the
+ *  original file rather than a diff on top of itself", and on the file it actually
+ *  ships against it was neither. Proven by running it twice on the real
+ *  index.html — watch-page-check.js now asserts exactly that. */
+const PERF_HEAD_RE = /<!--MZ_PERF_HEAD-->[\s\S]*?<!--\/MZ_PERF_HEAD-->\r?\n?/;
 
 /** Endpoints the homepage renders its first screen from, taken from a trace. */
 const WARM_ENDPOINTS = [
   '/api/tmdb/movie/popular?language=en-US&page=1',
   '/api/tmdb/trending/movie/week?language=en-US&page=1'
 ];
+
+/*  How long the warm-up trusts the app's own cache before firing again. Must stay
+ *  equal to the tmdb() discovery TTL that _mzFlushCacheWrites stamps mz_warm_ts
+ *  from, or the two disagree about what "warm" means. */
+const WARM_SKIP_MS = 10800000;      // 3h
+
+/*  ── THE WARM-UP, AND WHY IT IS WRITTEN HERE RATHER THAN BY HAND ──
+ *
+ *  This block used to be generated WITHOUT the mz_warm_ts guard, and index.html
+ *  was then hand-edited to add it. That is a drift, not a fix: optimizeHomeHead()
+ *  deletes the delimited region and rewrites it from this template, so the next
+ *  nightly `npm run seo:refresh` silently reverted the hand edit — reinstating two
+ *  fetches that download 40-100 KB for nobody on every warm load, and putting back
+ *  a duplicate stylesheet preload the same tuning had removed. It was found by
+ *  running the build step and reading the diff.
+ *
+ *  So the template IS the source of truth now, and index.html is a pure product of
+ *  it. Keeping them byte-identical is what makes the nightly run a no-op on the
+ *  head, which is the only state in which the tuning survives.
+ */
+function warmUpScript() {
+  return '<script>\n'
+    + '/* Warms the edge cache for two first-screen paths while the parser is still\n'
+    + '   working; both bodies are discarded on purpose. Skipped on localhost, and\n'
+    + '   skipped when mz_warm_ts says the app already holds a fresh cache \u2014 on a warm\n'
+    + '   load these two fetches downloaded 40-100 KB for nobody. See _mzFlushCacheWrites\n'
+    + '   in moviezone.js for why the decision is made from a 13-byte marker. */\n'
+    + '(function(){try{\n'
+    + '  if(/^(localhost|127\\.0\\.0\\.1)$/.test(location.hostname))return;\n'
+    + '  try{var t=parseInt(localStorage.getItem("mz_warm_ts")||"0",10);\n'
+    + '      if(t&&Date.now()-t<' + WARM_SKIP_MS + ')return;}catch(e){}\n'
+    + '  var u=' + JSON.stringify(WARM_ENDPOINTS) + ';\n'
+    + '  for(var i=0;i<u.length;i++)fetch(u[i],{credentials:"same-origin"}).catch(function(){});\n'
+    + '}catch(e){}})();\n'
+    + '</script>\n';
+}
 
 /**
  * Rewrites the <head> of index.html for the critical path.
@@ -3021,8 +3159,16 @@ const WARM_ENDPOINTS = [
  */
 function optimizeHomeHead(shell, heroUrl) {
   if (!shell) return shell;
+
+  /*  The host file's line ending, not this process's. index.html is CRLF on a
+   *  Windows checkout and LF in CI, and a block written with the wrong one is a
+   *  diff on every single run even when every line is byte-identical — which is
+   *  how this was found: a line-by-line comparison reported ZERO differing lines
+   *  while the two strings were still unequal. Detect and reuse. */
+  const NL = /\r\n/.test(shell) ? '\r\n' : '\n';
+
   let html = shell.replace(PERF_HEAD_RE, '');
-  html = html.replace(/[ \t]*<meta name="mz-hero-backdrop"[^>]*>\n?/g, '');
+  html = html.replace(/[ \t]*<meta name="mz-hero-backdrop"[^>]*>\r?\n?/g, '');
 
   // Restore anything a previous run rewrote, so this is a pure function of the
   // original file rather than a diff on top of itself.
@@ -3040,7 +3186,7 @@ function optimizeHomeHead(shell, heroUrl) {
     '<link rel="stylesheet" href="$1">'
   );
   html = html.replace(
-    /<link rel="preload" href="(\/?moviezone\.min\.css[^"]*)" as="style"[^>]*>\n?/, ''
+    /<link rel="preload" href="(\/?moviezone\.min\.css[^"]*)" as="style"[^>]*>\r?\n?/, ''
   );
 
   const cssLink = html.match(/<link rel="stylesheet" href="(\/?moviezone\.min\.css[^"]*)">/);
@@ -3048,7 +3194,7 @@ function optimizeHomeHead(shell, heroUrl) {
 
   // 1. drop preloads for bundles that gate neither first paint nor LCP
   html = html.replace(
-    /[ \t]*<link[^>]*rel="preload"[^>]*as="script"[^>]*>\n?/g,
+    /[ \t]*<link[^>]*rel="preload"[^>]*as="script"[^>]*>\r?\n?/g,
     (tag) => (tag.indexOf('moviezone.min.js') !== -1 ? tag : '')
   );
 
@@ -3060,23 +3206,25 @@ function optimizeHomeHead(shell, heroUrl) {
   );
 
   // 3. everything that has to start early, in priority order, after the CSS link
+  /*  NO `<link rel="preload" as="style">` for the stylesheet.
+   *
+   *  It used to be the first line of this block, and it was pure waste: the block
+   *  is inserted immediately AFTER the `<link rel="stylesheet">` for the same URL,
+   *  which the preload scanner has already discovered at the highest priority in
+   *  the same pass. Chrome reports it as a duplicate-priority preload. It was
+   *  removed from index.html by hand once and this template put it straight back
+   *  on the next build — see the note above warmUpScript(). */
   const block = PERF_HEAD_MARK + '\n'
-    + '<link rel="preload" href="' + cssLink[1] + '" as="style" fetchpriority="high">\n'
     + (heroUrl ? heroPreloadTag(heroUrl) : '')
-    + '<script>\n'
-    + '/* Warms the HTTP cache for first-screen data while the parser is still\n'
-    + '   working; moviezone.js requests the same URLs a second later and gets a\n'
-    + '   cache hit. Guarded so it can never affect rendering, and skipped on\n'
-    + '   localhost where the app points at a different API base. */\n'
-    + '(function(){try{'
-    + 'if(/^(localhost|127\\.0\\.0\\.1)$/.test(location.hostname))return;'
-    + 'var u=' + JSON.stringify(WARM_ENDPOINTS) + ';'
-    + 'for(var i=0;i<u.length;i++)fetch(u[i],{credentials:"same-origin"}).catch(function(){});'
-    + '}catch(e){}})();\n'
-    + '</script>\n'
+    + warmUpScript()
     + '<!--/MZ_PERF_HEAD-->';
 
-  return html.replace(cssLink[0], cssLink[0] + '\n' + block);
+  /*  Built with '\n' throughout for readability, then normalised to the host
+   *  file's ending in one place. The block never contains a literal '\r', so this
+   *  substitution cannot double up. */
+  const blockNL = NL === '\n' ? block : block.replace(/\n/g, NL);
+
+  return html.replace(cssLink[0], cssLink[0] + NL + blockNL);
 }
 
 /** Minimal attribute escaping for a URL we build ourselves. */
@@ -3135,16 +3283,27 @@ function registerHomeSsr(app, deps) {
     if (!html) {
       let block = '';
       try {
-        const [trending, popular, tv] = await Promise.all([
-          tmdb('/trending/movie/week', { language: 'en-US', page: '1' }).catch(() => null),
-          tmdb('/movie/popular', { language: 'en-US', page: '1' }).catch(() => null),
-          tmdb('/tv/popular', { language: 'en-US', page: '1' }).catch(() => null)
+        /*  Three pages per source, not one. Measured: filtering /tv/popular leaves
+         *  19 of 40 rows, so a single page cannot fill twenty series links. The
+         *  whole result is memoised under `ssr:home:links`, so this is a handful of
+         *  requests per cache window rather than per visitor. */
+        const seriesQ = homeLinkSeriesQuery();
+        const seriesEndpoint = seriesQ ? seriesQ.endpoint : '/tv/popular';
+        const seriesParams = seriesQ ? seriesQ.params : {};
+        const pages = [1, 2, 3];
+        const ask = (endpoint, extra) => pages.map((p) => tmdb(
+          endpoint, Object.assign({ language: 'en-US', page: String(p) }, extra || {})
+        ).catch(() => null));
+
+        const [tr, po, tv] = await Promise.all([
+          Promise.all(ask('/trending/movie/week')),
+          Promise.all(ask('/movie/popular')),
+          Promise.all(ask(seriesEndpoint, seriesParams))
         ]);
-        const pick = (d, n) => ((d && d.results) || []).filter((r) => r && r.id).slice(0, n);
         block = renderHomeLinkBlock({
-          trending: pick(trending, 20),
-          popular: pick(popular, 20),
-          tv: pick(tv, 20)
+          trending: pickHomeLinks(tr, 20, 'movie'),
+          popular: pickHomeLinks(po, 20, 'movie'),
+          tv: pickHomeLinks(tv, 20, 'tv')
         });
       } catch (err) {
         console.warn('[seo-ssr] homepage link block failed:', err && err.message);
@@ -3181,6 +3340,10 @@ module.exports = {
   renderBrowseLetterPage,
   renderHomeLinkBlock,
   injectHomeLinks,
+  // Shared with scripts/inject-home-links.js so the build-time and request-time
+  // copies of the homepage link block cannot disagree about what belongs in it.
+  pickHomeLinks,
+  homeLinkSeriesQuery,
   optimizeHomeHead,
   injectHeroSlide,
   readSitemapCache,

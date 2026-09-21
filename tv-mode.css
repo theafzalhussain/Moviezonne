@@ -317,3 +317,96 @@ html[data-mz-tv="true"][data-mz-tv-tier="low"] .slide-bg {
     transition: none !important;
   }
 }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   WEAK BIG SCREENS — the rendering budget without the TV interaction model
+   ══════════════════════════════════════════════════════════════════════════
+   Everything above is gated on html[data-mz-tv="true"], which only a device
+   tv-mode.js can FINGERPRINT as a TV ever gets. Verified on the real page at
+   3840×2160: data-mz-tv came back null. So a 55" or 65" panel whose browser is
+   not in TV_UA_PATTERNS — and which reports a pointer, as most modern smart-TV
+   browsers do — was getting the full desktop rendering cost, while moviezone.css's
+   own "large screen optimisation" block additionally switched ON smooth scrolling
+   and a GPU layer per card. That is the reported "very slow and laggy on a big TV".
+
+   shouldThrottleBigScreen() in tv-mode.js sets data-mz-bigscreen for exactly two
+   populations: a ≥1920px screen with no fine pointer, and a ≥2560px screen on ≤4 GB
+   or ≤4 cores. An ordinary desktop with a mouse matches neither and is untouched.
+
+   WHY THIS IS NOT A CSS WIDTH QUERY, which would be simpler: because the most
+   valuable rule here — dropping the per-card GPU layer — is a VRAM trade-off, and
+   the two hardware classes want OPPOSITE answers. Measured at 3840×2160 on a
+   desktop GPU, removing the card layers made frame times sharply WORSE (scroll p95
+   23ms → 200ms) because the alternative is repainting on the main thread. A TV with
+   a few hundred MB of shared video memory is hurt by the same layers a workstation
+   is helped by. Width cannot tell them apart; a pointer and a memory figure can.
+
+   Each rule below is the same declaration the TV layer above already makes, for the
+   same documented reason. Nothing here changes layout, colour or interaction — only
+   how much per-frame work the compositor is asked to do.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Smooth scrolling is the single biggest cause of the "it feels laggy" complaint
+   on a remote- or trackpad-driven big screen. Layout is untouched. */
+html[data-mz-bigscreen="true"],
+html[data-mz-bigscreen="true"] body {
+  scroll-behavior: auto !important;
+}
+
+/* backdrop-filter forces an offscreen composite pass per element per frame, and
+   #navbar is position:fixed and full width, so it pays that on every scroll frame
+   over a bar that gets WIDER at this size. A permanent will-change pins a GPU
+   layer per element and exhausts TV VRAM. */
+html[data-mz-bigscreen="true"] * {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  will-change: auto !important;
+}
+
+/*  moviezone.css re-enables the navbar blur at `.large-screen-mode #navbar` with
+ *  !important, and when both declarations are important the cascade is decided by
+ *  SPECIFICITY — one class plus one id beats the universal selector above. Verified
+ *  on the real page: the computed backdrop-filter stayed `blur(20px) saturate(1.8)`
+ *  until a selector that carries the id matched it. */
+html[data-mz-bigscreen="true"] #navbar,
+html[data-mz-bigscreen="true"] .large-screen-mode #navbar {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* The composited layer budget. moviezone.css gives every card
+   `transform: perspective(1000px) translateZ(0)` plus `backface-visibility: hidden`
+   to force a GPU layer. Both are visually IDENTITY transforms — they move nothing
+   and render nothing differently — so dropping them on RESTING tiles costs nothing
+   visually and removes one layer per card. The hover/focus transform is excluded,
+   so a highlighted tile still lifts exactly as it does on a laptop. */
+html[data-mz-bigscreen="true"] .movie-card:not(:hover):not(:focus):not(:focus-within),
+html[data-mz-bigscreen="true"] .upcoming-card:not(:hover):not(:focus):not(:focus-within) {
+  transform: none !important;
+}
+html[data-mz-bigscreen="true"] .movie-card:not(:hover):not(:focus):not(:focus-within) img,
+html[data-mz-bigscreen="true"] .upcoming-card:not(:hover):not(:focus):not(:focus-within) img {
+  transform: none !important;
+  backface-visibility: visible !important;
+  -webkit-backface-visibility: visible !important;
+}
+
+/* content-visibility:auto only pays off if the placeholder size is right.
+   moviezone.css pins it at a flat 180×320 guess while a card on a 2560px screen is
+   ~300px wide, so every row scrolling into view resized and forced a relayout of
+   the whole grid. `auto` makes the browser reuse each tile's last MEASURED size, so
+   a skipped tile keeps the exact box it had. Paired with the de-promotion above,
+   which is why both live here rather than in a width query. */
+html[data-mz-bigscreen="true"] .movie-card,
+html[data-mz-bigscreen="true"] .upcoming-card,
+html[data-mz-bigscreen="true"] .ch-card {
+  contain-intrinsic-size: auto 200px auto 320px;
+}
+
+/* The 2×-viewport blurred aurora: inset:-20% on a fixed, full-viewport overlay is
+   ~1.96× the viewport area under a 30px Gaussian, animated forever. */
+html[data-mz-bigscreen="true"] .collections-hub-overlay::before {
+  filter: none !important;
+  animation: none !important;
+}
