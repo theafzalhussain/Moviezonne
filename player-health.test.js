@@ -70,6 +70,14 @@ function makeSandbox(sources, animeIds) {
     block('function _mzHealthEntry('),
     block('function recordPlayerLoad('),
     block('function recordPlayerFailure('),
+    /*  playerCost() now also weighs "has this server ever actually PLAYED", so the
+     *  two pieces that answer that question have to come across too or the cost
+     *  function throws. See the note above recordPlayerPlayed in moviezone.js for
+     *  why iframe.onload alone was ranking error pages at the top. */
+    line('const MZ_NOPLAY_SUSPECT_AFTER ='),
+    line('const MZ_PLAYED_PROOF_SEC ='),
+    block('function recordPlayerPlayed('),
+    block('function playerNeverPlayed('),
     block('function playerCost('),
     block('function rankSourceIdxs('),
     block('function candidateSourceIdxs('),
@@ -78,6 +86,7 @@ function makeSandbox(sources, animeIds) {
     block('function resetTriedSources('),
     block('function getSelectedSourceIdx('),
     'globalThis.__api = { playerHealth, recordPlayerLoad, recordPlayerFailure, playerCost,'
+      + ' recordPlayerPlayed, playerNeverPlayed,'
       + ' rankSourceIdxs, candidateSourceIdxs, adaptivePlayerTimeout, getSelectedSourceIdx,'
       + ' MZ_PH_DEFAULT_TIMEOUT, MZ_PH_MIN_TIMEOUT, MZ_PH_MAX_TIMEOUT, store: null };'
   ].join('\n\n'), sandbox);
@@ -150,6 +159,13 @@ it('a recovered server climbs back out of the penalty box', () => {
   for (let i = 0; i < 4; i++) api.recordPlayerFailure('Alpha');
   const demoted = api.playerCost('Alpha');
   for (let i = 0; i < 8; i++) api.recordPlayerLoad('Alpha', 700);
+  /*  A server that has genuinely recovered has PLAYED, not merely answered — and
+   *  playerCost() now tells those two apart, because an error page answers fast
+   *  and would otherwise rank first. So the fixture records what a real recovery
+   *  looks like. Without this the 12,000-point never-played penalty applies and
+   *  the assertion below fails, which is the correct verdict for a server that
+   *  keeps returning a document nobody can watch. */
+  api.recordPlayerPlayed('Alpha');
   const recovered = api.playerCost('Alpha');
   assert.ok(recovered < demoted,
     'cost should fall after sustained success (' + demoted + ' -> ' + recovered + ')');
@@ -160,12 +176,42 @@ it('a recovered server climbs back out of the penalty box', () => {
 it('one slow load does not condemn an otherwise fast server (EWMA)', () => {
   const { api } = fresh();
   for (let i = 0; i < 6; i++) api.recordPlayerLoad('Delta', 500);
+  api.recordPlayerPlayed('Delta');   // "proven" means it played, not just answered
   const before = api.playerCost('Delta');
   api.recordPlayerLoad('Delta', 9000);
   const after = api.playerCost('Delta');
   assert.ok(after < 4000,
     'a single 9 s outlier should not push a proven server past the unknown baseline, got ' + after);
   assert.ok(after > before, 'the outlier should still register');
+});
+
+/*  The failure mode this pair exists for: a provider whose origin is down serves an
+ *  error page, the iframe fires `load`, recordPlayerLoad books a success, and the
+ *  server ranks FIRST while every viewer sees "blocked". Measured live on
+ *  player.videasy.to (502 on every path) and vidcore.io (403 Cloudflare block). */
+it('a server that only ever answers is ranked with the failures', () => {
+  const { api } = fresh();
+  for (let i = 0; i < 6; i++) api.recordPlayerLoad('Alpha', 300);   // fast error page
+  for (let i = 0; i < 6; i++) api.recordPlayerLoad('Delta', 2500);  // slower, real video
+  api.recordPlayerPlayed('Delta');
+  assert.ok(api.playerNeverPlayed('Alpha'), 'six answers with no play should be suspect');
+  assert.ok(!api.playerNeverPlayed('Delta'), 'a server that played is not suspect');
+  assert.ok(api.playerCost('Alpha') > api.playerCost('Delta'),
+    'a fast error page must not outrank a slower server that actually plays ('
+    + api.playerCost('Alpha') + ' vs ' + api.playerCost('Delta') + ')');
+  assert.strictEqual(api.rankSourceIdxs([0, 3])[0], 3,
+    'the server that plays should be chosen first');
+});
+
+it('one real play clears the suspicion, so an outage is not permanent', () => {
+  const { api } = fresh();
+  for (let i = 0; i < 6; i++) api.recordPlayerLoad('Alpha', 300);
+  const suspected = api.playerCost('Alpha');
+  api.recordPlayerPlayed('Alpha');
+  assert.ok(!api.playerNeverPlayed('Alpha'), 'a single play must clear it');
+  assert.ok(api.playerCost('Alpha') < suspected,
+    'cost should fall once the server proves it plays (' + suspected
+    + ' -> ' + api.playerCost('Alpha') + ')');
 });
 
 console.log('\ngive-up timer\n' + '-'.repeat(62));
@@ -358,11 +404,43 @@ it('the warm list is derived from playerSources, never hand-written', () => {
     });
 });
 
+/*  ── WHAT THIS CHECK IS REALLY FOR, AND WHY IT WAS REWRITTEN ──
+ *
+ *  The invariant that matters is in the title: no server may send episodes to a
+ *  host the app never warms, because that host then pays a cold DNS + TLS
+ *  handshake at the exact moment the user wanted video.
+ *
+ *  It used to be asserted as "the TV origin set is a subset of the MOVIE origin
+ *  set", which is only the same thing while every server happens to use one host
+ *  for both types. MultiLang HD does not: films go to peachify.top, which is the
+ *  one provider measured to actually resolve a stream for Hindi titles, and
+ *  episodes go to moviesapi.vip, because peachify's /embed/tv route answers 200
+ *  and then resolves nothing on every series tried. So the old assertion failed on
+ *  a change that does not break the invariant at all.
+ *
+ *  It is now asserted directly: whatever origins the movie AND tv branches produce,
+ *  playerHostOrigins() must cover all of them. That is a strictly stronger check —
+ *  it would also have caught the old "TV ⊆ movie" case — and it is checked against
+ *  the shipped function rather than against an assumption about it. */
 it('a movie and a series warm the same origins (no cold host on episode play)', () => {
   const { movie, tv } = realPlayerOrigins();
-  const missed = tv.filter((o) => o && movie.indexOf(o) === -1);
+
+  /*  playerHostOrigins() must probe BOTH branches. Reading the shipped source is
+   *  what keeps this honest: a future edit that drops the tv probe would otherwise
+   *  pass, since the assertion below would still be comparing two lists this test
+   *  built itself. */
+  const fnStart = src.indexOf('function playerHostOrigins()');
+  assert.ok(fnStart !== -1, 'playerHostOrigins() is gone');
+  const fn = src.slice(fnStart, fnStart + 1600);
+  assert.ok(/'movie'/.test(fn) && /'tv'/.test(fn),
+    'playerHostOrigins() no longer probes both the movie and tv branches, so a '
+    + 'server that splits hosts by type would leave its episode host cold');
+
+  const warmed = new Set(movie.concat(tv).filter(Boolean));
+  const used = tv.concat(movie).filter(Boolean);
+  const missed = used.filter((o) => !warmed.has(o));
   assert.strictEqual(missed.length, 0,
-    'series playback uses origins the movie probe never warms: ' + missed.join(', '));
+    'origins used for playback that are never warmed: ' + missed.join(', '));
 });
 
 /*  On a phone there is no hover, so mouseenter/focus warmed nothing at all and

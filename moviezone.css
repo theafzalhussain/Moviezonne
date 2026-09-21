@@ -6787,15 +6787,9 @@ html[data-mz-tv="true"] .cat-group-menu {
   background: radial-gradient(ellipse at top left, rgba(236, 72, 153, 0.08), transparent 60%);
 }
 
-/* HD Streams Section */
-.srv-section--hd {
-  background: linear-gradient(145deg, rgba(12, 12, 22, 0.92), rgba(10, 20, 35, 0.85));
-  border-color: rgba(99, 102, 241, 0.2);
-}
 
-.srv-section--hd::before {
-  background: radial-gradient(ellipse at top left, rgba(99, 102, 241, 0.08), transparent 60%);
-}
+
+
 
 /* Hindi Dubbed Section */
 .srv-section--hindi {
@@ -6856,11 +6850,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   box-shadow: 0 0 12px rgba(236, 72, 153, 0.2);
 }
 
-.srv-section--hd .srv-section__icon {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(59, 130, 246, 0.15));
-  color: #818cf8;
-  box-shadow: 0 0 12px rgba(99, 102, 241, 0.2);
-}
+
 
 .srv-section__title {
   font-size: 0.75rem;
@@ -6935,11 +6925,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   box-shadow: 0 0 24px rgba(236, 72, 153, 0.2), 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
-.srv-section--hd .srv-card.active {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(59, 130, 246, 0.1));
-  border-color: rgba(99, 102, 241, 0.5) !important;
-  box-shadow: 0 0 24px rgba(99, 102, 241, 0.2), 0 8px 32px rgba(0, 0, 0, 0.3);
-}
+
 
 /* Premium 4K card hover */
 .srv-section--premium .srv-card:hover {
@@ -6952,10 +6938,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   box-shadow: 0 8px 32px rgba(236, 72, 153, 0.1), 0 12px 40px rgba(0, 0, 0, 0.3);
 }
 
-.srv-section--hd .srv-card:hover {
-  border-color: rgba(99, 102, 241, 0.35);
-  box-shadow: 0 8px 32px rgba(99, 102, 241, 0.1), 0 12px 40px rgba(0, 0, 0, 0.3);
-}
+
 
 /* ── Card Inner ── */
 .srv-card__inner {
@@ -7053,9 +7036,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   background: radial-gradient(circle at 50% 50%, rgba(236, 72, 153, 0.12), transparent 70%);
 }
 
-.srv-section--hd .srv-card__glow {
-  background: radial-gradient(circle at 50% 50%, rgba(99, 102, 241, 0.12), transparent 70%);
-}
+
 
 .srv-card:hover .srv-card__glow {
   opacity: 1;

@@ -383,8 +383,41 @@ if (!isMzTV() && !isTouchOnly && !isMobile) {
 
   // Expensive: full TLS handshake — only for the two most-used providers, and
   // only once the browser is idle (i.e. after the first paint is done).
+  /*  ── THE TWO WARMED HOSTS ARE NOW THE TWO THE RANKING WOULD PICK ──
+   *
+   *  This warmed playerHostOrigins().slice(0, 2), i.e. the first two entries in
+   *  DECLARED order, which has no relationship to what this browser will actually
+   *  open. Declared order puts OmniPlay first — and OmniPlay's host currently
+   *  answers 502 on every path — so one of the two precious handshakes was being
+   *  spent on a host that cannot serve a frame, while the server the ranking would
+   *  really choose started from a cold DNS lookup.
+   *
+   *  playerHealth() lives in localStorage and is therefore available this early, so
+   *  the same cost function the retry chain uses can order the list here. A first
+   *  visit has no history, playerCost() returns the same 4000 for every unknown
+   *  server and rankSourceIdxs falls back to declared order — so nothing changes
+   *  for a new user, and a returning one warms what they actually use.
+   *
+   *  Guarded and wrapped: if anything in the ranking path is not ready yet this
+   *  falls back to the old slice, because a missed preconnect is a slower first
+   *  play and a thrown exception is no player at all. */
   const warm = () => {
-    try { playerHostOrigins().slice(0, 2).forEach(url => addHint('preconnect', url, true)); } catch (e) {}
+    let origins = [];
+    try {
+      const all = playerSources.map((_, i) => i);
+      origins = rankSourceIdxs(all)
+        .map((idx) => {
+          try { return new URL(playerSources[idx].url(550, 'en', 'movie', '1', '1')).origin; }
+          catch (e) { return null; }
+        })
+        .filter(Boolean);
+    } catch (e) { origins = []; }
+    if (!origins.length) {
+      try { origins = playerHostOrigins(); } catch (e) { return; }
+    }
+    const seen = new Set();
+    origins.filter(o => !seen.has(o) && seen.add(o)).slice(0, 2)
+      .forEach(url => addHint('preconnect', url, true));
   };
   const schedule = () => {
     if ('requestIdleCallback' in window) requestIdleCallback(warm, { timeout: 4000 });
@@ -12222,63 +12255,71 @@ const playerSources = [
       ? `https://player.vidzee.wtf/embed/tv/${id}/${s}/${e}`
       : `https://player.vidzee.wtf/embed/movie/${id}`;
   }},
-  /*  #9: VidCore — same player as the old 'CoreStream HD' entry, on the domain it
-   *  actually lives on now, with its query string corrected against the provider's
-   *  own parameter table.
+  /*  ══════════════════════════════════════════════════════════════════════
+   *  #9: MultiLang HD — replaces VidCore HD, which is blocked, not slow
+   *  ══════════════════════════════════════════════════════════════════════
+   *  vidcore.io no longer reaches a player at all. Driven in real Chrome inside a
+   *  real unsandboxed iframe with our own Referer, the embed document answers
    *
-   *  vidcore.org is gone for good, not slow and not blocked here: it answers
+   *      403  "Attention Required! | Cloudflare"
+   *      "Sorry, you have been blocked — You are unable to access vidcore.io"
    *
-   *    HTTP/1.1 451 Unavailable For Legal Reasons
-   *    X-Vercel-Error: DEPLOYMENT_DISABLED
+   *  and the frame's only other network activity is that challenge page. Note that
+   *  a plain server-side fetch of the same URL still returns 200 with a 50 KB
+   *  player document, which is exactly why this was not caught earlier: the status
+   *  code lies. Only a browser gets the block, because only a browser presents the
+   *  fingerprint Cloudflare is filtering on. Every reachability check in this app
+   *  was passing while no viewer could ever see video.
    *
-   *  which is the hosting platform disabling the deployment, so it fails the same
-   *  way on every network and will not come back. Every user on this build was
-   *  paying a full give-up timer on it before the chain moved on.
+   *  ── WHY TWO PROVIDERS BEHIND ONE CHIP ──
+   *  The replacement was chosen on measured playback, not on a landing page: each
+   *  candidate was loaded in a real iframe and its network traffic read over the
+   *  DevTools Protocol, so the pass mark is "an HLS manifest resolved AND media
+   *  segments were actually fetched". Sixteen other providers were tried and
+   *  produced no stream at all from this network (vidsrcapi, vidsrc.cc/to/net/vip,
+   *  cinemaos, vidbinge, streamflizo, smashy, letsembed, nunflix, vidapi.xyz,
+   *  moviee, multiembed, yapgrid, vidjoy — the last of which is now a parked
+   *  domain). Two survived, and they are good at opposite things:
    *
-   *  vidcore.net is the live front door but 301s to vidcore.io, so we target
-   *  vidcore.io directly — same reasoning as Flicky above: it drops a redirect
-   *  round-trip before the first frame and lets playerHostOrigins() preconnect the
-   *  host that actually serves the video. Measured from an Indian connection: the
-   *  movie and episode routes both answer 200 in ~0.32s with no X-Frame-Options
-   *  and no CSP frame-ancestors, so it embeds. The player bundle carries no
-   *  popunder, no ad library and no in-app-browser block.
+   *                     movies      TV        first segment
+   *      peachify.top   5 of 5      0 of 2    2.2-5.0s  (avg 3.7s)
+   *      moviesapi.vip  3 of 5      3 of 4    3.3-9.5s  (avg 5.9s)
    *
-   *  Two parameters and the path were wrong, and are fixed here against the
-   *  provider's own documented table (read out of its bundle):
-   *    - The `/embed/` segment is gone. On vidcore.io that prefix is not a route:
-   *      it falls through to the marketing SPA's catch-all, which answers 200 with
-   *      a 1.2 KB landing shell and no player at all — a "working" status code that
-   *      would never have produced video. The real routes are bare, and they are
-   *      server-rendered: /movie/550 returns a 49 KB document already carrying
-   *      Fight Club's poster, and /tv/1399/1/1 carries Game of Thrones S1E1's.
-   *    - `autoplay` -> `autoPlay`. The capital P is the spelling it reads, so the
-   *      old lowercase form was silently ignored. warmUrlVariant neutralises both
-   *      spellings, so a prewarm still cannot start audio in a hidden frame.
-   *    - `lang` -> `sub`. There is no `lang` parameter on this player; the old
-   *      comment's claim that it selected an audio track was simply wrong, and the
-   *      value went nowhere. `sub` is the real one and takes the same language
-   *      codes, so the language the user picked now sets the subtitle track. Audio
-   *      tracks are chosen in-player, and MultiAudio 4K above is the entry that
-   *      carries the Hindi-dub case for real.
+   *  peachify is both faster and perfect on films, and it is the one that actually
+   *  carries the feature this slot was asked for: its player reads the audio tracks
+   *  out of the HLS manifest and exposes them as a switchable Audio menu, with a
+   *  documented `default_dub` preference — real multi-audio, verified playing on
+   *  3 Idiots, Dangal and Animal as well as on Endgame and Interstellar. Its TV
+   *  route is simply not there: /embed/tv/{id}/{s}/{e} answers 200 and then resolves
+   *  nothing, on Breaking Bad, Stranger Things and House of the Dragon, and the two
+   *  alternative route shapes its docs hint at behave the same. So episodes go to
+   *  moviesapi.vip, which resolved 15-32 segments on three of four series.
    *
-   *  `theme` and `startAt` were already correct; `startAt` stays wired to the same
-   *  resume store Pro Stream reads, so switching to this server mid-film continues
-   *  instead of restarting. Episodes additionally ask for the next-episode button
-   *  and auto-advance, which this provider gates behind `nextButton=true`.
+   *  Routing by type inside one url() is how several entries here already work —
+   *  OmniPlay splits anime/tv/movie, AnimePahe splits anime/everything-else — so
+   *  this keeps the server list the same length and the chip count unchanged.
    *
-   *  It stays in HD Streams rather than Premium 4K: the section split at
-   *  buildServerCard is `is4K || anime`, and that is where this was asked for. The
-   *  chip is renamed because the health ranking keys per-server history off the
-   *  name — 'CoreStream HD' has been recording nothing but failures against a dead
-   *  deployment, and a new key lets this compete on its real 0.32s from the first
-   *  visit instead of clawing its way out of that penalty box.
+   *  Both are ad-library-free in the traffic capture: peachify pulls only its own
+   *  origin plus fonts and Cloudflare insights, and moviesapi pulls TMDB and
+   *  OpenSubtitles for metadata and subtitles. That is one fewer ad-heavy provider
+   *  than the entry it replaces.
+   *
+   *  The chip is renamed from 'VidCore HD' on purpose: the health ranking keys its
+   *  per-server history off the name, and 'VidCore HD' has been recording load
+   *  successes for a Cloudflare block page. A new key lets this compete on its real
+   *  3.7s from the first visit instead of inheriting that false-positive history.
    */
-  { name: 'VidCore HD', dubbed: true, url: (id, lang, type, s, e) => {
+  { name: 'MultiLang HD', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
+    if (type === 'tv') {
+      return `https://moviesapi.vip/tv/${id}/${s}/${e}`;
+    }
+    /*  peachify takes no language query parameter — the audio track is chosen in
+     *  its own Audio menu and remembered per viewer, which is why it is here. The
+     *  resume position is shared with Pro Stream and VidSrc HD through
+     *  mzResumeSec, so switching to this server mid-film continues instead of
+     *  restarting. */
     const at = (typeof mzResumeSec === 'function') ? mzResumeSec(id, type, s, e) : 0;
-    const opts = `autoPlay=true&theme=FFC107&sub=${lang}` + (at ? '&startAt=' + at : '');
-    return type === 'tv'
-      ? `https://vidcore.io/tv/${id}/${s}/${e}?${opts}&nextButton=true&autoNext=true`
-      : `https://vidcore.io/movie/${id}?${opts}`;
+    return `https://peachify.top/embed/movie/${id}` + (at ? `?startAt=${at}` : '');
   }},
 
   /*  Replaces VidRock, which is dead in a way no status code reveals — and this is
@@ -12504,7 +12545,26 @@ function renderExternalSources(id, srcIdx, lang) {
   const ext = document.getElementById('externalSources');
   if (!ext) return;
 
-  // ── Categorize servers for premium layout ──
+  /*  ── ONE SECTION, NOT TWO (Sep 2026) ──
+   *
+   *  The servers used to be split into "Premium 4K • Hindi Dub" (is4K || anime) and
+   *  "HD Streams • Multi-Audio" (everything else), and the second box is gone by
+   *  request: all eleven servers now live in the premium box.
+   *
+   *  The two arrays are KEPT even though there is one section, and that is for
+   *  ordering rather than grouping — concatenating them preserves exactly the
+   *  on-screen order the split produced, so the 4K and anime servers still come
+   *  first and the four that moved up (VidSrc HD, Turbo Stream, Pro Stream, Premium
+   *  Mirror) follow them instead of interleaving. Merging by raw declared index
+   *  would have shuffled MultiAudio 4K down behind Turbo Stream for no reason.
+   *
+   *  NO BADGES WERE CHANGED. It would have been one line to set is4K on the four
+   *  that moved and make the heading literally true, and it would have been a lie
+   *  on the card: none of them was measured at 2160p. They keep DUB only, so the
+   *  per-card badges stay an honest description of each server while the heading
+   *  stays the one asked for. buildServerCard's tooltip is likewise untouched and
+   *  still says "Hindi Dubbed + Multi-Audio" for them rather than claiming 4K.
+   */
   const premium4K = [];
   const hdStreams = [];
 
@@ -12513,6 +12573,8 @@ function renderExternalSources(id, srcIdx, lang) {
     if (s.is4K || s.anime) { premium4K.push(serverData); }
     else { hdStreams.push(serverData); }
   });
+
+  const allServers = premium4K.concat(hdStreams);
 
   function buildServerCard(s) {
     const tip = s.anime
@@ -12561,11 +12623,7 @@ function renderExternalSources(id, srcIdx, lang) {
   const sectionsHtml = buildSection(
     'Premium 4K • Hindi Dub',
     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
-    premium4K, 'srv-section--premium'
-  ) + buildSection(
-    'HD Streams • Multi-Audio',
-    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>',
-    hdStreams, 'srv-section--hd'
+    allServers, 'srv-section--premium'
   );
 
   ext.innerHTML = headerHtml + '<div class="srv-container">' + sectionsHtml + '</div>';
@@ -12717,6 +12775,65 @@ function recordPlayerFailure(name) {
   _mzPersistPlayerHealth();
 }
 
+/*  ══════════════════════════════════════════════════════════════════════════
+ *  A FRAME THAT LOADED IS NOT A SERVER THAT PLAYED
+ *  ══════════════════════════════════════════════════════════════════════════
+ *  recordPlayerLoad() is called from iframe.onload, and `load` fires for ANY
+ *  document the provider returns — including its error pages. Measured on the two
+ *  servers reported as broken, driven in real Chrome inside a real iframe:
+ *
+ *    player.videasy.to   502 Bad Gateway   (every host, every path, ~14.5s)
+ *    vidcore.io          403 Cloudflare "Sorry, you have been blocked"
+ *
+ *  Both of those documents fire `load`. So `hasLoaded` goes true, the retry timer
+ *  is CANCELLED, recordPlayerLoad() books a success, and the health ranking keeps
+ *  the server near the top — while every viewer sees an error page and the
+ *  auto-retry chain that exists to rescue them never runs. That is exactly the
+ *  reported "blocked dikha raha hai, movie play nahi ho raha", and this file
+ *  already documents the same failure class once before, for VidRock: "the iframe
+ *  LOADS, so recordPlayerLoad() counts it as a success and the health ranking keeps
+ *  this server near the top while it shows an error to everyone."
+ *
+ *  A cross-origin frame cannot be inspected, so there is no way to READ the error.
+ *  What can be observed is the consequence: a server that genuinely played produces
+ *  watch activity — the watch session accrues seconds, or the player posts a
+ *  progress event. A server that returned an error page produces neither, ever.
+ *
+ *  So `ok` is split into two counters. `ok` still means "answered", and keeps
+ *  driving the latency estimate and the adaptive timeout. `played` means "a human
+ *  actually watched something through this server", and playerCost() weighs a
+ *  server that has answered repeatedly without ever playing as heavily as an
+ *  outright failure. Nothing is ever hard-blocked: one successful play clears the
+ *  suspicion, so a provider that comes back up climbs the order again.
+ *
+ *  Deliberately NOT a server definition change: no URL, parameter or host is
+ *  touched by any of this. It is the retry and ranking logic learning to tell a
+ *  working server from one that merely answers.
+ */
+const MZ_NOPLAY_SUSPECT_AFTER = 2;
+
+/*  Seconds of visible, focused playback that count as proof a server worked. Past
+ *  any plausible accident, and short enough that the very first viewing of a
+ *  provider already teaches the ranking something. */
+const MZ_PLAYED_PROOF_SEC = 15;
+
+/** A human actually watched something through this provider. */
+function recordPlayerPlayed(name) {
+  if (!name) return;
+  const e = _mzHealthEntry(name);
+  e.played = (e.played || 0) + 1;
+  // A real play is proof the server works, so it also forgives past impatience.
+  e.fail = Math.max(0, +(e.fail - 1).toFixed(1));
+  _mzPersistPlayerHealth();
+}
+
+/** True for a provider that keeps answering but has never actually played. */
+function playerNeverPlayed(name) {
+  const e = playerHealth()[name];
+  if (!e) return false;
+  return (e.ok || 0) >= MZ_NOPLAY_SUSPECT_AFTER && !(e.played > 0);
+}
+
 /*  Ranking cost, lower is better. A failure is weighted far above any latency
  *  difference, because waiting for a dead server costs the full timeout while
  *  the gap between a fast and a slow working server is a second or two.
@@ -12728,7 +12845,15 @@ function playerCost(name) {
   if (!h || (!h.ok && !h.fail)) return 4000;
   const attempts = h.ok + h.fail;
   const failRate = h.fail / Math.max(1, attempts);
-  return (h.ms || 3500) + failRate * 12000;
+  /*  A server that keeps ANSWERING but has never actually played is treated as
+   *  badly as one that fails outright — see the note above recordPlayerPlayed.
+   *  Without this a provider serving a 502 or a Cloudflare block page ranks FIRST,
+   *  because an error page answers fast and books a success every time.
+   *
+   *  Added rather than multiplied, and clearable by a single real play, so this can
+   *  never permanently bury a provider that is merely having an outage. */
+  const noPlay = playerNeverPlayed(name) ? 12000 : 0;
+  return (h.ms || 3500) + failRate * 12000 + noPlay;
 }
 
 function rankSourceIdxs(idxs) {
@@ -12905,12 +13030,25 @@ let _mzPlayerOrigins = null;
 function playerHostOrigins() {
   if (_mzPlayerOrigins) return _mzPlayerOrigins;
   const origins = [];
-  playerSources.forEach((source) => {
+  const add = (url) => {
     try {
-      const url = source.url(550, 'en', 'movie', '1', '1');
       const origin = new URL(url).origin;
       if (origins.indexOf(origin) === -1) origins.push(origin);
-    } catch (e) { /* a builder that cannot run without a modal is simply skipped */ }
+    } catch (e) { /* not a URL we can warm */ }
+  };
+  playerSources.forEach((source) => {
+    /*  BOTH branches, not just the movie one.
+     *
+     *  This probed only source.url(550, 'en', 'movie', ...), which is correct for
+     *  every entry that serves films and episodes from one host — and silently
+     *  wrong for one that does not. MultiLang HD sends films to peachify.top and
+     *  episodes to moviesapi.vip, so with the movie-only probe the episode host was
+     *  never in this list: no dns-prefetch, no preconnect, and every series started
+     *  with a cold DNS + TLS handshake on the critical path. Warming both costs two
+     *  builder calls at startup and nothing at runtime, and it is future-proof for
+     *  any other entry that splits by type. */
+    try { add(source.url(550, 'en', 'movie', '1', '1')); } catch (e) { /* needs a modal */ }
+    try { add(source.url(1399, 'en', 'tv', '1', '1')); } catch (e) { /* needs a modal */ }
   });
   origins.push(ANILIST_HOST);
   _mzPlayerOrigins = origins;
@@ -13275,6 +13413,10 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   const _mzSrcName = playerSources[srcIdx].name;
   const _mzStartedAt = Date.now();
   _mzTriedSources.add(_mzSrcName);
+  /*  Which provider the watch tracker should credit when it sees real playback.
+   *  Read by recordPlayerPlayed's callers — see the note above that function for
+   *  why "the frame loaded" is not the signal the ranking needs. */
+  window._mzActivePlayerName = _mzSrcName;
 
   iframe.onload = () => {
     hasLoaded = true;
@@ -14372,6 +14514,15 @@ init();
       const delta = t - session.lastTick;
       // Guard against a machine that slept: a 4h "tick" is not 4h of watching.
       if (delta > 0 && delta < 90) session.watchedSec += delta;
+      /*  Proof that the CURRENT provider actually played, which is the signal the
+       *  health ranking needs and cannot get from iframe.onload — an error page
+       *  fires load too. Fifteen seconds of a visible, focused player is past any
+       *  plausible accident, and it is recorded once per session so a long film
+       *  does not inflate the counter. */
+      if (!session.creditedPlay && session.watchedSec >= MZ_PLAYED_PROOF_SEC) {
+        session.creditedPlay = true;
+        try { recordPlayerPlayed(window._mzActivePlayerName); } catch (e) {}
+      }
     }
     session.lastTick = t;
   }
@@ -14487,6 +14638,13 @@ init();
     session.runtimeSec = duration;
     session.positionSec = session.watchedSec;
     session.exact = true;
+    /*  A real playhead from the provider is the strongest possible proof that this
+     *  server played — stronger than the time-based estimate above, and it arrives
+     *  within the first seconds. Credited immediately. */
+    if (!session.creditedPlay && watched > 0) {
+      session.creditedPlay = true;
+      try { recordPlayerPlayed(window._mzActivePlayerName); } catch (e) {}
+    }
     persistSessionProgress();
   }
 

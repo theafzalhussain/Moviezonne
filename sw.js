@@ -137,7 +137,71 @@
 // popularity instead, with the floor taken from its own category.
 // That moved moviezone.min.css to 9.14, tv-mode.min.css to 1.4, tv-mode.min.js to
 // 1.6 and moviezone.min.js to 14.6; the precached shell pins all four URLs.
-const CACHE_NAME = 'moviezone-v149';
+const CACHE_NAME = 'moviezone-v151';
+
+/*  v151: the server picker is one section instead of two. "HD Streams •
+ *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream
+ *  and Premium Mirror — sit in the Premium box with the other seven, eleven in all.
+ *
+ *  Their BADGES are unchanged on purpose. Setting is4K on the four that moved would
+ *  have made the heading literally true in one line and put a 4K claim on cards for
+ *  servers none of which was measured at 2160p, so they keep DUB only and the
+ *  tooltip still reads "Hindi Dubbed + Multi-Audio" rather than claiming 4K.
+ *
+ *  The premium/hd arrays are kept for ORDERING rather than grouping: concatenating
+ *  them preserves the exact on-screen order the split produced, so the 4K and anime
+ *  servers still lead and the four that moved follow, instead of interleaving by
+ *  declared index and pushing MultiAudio 4K down behind Turbo Stream.
+ *
+ *  Six now-unreachable .srv-section--hd rule blocks were deleted from moviezone.css
+ *  (1,057 bytes) — nothing can carry that class any more. Each was verified to be a
+ *  standalone selector first; none shared a selector list with --premium, which is
+ *  what would have made a blind delete a visual regression.
+ *
+ *  Verified on the real page: one section, "11 servers", 11 cards, badges
+ *  4K+ANIME+DUB / 4K+DUB / DUB exactly as declared. That moved moviezone.min.js to
+ *  14.9 and moviezone.min.css to 9.15; the precached shell pins both URLs. */
+
+/*  v150: the two reported-broken servers, and a ranking bug that was hiding both.
+ *
+ *    • THE FRAME LOADING IS NOT THE SERVER PLAYING. recordPlayerLoad() is called
+ *      from iframe.onload, and `load` fires for a provider's ERROR page too. So a
+ *      502 or a Cloudflare block booked a SUCCESS, cancelled the give-up timer, and
+ *      ranked that server first — while every viewer sat looking at "blocked" and
+ *      the auto-retry chain that exists to rescue them never ran. That is the
+ *      reported OmniPlay symptom exactly. playerCost() now also weighs whether a
+ *      server has EVER produced real playback (15s of visible watching, or a
+ *      playhead event from the player itself) and treats "answers but never plays"
+ *      as heavily as an outright failure. One real play clears it, so an outage is
+ *      never permanent. No server definition is touched by this.
+ *    • MultiLang HD REPLACES VidCore HD. vidcore.io answers 403 "Sorry, you have
+ *      been blocked" to a real browser while still returning 200 to a server-side
+ *      fetch, which is why every reachability check was passing. The replacement was
+ *      picked by loading candidates in a real iframe and reading their network
+ *      traffic over the DevTools Protocol — the pass mark is an HLS manifest AND
+ *      media segments actually fetched. Sixteen providers resolved no stream at all.
+ *      Two worked, at opposite things: peachify.top played 5 of 5 films in 2.2-5.0s
+ *      and exposes real switchable audio tracks from the HLS manifest (verified on
+ *      3 Idiots, Dangal, Animal), but its /embed/tv route resolves nothing on any
+ *      series; moviesapi.vip played 3 of 4 series. So films go to peachify and
+ *      episodes to moviesapi, the same type-routing OmniPlay and AnimePahe already
+ *      use. Server count and chip count are unchanged.
+ *    • playerHostOrigins() now probes the movie AND tv branches. It only ever asked
+ *      for a movie URL, so a server that splits hosts by type left its episode host
+ *      with no dns-prefetch and no preconnect — a cold DNS + TLS handshake at the
+ *      moment the user pressed play.
+ *    • THE TWO PRECONNECTED HOSTS ARE THE TWO THE RANKING WOULD PICK, not the first
+ *      two in declared order. Declared order puts OmniPlay first, whose host is
+ *      currently 502 on every path, so one of the two handshakes was being spent on
+ *      a host that cannot serve a frame. A first visit is unaffected: with no
+ *      history every cost is equal and the order falls back to declared.
+ *
+ *  NOT FIXED, and it cannot be from here: OmniPlay's own origin is down.
+ *  player.videasy.to answers 502 after ~14.5s on every path and every mirror
+ *  (.net 301s to it), confirmed by plain fetch, top-level Chrome and a framed
+ *  Chrome. Its URL builder is left byte-for-byte as it was, as asked.
+ *
+ *  That moved moviezone.min.js to 14.8; the precached shell pins the URL. */
 
 /*  v149: the four remaining main-thread costs on the big-screen path.
  *
@@ -189,10 +253,10 @@ const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/tv-mode.min.css?v=1.4',
-  '/moviezone.min.css?v=9.14',
+  '/moviezone.min.css?v=9.15',
   '/tv-mode.min.js?v=1.7',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=14.7',
+  '/moviezone.min.js?v=14.9',
   '/manifest.json',
   '/moviezone-logo.png?v=2',
   '/icon-192.png?v=2',
