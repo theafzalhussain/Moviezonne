@@ -137,7 +137,7 @@
 // popularity instead, with the floor taken from its own category.
 // That moved moviezone.min.css to 9.14, tv-mode.min.css to 1.4, tv-mode.min.js to
 // 1.6 and moviezone.min.js to 14.6; the precached shell pins all four URLs.
-const CACHE_NAME = 'moviezone-v151';
+const CACHE_NAME = 'moviezone-v152';
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
  *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream
@@ -249,14 +249,36 @@ const IMAGE_CACHE = 'moviezone-tmdb-images-v1';
 // Hard ceiling on the image cache. Roughly 50 MB at TMDB w342/w780 sizes.
 const IMAGE_CACHE_MAX_ENTRIES = 400;
 
+/*  How long a navigation waits for the network before the cached shell is
+ *  painted instead. Tuned rather than guessed at either extreme:
+ *
+ *  Too low and a normal mobile connection loses the race, so users are routinely
+ *  shown a cached shell when fresh HTML was moments away — which also costs a
+ *  second render when the real document is not what got painted.
+ *  Too high and the stall it exists to absorb is still a stall.
+ *
+ *  2.5 s sits above a realistic 4G document response and well below the point
+ *  where a user decides the page is broken and reloads (which makes the problem
+ *  worse, not better, by starting the whole race again).
+ *
+ *  Only navigations are raced. Scripts and styles fall through to the original
+ *  offline ladder, because painting a stale one is not equivalent to painting a
+ *  stale document. */
+const NAV_NETWORK_BUDGET_MS = 2500;
+
+/*  A sentinel for "the network lost the race". A Symbol cannot be confused with
+ *  a Response, so the branch below never has to guess whether it is holding a
+ *  real answer or a timeout marker. */
+const NETWORK_TOO_SLOW = Symbol('network-too-slow');
+
 const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/tv-mode.min.css?v=1.4',
+  '/tv-mode.min.css?v=1.5',
   '/moviezone.min.css?v=9.15',
-  '/tv-mode.min.js?v=1.7',
+  '/tv-mode.min.js?v=1.8',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=14.9',
+  '/moviezone.min.js?v=15.0',
   '/manifest.json',
   '/moviezone-logo.png?v=2',
   '/icon-192.png?v=2',
@@ -329,15 +351,43 @@ self.addEventListener('install', event => {
 
 self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys()
-      .then(keys => Promise.all(
+    (async () => {
+      const keys = await caches.keys();
+      await Promise.all(
         keys
           // IMAGE_CACHE must survive a shell bump: those bytes are version-independent
           // and re-downloading them is exactly the cost this cache exists to avoid.
           .filter(key => key !== CACHE_NAME && key !== IMAGE_CACHE)
           .map(key => caches.delete(key))
-      ))
-      .then(() => self.clients.claim())
+      );
+
+      /*  ── NAVIGATION PRELOAD ──────────────────────────────────────────────
+       *  Without this, every single navigation paid service-worker start-up
+       *  BEFORE the HTML request was even issued. The worker has to boot, parse
+       *  and reach its fetch handler first, and only then does the network see
+       *  the document request — ~50-300 ms of pure added latency on mid-range
+       *  mobile, on the most critical request of the page, on every navigation.
+       *  It is latency the site would not have had with no service worker at all.
+       *
+       *  Enabling preload makes the browser start the document request in
+       *  parallel with booting the worker; the fetch handler then awaits
+       *  event.preloadResponse instead of issuing a second identical request.
+       *  This is the largest TTFB win available on the client side and it lands
+       *  squarely on p50 and p75, where 90% of traffic sits.
+       *
+       *  Feature-detected: Safari has no navigationPreload, and an unguarded
+       *  property access here would reject the activate handler and leave the
+       *  worker stuck in "activating" forever. */
+      if (self.registration.navigationPreload) {
+        try {
+          await self.registration.navigationPreload.enable();
+        } catch (e) {
+          console.warn('[MovieZone SW] navigationPreload unavailable:', e && e.message);
+        }
+      }
+
+      await self.clients.claim();
+    })()
   );
 });
 
@@ -367,37 +417,44 @@ self.addEventListener('fetch', event => {
   // layer in moviezone.js, which has the domain knowledge to decide TTLs.
   if (url.pathname.startsWith('/api/')) return;
 
-  /*  ── TMDB IMAGES: stale-while-revalidate ────────────────────────────────
+  /*  ── TMDB IMAGES: cache-first, immutable ────────────────────────────────
    *  These were previously not cached at all. The generic branch below only
    *  stored `response.type === 'basic'` (same-origin) responses, and a TMDB
    *  image is a cross-origin `cors`/`opaque` response, so every repeat visit
    *  re-downloaded every poster and — critically — the hero backdrop, which is
    *  the LCP element.
    *
-   *  Serving from cache immediately makes a returning visitor's LCP a cache read
-   *  instead of a cross-origin round trip. The background revalidation keeps
-   *  entries from going stale forever; posters are immutable per URL anyway
-   *  (TMDB paths are content-addressed), so this is really just a refresh path.
+   *  WHY THIS IS NO LONGER STALE-WHILE-REVALIDATE
+   *  It used to fire the revalidation fetch unconditionally, before even looking
+   *  at the cached entry, and only the *response* was discarded on a hit. So a
+   *  returning visitor with a warm cache re-downloaded every poster on screen in
+   *  the background anyway — up to IMAGE_CACHE_MAX_ENTRIES of them — while the
+   *  first screen was still loading. On a mobile link that is bandwidth taken
+   *  directly from the LCP backdrop and the two render-blocking bundles, to
+   *  refresh bytes that cannot have changed.
+   *
+   *  A TMDB image path is content-addressed: /t/p/w342/<hash>.jpg names the
+   *  bytes, so a different image is always a different URL. There is nothing for
+   *  a revalidation to discover. Cache-first is not a staleness trade here — it
+   *  is the correct strategy for the URL shape, and it is what makes a returning
+   *  visitor's LCP a local cache read instead of a cross-origin round trip.
    *  ──────────────────────────────────────────────────────────────────────── */
   if (isTmdbImage(url)) {
     event.respondWith(
       caches.open(IMAGE_CACHE).then(async cache => {
         const cached = await cache.match(request);
+        if (cached) return cached;
 
-        const revalidate = fetch(request).then(response => {
-          // Opaque (no-cors) responses have status 0; they are still storable and
-          // still render, so accept them rather than skipping the cache entirely.
-          if (response && (response.ok || response.type === 'opaque')) {
-            cache.put(request, response.clone()).then(trimImageCache).catch(() => {});
-          }
-          return response;
-        });
-
-        if (cached) {
-          event.waitUntil(revalidate.catch(() => {}));
-          return cached;
+        const response = await fetch(request);
+        // Opaque (no-cors) responses have status 0; they are still storable and
+        // still render, so accept them rather than skipping the cache entirely.
+        if (response && (response.ok || response.type === 'opaque')) {
+          const copy = response.clone();
+          event.waitUntil(
+            cache.put(request, copy).then(trimImageCache).catch(() => {})
+          );
         }
-        return revalidate;
+        return response;
       })
     );
     return;
@@ -462,15 +519,67 @@ self.addEventListener('fetch', event => {
 
   if (networkFirst) {
     event.respondWith(
-      fetch(request)
-        .then(response => {
+      (async () => {
+        /*  One promise, consumed at most once. event.preloadResponse is the
+         *  request the browser started while this worker was still booting (see
+         *  navigationPreload in activate); awaiting it is strictly cheaper than
+         *  issuing a second identical one. It resolves to undefined when preload
+         *  did not apply — every non-navigation, and every browser without the
+         *  feature — so the plain fetch stays the fallback, not the exception. */
+        const fromNetwork = (async () => {
+          let response = null;
+          if (event.preloadResponse) {
+            try { response = await event.preloadResponse; } catch (e) { response = null; }
+          }
+          if (!response) response = await fetch(request);
           if (response.ok && response.type === 'basic') {
             const copy = response.clone();
             event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.put(request, copy)));
           }
           return response;
-        })
-        .catch(async () => {
+        })();
+
+        /*  ── BOUNDED, NOT UNBOUNDED ──────────────────────────────────────────
+         *  Pure network-first meant a stalled mobile connection left the user
+         *  looking at a blank document until the browser's own timeout fired,
+         *  tens of seconds later. That is the "hang" users report, and it scores
+         *  as a p95 latency outlier rather than as an error, which is why it is
+         *  invisible in error rates but very visible in the percentiles.
+         *
+         *  So: race the network against the cached shell. If the network wins,
+         *  nothing changes. If it does not answer within the budget, paint the
+         *  shell and let the network keep running under waitUntil to refresh the
+         *  cache for the next navigation — the request is deferred, never
+         *  abandoned.
+         *
+         *  There is no stale-version hazard: activate() deletes every cache but
+         *  CACHE_NAME and install() refills it, so the cached shell is always the
+         *  currently deployed one, referencing the currently deployed ?v= bundles. */
+        const shell = request.mode === 'navigate'
+          ? await caches.match('/index.html')
+          : null;
+
+        if (shell) {
+          let timer = null;
+          const timeout = new Promise(resolve => {
+            timer = setTimeout(() => resolve(NETWORK_TOO_SLOW), NAV_NETWORK_BUDGET_MS);
+          });
+          try {
+            const winner = await Promise.race([
+              fromNetwork.catch(() => NETWORK_TOO_SLOW),
+              timeout
+            ]);
+            if (winner !== NETWORK_TOO_SLOW) return winner;
+            event.waitUntil(fromNetwork.catch(() => {}));
+            return shell;
+          } finally {
+            if (timer !== null) clearTimeout(timer);
+          }
+        }
+
+        try {
+          return await fromNetwork;
+        } catch (e) {
           // Try exact match first, then try stripping query string for pre-cached assets
           let cached = await caches.match(request);
           if (!cached && url.search) {
@@ -480,7 +589,8 @@ self.addEventListener('fetch', event => {
           if (cached) return cached;
           if (request.mode === 'navigate') return caches.match('/index.html');
           throw new Error('Offline asset unavailable');
-        })
+        }
+      })()
     );
     return;
   }

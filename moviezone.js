@@ -13249,6 +13249,38 @@ function warmUrlVariant(url) {
  * power" abort nahi aata. Play dabane par usi frame ko real stream URL par navigate
  * kiya jata hai: DNS/TLS, provider JS/CSS sab cached hote hain, to playback jaldi shuru.
  */
+/*  ── WHO CAN AFFORD A SPECULATIVE SECOND BROWSING CONTEXT ──────────────────
+ *  prewarmPlayer() below does not merely open a socket — it attaches a live
+ *  iframe pointing at a third-party player document, which pulls that provider's
+ *  HTML, JS and CSS and usually an ad/resolver chain behind it, all before the
+ *  viewer has pressed Play. On a fast device that is the trade the "instant play"
+ *  design intends and it pays off.
+ *
+ *  It was guarded only by isDataSaver() and "a real player already exists", so
+ *  the weakest hardware in the fleet was paying the largest speculative cost:
+ *
+ *  - On a TV this is the worst thing on the page. It is a whole extra document on
+ *    a CPU already several times slower than a phone's, held at opacity:0.001
+ *    rather than display:none (deliberately, so the frame is not throttled) which
+ *    means it is also composited on every frame. And it is not even click-gated
+ *    there: tv-mode.js synthesises a mouseover after ~650-900ms of D-pad rest on a
+ *    card, so merely leaving the highlight on a tile started a provider load.
+ *  - On a 2-core / 2GB phone the parse and execute of the provider's bundle lands
+ *    on the same main thread the modal is still settling on, which is precisely
+ *    the interaction the user is waiting on.
+ *
+ *  Nothing is lost by declining: playMovie() builds the real frame on demand, and
+ *  warmEmbedUrl above still runs for every device, so the DNS/TLS handshake to
+ *  the chosen provider is warmed regardless. Only the speculative document fetch
+ *  is skipped — the cheap half of the optimisation is kept everywhere, and only
+ *  the expensive half is means-tested. */
+function canAffordPrewarmFrame() {
+  if (isDataSaver()) return false;   // save-data, 2g, slow-2g
+  if (isMzTV()) return false;        // weakest CPU, and triggered by focus rest
+  if (mzLowTier) return false;       // <=2 cores / <=2GB / TV UA / 2g
+  return true;
+}
+
 function prewarmPlayer(id, type, srcIdxOverride) {
   if (!id || isDataSaver() || document.getElementById('playerFrame')) return;
   const embedEl = document.getElementById('videoEmbed');
@@ -13257,6 +13289,13 @@ function prewarmPlayer(id, type, srcIdxOverride) {
   const realUrl = buildPlayerUrl(id, type, idx);
   if (!realUrl) return;
   warmEmbedUrl(realUrl, playerSources[idx] && playerSources[idx].name);
+  /*  The split point, and it matters which side of warmEmbedUrl it sits on.
+   *  Above, every device — TV and low-tier phone included — has already warmed
+   *  DNS/TLS to the chosen provider, which is the cheap half of "instant play".
+   *  Only the speculative document fetch below is means-tested. Declining before
+   *  warmEmbedUrl would have taken that free win away from exactly the devices
+   *  this guard exists to protect. */
+  if (!canAffordPrewarmFrame()) return;
   if (_mzPrewarm && _mzPrewarm.realUrl === realUrl && _mzPrewarm.iframe && _mzPrewarm.iframe.parentNode) return;
 
   destroyPrewarm();

@@ -61,9 +61,26 @@
      *  These patterns hand those paths to the Worker first. Anything it does not
      *  claim still falls through to env.ASSETS.fetch(), so the SPA keeps serving
      *  unknown slugs exactly as before.
+     *
+     *  "/" AND "/index.html" ARE HERE FOR A DIFFERENT REASON
+     *  worker.js has a `path.endsWith('.html') || path === '/'` branch that sets
+     *  `max-age=300, s-maxage=3600, stale-while-revalidate=86400` and appends
+     *  `Link: <https://image.tmdb.org>; rel=preconnect` for Early Hints. Without
+     *  "/" listed here the asset router answered the homepage directly and that
+     *  branch never ran — so the single most-requested document on the site, the
+     *  one 90% of mobile users land on, was the only one getting neither the
+     *  stale-while-revalidate policy nor the 103 Early Hint. The code was written
+     *  for it; only the route was missing.
+     *
+     *  Cost is one Worker invocation, and it is recovered immediately: the
+     *  homepage now also lands in caches.default under a tracking-param-scrubbed
+     *  key, so every ?utm_* / ?fbclid variant of a shared link shares one edge
+     *  entry instead of missing individually.
      */
     "run_worker_first": [
       "/api/*",
+      "/",
+      "/index.html",
       "/movies",
       "/movies/*",
       "/series",

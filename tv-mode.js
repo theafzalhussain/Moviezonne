@@ -613,6 +613,12 @@
   function collectFocusables() {
     var scope = activeScope() || document.body;
     if (focusCache.entries && focusCache.scope === scope) return focusCache.entries;
+    /*  Piggy-backed on the rebuild deliberately. buildFocusables() below is about
+     *  to force a synchronous layout anyway, so the navbar measurement joins that
+     *  same flush and costs nothing extra — whereas refreshing it from
+     *  invalidateFocusCache() would add a forced layout to the DOM-sweep path,
+     *  which fires during chunked rendering. */
+    topKeepout = measureTopKeepout();
     focusCache.entries = buildFocusables(scope);
     focusCache.scope = scope;
     focusCache.byElement = null;
@@ -695,8 +701,45 @@
        2. only scroll when the target is actually hidden behind the navbar or off
           an edge. Most D-pad moves land on something already visible, and the
           cheapest scroll is no scroll. */
-  var TOP_KEEPOUT = 112;    // sticky navbar + breathing room
+  /*  ── THE TOP KEEPOUT MUST SCALE WITH THE PANEL ──────────────────────────
+   *  This was the literal 112, which is 7rem at a 16px root — the same figure
+   *  tv-mode.css uses for scroll-padding-top. The two agree only while the root
+   *  font-size is 100%, and on a big TV it is not: moviezone.css scales the root
+   *  to 125% at >=2500px, and injectTVCss() takes it to 150% at >=3400px and 190%
+   *  at >=5000px. So on a 4K or 8K panel the real navbar stood 1.5-1.9x taller
+   *  than this constant claimed.
+   *
+   *  The consequence was a visible bug, not just a slow path: scrollFocusIntoView
+   *  concluded a top-row card was "already visible", scrolled nothing, and the
+   *  highlighted card sat underneath the navbar — on the largest screens, where
+   *  the focus ring is the only thing telling the viewer where they are.
+   *
+   *  Measured from the live navbar when there is one, because that is the element
+   *  actually doing the occluding; it also covers a navbar that has wrapped to two
+   *  rows. Falls back to 7rem scaled by the real root font-size, which keeps it in
+   *  step with the CSS by construction rather than by coincidence. */
+  var TOP_KEEPOUT_FALLBACK = 112;
   var BOTTOM_KEEPOUT = 24;
+  var topKeepout = TOP_KEEPOUT_FALLBACK;
+
+  function measureTopKeepout() {
+    var rootPx = 16;
+    try {
+      var parsed = parseFloat(getComputedStyle(document.documentElement).fontSize);
+      if (parsed > 0) rootPx = parsed;
+    } catch (err) {}
+
+    var nav = byId('navbar');
+    if (nav) {
+      var height = nav.getBoundingClientRect().height;
+      /*  A navbar that is collapsed, hidden or not yet laid out must not shrink
+       *  the keepout to nothing — that would reintroduce the same bug from the
+       *  other direction, with focus scrolling to the very top of the viewport. */
+      if (height > 24) return Math.round(height + rootPx);
+    }
+    // 7rem, matching scroll-padding-top in tv-mode.css.
+    return Math.round(rootPx * 7);
+  }
 
   function scrollFocusIntoView(el, direction, docRect) {
     var viewportH = window.innerHeight || 720;
@@ -707,7 +750,7 @@
           left: docRect.left - scrollOffsetX(), right: docRect.right - scrollOffsetX() }
       : el.getBoundingClientRect();
 
-    var needsVertical = rect.top < TOP_KEEPOUT || rect.bottom > viewportH - BOTTOM_KEEPOUT;
+    var needsVertical = rect.top < topKeepout || rect.bottom > viewportH - BOTTOM_KEEPOUT;
     var needsHorizontal = rect.left < 0 || rect.right > viewportW;
     if (!needsVertical && !needsHorizontal) return; // already visible — do nothing
 
@@ -1265,8 +1308,29 @@
 
     var imgs = document.querySelectorAll('.movie-card img:not([data-mztv-seen]), .upcoming-card img:not([data-mztv-seen])');
     for (var i = 0; i < imgs.length; i++) {
-      imgs[i].setAttribute('data-mztv-seen', '1');
-      observer.observe(imgs[i]);
+      var img = imgs[i];
+      // Marked regardless, so a skipped image is not re-examined on every sweep.
+      img.setAttribute('data-mztv-seen', '1');
+      /*  ── DO NOT OBSERVE WHAT THE BROWSER IS ALREADY DEFERRING ──────────
+       *  Both branches of the poster observer are no-ops for a loading="lazy"
+       *  image: the park branch bails on `img.loading === 'lazy'` (see the note
+       *  in ensurePosterObserver — stripping src cancels an in-flight fetch and
+       *  costs the same bytes twice), and the unpark branch only acts on an image
+       *  that was parked. So observing them bought nothing at all.
+       *
+       *  It did cost, though, and the cost grew without limit. The TV card budget
+       *  deliberately never deletes cards (that would break scroll position and
+       *  D-pad focus), nothing ever called unobserve, and createMovieCardHTML
+       *  emits loading="lazy" unconditionally — so after a few "Load More"
+       *  presses the observer was tracking 120+ targets that could not act on any
+       *  of them, and every one of those entries was still delivered to the
+       *  callback on every scroll. On a TV CPU that is a steadily rising per-frame
+       *  tax for no benefit.
+       *
+       *  Skipping them keeps the mechanism for eagerly-loaded images, which is
+       *  what it was written for and where it still helps. */
+      if (img.loading === 'lazy') continue;
+      observer.observe(img);
     }
   }
 
@@ -1331,12 +1395,33 @@
   function watchIdleSections() {
     if (typeof IntersectionObserver !== 'function') return;
     var observer = new IntersectionObserver(function (entries) {
+      /*  Invalidate ONLY when a section actually crossed the boundary.
+       *
+       *  This used to call invalidateFocusCache() unconditionally, once per
+       *  callback. IntersectionObserver fires on delivery, not only on change —
+       *  including an initial callback for every observed target — so the cache
+       *  was being thrown away repeatedly while the user held a direction key,
+       *  which is exactly when the section boundaries are being crossed and when
+       *  the user is pressing fastest.
+       *
+       *  The cost of a needless invalidation is not small: the next arrow press
+       *  pays a full querySelectorAll plus one getBoundingClientRect per
+       *  candidate (~150 on a loaded grid) plus a closest('[hidden]') ancestor
+       *  walk each — one forced synchronous layout, on the keypress, on a CPU
+       *  several times slower than a phone's. That is the stutter during vertical
+       *  travel. Tracking the previous state makes a no-op callback free. */
+      var changed = false;
       for (var i = 0; i < entries.length; i++) {
         var el = entries[i].target;
-        if (entries[i].isIntersecting) el.removeAttribute('data-mztv-idle');
-        else el.setAttribute('data-mztv-idle', '1');
+        var wasIdle = el.getAttribute('data-mztv-idle') === '1';
+        if (entries[i].isIntersecting) {
+          if (wasIdle) { el.removeAttribute('data-mztv-idle'); changed = true; }
+        } else if (!wasIdle) {
+          el.setAttribute('data-mztv-idle', '1');
+          changed = true;
+        }
       }
-      invalidateFocusCache(); // a skipped section removes its focusables
+      if (changed) invalidateFocusCache(); // a skipped section removes its focusables
     }, { rootMargin: '25% 0px' });
 
     IDLE_SECTION_IDS.forEach(function (id) {

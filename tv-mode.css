@@ -143,41 +143,71 @@ html[data-mz-tv="true"] .upcoming-detail-box {
    :focus-visible values under plain :focus as a safety net. Values copied from
    moviezone.css: do not "improve" them here or TV and laptop will drift. */
 
+/*  ── FOCUS STYLING IS A PER-KEYPRESS REPAINT, SO IT IS PRICED LIKE ONE ─────
+ *  Every arrow press repaints two cards: the one losing focus and the one
+ *  gaining it. Whatever these rules cost, the TV pays it twice per press, at
+ *  key-repeat speed, on a GPU with a fraction of a phone's fill rate.
+ *
+ *  What was here: a 100px-blur drop shadow plus a 40px-blur gold glow on the
+ *  card, a 20px glow on every focusable, three stacked shadows on the play
+ *  button (one of them 36px blur), and `filter: saturate() contrast()` over the
+ *  full poster bitmap. A large blur radius is the single most expensive raster
+ *  operation in CSS — the compositor has to sample a region that grows with the
+ *  square of the radius — and a `filter` forces a per-pixel pass over the image
+ *  on top of that.
+ *
+ *  What replaces it: spread instead of blur. `box-shadow: 0 0 0 Npx` draws a
+ *  hard ring and costs essentially nothing to raster, and at a 3-metre viewing
+ *  distance a crisp gold ring reads as *more* legible than a soft glow, not
+ *  less. The gold colour, the outline, the lift and the z-index promotion are all
+ *  unchanged, so focus looks and behaves the same; only the expensive way of
+ *  drawing it is gone. Contained blurs are kept where they carry real depth cues,
+ *  at radii a TV can afford.
+ *  ───────────────────────────────────────────────────────────────────────── */
+
 html[data-mz-tv="true"] :focus {
   outline: 2px solid var(--gold) !important;
   outline-offset: 3px !important;
-  box-shadow: 0 0 20px rgba(245, 197, 24, 0.4) !important;
+  /* Was 0 0 20px (blurred glow) on every focusable element on the page. */
+  box-shadow: 0 0 0 2px rgba(245, 197, 24, 0.45) !important;
   border-radius: inherit;
 }
 
 html[data-mz-tv="true"] .movie-card:focus {
   border-color: rgba(245, 197, 24, 0.3) !important;
   z-index: 10;
+  /* Was 0 45px 100px + 0 0 40px. Same gold edge, same sense of lift, ~1/16th
+     the blur area to resample. */
   box-shadow:
-    0 45px 100px rgba(0, 0, 0, 0.7),
-    0 0 40px rgba(245, 197, 24, 0.1) !important;
+    0 14px 22px rgba(0, 0, 0, 0.6),
+    0 0 0 3px rgba(245, 197, 24, 0.35) !important;
 }
 html[data-mz-tv="true"] .movie-card:focus::before { opacity: 1; }
+/*  The poster keeps its scale — a transform is composited, not rastered, so it is
+ *  cheap — but the saturate/contrast filter is dropped. It forced a full per-pixel
+ *  pass over a ~300x450 bitmap on both cards on every single press, for a colour
+ *  shift that is not perceptible across a room. */
 html[data-mz-tv="true"] .movie-card:focus .card-poster img {
   transform: scale(1.03);
-  filter: saturate(1.15) contrast(1.07) brightness(1);
+  filter: none !important;
 }
 html[data-mz-tv="true"] .movie-card:focus .card-overlay { opacity: 1; }
 html[data-mz-tv="true"] .movie-card:focus .card-play-btn {
   transform: translateY(0) scale(1) rotate(0deg);
+  /* Was three stacked shadows including a 36px blur; now one tight shadow and a
+     hard ring. */
   box-shadow:
-    0 14px 36px rgba(230, 57, 70, 0.45),
-    0 0 0 8px rgba(245, 197, 24, 0.12),
-    0 0 24px rgba(245, 197, 24, 0.25);
+    0 6px 14px rgba(230, 57, 70, 0.5),
+    0 0 0 6px rgba(245, 197, 24, 0.14);
 }
 
 html[data-mz-tv="true"] .upcoming-card:focus {
   border-color: rgba(245, 197, 24, 0.32) !important;
   transform: translateY(-6px) scale(1.01);
+  /* Was 0 24px 60px + two more layers. */
   box-shadow:
-    0 24px 60px rgba(0, 0, 0, 0.55),
-    0 0 0 1px rgba(245, 197, 24, 0.12),
-    0 0 24px rgba(245, 197, 24, 0.07) !important;
+    0 12px 20px rgba(0, 0, 0, 0.5),
+    0 0 0 2px rgba(245, 197, 24, 0.2) !important;
   z-index: 10;
 }
 
@@ -409,4 +439,82 @@ html[data-mz-bigscreen="true"] .ch-card {
 html[data-mz-bigscreen="true"] .collections-hub-overlay::before {
   filter: none !important;
   animation: none !important;
+}
+
+
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TITLE-SAFE INSETS (OVERSCAN)
+   ═══════════════════════════════════════════════════════════════════════════
+
+   A TV is the one display that does not promise to show you all of its own
+   framebuffer. Plenty of sets — especially 32"-43" panels driven over HDMI, and
+   almost anything with a "Just Scan" / "Screen Fit" option left off — crop 2-5%
+   off every edge. moviezone.css grants `padding: 3%` at >=1920px, which covers
+   most of it horizontally, but nothing below 1920px gets that padding and nothing
+   at any width gets vertical protection. The bottom edge matters most, because
+   the bottom row is exactly where a D-pad user ends up, and a focused card that
+   is half-cropped is a card whose focus ring the viewer cannot see.
+
+   WHAT THIS BLOCK DELIBERATELY DOES NOT DO
+   It does not resize anything. tv-mode.css is a performance sheet, not a re-skin:
+   tv-mode.test.js fails the build on font-size, width, height, gap,
+   grid-template-columns, letter-spacing or line-height appearing here, because an
+   earlier attempt at TV-specific sizing is what "made cards render huge and the
+   whole UI look different on TV". Card sizing for large screens therefore stays
+   where it already lives, in moviezone.css's (min-width: 1920px) and 2500px
+   queries, and this block confines itself to insetting content away from the
+   panel edges — padding only, no geometry.
+
+   Worth recording alongside those breakpoints: almost every 4K smart TV reports a
+   1920x1080 CSS viewport at devicePixelRatio 2, not a 3840px one (Tizen and webOS
+   both do this). So a 65" 4K panel and a 32" 1080p panel land on the SAME
+   breakpoint, and the 3400px/5000px steps in injectTVCss() are close to
+   unreachable on real hardware. Anyone revisiting large-screen sizing should start
+   from that fact rather than from the pixel widths the panels advertise.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/*  Expressed as custom properties so the insets can be retuned in one place and
+ *  so env() is resolved once rather than at every use site. The max() against a
+ *  vw/vh floor is what makes this work on the sets that need it most: a TV browser
+ *  reporting no safe-area insets at all (most of them) still gets the floor, while
+ *  a platform that does report them (some Android TV builds, and a browser in a
+ *  letterboxed window) gets whichever is larger. */
+html[data-mz-tv="true"] {
+  --mz-tv-safe-x: max(2.2vw, env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px));
+  --mz-tv-safe-y: max(1.4vh, env(safe-area-inset-bottom, 0px));
+}
+
+/*  max() against the 3% moviezone.css already applies, so this can only ever
+ *  ENLARGE the inset — never shrink it, and never stack on top of it. Stacking
+ *  would have cost a tenth of the screen width at >=1920px, where the 3% is
+ *  load-bearing. */
+html[data-mz-tv="true"] .main-content,
+html[data-mz-tv="true"] #upcoming,
+html[data-mz-tv="true"] #movies-section {
+  padding-left: max(3%, var(--mz-tv-safe-x));
+  padding-right: max(3%, var(--mz-tv-safe-x));
+}
+
+/*  The navbar sits against the top edge, the first thing overscan eats, and it is
+ *  what tells the viewer where they are. Inset via padding rather than width:
+ *  width is forbidden here (see the note above) and padding achieves the same
+ *  protection without taking layout ownership away from moviezone.css. */
+html[data-mz-tv="true"] #navbar {
+  padding-left: max(1rem, var(--mz-tv-safe-x));
+  padding-right: max(1rem, var(--mz-tv-safe-x));
+}
+
+/*  Vertical protection. scroll-padding-bottom complements the scroll-padding-top
+ *  already set above: that stops the scroll clear of the navbar, this guarantees
+ *  there is somewhere for the last row to stop that is not under the bezel. */
+html[data-mz-tv="true"] .site-footer {
+  padding-bottom: calc(2rem + var(--mz-tv-safe-y));
+}
+html[data-mz-tv="true"] .movie-grid,
+html[data-mz-tv="true"] .upcoming-grid,
+html[data-mz-tv="true"] .continue-watching-grid,
+html[data-mz-tv="true"] .ch-grid {
+  scroll-padding-bottom: calc(3rem + var(--mz-tv-safe-y));
 }
