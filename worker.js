@@ -1284,28 +1284,34 @@ async function handleTmdbBatch(request, env, ctx, url) {
      *  to 40 paths — before a single card could paint. Now that visitor is
      *  answered from the assembled copy in one KV read and the fan-out happens
      *  behind the response. */
-    const hit = await env.TMDB_CACHE.getWithMetadata(planKey, { type: 'text', cacheTtl: 60 });
-    if (hit && hit.value) {
-      const storedAt = hit.metadata && hit.metadata.t;
-      const fresh = !storedAt || Date.now() - storedAt < BATCH_CACHE_TTL * 1000;
-      if (!fresh) ctx.waitUntil(refreshBatch(paths, planKey, env, ctx, planCacheKey));
-      /*  Promote a KV hit into the colo cache, which is what makes the NEXT
-       *  request in this colo skip KV entirely. Only a fresh body is promoted: a
-       *  stale one already has a refresh running behind it, and pinning it here
-       *  would mask the fresher copy that lands a moment later — the same rule
-       *  the generic edge layer in fetch() applies to STALE proxy responses. */
-      if (fresh) {
-        const promote = coloCache();
-        if (promote) {
-          ctx.waitUntil(promote
-            .put(planCacheKey, batchCacheEntry(hit.value, storedAt || Date.now()))
-            .catch(() => {}));
+    try {
+      const hit = await env.TMDB_CACHE.getWithMetadata(planKey, { type: 'text', cacheTtl: 60 });
+      if (hit && hit.value) {
+        const storedAt = hit.metadata && hit.metadata.t;
+        const fresh = !storedAt || Date.now() - storedAt < BATCH_CACHE_TTL * 1000;
+        if (!fresh) ctx.waitUntil(refreshBatch(paths, planKey, env, ctx, planCacheKey));
+        /*  Promote a KV hit into the colo cache, which is what makes the NEXT
+         *  request in this colo skip KV entirely. Only a fresh body is promoted: a
+         *  stale one already has a refresh running behind it, and pinning it here
+         *  would mask the fresher copy that lands a moment later — the same rule
+         *  the generic edge layer in fetch() applies to STALE proxy responses. */
+        if (fresh) {
+          const promote = coloCache();
+          if (promote) {
+            ctx.waitUntil(promote
+              .put(planCacheKey, batchCacheEntry(hit.value, storedAt || Date.now()))
+              .catch(() => {}));
+          }
         }
+        return new Response(hit.value, {
+          status: 200,
+          headers: batchHeaders(fresh ? 'HIT' : 'STALE')
+        });
       }
-      return new Response(hit.value, {
-        status: 200,
-        headers: batchHeaders(fresh ? 'HIT' : 'STALE')
-      });
+    } catch (err) {
+      // A KV read failure must not 500 the whole first screen — fall through
+      // and assemble from the colo cache / TMDB instead.
+      console.log('[batch] kv read failed: ' + (err && err.message));
     }
   }
 
