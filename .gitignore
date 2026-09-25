@@ -8,3 +8,14 @@ node_modules/
 # are explicitly removed with `git rm --cached`.
 .wrangler/
 moviezone-worker-504-fix/
+
+
+# Throwaway Chrome profiles and scratch output from the CDP test harnesses
+# (cwv-check.js, cat-tabs.browser.test.js, rum-gate.browser.test.js, ...). These
+# got committed once - 1,134 files / 53 MB, Chrome's Cookies / Login Data /
+# History among them - and because wrangler publishes assets.directory "." they
+# were then served publicly. .assetsignore now stops the publishing; this stops
+# them coming back. Files already tracked stay tracked until `git rm -r --cached`.
+cp*.tmp/
+shots.tmp/
+*.tmp.png

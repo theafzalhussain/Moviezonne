@@ -12,8 +12,18 @@
 # manifest.json, collections-catalog.json, robots.txt, sitemap*.xml, fonts and
 # icons. assetsignore-check.js enforces exactly that.
 
-**/node_modules
-**/.git
+# Directory excludes carry a TRAILING SLASH.
+#
+# This list started as `**/node_modules` and `**/.git`, and neither one worked:
+# verified against production, https://moviezone.dev/node_modules/terser/package.json
+# answered 200, so ~13,500 dependency files were being published on every deploy.
+# The slash is what makes wrangler prune the directory instead of walking into it.
+# Both forms are listed because the root-level one is the case that matters here
+# and the `**/` one covers nested copies.
+node_modules/
+**/node_modules/
+.git/
+**/.git/
 **/.DS_Store
 **/wrangler.jsonc
 
@@ -60,3 +70,45 @@ package-lock.json
 vercel.json
 netlify.toml
 _perf-block.txt
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SCRATCH ARTEFACTS FROM THE BROWSER TEST HARNESSES
+#
+# cwv-check.js, cat-tabs.browser.test.js, rum-gate.browser.test.js and the other
+# CDP harnesses launch Chrome with a throwaway --user-data-dir next to the repo.
+# Those directories got committed, and because assets.directory is ".", they were
+# then PUBLISHED: 1,134 files / 53 MB, including Chrome's own
+# Default/Network/Cookies, Default/Login Data, Default/Web Data and
+# Default/History. Verified against production - /cp7.tmp/Default/Login%20Data
+# answered 200.
+#
+# Excluding them here stops the publishing. It does NOT remove them from git
+# history, which is a separate decision (see the note in the handover): anything
+# that has been publicly served has to be treated as disclosed.
+#
+# Patterned rather than named so the next harness run cannot reintroduce the
+# problem under a new number.
+*.tmp/
+**/*.tmp/
+cp*.tmp/
+shots.tmp/
+
+# Scratch images from the banner/OG tooling. Never referenced by any page, and
+# banner-desktop.tmp.png alone is 536 KB of deploy weight.
+*.tmp.png
+*.tmp.js
+
+# Unminified sources. `npm run build` produces the .min siblings and index.html
+# references only those (asset-perf-check.js asserts the bare forms are absent),
+# so these are 1.2 MB of deploy weight that no browser ever requests.
+#
+# Only files that HAVE a .min sibling belong here. universes.css deliberately
+# does not: it has no minified build and index.html loads it directly, so
+# excluding it 404s the Cinematic Universe rail's styling. assetsignore-check.js
+# caught exactly that.
+moviezone.js
+moviezone.css
+tv-mode.js
+tv-mode.css
+search-engine.js
+pwa-install.js
