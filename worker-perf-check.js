@@ -422,6 +422,76 @@ const PLAN = [
     delete global.caches;
   }
 
+  /*  ── THE BATCH CAP AND THE CLIENT CHUNK MUST AGREE ──
+   *
+   *  handleTmdbBatch rejects a plan larger than MAX_BATCH_PATHS with a 400, and
+   *  tmdbBatch's catch turns that into a silent fallback to individual requests -
+   *  correct, but for an OTT provider-verification wave that means ~20 requests
+   *  through the 8-lane gate instead of one POST: three sequential round trips on
+   *  mobile, plus the 30-per-10s rate budget, plus a miss on the edge-assembled
+   *  batch cache. Strictly worse than the batching it replaced, and the only
+   *  symptom is a console.debug nobody reads.
+   *
+   *  _ottPrimeBatch slices at MZ_BATCH_CHUNK, so that constant is the one that has
+   *  to stay within the cap. Read out of the source rather than imported, because
+   *  moviezone.js is a browser script with no module boundary.
+   */
+  const clientSrc = fs.readFileSync(path.join(__dirname, 'moviezone.js'), 'utf8');
+  const chunk = Number((clientSrc.match(/const MZ_BATCH_CHUNK\s*=\s*(\d+)/) || [])[1]);
+  /*  Through pushLimits(), not a named export: the runtime refuses to load a
+   *  Worker module whose named exports are plain numbers - see the note on
+   *  pushLimits() in worker.js. */
+  const cap = worker.pushLimits().MAX_BATCH_PATHS;
+
+  check('the client batch chunk is declared as a named constant', Number.isFinite(chunk),
+    'MZ_BATCH_CHUNK not found in moviezone.js - a hard-coded CHUNK cannot be '
+      + 'checked against the Worker cap');
+  check('the client batch chunk fits inside the Worker cap', chunk <= cap,
+    'MZ_BATCH_CHUNK is ' + chunk + ' but MAX_BATCH_PATHS is ' + cap
+      + ', so every full chunk would 400 and fall back to individual requests');
+  check('_ottPrimeBatch slices on that constant, not a literal',
+    /const CHUNK = MZ_BATCH_CHUNK;/.test(clientSrc),
+    '_ottPrimeBatch has a hard-coded chunk size again, so it can drift from the cap');
+
+  /*  The cap leaves headroom over the 16-path ALL feed. */
+  check('the cap leaves headroom over the 16-path ALL feed', cap >= 20,
+    'MAX_BATCH_PATHS is ' + cap + '; the ALL feed alone is 16 paths');
+
+  /*  ── THE UPSTREAM TIMEOUT MUST STAY INSIDE THE CLIENT'S OWN BUDGET ──
+   *
+   *  tmdbUpstream makes TWO attempts of TMDB_TIMEOUT_MS with no backoff, so the
+   *  Worker's own ceiling for /api/tmdb/* is 2x that value plus the KV read and
+   *  the JSON assembly. The browser aborts its attempt at MZ_FETCH_TIMEOUT_MS. If
+   *  the Worker's ceiling ever reaches the client's, the edge retry lands after
+   *  the client has already hung up - and a client hanging up is exactly what
+   *  Cloudflare records as a 499. The comment above MZ_FETCH_TIMEOUT_MS in
+   *  moviezone.js documents the incident: a 9000ms client timeout produced 511 of
+   *  those in five minutes.
+   *
+   *  envInt clamps TMDB_TIMEOUT_MS to 1000-20000, so the config alone can push the
+   *  ceiling to 40s and nothing in the code would object. This is the check that
+   *  objects. Read out of wrangler.jsonc, because that is where the override that
+   *  can break it lives - the compiled default is only the fallback.
+   */
+  const wranglerSrc = fs.readFileSync(path.join(__dirname, 'wrangler.jsonc'), 'utf8');
+  const upstreamMs = Number((wranglerSrc.match(/"TMDB_TIMEOUT_MS"\s*:\s*"(\d+)"/) || [])[1]);
+  const clientMs = Number((clientSrc.match(/const MZ_FETCH_TIMEOUT_MS\s*=\s*(\d+)/) || [])[1]);
+
+  check('both timeout values are declared where the guard can read them',
+    Number.isFinite(upstreamMs) && Number.isFinite(clientMs),
+    'TMDB_TIMEOUT_MS=' + upstreamMs + ' MZ_FETCH_TIMEOUT_MS=' + clientMs);
+
+  check('two upstream attempts still fit inside one client attempt',
+    upstreamMs * 2 < clientMs,
+    'the Worker can take ' + (upstreamMs * 2) + 'ms but the browser aborts at '
+      + clientMs + 'ms, so the edge retry lands after the client gave up (499s)');
+
+  check('and with real slack left for the KV read and the JSON assembly',
+    clientMs - upstreamMs * 2 >= 4000,
+    'only ' + (clientMs - upstreamMs * 2) + 'ms of headroom between the Worker '
+      + 'ceiling and the client abort; the cold path also has to do a KV read, a '
+      + 'JSON.parse per path and a re-serialise inside that margin');
+
   console.log('\n' + '='.repeat(74));
   console.log('  worker-perf-check: ' + pass + ' passed, ' + fail + ' failed');
   if (fail) failures.forEach(f => console.log('   x ' + f));

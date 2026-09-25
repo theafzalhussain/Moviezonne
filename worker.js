@@ -950,7 +950,31 @@ async function handleTmdbProxy(request, env, ctx, url) {
  *  capped, and the TMDB base URL and bearer token are always applied here —
  *  never taken from input.
  */
-const MAX_BATCH_PATHS = 40;
+/*  ── THE CAP, AND WHY IT IS NOT 40 ANY MORE ──
+ *
+ *  A batch is assembled in one invocation: runBatchPlan fans the paths out with
+ *  Promise.all, parses every JSON body and re-serialises one combined answer. So
+ *  the cap is really a ceiling on peak CPU and peak memory for a single request,
+ *  and at 40 paths that peak was roughly 800 KB of JSON through one isolate.
+ *
+ *  24 rather than 20. The largest plan the client can build is the 16-path ALL
+ *  feed (_mzCatPlan('all') in moviezone.js); cartoon-all is 13 and the carousel
+ *  12. 20 would work today and leave four paths of headroom, which is not enough
+ *  for a file whose own comments record sources being traded in and out of that
+ *  plan repeatedly - the first plan to reach 21 would be silently rejected and
+ *  degrade to individual requests with nothing but a console.debug to say so.
+ *  24 keeps 50% headroom over the real maximum and still cuts peak batch size by
+ *  40%.
+ *
+ *  MZ_BATCH_CHUNK in moviezone.js MUST NOT EXCEED THIS. _ottPrimeBatch slices its
+ *  provider-verification waves at that constant and posts the slices in parallel,
+ *  so with the two in agreement a 40-path wave becomes two parallel POSTs of 20 -
+ *  same single round trip, half the peak per invocation. With the two in
+ *  disagreement, every oversized wave 400s and falls back to ~20 individual
+ *  requests through the 8-lane gate, which is three sequential round trips and
+ *  strictly worse than before. worker-perf-check.js asserts they agree.
+ */
+const MAX_BATCH_PATHS = 24;
 const TMDB_CACHE_TTL = 604800;  // 7 days — a title's own record rarely changes
 
 /*  ── AUTO-UPDATE: THE TTL HAS TO KNOW WHAT IT IS CACHING ──
@@ -2386,6 +2410,164 @@ function edgeCacheKey(request, url) {
   return new Request(clean.toString(), { method: request.method, headers: request.headers });
 }
 
+/*  ══════════════════════════════════════════════════════════════════════════
+ *  HOMEPAGE HERO PRELOAD — RESOLVED AT THE EDGE, NOT PINNED IN THE FILE
+ *  ══════════════════════════════════════════════════════════════════════════
+ *  index.html ships a hard-coded hero preload, written into the delimited
+ *  MZ_PERF_HEAD block by heroPreloadTag() in seo-ssr.js and refreshed by the
+ *  nightly seo-refresh workflow. Two separate things make that insufficient, and
+ *  both were verified rather than assumed:
+ *
+ *    1. THE WORKFLOW HAS NEVER COMMITTED. There is not one seo-refresh[bot]
+ *       commit in the history, so the shipped value is whatever was last written
+ *       by hand — it has never been refreshed by anything.
+ *    2. EVEN IF IT RAN, it would be a once-a-day commit against an endpoint that
+ *       reorders continuously, served on top of s-maxage=3600.
+ *
+ *  Measured against the live API: the backdrop in the file,
+ *  /1CIaRYKf3zg2Xyce1CSfCMg2Vfw.jpg, is not in /trending/movie/week any more —
+ *  not at [0], not anywhere on the page. So the preload was doing the exact
+ *  opposite of its job, in two compounding ways:
+ *
+ *    • 80-160 KB fetched at fetchpriority=high, on a mobile radio, for an image
+ *      no slide will ever display — in direct competition with the stylesheet,
+ *      the bundle and the real LCP image; and
+ *    • pinPreloadedHero() could not find that backdrop among the candidates, so
+ *      slide 0 fell through to the editorial pin — a DIFFERENT image, which
+ *      could not even be requested until the bundle had parsed and the batch had
+ *      come back.
+ *
+ *  The LCP element was therefore never the preloaded one. The preload was pure
+ *  competition for it. That is the single largest LCP cost on a cold visit, and
+ *  it cannot be fixed durably in the file, because the file is a build artefact
+ *  of a job that is not running.
+ *
+ *  So it is resolved here instead, from the same endpoint the client pins to,
+ *  out of the KV copy the Worker already holds — then the two <link rel=preload>
+ *  hints and <meta name="mz-hero-backdrop"> are rewritten to match. The client's
+ *  heroBackdropMetaPath() now pins slide 0 to an image the browser has already
+ *  started — or finished — downloading before the bundle even parsed.
+ *
+ *  THIS IS NOT PER-REQUEST WORK. The rewritten document is what gets stored in
+ *  caches.default, so the KV read and the rewrite are paid once per cache
+ *  generation and every other visitor is served the finished bytes from the
+ *  edge. On a miss or a fault the document is passed through untouched and the
+ *  response is deliberately NOT cached, so the stale preload can never be
+ *  pinned at the edge for an hour — see the put guard in fetch().
+ */
+const HERO_TRENDING_PATH = '/trending/movie/week?language=en-US&page=1';
+const TMDB_IMG_PREFIX = 'https://image.tmdb.org/t/p/';
+
+/*  Kept byte-identical to WIDE_MQ/MOBILE_MQ in seo-ssr.js and HERO_WIDE_MQ in
+ *  moviezone.js. All three branch on the same axis and a drift between them
+ *  means the browser preloads one width and the client renders the other, which
+ *  is a double download rather than a cache hit. */
+const HERO_WIDE_MQ = '(min-width: 1025px)';
+const HERO_MOBILE_MQ = '(max-width: 1024px)';
+
+/*  How long the homepage will wait for the hero before shipping without it.
+ *
+ *  The normal path is a KV read behind `cacheTtl: 60`, i.e. single-digit ms. The
+ *  budget exists for the cold-cold case — empty KV plus a TMDB round trip, which
+ *  TMDB_TIMEOUT_MS alone allows 3s for. Nobody's homepage should wait 3s for a
+ *  preload hint, so that request ships un-rewritten and uncached while the fetch
+ *  continues under waitUntil; the next request finds KV warm and gets the real
+ *  thing. */
+const HERO_RESOLVE_BUDGET_MS = 400;
+
+/** The current hero backdrop path, or '' if it cannot be resolved cheaply. */
+async function heroBackdropPath(env, ctx) {
+  try {
+    const result = await fetchTmdbJson(HERO_TRENDING_PATH, env, ctx);
+    if (result.status !== 200) return '';
+    const first = (JSON.parse(result.text).results || [])[0];
+    const path = first && first.backdrop_path;
+    /*  Validated, not trusted. This value is interpolated into a URL in a
+     *  response header and into an attribute in the document, so it is held to
+     *  the shape TMDB actually returns rather than to "it is a string". */
+    return (typeof path === 'string' && /^\/[A-Za-z0-9_-]+\.(?:jpg|jpeg|png|webp)$/.test(path))
+      ? path
+      : '';
+  } catch (err) {
+    console.log('[hero] resolve failed: ' + (err && err.message));
+    return '';
+  }
+}
+
+/*  Rewrites the shipped hero hints AND the server-rendered slide 0 in place.
+ *
+ *  BOTH, and that pairing is the whole point. scripts/inject-home-links.js writes
+ *  the preload and the slide-0 <picture> from the same heroUrl, precisely so the
+ *  preload is consumed by the element that renders - heroPreloadTag() documents
+ *  the Chrome warning that appeared when they disagreed. Rewriting only the hint
+ *  would put them back into disagreement and make things WORSE than the stale
+ *  state it is fixing: the browser would preload the live backdrop, paint the
+ *  stale one as LCP, and then download the live one again when buildCarousel()
+ *  replaced the slide. Two backdrops and a visible swap.
+ *
+ *  Attribute-matched rather than string-replaced: the shape of these blocks is
+ *  owned by heroPreloadTag() and injectHeroSlide() in seo-ssr.js, and a rewrite
+ *  keyed on their exact formatting would silently become a no-op the next time
+ *  either template is touched. Streaming, so the 128 KB document is never
+ *  buffered.
+ */
+function rewriteHeroPreload(response, backdropPath) {
+  const mobile = TMDB_IMG_PREFIX + 'w780' + backdropPath;
+  const wide = TMDB_IMG_PREFIX + 'w1280' + backdropPath;
+  /** w1280 for the wide branch, w780 for everything else - see heroPreloadTag(). */
+  const forMedia = (media) => (media === HERO_WIDE_MQ ? wide : mobile);
+
+  return new HTMLRewriter()
+    .on('link[rel="preload"][as="image"]', {
+      element(el) {
+        /*  This selector also matches the /moviezone-logo.webp preload, which is
+         *  a local 7 KB file and must be left exactly as it is. Only the TMDB
+         *  backdrop hints are ours to rewrite. */
+        const href = el.getAttribute('href') || '';
+        if (href.indexOf(TMDB_IMG_PREFIX) !== 0) return;
+        el.setAttribute('href', forMedia(el.getAttribute('media')));
+      }
+    })
+    .on('meta[name="mz-hero-backdrop"]', {
+      element(el) { el.setAttribute('content', backdropPath); }
+    })
+    /*  Slide 0, emitted statically by injectHeroSlide() so the parser has an LCP
+     *  element to consume immediately. Scoped to [data-mz-hero-ssr] so no other
+     *  <source>/<img> on the page can be caught by this. */
+    .on('[data-mz-hero-ssr] source', {
+      element(el) {
+        if ((el.getAttribute('srcset') || '').indexOf(TMDB_IMG_PREFIX) !== 0) return;
+        el.setAttribute('srcset', forMedia(el.getAttribute('media')));
+      }
+    })
+    .on('[data-mz-hero-ssr] img', {
+      element(el) {
+        /*  The <img> is the fallback inside <picture>, and injectHeroSlide() emits
+         *  it at w1280 - it is only reached when neither <source> matches. Keeping
+         *  that width means the rewritten markup is byte-for-byte the shape the
+         *  generator would have produced for this backdrop. */
+        if ((el.getAttribute('src') || '').indexOf(TMDB_IMG_PREFIX) !== 0) return;
+        el.setAttribute('src', wide);
+      }
+    })
+    .transform(response);
+}
+
+/** The media-scoped Early Hint pair for a resolved hero, in <link> header form. */
+function heroEarlyHints(backdropPath) {
+  /*  Media-scoped exactly like the tags, for the reason documented on
+   *  heroPreloadTag(): `sizes` resolves against device pixels, so a DPR2 phone
+   *  asks for ~820px and gets upgraded to the 116 KB w1280 copy where the app
+   *  intends the 45 KB one. A media query is evaluated on CSS pixels, the same
+   *  axis the client branches on, so the two cannot disagree. */
+  return [
+    '<' + TMDB_IMG_PREFIX + 'w780' + backdropPath + '>; rel=preload; as=image; '
+      + 'media="' + HERO_MOBILE_MQ + '"; fetchpriority=high',
+    '<' + TMDB_IMG_PREFIX + 'w1280' + backdropPath + '>; rel=preload; as=image; '
+      + 'media="' + HERO_WIDE_MQ + '"; fetchpriority=high'
+  ];
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -2464,6 +2646,7 @@ export default {
     newHeaders.set('Referrer-Policy', 'strict-origin-when-cross-origin');
 
     const path = url.pathname;
+    let isHomeDocument = false;
 
     if (path === '/sw.js') {
       /*  MUST come before the .js branch below, which was giving the service
@@ -2501,16 +2684,58 @@ export default {
        *  assembled, which is earlier than the <link rel=preconnect> in <head>
        *  can possibly fire. Ignored harmlessly where Early Hints is off. */
       newHeaders.append('Link', '<https://image.tmdb.org>; rel=preconnect');
+      isHomeDocument = (path === '/' || path === '/index.html');
     }
 
-    const finalResponse = new Response(assetResponse.body, {
+    /*  ── THE HERO HINT (homepage only) ──
+     *  See heroBackdropPath() above for why the value in the file cannot be
+     *  trusted. Resolved before the response is constructed because the Early
+     *  Hint has to go on these headers, and applied to the body by
+     *  rewriteHeroPreload() below so tag and header can never disagree. */
+    let heroPath = '';
+    if (isHomeDocument && request.method === 'GET') {
+      const heroWork = heroBackdropPath(env, ctx);
+      /*  Kept alive past the response on purpose. When the race below times out
+       *  this is the fetch that populates KV, and without waitUntil it would be
+       *  cancelled with the request — so every visitor would time out forever and
+       *  the hero would never resolve at all. */
+      ctx.waitUntil(heroWork.catch(() => {}));
+      heroPath = await Promise.race([
+        heroWork,
+        new Promise((resolve) => setTimeout(() => resolve(''), HERO_RESOLVE_BUDGET_MS))
+      ]);
+      if (heroPath) {
+        for (const hint of heroEarlyHints(heroPath)) newHeaders.append('Link', hint);
+        /*  The validator describes the bytes env.ASSETS handed over, and those are
+         *  no longer the bytes being sent. Left in place it would let a client
+         *  revalidate its way back into a document pinning last week's backdrop,
+         *  and it would collapse two different hero generations onto one entry.
+         *  Dropped rather than recomputed: hashing the rewritten body means
+         *  buffering it, and freshness here is already carried by Cache-Control —
+         *  notModified() returns null when there is no ETag, so the 304 path just
+         *  stays out of the way for this one document. */
+        newHeaders.delete('ETag');
+        newHeaders.delete('Last-Modified');
+      }
+    }
+
+    let finalResponse = new Response(assetResponse.body, {
       status: assetResponse.status,
       statusText: assetResponse.statusText,
       headers: newHeaders
     });
 
-    // ✅ Cache static assets (200 only)
-    if (request.method === 'GET' && finalResponse.status === 200 && path !== '/sw.js') {
+    if (heroPath) finalResponse = rewriteHeroPreload(finalResponse, heroPath);
+
+    /*  ✅ Cache static assets (200 only)
+     *
+     *  The homepage is stored only once its hero actually resolved. Caching the
+     *  pass-through would pin the stale hard-coded preload at the edge for the
+     *  full s-maxage — turning a transient KV miss into an hour of the exact bug
+     *  this code exists to remove. Skipping the put costs one extra invocation
+     *  and the next request finds KV warm. */
+    if (request.method === 'GET' && finalResponse.status === 200 && path !== '/sw.js'
+        && (!isHomeDocument || heroPath)) {
       ctx.waitUntil(edgeCache.put(cacheKey, finalResponse.clone()));
     }
 

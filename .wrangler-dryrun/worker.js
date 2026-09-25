@@ -933,10 +933,12 @@ footer.foot h3{font-size:.74rem;letter-spacing:1.4px;text-transform:uppercase;co
   var TV_UA_RE = /\b(?:smart-?tv|smarttv|googletv|android\s*tv|appletv|tvos|crkey|roku|web0?s|tizen|vidaa|hbbtv|netcast|viera|bravia|aquos)\b|\bAFT[A-Z0-9]/i;
   var local = /^(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)$/.test(host)
     || /^(?:192\.168\.|10\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(host);
-  // TEMPORARY MASTER PAUSE — flip to true to turn ads OFF on the SSR
-  // watch/detail pages. Mirrors MZ_ADS_PAUSED in index.html; set BOTH to pause
-  // the whole site, set BOTH back to false to re-enable. When paused the slot
-  // collapses via mz-no-ads and nothing is injected.
+  // AD STATE — this SSR watch/detail layer only ever carried the Native Banner
+  // and the (capped) Popunder; the Social Bar deliberately never ran here. Both
+  // of those units are currently switched OFF site-wide, so this layer stays
+  // paused: nothing is injected, the slot collapses via mz-no-ads. The live
+  // Social Bar runs on the SPA (index.html). If the Native Banner or Popunder is
+  // ever re-enabled, flip this to false to bring them back on the watch pages.
   var PAUSED = true;
   var enabled = !PAUSED && !local && !CRAWLER_RE.test(ua) && !TV_UA_RE.test(ua);
   window.__mzAds = { enabled: enabled, injected: [], blocked: [], capped: [] };
@@ -1769,6 +1771,53 @@ ${body}
     __name(injectHomeLinks, "injectHomeLinks");
     var homeShellMemo = null;
     var homeShellMtime = 0;
+    var HOME_LINK_MIN_MOVIE_YEAR = 2e3;
+    var HOME_LINK_NON_DRAMA_TV = /* @__PURE__ */ new Set([10763, 10764, 10766, 10767]);
+    function homeLinkKeeps(row, kind) {
+      if (!row || !row.id) return false;
+      if (kind === "tv") {
+        return !(Array.isArray(row.genre_ids) && row.genre_ids.some((g) => HOME_LINK_NON_DRAMA_TV.has(g)));
+      }
+      const year = parseInt(String(row.release_date || "").slice(0, 4), 10);
+      return !isFinite(year) || year >= HOME_LINK_MIN_MOVIE_YEAR;
+    }
+    __name(homeLinkKeeps, "homeLinkKeeps");
+    function pickHomeLinks(pages, n, kind) {
+      const seen = /* @__PURE__ */ new Set();
+      const out = [];
+      (pages || []).forEach((page) => (page && page.results || []).forEach((row) => {
+        if (out.length >= n || !homeLinkKeeps(row, kind) || seen.has(row.id)) return;
+        seen.add(row.id);
+        out.push(row);
+      }));
+      return out;
+    }
+    __name(pickHomeLinks, "pickHomeLinks");
+    var homeSeriesQueryMemo;
+    function homeLinkSeriesQuery() {
+      if (homeSeriesQueryMemo !== void 0) return homeSeriesQueryMemo;
+      homeSeriesQueryMemo = null;
+      try {
+        const src = fs.readFileSync(path.join(APP_DIR, "moviezone.js"), "utf8");
+        const block = (src.match(/const STREAMING_NETWORK_IDS = \[([\s\S]*?)\]\.join\('\|'\)/) || [])[1];
+        const networks = block ? (block.match(/'(\d+)'/g) || []).map((s) => s.replace(/'/g, "")).join("|") : "";
+        if (!networks) return homeSeriesQueryMemo;
+        const linear = (src.match(/const LINEAR_TV_EXCLUDE_IDS = '([^']+)'/) || [])[1] || "";
+        homeSeriesQueryMemo = {
+          endpoint: "/discover/tv",
+          params: {
+            with_networks: networks,
+            without_networks: linear,
+            without_genres: "10763,10764,10766,10767",
+            sort_by: "popularity.desc",
+            "vote_count.gte": "40"
+          }
+        };
+      } catch (e) {
+      }
+      return homeSeriesQueryMemo;
+    }
+    __name(homeLinkSeriesQuery, "homeLinkSeriesQuery");
     function readHomeShell() {
       const stat = fs.statSync(HOME_FILE);
       if (homeShellMemo && stat.mtimeMs === homeShellMtime) return homeShellMemo;
@@ -1979,7 +2028,7 @@ ${body}
         name: "VidFast 4K",
         build: /* @__PURE__ */ __name((id, type, s, e) => {
           const opts = "autoPlay=true&theme=FFC107&title=true&poster=true&autoNext=true&nextButton=true";
-          return type === "tv" ? "https://vidfast.pro/tv/" + id + "/" + s + "/" + e + "?" + opts : "https://vidfast.pro/movie/" + id + "?" + opts;
+          return type === "tv" ? "https://vidfast.vc/tv/" + id + "/" + s + "/" + e + "?" + opts : "https://vidfast.vc/movie/" + id + "?" + opts;
         }, "build")
       },
       {
@@ -1990,12 +2039,19 @@ ${body}
         name: "OmniPlay 4K",
         build: /* @__PURE__ */ __name((id, type, s, e) => {
           const opts = "color=ffc107&autoplay=true&nextEpisode=true&episodeSelector=true&autoplayNextEpisode=true";
-          return type === "tv" ? "https://player.videasy.net/tv/" + id + "/" + s + "/" + e + "?" + opts : "https://player.videasy.net/movie/" + id + "?" + opts;
+          return type === "tv" ? "https://player.videasy.to/tv/" + id + "/" + s + "/" + e + "?" + opts : "https://player.videasy.to/movie/" + id + "?" + opts;
         }, "build")
       },
       {
-        name: "VidRock HD",
-        build: /* @__PURE__ */ __name((id, type, s, e) => type === "tv" ? "https://vidrock.net/tv/" + id + "/" + s + "/" + e : "https://vidrock.net/movie/" + id, "build")
+        /*  Replaces the old VidRock entry: vidrock.net still answers 200 but its
+         *  resolver returns every upstream with a null url, so the player renders
+         *  "Content unavailable" for every title. This host is verified to decode real
+         *  frames for both movies and episodes. The in-app-browser limitation the SPA
+         *  guards against does not apply here — this page is a link target, not an
+         *  embed inside another app's WebView, and there is no scripted fallback
+         *  chain on it to confuse either way. */
+        name: "VidSrc HD",
+        build: /* @__PURE__ */ __name((id, type, s, e) => type === "tv" ? "https://vidsrc.su/embed/tv/" + id + "/" + s + "/" + e + "?autoplay=true&autonext=true" : "https://vidsrc.su/embed/movie/" + id + "?autoplay=true", "build")
       },
       {
         /*  Best for older / long-running anime and cartoons in the app. The alfa and
@@ -2005,7 +2061,7 @@ ${body}
       },
       {
         name: "Turbo Stream",
-        build: /* @__PURE__ */ __name((id, type, s, e) => type === "tv" ? "https://111movies.com/tv/" + id + "/" + s + "/" + e : "https://111movies.com/movie/" + id, "build")
+        build: /* @__PURE__ */ __name((id, type, s, e) => type === "tv" ? "https://player.vidlove.cc/embed/tv/" + id + "/" + s + "/" + e : "https://player.vidlove.cc/embed/movie/" + id, "build")
       }
     ];
     function watchInt(value, min, max, fallback) {
@@ -2334,35 +2390,55 @@ ${body}
     }
     __name(injectHeroSlide, "injectHeroSlide");
     var PERF_HEAD_MARK = "<!--MZ_PERF_HEAD-->";
-    var PERF_HEAD_RE = /<!--MZ_PERF_HEAD-->[\s\S]*?<!--\/MZ_PERF_HEAD-->\n?/;
+    var PERF_HEAD_RE = /<!--MZ_PERF_HEAD-->[\s\S]*?<!--\/MZ_PERF_HEAD-->\r?\n?/;
     var WARM_ENDPOINTS = [
       "/api/tmdb/movie/popular?language=en-US&page=1",
       "/api/tmdb/trending/movie/week?language=en-US&page=1"
     ];
+    var WARM_SKIP_MS = 108e5;
+    function warmUpScript() {
+      return `<script>
+/* Head start for the two paths the first screen cannot paint without, fired
+   while the parser is still in <head> so the round trip overlaps the stylesheet,
+   the fonts and the bundle's own download and parse instead of queueing behind
+   them. The payloads are kept, not discarded: _mzAdoptHeadStart in moviezone.js
+   primes tmdbCache from them, so /trending/movie/week - the hero's own source -
+   is resolved before the bundle has finished parsing. Skipped on localhost, and
+   skipped when mz_warm_ts says the app already holds a fresh cache. See
+   _mzFlushCacheWrites in moviezone.js for why that decision is made from a
+   13-byte marker. */
+(function(){try{
+  if(/^(localhost|127\\.0\\.0\\.1)$/.test(location.hostname))return;
+  try{var t=parseInt(localStorage.getItem("mz_warm_ts")||"0",10);
+      if(t&&Date.now()-t<` + WARM_SKIP_MS + ")return;}catch(e){}\n  var u=" + JSON.stringify(WARM_ENDPOINTS) + ';\n  var m=window.__mzHeadStart={};\n  for(var i=0;i<u.length;i++)m[u[i]]=fetch(u[i],{credentials:"same-origin"})\n    .then(function(r){return r.ok&&(r.headers.get("content-type")||"")\n      .indexOf("json")>-1?r.json():null;}).catch(function(){return null;});\n}catch(e){}})();\n<\/script>\n';
+    }
+    __name(warmUpScript, "warmUpScript");
     function optimizeHomeHead(shell, heroUrl) {
       if (!shell) return shell;
+      const NL = /\r\n/.test(shell) ? "\r\n" : "\n";
       let html = shell.replace(PERF_HEAD_RE, "");
-      html = html.replace(/[ \t]*<meta name="mz-hero-backdrop"[^>]*>\n?/g, "");
+      html = html.replace(/[ \t]*<meta name="mz-hero-backdrop"[^>]*>\r?\n?/g, "");
       html = html.replace(
         /<link rel="stylesheet" href="(\/?tv-mode\.min\.css[^"]*)" media="print"[^>]*>/,
         '<link rel="stylesheet" href="$1">'
       );
       html = html.replace(
-        /<link rel="preload" href="(\/?moviezone\.min\.css[^"]*)" as="style"[^>]*>\n?/,
+        /<link rel="preload" href="(\/?moviezone\.min\.css[^"]*)" as="style"[^>]*>\r?\n?/,
         ""
       );
       const cssLink = html.match(/<link rel="stylesheet" href="(\/?moviezone\.min\.css[^"]*)">/);
       if (!cssLink) return shell;
       html = html.replace(
-        /[ \t]*<link[^>]*rel="preload"[^>]*as="script"[^>]*>\n?/g,
+        /[ \t]*<link[^>]*rel="preload"[^>]*as="script"[^>]*>\r?\n?/g,
         (tag) => tag.indexOf("moviezone.min.js") !== -1 ? tag : ""
       );
       html = html.replace(
         /<link rel="stylesheet" href="(\/?tv-mode\.min\.css[^"]*)">/,
         `<link rel="stylesheet" href="$1" media="print" onload="this.media='all';this.onload=null">`
       );
-      const block = PERF_HEAD_MARK + '\n<link rel="preload" href="' + cssLink[1] + '" as="style" fetchpriority="high">\n' + (heroUrl ? heroPreloadTag(heroUrl) : "") + "<script>\n/* Warms the HTTP cache for first-screen data while the parser is still\n   working; moviezone.js requests the same URLs a second later and gets a\n   cache hit. Guarded so it can never affect rendering, and skipped on\n   localhost where the app points at a different API base. */\n(function(){try{if(/^(localhost|127\\.0\\.0\\.1)$/.test(location.hostname))return;var u=" + JSON.stringify(WARM_ENDPOINTS) + ';for(var i=0;i<u.length;i++)fetch(u[i],{credentials:"same-origin"}).catch(function(){});}catch(e){}})();\n<\/script>\n<!--/MZ_PERF_HEAD-->';
-      return html.replace(cssLink[0], cssLink[0] + "\n" + block);
+      const block = PERF_HEAD_MARK + "\n" + (heroUrl ? heroPreloadTag(heroUrl) : "") + warmUpScript() + "<!--/MZ_PERF_HEAD-->";
+      const blockNL = NL === "\n" ? block : block.replace(/\n/g, NL);
+      return html.replace(cssLink[0], cssLink[0] + NL + blockNL);
     }
     __name(optimizeHomeHead, "optimizeHomeHead");
     function escAttr(v) {
@@ -2406,16 +2482,23 @@ ${body}
         if (!html) {
           let block = "";
           try {
-            const [trending, popular, tv] = await Promise.all([
-              tmdb("/trending/movie/week", { language: "en-US", page: "1" }).catch(() => null),
-              tmdb("/movie/popular", { language: "en-US", page: "1" }).catch(() => null),
-              tmdb("/tv/popular", { language: "en-US", page: "1" }).catch(() => null)
+            const seriesQ = homeLinkSeriesQuery();
+            const seriesEndpoint = seriesQ ? seriesQ.endpoint : "/tv/popular";
+            const seriesParams = seriesQ ? seriesQ.params : {};
+            const pages = [1, 2, 3];
+            const ask = /* @__PURE__ */ __name((endpoint, extra) => pages.map((p) => tmdb(
+              endpoint,
+              Object.assign({ language: "en-US", page: String(p) }, extra || {})
+            ).catch(() => null)), "ask");
+            const [tr, po, tv] = await Promise.all([
+              Promise.all(ask("/trending/movie/week")),
+              Promise.all(ask("/movie/popular")),
+              Promise.all(ask(seriesEndpoint, seriesParams))
             ]);
-            const pick = /* @__PURE__ */ __name((d, n) => (d && d.results || []).filter((r) => r && r.id).slice(0, n), "pick");
             block = renderHomeLinkBlock({
-              trending: pick(trending, 20),
-              popular: pick(popular, 20),
-              tv: pick(tv, 20)
+              trending: pickHomeLinks(tr, 20, "movie"),
+              popular: pickHomeLinks(po, 20, "movie"),
+              tv: pickHomeLinks(tv, 20, "tv")
             });
           } catch (err) {
             console.warn("[seo-ssr] homepage link block failed:", err && err.message);
@@ -2450,6 +2533,10 @@ ${body}
       renderBrowseLetterPage,
       renderHomeLinkBlock,
       injectHomeLinks,
+      // Shared with scripts/inject-home-links.js so the build-time and request-time
+      // copies of the homepage link block cannot disagree about what belongs in it.
+      pickHomeLinks,
+      homeLinkSeriesQuery,
       optimizeHomeHead,
       injectHeroSlide,
       readSitemapCache,
@@ -2497,8 +2584,219 @@ ${body}
   }
 });
 
+// ott-charts.js
+var require_ott_charts = __commonJS({
+  "ott-charts.js"(exports, module) {
+    "use strict";
+    var OTT_JW_PACKAGES = {
+      netflix: { pkg: "nfx", provider: "8" },
+      prime: { pkg: "prv", provider: "119" },
+      jiohotstar: { pkg: "jhs", provider: "2336" },
+      zee5: { pkg: "zee", provider: "232" },
+      apple: { pkg: "atp", provider: "350" },
+      sonyliv: { pkg: "snl", provider: "237" },
+      /*  The OTT table fetches MX Player under provider 1898 ("Amazon MX Player")
+       *  because that is the id with the deeper Indian index, but JustWatch files
+       *  the package itself under 515 / mxp. OTT_ALT_PROVIDERS already accepts both
+       *  ids when verifying, which is what keeps the chart and the gate consistent. */
+      mxplayer: { pkg: "mxp", provider: "515" },
+      aha: { pkg: "aha", provider: "532" },
+      crunchyroll: { pkg: "cru", provider: "283" },
+      sunnxt: { pkg: "snx", provider: "309" },
+      lionsgate: { pkg: "lgp", provider: "561" },
+      vi: { pkg: "vim", provider: "614" },
+      discoveryplus: { pkg: "dsp", provider: "510" },
+      shemaroo: { pkg: "sme", provider: "474" }
+    };
+    var JW_ENDPOINT = "https://apis.justwatch.com/graphql";
+    var JW_TIMEOUT_MS = 9e3;
+    var JW_REGION = "IN";
+    var JW_LANGUAGE = "en";
+    var JW_MONETIZATION = ["FLATRATE", "FREE", "ADS"];
+    var JW_LIST_SIZE = 30;
+    var JW_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+    var JW_NODE_FIELDS = `
+  objectType
+  content(country: $country, language: $language) {
+    title
+    originalReleaseYear
+    externalIds { tmdbId }
+  }`;
+    var JW_TRENDING_QUERY = `
+  query MzPlatformTrending($country: Country!, $language: Language!, $first: Int!,
+                           $sortBy: PopularTitlesSorting!, $filter: TitleFilter) {
+    popularTitles(country: $country, first: $first, sortBy: $sortBy, filter: $filter) {
+      edges { node {${JW_NODE_FIELDS} } }
+    }
+  }`;
+    var JW_NEW_QUERY = `
+  query MzPlatformNew($country: Country!, $language: Language!, $first: Int!,
+                      $filter: TitleFilter) {
+    newTitles(country: $country, first: $first, filter: $filter) {
+      edges { node {${JW_NODE_FIELDS} } }
+    }
+  }`;
+    function isKnownChartPlatform(key) {
+      return Object.prototype.hasOwnProperty.call(OTT_JW_PACKAGES, String(key || ""));
+    }
+    __name(isKnownChartPlatform, "isKnownChartPlatform");
+    function chartPlatforms() {
+      return Object.keys(OTT_JW_PACKAGES);
+    }
+    __name(chartPlatforms, "chartPlatforms");
+    var JW_TYPE_TO_MEDIA = {
+      MOVIE: "movie",
+      SHOW: "tv",
+      SHOW_SEASON: "tv",
+      SHOW_EPISODE: "tv"
+    };
+    function normaliseChartNode(node) {
+      if (!node) return null;
+      const media = JW_TYPE_TO_MEDIA[node.objectType];
+      if (!media) return null;
+      const content = node.content || {};
+      const raw = content.externalIds && content.externalIds.tmdbId;
+      if (!raw) return null;
+      const base = String(raw).split(":")[0].trim();
+      if (!/^\d+$/.test(base)) return null;
+      return {
+        id: Number(base),
+        media_type: media,
+        title: content.title || "",
+        year: content.originalReleaseYear || null
+      };
+    }
+    __name(normaliseChartNode, "normaliseChartNode");
+    async function jwQuery(query, variables, fetchImpl) {
+      const doFetch = fetchImpl || (typeof fetch === "function" ? fetch : null);
+      if (!doFetch) throw new Error("no fetch implementation available");
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), JW_TIMEOUT_MS);
+      let res;
+      try {
+        res = await doFetch(JW_ENDPOINT, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "accept": "application/json",
+            "user-agent": JW_UA
+          },
+          body: JSON.stringify({ query, variables }),
+          signal: controller.signal
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+      if (!res.ok) throw new Error("JustWatch responded " + res.status);
+      const payload = await res.json();
+      if (payload && payload.errors && payload.errors.length) {
+        throw new Error("JustWatch GraphQL error: " + String(payload.errors[0] && payload.errors[0].message).slice(0, 160));
+      }
+      return payload && payload.data;
+    }
+    __name(jwQuery, "jwQuery");
+    function collapseEdges(edges) {
+      const out = [];
+      const seen = /* @__PURE__ */ new Set();
+      (edges || []).forEach((edge) => {
+        const entry = normaliseChartNode(edge && edge.node);
+        if (!entry) return;
+        const dedupeKey = entry.media_type + "-" + entry.id;
+        if (seen.has(dedupeKey)) return;
+        seen.add(dedupeKey);
+        entry.rank = out.length + 1;
+        out.push(entry);
+      });
+      return out;
+    }
+    __name(collapseEdges, "collapseEdges");
+    async function fetchPlatformChart(key, options) {
+      const opts = options || {};
+      const cfg = OTT_JW_PACKAGES[key];
+      if (!cfg) throw new Error("unknown chart platform: " + key);
+      const region = opts.region || JW_REGION;
+      const language = opts.language || JW_LANGUAGE;
+      const size = opts.size || JW_LIST_SIZE;
+      const fetchImpl = opts.fetch;
+      const filter = { packages: [cfg.pkg], monetizationTypes: JW_MONETIZATION };
+      const [trendingRes, newRes] = await Promise.allSettled([
+        jwQuery(
+          JW_TRENDING_QUERY,
+          { country: region, language, first: size, sortBy: "TRENDING", filter },
+          fetchImpl
+        ),
+        jwQuery(
+          JW_NEW_QUERY,
+          { country: region, language, first: size, filter },
+          fetchImpl
+        )
+      ]);
+      if (trendingRes.status === "rejected" && newRes.status === "rejected") {
+        const why = trendingRes.reason && trendingRes.reason.message || "unknown";
+        throw new Error("both charts failed for " + key + ": " + why);
+      }
+      const trending = trendingRes.status === "fulfilled" ? collapseEdges(trendingRes.value && trendingRes.value.popularTitles && trendingRes.value.popularTitles.edges) : [];
+      const newly = newRes.status === "fulfilled" ? collapseEdges(newRes.value && newRes.value.newTitles && newRes.value.newTitles.edges) : [];
+      return {
+        platform: key,
+        package: cfg.pkg,
+        provider: cfg.provider,
+        region,
+        trending,
+        newly,
+        fetchedAt: Date.now()
+      };
+    }
+    __name(fetchPlatformChart, "fetchPlatformChart");
+    function mergeChartOrder(chart, limit) {
+      const trending = chart && chart.trending || [];
+      const newly = chart && chart.newly || [];
+      const cap = limit || trending.length + newly.length;
+      const merged = [];
+      const seen = /* @__PURE__ */ new Set();
+      const take = /* @__PURE__ */ __name((entry, source) => {
+        if (!entry || merged.length >= cap) return;
+        const dedupeKey = entry.media_type + "-" + entry.id;
+        if (seen.has(dedupeKey)) return;
+        seen.add(dedupeKey);
+        merged.push({
+          id: entry.id,
+          media_type: entry.media_type,
+          title: entry.title,
+          chartRank: merged.length + 1,
+          chartSource: source,
+          sourceRank: entry.rank
+        });
+      }, "take");
+      let ti = 0;
+      let ni = 0;
+      while (merged.length < cap && (ti < trending.length || ni < newly.length)) {
+        const before = merged.length;
+        take(trending[ti++], "trending");
+        take(trending[ti++], "trending");
+        take(newly[ni++], "newly");
+        if (merged.length === before && ti > trending.length && ni > newly.length) break;
+      }
+      return merged;
+    }
+    __name(mergeChartOrder, "mergeChartOrder");
+    module.exports = {
+      OTT_JW_PACKAGES,
+      JW_LIST_SIZE,
+      JW_MONETIZATION,
+      isKnownChartPlatform,
+      chartPlatforms,
+      normaliseChartNode,
+      collapseEdges,
+      fetchPlatformChart,
+      mergeChartOrder
+    };
+  }
+});
+
 // worker.js
 var import_seo_ssr = __toESM(require_seo_ssr());
+var import_ott_charts = __toESM(require_ott_charts());
 var RECORD_SIZE = 4096;
 var PUSH_TTL_SECONDS = 2419200;
 var VAPID_TTL_SECONDS = 43200;
@@ -3090,7 +3388,7 @@ async function handleTmdbProxy(request, env, ctx, url) {
   });
 }
 __name(handleTmdbProxy, "handleTmdbProxy");
-var MAX_BATCH_PATHS = 40;
+var MAX_BATCH_PATHS = 24;
 var TMDB_CACHE_TTL = 604800;
 var TMDB_VOLATILE_CACHE_TTL = 10800;
 var BATCH_CACHE_TTL = 10800;
@@ -3145,17 +3443,69 @@ function putBatch(planKey, body, env) {
   });
 }
 __name(putBatch, "putBatch");
-async function refreshBatch(paths, planKey, env, ctx) {
+async function refreshBatch(paths, planKey, env, ctx, planCacheKey) {
   try {
-    const settled = await runBatchPlan(paths, env, ctx);
+    const settled = await runBatchPlanOnce(planKey, paths, env, ctx);
     if (settled.every((r) => r.status === "fulfilled")) {
-      await putBatch(planKey, JSON.stringify({ results: settled }), env);
+      const body = JSON.stringify({ results: settled });
+      if (planCacheKey) {
+        await putBatchEverywhere(planCacheKey, planKey, body, env, ctx);
+      } else if (env.TMDB_CACHE) {
+        await putBatch(planKey, body, env);
+      }
     }
   } catch (err) {
     console.log("[batch] background refresh failed: " + (err && err.message));
   }
 }
 __name(refreshBatch, "refreshBatch");
+var BATCH_STORED_HEADER = "x-mz-stored";
+function coloCache() {
+  return typeof caches !== "undefined" && caches && caches.default ? caches.default : null;
+}
+__name(coloCache, "coloCache");
+function batchCacheKey(url, planKey) {
+  return new Request(url.origin + "/api/tmdb/batch/" + planKey, { method: "GET" });
+}
+__name(batchCacheKey, "batchCacheKey");
+function batchCacheEntry(body, storedAt) {
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "content-type": "application/json",
+      // Retention only. Freshness is the stored-at header below, so this is
+      // deliberately the full stale window and not BATCH_CACHE_TTL.
+      "cache-control": "public, s-maxage=" + Math.min(BATCH_CACHE_TTL * TMDB_STALE_MULT, TMDB_MAX_RETENTION),
+      [BATCH_STORED_HEADER]: String(storedAt)
+    }
+  });
+}
+__name(batchCacheEntry, "batchCacheEntry");
+function putBatchEverywhere(planCacheKey, planKey, body, env, ctx) {
+  const storedAt = Date.now();
+  const colo = coloCache();
+  const work = [];
+  if (env.TMDB_CACHE) work.push(putBatch(planKey, body, env));
+  if (colo) work.push(colo.put(planCacheKey, batchCacheEntry(body, storedAt)));
+  return Promise.all(work.map((p) => p.catch((err) => {
+    console.log("[batch] cache write failed: " + (err && err.message));
+  })));
+}
+__name(putBatchEverywhere, "putBatchEverywhere");
+var _batchInFlight = /* @__PURE__ */ new Map();
+function runBatchPlanOnce(planKey, paths, env, ctx) {
+  const pending = _batchInFlight.get(planKey);
+  if (pending) return pending;
+  const started = runBatchPlan(paths, env, ctx);
+  _batchInFlight.set(planKey, started);
+  started.then(() => {
+  }, () => {
+  }).then(() => {
+    _batchInFlight.delete(planKey);
+  });
+  return started;
+}
+__name(runBatchPlanOnce, "runBatchPlanOnce");
 async function handleTmdbBatch(request, env, ctx, url) {
   let paths;
   try {
@@ -3176,46 +3526,215 @@ async function handleTmdbBatch(request, env, ctx, url) {
   const planKey = "batch:" + bytesToHex(
     await crypto.subtle.digest("SHA-256", TE.encode(paths.join("\n")))
   ).slice(0, 32);
+  const planCacheKey = batchCacheKey(url, planKey);
+  const batchHeaders = /* @__PURE__ */ __name((cacheState) => ({
+    "content-type": "application/json",
+    "x-cache": cacheState,
+    "x-batch-size": String(paths.length),
+    // The assembled copy lives in the colo cache and KV under the plan hash;
+    // nothing downstream of here should hold a per-visitor copy.
+    "cache-control": "no-store"
+  }), "batchHeaders");
+  const colo = coloCache();
+  if (colo) {
+    try {
+      const cached = await colo.match(planCacheKey);
+      if (cached) {
+        const storedAt = Number(cached.headers.get(BATCH_STORED_HEADER)) || 0;
+        const fresh = !storedAt || Date.now() - storedAt < BATCH_CACHE_TTL * 1e3;
+        if (!fresh) {
+          ctx.waitUntil(refreshBatch(paths, planKey, env, ctx, planCacheKey));
+        }
+        return new Response(cached.body, {
+          status: 200,
+          headers: batchHeaders(fresh ? "EDGE-HIT" : "EDGE-STALE")
+        });
+      }
+    } catch (err) {
+      console.log("[batch] colo lookup failed: " + (err && err.message));
+    }
+  }
   if (env.TMDB_CACHE) {
-    const hit = await env.TMDB_CACHE.getWithMetadata(planKey, { type: "text", cacheTtl: 60 });
+    try {
+      const hit = await env.TMDB_CACHE.getWithMetadata(planKey, { type: "text", cacheTtl: 60 });
+      if (hit && hit.value) {
+        const storedAt = hit.metadata && hit.metadata.t;
+        const fresh = !storedAt || Date.now() - storedAt < BATCH_CACHE_TTL * 1e3;
+        if (!fresh) ctx.waitUntil(refreshBatch(paths, planKey, env, ctx, planCacheKey));
+        if (fresh) {
+          const promote = coloCache();
+          if (promote) {
+            ctx.waitUntil(promote.put(planCacheKey, batchCacheEntry(hit.value, storedAt || Date.now())).catch(() => {
+            }));
+          }
+        }
+        return new Response(hit.value, {
+          status: 200,
+          headers: batchHeaders(fresh ? "HIT" : "STALE")
+        });
+      }
+    } catch (err) {
+      console.log("[batch] kv read failed: " + (err && err.message));
+    }
+  }
+  const settled = await runBatchPlanOnce(planKey, paths, env, ctx);
+  const body = JSON.stringify({ results: settled });
+  const allOk = settled.every((r) => r.status === "fulfilled");
+  if (allOk) {
+    ctx.waitUntil(putBatchEverywhere(planCacheKey, planKey, body, env, ctx));
+  }
+  return new Response(body, {
+    status: 200,
+    headers: Object.assign(batchHeaders("MISS"), {
+      // Whether this plan was worth remembering. Surfaced because a batch that
+      // keeps reporting "no" means a source is persistently failing, and the
+      // symptom on the client — a slightly thin feed — is easy to miss.
+      "x-batch-stored": allOk ? "yes" : "no"
+    })
+  });
+}
+__name(handleTmdbBatch, "handleTmdbBatch");
+var OTT_CHART_TTL = 7200;
+var OTT_CHART_STALE_MULT = 12;
+var OTT_CHART_HEAD = 24;
+function slimChartCard(detail, mediaType) {
+  if (!detail || !detail.id) return null;
+  return {
+    id: detail.id,
+    media_type: mediaType,
+    title: detail.title || detail.name || "",
+    name: detail.name || detail.title || "",
+    overview: detail.overview || "",
+    poster_path: detail.poster_path || null,
+    backdrop_path: detail.backdrop_path || null,
+    release_date: detail.release_date || "",
+    first_air_date: detail.first_air_date || "",
+    vote_average: detail.vote_average || 0,
+    vote_count: detail.vote_count || 0,
+    popularity: detail.popularity || 0,
+    original_language: detail.original_language || "en",
+    genre_ids: Array.isArray(detail.genres) ? detail.genres.map((g) => g && g.id).filter(Boolean) : detail.genre_ids || []
+  };
+}
+__name(slimChartCard, "slimChartCard");
+async function hydrateOttChart(order, env, ctx) {
+  const settled = await Promise.allSettled(
+    order.map((entry) => fetchTmdbJson(
+      "/" + entry.media_type + "/" + entry.id + "?language=en-US",
+      env,
+      ctx
+    ))
+  );
+  const cards = [];
+  settled.forEach((result, i) => {
+    if (result.status !== "fulfilled" || result.value.status !== 200) return;
+    let detail;
+    try {
+      detail = JSON.parse(result.value.text);
+    } catch (err) {
+      return;
+    }
+    const card = slimChartCard(detail, order[i].media_type);
+    if (!card || !card.poster_path) return;
+    card._chartRank = cards.length + 1;
+    card._chartSource = order[i].chartSource;
+    cards.push(card);
+  });
+  return cards;
+}
+__name(hydrateOttChart, "hydrateOttChart");
+async function buildOttChart(platform, region, env, ctx) {
+  const chart = await import_ott_charts.default.fetchPlatformChart(platform, { region });
+  const order = import_ott_charts.default.mergeChartOrder(chart, OTT_CHART_HEAD);
+  const items = await hydrateOttChart(order, env, ctx);
+  if (!items.length) throw new Error("chart hydrated to zero cards");
+  return {
+    platform,
+    region,
+    provider: chart.provider,
+    package: chart.package,
+    source: "justwatch",
+    fetchedAt: chart.fetchedAt,
+    counts: { trending: chart.trending.length, newly: chart.newly.length },
+    items
+  };
+}
+__name(buildOttChart, "buildOttChart");
+async function refreshOttChart(platform, region, cacheKey, store, env, ctx) {
+  try {
+    const payload = await buildOttChart(platform, region, env, ctx);
+    await store.put(cacheKey, JSON.stringify(payload), {
+      expirationTtl: OTT_CHART_TTL * OTT_CHART_STALE_MULT,
+      metadata: { t: Date.now() }
+    });
+  } catch (err) {
+    console.log("[ott-charts] refresh failed for " + platform + "/" + region + ": " + (err && err.message));
+  }
+}
+__name(refreshOttChart, "refreshOttChart");
+async function handleOttCharts(request, env, ctx, url) {
+  const platform = String(url.searchParams.get("platform") || "").trim().toLowerCase();
+  const region = String(url.searchParams.get("region") || "IN").trim().toUpperCase().slice(0, 2);
+  if (!import_ott_charts.default.isKnownChartPlatform(platform)) {
+    return json({ error: "Unknown platform", platforms: import_ott_charts.default.chartPlatforms() }, 400);
+  }
+  const cacheKey = "ott-chart:" + platform + ":" + region;
+  const store = env.OTT_CHART_CACHE || env.TMDB_CACHE;
+  if (store) {
+    const hit = await store.getWithMetadata(cacheKey, { type: "text", cacheTtl: 60 });
     if (hit && hit.value) {
       const storedAt = hit.metadata && hit.metadata.t;
-      const fresh = !storedAt || Date.now() - storedAt < BATCH_CACHE_TTL * 1e3;
-      if (!fresh) ctx.waitUntil(refreshBatch(paths, planKey, env, ctx));
+      const fresh = !storedAt || Date.now() - storedAt < OTT_CHART_TTL * 1e3;
+      if (!fresh) ctx.waitUntil(refreshOttChart(platform, region, cacheKey, store, env, ctx));
       return new Response(hit.value, {
         status: 200,
         headers: {
           "content-type": "application/json",
           "x-cache": fresh ? "HIT" : "STALE",
-          "x-batch-size": String(paths.length),
-          "cache-control": "no-store"
+          "cache-control": fresh ? "public, max-age=1800, s-maxage=7200, stale-while-revalidate=86400" : "public, max-age=60, must-revalidate"
         }
       });
     }
   }
-  const settled = await runBatchPlan(paths, env, ctx);
-  const body = JSON.stringify({ results: settled });
-  const allOk = settled.every((r) => r.status === "fulfilled");
-  if (env.TMDB_CACHE && allOk) {
-    ctx.waitUntil(putBatch(planKey, body, env));
+  let payload;
+  try {
+    payload = await buildOttChart(platform, region, env, ctx);
+  } catch (err) {
+    console.log("[ott-charts] " + platform + "/" + region + " unavailable: " + (err && err.message));
+    return new Response(JSON.stringify({
+      platform,
+      region,
+      source: "justwatch",
+      fetchedAt: Date.now(),
+      unavailable: true,
+      counts: { trending: 0, newly: 0 },
+      items: []
+    }), {
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        "x-cache": "MISS",
+        "cache-control": "public, max-age=60, must-revalidate"
+      }
+    });
+  }
+  const body = JSON.stringify(payload);
+  if (store) {
+    ctx.waitUntil(store.put(cacheKey, body, {
+      expirationTtl: OTT_CHART_TTL * OTT_CHART_STALE_MULT,
+      metadata: { t: Date.now() }
+    }));
   }
   return new Response(body, {
     status: 200,
     headers: {
       "content-type": "application/json",
       "x-cache": "MISS",
-      // Whether this plan was worth remembering. Surfaced because a batch that
-      // keeps reporting "no" means a source is persistently failing, and the
-      // symptom on the client — a slightly thin feed — is easy to miss.
-      "x-batch-stored": allOk ? "yes" : "no",
-      "x-batch-size": String(paths.length),
-      // The response is per-plan and served over POST; the KV entry above is the
-      // shared cache, so nothing downstream should hold a copy.
-      "cache-control": "no-store"
+      "cache-control": "public, max-age=1800, s-maxage=7200, stale-while-revalidate=86400"
     }
   });
 }
-__name(handleTmdbBatch, "handleTmdbBatch");
+__name(handleOttCharts, "handleOttCharts");
 async function routeApi(request, env, ctx, url) {
   const { pathname } = url;
   if (!pathname.startsWith("/api/")) return null;
@@ -3225,8 +3744,15 @@ async function routeApi(request, env, ctx, url) {
     }
     return handleTmdbBatch(request, env, ctx, url);
   }
+  if (pathname.startsWith("/api/tmdb/batch/")) {
+    return json({ error: "Not an endpoint" }, 404);
+  }
   if (pathname.startsWith("/api/tmdb/")) {
     return handleTmdbProxy(request, env, ctx, url);
+  }
+  if (pathname === "/api/ott/charts") {
+    if (request.method !== "GET") return json({ error: "Method not allowed" }, 405);
+    return handleOttCharts(request, env, ctx, url);
   }
   const post = request.method === "POST";
   if (pathname === "/api/push/vapid-key") {
@@ -3269,10 +3795,55 @@ function ssrTmdb(env, ctx) {
   };
 }
 __name(ssrTmdb, "ssrTmdb");
+function weakEtag(text) {
+  const str = String(text);
+  let h1 = 2166136261;
+  let h2 = 3266489909;
+  for (let i = 0; i < str.length; i++) {
+    const c = str.charCodeAt(i);
+    h1 = (h1 ^ c) * 16777619 >>> 0;
+    h2 = (h2 + c >>> 0) * 2246822507 >>> 0;
+  }
+  return 'W/"' + str.length.toString(36) + "-" + h1.toString(36) + h2.toString(36) + '"';
+}
+__name(weakEtag, "weakEtag");
+var ETAG_SUFFIX_RE = /-(?:gzip|br|df)$/;
+function bareEtag(tag) {
+  return String(tag).trim().replace(/^W\//, "").replace(/^"|"$/g, "").replace(ETAG_SUFFIX_RE, "");
+}
+__name(bareEtag, "bareEtag");
+var NOT_MODIFIED_HEADERS = ["cache-control", "content-type", "etag", "link", "vary", "x-robots-tag"];
+function notModified(request, response) {
+  if (!response || response.status !== 200 || request.method !== "GET") return null;
+  const etag = response.headers.get("etag");
+  const inm = request.headers.get("if-none-match");
+  if (!etag || !inm) return null;
+  const want = bareEtag(etag);
+  const candidates = inm.split(",");
+  let matched = false;
+  for (const candidate of candidates) {
+    const trimmed = candidate.trim();
+    if (trimmed === "*" || bareEtag(trimmed) === want) {
+      matched = true;
+      break;
+    }
+  }
+  if (!matched) return null;
+  const headers = new Headers();
+  for (const name of NOT_MODIFIED_HEADERS) {
+    const value = response.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+  return new Response(null, { status: 304, headers });
+}
+__name(notModified, "notModified");
+var SSR_EARLY_HINT_LINK = "<https://image.tmdb.org>; rel=preconnect; crossorigin";
 function ssrHtml(html, cacheControl, robots) {
   const headers = {
     "content-type": "text/html; charset=utf-8",
-    "cache-control": cacheControl
+    "cache-control": cacheControl,
+    "etag": weakEtag(html),
+    "link": SSR_EARLY_HINT_LINK
   };
   if (robots) headers["x-robots-tag"] = robots;
   return new Response(html, { status: 200, headers });
@@ -3369,6 +3940,7 @@ async function ssrWatchPage(kind, rawSlug, url, env, ctx) {
 }
 __name(ssrWatchPage, "ssrWatchPage");
 var SITEMAP_KV_TTL = 86400;
+var SITEMAP_KV_CACHE_TTL = 3600;
 var SITEMAP_CHUNK = 2e3;
 var SITEMAP_LIVE_PAGES = 3;
 var SITEMAP_CATALOG_KV_KEY = "sitemap:catalog";
@@ -3396,7 +3968,11 @@ function xmlResponse(xml, cacheControl) {
     status: 200,
     headers: {
       "content-type": "application/xml; charset=utf-8",
-      "cache-control": cacheControl || SITEMAP_CACHE
+      "cache-control": cacheControl || SITEMAP_CACHE,
+      /*  Crawlers are the heaviest repeat consumers of these URLs and they do
+       *  send If-None-Match. A 304 saves them, and us, the full shard body —
+       *  sitemap-movies-N.xml is the largest document this Worker produces. */
+      "etag": weakEtag(xml)
     }
   });
 }
@@ -3433,7 +4009,7 @@ async function getSitemapItems(kind, env, ctx) {
   let result = null;
   if (store) {
     try {
-      const raw = await store.get(SITEMAP_CATALOG_KV_KEY);
+      const raw = await store.get(SITEMAP_CATALOG_KV_KEY, { cacheTtl: SITEMAP_KV_CACHE_TTL });
       const parsed = raw ? JSON.parse(raw) : null;
       const items = parsed && Array.isArray(parsed[wanted]) ? parsed[wanted] : null;
       if (items && items.length) {
@@ -3450,7 +4026,7 @@ async function getSitemapItems(kind, env, ctx) {
   }
   if (!result && store) {
     try {
-      const raw = await store.get(sitemapItemsKvKey(wanted));
+      const raw = await store.get(sitemapItemsKvKey(wanted), { cacheTtl: SITEMAP_KV_CACHE_TTL });
       const items = raw ? JSON.parse(raw) : null;
       if (Array.isArray(items) && items.length) {
         result = { items, generated: import_seo_ssr.default.SITEMAP_FALLBACK_DATE, source: "kv-live" };
@@ -3542,7 +4118,7 @@ async function browseEntries(env, ctx) {
   const store = seoStore(env);
   if (store) {
     try {
-      const raw = await store.get(SITEMAP_CATALOG_KV_KEY);
+      const raw = await store.get(SITEMAP_CATALOG_KV_KEY, { cacheTtl: SITEMAP_KV_CACHE_TTL });
       if (raw) {
         const parsed = JSON.parse(raw);
         const movies = Array.isArray(parsed.movie) ? parsed.movie : [];
@@ -3560,26 +4136,52 @@ async function browseEntries(env, ctx) {
   return movie.items.map((m) => Object.assign({ media_type: "movie" }, m)).concat(tv.items.map((t) => Object.assign({ media_type: "tv" }, t)));
 }
 __name(browseEntries, "browseEntries");
+var BROWSE_MEMO_KEY = "browse:index";
+function browseIndexFrom(entries) {
+  const counts = {};
+  const byLetter = /* @__PURE__ */ new Map();
+  for (const entry of entries) {
+    const letter = import_seo_ssr.default.browseLetterOf(ssrTitleOf(entry));
+    counts[letter] = (counts[letter] || 0) + 1;
+    let bucket = byLetter.get(letter);
+    if (!bucket) {
+      bucket = [];
+      byLetter.set(letter, bucket);
+    }
+    bucket.push(entry);
+  }
+  for (const bucket of byLetter.values()) {
+    bucket.sort((a, b) => ssrTitleOf(a).localeCompare(ssrTitleOf(b), "en"));
+  }
+  return { total: entries.length, counts, byLetter };
+}
+__name(browseIndexFrom, "browseIndexFrom");
+async function browseIndex(env, ctx) {
+  const memoStore = sitemapMemoFor(env);
+  const memo = memoStore && memoStore.get(BROWSE_MEMO_KEY);
+  if (memo && memo.expires > Date.now()) return memo.value;
+  const value = browseIndexFrom(await browseEntries(env, ctx));
+  if (memoStore && value.total) {
+    memoStore.set(BROWSE_MEMO_KEY, { expires: Date.now() + SITEMAP_MEMO_MS, value });
+  }
+  return value;
+}
+__name(browseIndex, "browseIndex");
 function browseHtml(html) {
   return ssrHtml(html, SSR_BROWSE_CACHE, "index, follow");
 }
 __name(browseHtml, "browseHtml");
 async function serveBrowseIndex(env, ctx) {
-  const all = await browseEntries(env, ctx);
-  if (!all.length) return null;
-  const counts = {};
-  for (const entry of all) {
-    const letter = import_seo_ssr.default.browseLetterOf(ssrTitleOf(entry));
-    counts[letter] = (counts[letter] || 0) + 1;
-  }
+  const { total, counts } = await browseIndex(env, ctx);
+  if (!total) return null;
   return browseHtml(import_seo_ssr.default.renderBrowseIndexPage(counts));
 }
 __name(serveBrowseIndex, "serveBrowseIndex");
 async function serveBrowseLetter(letter, url, env, ctx) {
   if (import_seo_ssr.default.BROWSE_LETTERS.indexOf(letter) === -1) return null;
-  const all = await browseEntries(env, ctx);
-  if (!all.length) return null;
-  const entries = all.filter((entry) => import_seo_ssr.default.browseLetterOf(ssrTitleOf(entry)) === letter).sort((a, b) => ssrTitleOf(a).localeCompare(ssrTitleOf(b), "en"));
+  const { total, byLetter } = await browseIndex(env, ctx);
+  if (!total) return null;
+  const entries = byLetter.get(letter) || [];
   const perPage = import_seo_ssr.default.BROWSE_PER_PAGE;
   const totalPages = Math.max(1, Math.ceil(entries.length / perPage));
   let page = parseInt(url.searchParams.get("page"), 10);
@@ -3650,6 +4252,58 @@ function edgeCacheKey(request, url) {
   return new Request(clean.toString(), { method: request.method, headers: request.headers });
 }
 __name(edgeCacheKey, "edgeCacheKey");
+var HERO_TRENDING_PATH = "/trending/movie/week?language=en-US&page=1";
+var TMDB_IMG_PREFIX = "https://image.tmdb.org/t/p/";
+var HERO_WIDE_MQ = "(min-width: 1025px)";
+var HERO_MOBILE_MQ = "(max-width: 1024px)";
+var HERO_RESOLVE_BUDGET_MS = 400;
+async function heroBackdropPath(env, ctx) {
+  try {
+    const result = await fetchTmdbJson(HERO_TRENDING_PATH, env, ctx);
+    if (result.status !== 200) return "";
+    const first = (JSON.parse(result.text).results || [])[0];
+    const path = first && first.backdrop_path;
+    return typeof path === "string" && /^\/[A-Za-z0-9_-]+\.(?:jpg|jpeg|png|webp)$/.test(path) ? path : "";
+  } catch (err) {
+    console.log("[hero] resolve failed: " + (err && err.message));
+    return "";
+  }
+}
+__name(heroBackdropPath, "heroBackdropPath");
+function rewriteHeroPreload(response, backdropPath) {
+  const mobile = TMDB_IMG_PREFIX + "w780" + backdropPath;
+  const wide = TMDB_IMG_PREFIX + "w1280" + backdropPath;
+  const forMedia = /* @__PURE__ */ __name((media) => media === HERO_WIDE_MQ ? wide : mobile, "forMedia");
+  return new HTMLRewriter().on('link[rel="preload"][as="image"]', {
+    element(el) {
+      const href = el.getAttribute("href") || "";
+      if (href.indexOf(TMDB_IMG_PREFIX) !== 0) return;
+      el.setAttribute("href", forMedia(el.getAttribute("media")));
+    }
+  }).on('meta[name="mz-hero-backdrop"]', {
+    element(el) {
+      el.setAttribute("content", backdropPath);
+    }
+  }).on("[data-mz-hero-ssr] source", {
+    element(el) {
+      if ((el.getAttribute("srcset") || "").indexOf(TMDB_IMG_PREFIX) !== 0) return;
+      el.setAttribute("srcset", forMedia(el.getAttribute("media")));
+    }
+  }).on("[data-mz-hero-ssr] img", {
+    element(el) {
+      if ((el.getAttribute("src") || "").indexOf(TMDB_IMG_PREFIX) !== 0) return;
+      el.setAttribute("src", wide);
+    }
+  }).transform(response);
+}
+__name(rewriteHeroPreload, "rewriteHeroPreload");
+function heroEarlyHints(backdropPath) {
+  return [
+    "<" + TMDB_IMG_PREFIX + "w780" + backdropPath + '>; rel=preload; as=image; media="' + HERO_MOBILE_MQ + '"; fetchpriority=high',
+    "<" + TMDB_IMG_PREFIX + "w1280" + backdropPath + '>; rel=preload; as=image; media="' + HERO_WIDE_MQ + '"; fetchpriority=high'
+  ];
+}
+__name(heroEarlyHints, "heroEarlyHints");
 var worker_default = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -3660,7 +4314,10 @@ var worker_default = {
     const cacheKey = request.method === "GET" ? edgeCacheKey(request, url) : request;
     if (request.method === "GET") {
       const cached = await edgeCache.match(cacheKey);
-      if (cached) return cached;
+      if (cached) {
+        const fresh = notModified(request, cached);
+        return fresh || cached;
+      }
     }
     const apiResponse = await routeApi(request, env, ctx, url);
     if (apiResponse) {
@@ -3679,7 +4336,8 @@ var worker_default = {
       if (ssr.status === 200 && request.method === "GET") {
         ctx.waitUntil(edgeCache.put(cacheKey, ssr.clone()));
       }
-      return ssr;
+      const ssrFresh = notModified(request, ssr);
+      return ssrFresh || ssr;
     }
     const assetResponse = await env.ASSETS.fetch(request);
     const newHeaders = new Headers(assetResponse.headers);
@@ -3687,6 +4345,7 @@ var worker_default = {
     newHeaders.set("X-Frame-Options", "SAMEORIGIN");
     newHeaders.set("Referrer-Policy", "strict-origin-when-cross-origin");
     const path = url.pathname;
+    let isHomeDocument = false;
     if (path === "/sw.js") {
       newHeaders.set("Cache-Control", "no-cache, no-store, must-revalidate");
       newHeaders.set("Service-Worker-Allowed", "/");
@@ -3698,13 +4357,30 @@ var worker_default = {
     } else if (path.endsWith(".html") || path === "/") {
       newHeaders.set("Cache-Control", "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400");
       newHeaders.append("Link", "<https://image.tmdb.org>; rel=preconnect");
+      isHomeDocument = path === "/" || path === "/index.html";
     }
-    const finalResponse = new Response(assetResponse.body, {
+    let heroPath = "";
+    if (isHomeDocument && request.method === "GET") {
+      const heroWork = heroBackdropPath(env, ctx);
+      ctx.waitUntil(heroWork.catch(() => {
+      }));
+      heroPath = await Promise.race([
+        heroWork,
+        new Promise((resolve) => setTimeout(() => resolve(""), HERO_RESOLVE_BUDGET_MS))
+      ]);
+      if (heroPath) {
+        for (const hint of heroEarlyHints(heroPath)) newHeaders.append("Link", hint);
+        newHeaders.delete("ETag");
+        newHeaders.delete("Last-Modified");
+      }
+    }
+    let finalResponse = new Response(assetResponse.body, {
       status: assetResponse.status,
       statusText: assetResponse.statusText,
       headers: newHeaders
     });
-    if (request.method === "GET" && finalResponse.status === 200 && path !== "/sw.js") {
+    if (heroPath) finalResponse = rewriteHeroPreload(finalResponse, heroPath);
+    if (request.method === "GET" && finalResponse.status === 200 && path !== "/sw.js" && (!isHomeDocument || heroPath)) {
       ctx.waitUntil(edgeCache.put(cacheKey, finalResponse.clone()));
     }
     return finalResponse;

@@ -634,7 +634,7 @@ async function decryptAsUserAgent(subscriber, body) {
   equal('a malformed JSON body -> 400, not a 500', malformed.status, 400);
 
   // ── 10. edge batching ────────────────────────────────────────────────────
-  console.log('\n10. /api/tmdb/batch — the 26-request homepage in one round-trip');
+  console.log('\n10. /api/tmdb/batch — many paths, one round-trip');
 
   const batchEnv = () => ({ ...baseEnv, TMDB_TOKEN: 'test-token', TMDB_CACHE: fakeKV() });
   // What the client sends: the plan in a POST body.
@@ -741,8 +741,23 @@ async function decryptAsUserAgent(subscriber, body) {
   const tooMany = await callApi(worker, batchEnv(),
     batchReq(Array(limits.MAX_BATCH_PATHS + 1).fill('/movie/popular?page=1')));
   equal('a batch over the cap -> 400', tooMany.status, 400);
-  check('the cap leaves room for the 26-request homepage',
-    limits.MAX_BATCH_PATHS >= 26, 'cap is ' + limits.MAX_BATCH_PATHS);
+  /*  The number here used to be 26, justified as "the 26-request homepage in one
+   *  round-trip". That was a misreading of the client: the first screen's ~30
+   *  requests are sent as THREE separate plans - loadCarousel's 12,
+   *  _mzCatPlan('all')'s 16 and loadTop10's 2 (which never batches at all, being
+   *  under MZ_BATCH_MIN_REQUESTS) - so no single batch has ever carried 26 paths.
+   *  The largest plan the client can build is 16, and tmdbBatch further filters it
+   *  to the paths no cache can answer, so the real ceiling is 16 or lower.
+   *
+   *  Asserting 26 therefore pinned the cap above anything reachable while reading
+   *  as though it were protecting the homepage. The cap is now 24 - still 50% clear
+   *  of the 16-path plan, but half the peak JSON and CPU per invocation that 40
+   *  allowed. This asserts the headroom that actually exists.
+   *
+   *  MZ_BATCH_CHUNK in moviezone.js has to track the cap; worker-perf-check.js
+   *  asserts those two agree, which is the guard that matters for _ottPrimeBatch. */
+  check('the cap leaves headroom over the largest real plan (16 paths)',
+    limits.MAX_BATCH_PATHS >= 20, 'cap is ' + limits.MAX_BATCH_PATHS);
 
   equal('a missing plan -> 400', (await callApi(worker, batchEnv(), req('/api/tmdb/batch'))).status, 400);
   equal('a malformed plan -> 400',

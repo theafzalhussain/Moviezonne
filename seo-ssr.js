@@ -3115,7 +3115,7 @@ const WARM_ENDPOINTS = [
  *  from, or the two disagree about what "warm" means. */
 const WARM_SKIP_MS = 10800000;      // 3h
 
-/*  ── THE WARM-UP, AND WHY IT IS WRITTEN HERE RATHER THAN BY HAND ──
+/*  ── THE HEAD START, AND WHY IT IS WRITTEN HERE RATHER THAN BY HAND ──
  *
  *  This block used to be generated WITHOUT the mz_warm_ts guard, and index.html
  *  was then hand-edited to add it. That is a drift, not a fix: optimizeHomeHead()
@@ -3128,20 +3128,50 @@ const WARM_SKIP_MS = 10800000;      // 3h
  *  So the template IS the source of truth now, and index.html is a pure product of
  *  it. Keeping them byte-identical is what makes the nightly run a no-op on the
  *  head, which is the only state in which the tuning survives.
+ *
+ *  ── WHAT CHANGED: THE BODIES ARE NO LONGER THROWN AWAY ──
+ *
+ *  These two fetches used to exist only to warm the EDGE, and discarded both
+ *  payloads on arrival. That was close to worthless and not free:
+ *
+ *    • The edge is already warm for everyone except the hour's first visitor, so
+ *      there was usually nothing to warm; and
+ *    • 40-100 KB was downloaded at high priority on the visitor's own connection,
+ *      competing with the stylesheet, the fonts, the bundle and the LCP image,
+ *      and then deleted.
+ *
+ *  The far more valuable thing about firing them here was never the edge — it is
+ *  the TIMING. They start while the parser is still inside <head>, which is
+ *  several hundred milliseconds before moviezone.min.js has been downloaded,
+ *  decompressed, parsed, compiled and executed far enough to ask for anything. So
+ *  the payloads are now kept: _mzAdoptHeadStart() in moviezone.js takes them and
+ *  primes tmdbCache, which means /trending/movie/week — the source slide 0 is
+ *  pinned to, i.e. the LCP image's own URL — is resolved before the bundle
+ *  finishes parsing rather than a full round trip after it.
+ *
+ *  A failed or non-JSON response resolves to null and changes nothing: tmdbBatch()
+ *  simply finds nothing primed and asks for those paths itself, exactly as before.
  */
 function warmUpScript() {
   return '<script>\n'
-    + '/* Warms the edge cache for two first-screen paths while the parser is still\n'
-    + '   working; both bodies are discarded on purpose. Skipped on localhost, and\n'
-    + '   skipped when mz_warm_ts says the app already holds a fresh cache \u2014 on a warm\n'
-    + '   load these two fetches downloaded 40-100 KB for nobody. See _mzFlushCacheWrites\n'
-    + '   in moviezone.js for why the decision is made from a 13-byte marker. */\n'
+    + '/* Head start for the two paths the first screen cannot paint without, fired\n'
+    + '   while the parser is still in <head> so the round trip overlaps the stylesheet,\n'
+    + '   the fonts and the bundle\u0027s own download and parse instead of queueing behind\n'
+    + '   them. The payloads are kept, not discarded: _mzAdoptHeadStart in moviezone.js\n'
+    + '   primes tmdbCache from them, so /trending/movie/week - the hero\u0027s own source -\n'
+    + '   is resolved before the bundle has finished parsing. Skipped on localhost, and\n'
+    + '   skipped when mz_warm_ts says the app already holds a fresh cache. See\n'
+    + '   _mzFlushCacheWrites in moviezone.js for why that decision is made from a\n'
+    + '   13-byte marker. */\n'
     + '(function(){try{\n'
     + '  if(/^(localhost|127\\.0\\.0\\.1)$/.test(location.hostname))return;\n'
     + '  try{var t=parseInt(localStorage.getItem("mz_warm_ts")||"0",10);\n'
     + '      if(t&&Date.now()-t<' + WARM_SKIP_MS + ')return;}catch(e){}\n'
     + '  var u=' + JSON.stringify(WARM_ENDPOINTS) + ';\n'
-    + '  for(var i=0;i<u.length;i++)fetch(u[i],{credentials:"same-origin"}).catch(function(){});\n'
+    + '  var m=window.__mzHeadStart={};\n'
+    + '  for(var i=0;i<u.length;i++)m[u[i]]=fetch(u[i],{credentials:"same-origin"})\n'
+    + '    .then(function(r){return r.ok&&(r.headers.get("content-type")||"")\n'
+    + '      .indexOf("json")>-1?r.json():null;}).catch(function(){return null;});\n'
     + '}catch(e){}})();\n'
     + '</script>\n';
 }

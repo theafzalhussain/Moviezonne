@@ -18,17 +18,24 @@
 <link rel="preload" as="image" media="(min-width: 1025px)" href="https://image.tmdb.org/t/p/w1280/1CIaRYKf3zg2Xyce1CSfCMg2Vfw.jpg" fetchpriority="high">
 <meta name="mz-hero-backdrop" content="/1CIaRYKf3zg2Xyce1CSfCMg2Vfw.jpg">
 <script>
-/* Warms the edge cache for two first-screen paths while the parser is still
-   working; both bodies are discarded on purpose. Skipped on localhost, and
-   skipped when mz_warm_ts says the app already holds a fresh cache — on a warm
-   load these two fetches downloaded 40-100 KB for nobody. See _mzFlushCacheWrites
-   in moviezone.js for why the decision is made from a 13-byte marker. */
+/* Head start for the two paths the first screen cannot paint without, fired
+   while the parser is still in <head> so the round trip overlaps the stylesheet,
+   the fonts and the bundle's own download and parse instead of queueing behind
+   them. The payloads are kept, not discarded: _mzAdoptHeadStart in moviezone.js
+   primes tmdbCache from them, so /trending/movie/week - the hero's own source -
+   is resolved before the bundle has finished parsing. Skipped on localhost, and
+   skipped when mz_warm_ts says the app already holds a fresh cache. See
+   _mzFlushCacheWrites in moviezone.js for why that decision is made from a
+   13-byte marker. */
 (function(){try{
   if(/^(localhost|127\.0\.0\.1)$/.test(location.hostname))return;
   try{var t=parseInt(localStorage.getItem("mz_warm_ts")||"0",10);
       if(t&&Date.now()-t<10800000)return;}catch(e){}
   var u=["/api/tmdb/movie/popular?language=en-US&page=1","/api/tmdb/trending/movie/week?language=en-US&page=1"];
-  for(var i=0;i<u.length;i++)fetch(u[i],{credentials:"same-origin"}).catch(function(){});
+  var m=window.__mzHeadStart={};
+  for(var i=0;i<u.length;i++)m[u[i]]=fetch(u[i],{credentials:"same-origin"})
+    .then(function(r){return r.ok&&(r.headers.get("content-type")||"")
+      .indexOf("json")>-1?r.json():null;}).catch(function(){return null;});
 }catch(e){}})();
 </script>
 <!--/MZ_PERF_HEAD-->
@@ -39,7 +46,7 @@
 <link rel="preload" href="/fonts/outfit-latin-var.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/bebas-neue-latin-400.woff2" as="font" type="font/woff2" crossorigin>
 
-<link rel="preload" href="/moviezone.min.js?v=15.0" as="script">
+<link rel="preload" href="/moviezone.min.js?v=15.2" as="script">
 
 <style id="mz-fonts">
 @font-face{font-family:'Outfit';font-style:normal;font-weight:300 900;font-display:swap;src:url(/fonts/outfit-latin-var.woff2) format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
@@ -382,19 +389,48 @@
     console.log('[MovieZone PWA] Page is now controlled by service worker (no reload needed).');
   });
 
-  window.__mzServiceWorkerReady = navigator.serviceWorker
-    .register('/sw.js', { updateViaCache: 'none' })
-    .then(function (registration) {
-      registration.update().catch(function () {});
-      return navigator.serviceWorker.ready;
-    })
-    .then(function (registration) {
-      return registration;
-    })
-    .catch(function (err) {
-      console.error('[MovieZone PWA] Early service-worker registration failed:', err);
-      return null;
-    });
+  /*  ── REGISTERED AFTER load, NOT DURING HEAD PARSE ──
+   *
+   *  This used to call register() inline, right here in <head>. The install
+   *  handler in sw.js then ran cache.addAll(STATIC_ASSETS) immediately, and that
+   *  list was 1.5 MB on disk - so a first-time visitor downloaded the entire
+   *  offline shell IN PARALLEL WITH the stylesheet, the fonts, the bundle and the
+   *  LCP backdrop, over one mobile radio. It is the worst possible moment for it
+   *  and it bought nothing: a service worker cannot control the navigation that
+   *  registered it, so none of those bytes could help the load that paid for them.
+   *  (STATIC_ASSETS has also been cut to the shell that actually exists on the
+   *  page - see the note on it in sw.js.)
+   *
+   *  Registration now waits for the load event plus an idle callback, so the
+   *  precache starts on a connection that has nothing left to do. Everything that
+   *  observes the SW goes through __mzServiceWorkerReady or navigator.
+   *  serviceWorker.ready, and both still resolve - just later - so the install
+   *  prompt, the push flow and __mzAcquireServiceWorkerControl are unchanged.
+   *  beforeinstallprompt is captured by the listener above, which is still
+   *  installed during head parse, so a prompt that fires early is never missed.
+   */
+  window.__mzServiceWorkerReady = new Promise(function (resolve) {
+    function go() {
+      resolve(navigator.serviceWorker
+        .register('/sw.js', { updateViaCache: 'none' })
+        .then(function (registration) {
+          registration.update().catch(function () {});
+          return navigator.serviceWorker.ready;
+        })
+        .catch(function (err) {
+          console.error('[MovieZone PWA] service-worker registration failed:', err);
+          return null;
+        }));
+    }
+    function afterLoad() {
+      // Idle, not a fixed timer: on a slow phone the frames right after load are
+      // still busy with the feed paint, and this must not land inside them.
+      if ('requestIdleCallback' in window) requestIdleCallback(go, { timeout: 4000 });
+      else setTimeout(go, 1200);
+    }
+    if (document.readyState === 'complete') afterLoad();
+    else window.addEventListener('load', afterLoad, { once: true });
+  });
 })();
 </script>
 <meta name="theme-color" content="#f5c518">
@@ -675,6 +711,16 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
     env: isLocal ? 'development' : 'production',
     sessionSampleRate: isLocal ? 0 : 100,
     sessionReplaySampleRate: isWeak ? 0 : 10,
+    /*  Resource collection is the one RUM feature whose cost scales with the
+     *  page rather than with the session, and this page is the bad case: a cold
+     *  homepage produces ~90 entries (the batch plus up to 60 posters), each of
+     *  which becomes a RUM event to serialise and beacon. On a 2-core phone that
+     *  is main-thread time spent measuring instead of rendering. Tied to the same
+     *  weak-device verdict as replay, so the devices that can afford the
+     *  instrumentation still report it and the ones that cannot are left alone -
+     *  they still send views, errors and long tasks, which is what the TV and
+     *  low-end work is actually driven from. */
+    trackResources: !isWeak,
     weakDevice: !!isWeak
   };
   if (isCrawler) return;
@@ -695,7 +741,7 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
       sessionSampleRate: window.__mzRumProfile.sessionSampleRate,
       sessionReplaySampleRate: window.__mzRumProfile.sessionReplaySampleRate,
       defaultPrivacyLevel: 'mask-user-input',
-      trackResources: true,
+      trackResources: window.__mzRumProfile.trackResources,
       trackUserInteractions: true,
       trackLongTasks: true,
       /*  Noise filter. Only drops errors that are provably not ours and not
@@ -1844,7 +1890,7 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
 <!-- Root-absolute bundle URLs support nested detail routes. -->
 <script src="/tv-mode.min.js?v=1.8" defer></script>
 <script src="/search-engine.min.js?v=2.1" defer></script>
-<script src="/moviezone.min.js?v=15.0" defer></script>
+<script src="/moviezone.min.js?v=15.2" defer></script>
 <script>
 /*  ── pwa-install.min.js is NOT loaded with the others ─────────────────────────
  *  It was a fourth `defer` script, so its 30 KB was parsed and executed inside
@@ -1890,8 +1936,20 @@ window.addEventListener('beforeinstallprompt', function () { window.__mzLoadPwaI
  *  task at a later timestamp.
  *
  *  So: first real interaction wins (an engaged visitor gets it immediately, and
- *  their own tap already interrupted the render), otherwise a 6s timer, by which
+ *  their own tap already interrupted the render), otherwise a timer, by which
  *  point the app's own background work has finished.
+ *
+ *  ── WHY THE PASSIVE FALLBACK IS 12s AND NOT 6s ──
+ *  Because 6s was inside the window Datadog RUM uses to decide a view has
+ *  finished loading. RUM extends view.loading_time until page activity settles,
+ *  so an unprompted 30 KB request six seconds after `load` does not merely cost
+ *  30 KB - it re-opens the measurement and reports the whole thing as a slow page
+ *  load. That is a real part of why the dashboard showed a ~4.7s average for `/`
+ *  while the document itself was an edge hit served in single-digit milliseconds.
+ *  It is also genuinely wasted work on the common path: a visitor who has not
+ *  touched the page in twelve seconds is reading it, not looking for an install
+ *  button, and the moment they do touch it the interaction branch above fires
+ *  first anyway. Idle-scheduled on top, so it cannot land mid-frame.
  */
 (function () {
   var fired = false;
@@ -1906,7 +1964,12 @@ window.addEventListener('beforeinstallprompt', function () { window.__mzLoadPwaI
   ['pointerdown', 'keydown', 'touchstart'].forEach(function (t) {
     window.addEventListener(t, pull, { capture: true, passive: true, once: true });
   });
-  window.addEventListener('load', function () { setTimeout(pull, 6000); });
+  window.addEventListener('load', function () {
+    setTimeout(function () {
+      if ('requestIdleCallback' in window) requestIdleCallback(pull, { timeout: 3000 });
+      else pull();
+    }, 12000);
+  });
 })();
 </script>
 <script>
@@ -1932,12 +1995,23 @@ window.addEventListener('beforeinstallprompt', function () { window.__mzLoadPwaI
  */
 window.addEventListener('load', function () {
   if (!document.getElementById('cinematic-universes')) return;
-  setTimeout(function () {
+  /*  Idle after load rather than a flat 2s timer. The timer version fired at a
+   *  fixed moment whether or not the main thread was still finishing the feed
+   *  paint, and on a slow phone 2s after load is frequently mid-paint. Idle also
+   *  keeps this out of the window Datadog RUM watches to decide the view has
+   *  stopped loading - see the note on the pwa-install fallback above. The
+   *  timeout is the floor: the row still fills on engines that never report idle. */
+  var pulled = false;
+  function pull() {
+    if (pulled) return;
+    pulled = true;
     var s = document.createElement('script');
     s.src = '/universes-rail.js?v=4';
     s.async = true;
     document.head.appendChild(s);
-  }, 2000);
+  }
+  if ('requestIdleCallback' in window) requestIdleCallback(pull, { timeout: 5000 });
+  else setTimeout(pull, 2000);
 });
 </script>
 <script>
@@ -1970,6 +2044,8 @@ document.addEventListener('DOMContentLoaded', () => {
 //     posters are rendered with loading="eager" in moviezone.js.
 </script>
 
-<!-- Service worker registration is intentionally performed in the <head> PWA
-     bootstrap so first-visit activation can acquire control before install checks. --></body>
+<!-- The service worker is registered by the <head> PWA bootstrap, but not until
+     after `load` + idle: cache.addAll() runs on the visitor's own connection, and
+     registering during head parse made the offline shell compete with the
+     stylesheet, the bundle and the LCP image for a load it could not help. --></body>
 </html>

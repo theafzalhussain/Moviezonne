@@ -1004,6 +1004,33 @@ const MZ_FETCH_TIMEOUT_MS = 15000;  // per attempt; keep >= server.js tmdbClient
 const MZ_FETCH_MAX_RETRIES = 2;     // 3 attempts total, worst case
 const MZ_FETCH_BACKOFF_MS = 500;    // doubled per attempt, plus jitter
 
+/*  ── TOTAL BUDGET ACROSS ATTEMPTS ──
+ *
+ *  MZ_FETCH_TIMEOUT_MS is PER ATTEMPT, and there are three attempts with backoff
+ *  between them, so the real worst case was 3x15s + ~2s of sleeps ~= 47s - and
+ *  ~55s when a 429 supplies its own Retry-After. Nothing bounded the whole chain,
+ *  which is precisely the shape of a p95 tail: the request that eventually failed
+ *  is the one the calling Promise.allSettled was waiting on.
+ *
+ *  The per-attempt value is deliberately NOT lowered. It looks like the obvious
+ *  knob and it is the wrong one: the comment above records that 9000 produced 511
+ *  "TMDB responded 499" in five minutes, because a 499 IS this client hanging up
+ *  on a request that was still being served. The Worker's own ceiling is 2
+ *  attempts of TMDB_TIMEOUT_MS, and TMDB_TIMEOUT_MS is env-overridable up to
+ *  20000 - so cutting the client to 5s would reintroduce that incident by
+ *  construction, aborting requests that were about to succeed and turning a slow
+ *  response into a failed one.
+ *
+ *  Capping the TOTAL instead keeps the first attempt's generous budget - which is
+ *  what the 499 fix needs - and gives up on the retries, which are the part with
+ *  poor odds: an upstream that has already burned 20s on this URL is not usually
+ *  one attempt away from answering. 20s allows attempt 0 its full 15s plus a real
+ *  second try, and is checked before each attempt AND before each backoff sleep,
+ *  so the chain cannot start work it has no budget to finish. Exceeding it throws
+ *  the last real error, which tmdb() already handles by serving the stale
+ *  localStorage copy - yesterday's posters instead of a 47-second skeleton. */
+const MZ_FETCH_TOTAL_BUDGET_MS = 20000;
+
 // Set once the page is going away, so rejections caused by teardown can be
 // told apart from real failures. pagehide covers bfcache and normal unload.
 let _mzPageHiding = false;
@@ -1486,9 +1513,18 @@ async function _mzFetchAttempt(urlStr, outerSignal) {
  */
 async function _mzFetchWithRetry(urlStr, outerSignal, meta) {
   let lastError = null;
+  const deadline = Date.now() + MZ_FETCH_TOTAL_BUDGET_MS;
+  /** True once there is no point starting more work on this URL. */
+  const spent = () => Date.now() >= deadline;
 
   for (let attempt = 0; attempt <= MZ_FETCH_MAX_RETRIES; attempt++) {
     if (outerSignal.aborted || _mzPageHiding) break;
+
+    /*  Checked before the attempt, not only after it. Entering a fourth 15s wait
+     *  with 300ms of budget left is how the 47s worst case was reached - see
+     *  MZ_FETCH_TOTAL_BUDGET_MS. Attempt 0 always runs: the deadline is set on
+     *  entry, so it cannot already be spent here. */
+    if (attempt > 0 && spent()) break;
 
     // Retrying while the OS says there is no link just burns battery. Wait for
     // the connection to come back, but not longer than one backoff window —
@@ -1513,6 +1549,8 @@ async function _mzFetchWithRetry(urlStr, outerSignal, meta) {
         : MZ_FETCH_BACKOFF_MS * Math.pow(2, attempt) + Math.random() * 250;
       lastError = new Error('TMDB responded ' + r.status);
       lastError.status = r.status;
+      // A sleep that would outlast the budget is a sleep with nothing after it.
+      if (Date.now() + wait >= deadline) break;
       await _mzSleep(wait);
       continue;
     } catch (err) {
@@ -1524,7 +1562,9 @@ async function _mzFetchWithRetry(urlStr, outerSignal, meta) {
 
       // Jitter matters here: a cold homepage fires 15 of these at once, and
       // without it all 15 would retry in the same millisecond and collide again.
-      await _mzSleep(MZ_FETCH_BACKOFF_MS * Math.pow(2, attempt) + Math.random() * 250);
+      const backoff = MZ_FETCH_BACKOFF_MS * Math.pow(2, attempt) + Math.random() * 250;
+      if (Date.now() + backoff >= deadline) throw err;
+      await _mzSleep(backoff);
     }
   }
 
@@ -1625,6 +1665,94 @@ function _mzTmdbFreshMs(urlStr) {
 /** Below this, a batch costs more than it saves — just let tmdb() run. */
 const MZ_BATCH_MIN_REQUESTS = 3;
 
+/*  How long the batch POST may take before the page gives up on it and falls back
+ *  to individual requests. See the note at the fetch() call for how it is sized
+ *  against the Worker's own ceiling. */
+const MZ_BATCH_TIMEOUT_MS = 10000;
+
+/*  AbortSignal.timeout() where it exists, a hand-rolled controller where it does
+ *  not. Older Smart TV WebKits - the devices this codebase already special-cases
+ *  everywhere else - have AbortController but not the static timeout helper, and
+ *  an unguarded AbortSignal.timeout there is a TypeError that would take out the
+ *  whole batch path rather than time it out. */
+function _mzTimeoutSignal(ms) {
+  try {
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+      return AbortSignal.timeout(ms);
+    }
+    if (typeof AbortController === 'function') {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), ms);
+      return controller.signal;
+    }
+  } catch (e) { /* fall through - an un-abortable fetch beats no fetch */ }
+  return undefined;
+}
+
+/*  ══════════════════════════════════════════════════════════════════════
+ *  HEAD START — the two first-screen paths that were already in flight
+ *  ══════════════════════════════════════════════════════════════════════
+ *  index.html fires /movie/popular and /trending/movie/week from <head>, while
+ *  the parser is still working. That happens several hundred milliseconds before
+ *  this bundle has been downloaded, decompressed, parsed, compiled and executed
+ *  far enough to ask for anything itself — so by the time init() runs, those two
+ *  answers are usually already on the machine.
+ *
+ *  They used to be thrown away. The block existed to warm the edge and discarded
+ *  both bodies, which meant 40-100 KB was pulled down the visitor's own
+ *  connection at high priority, in competition with the stylesheet and the LCP
+ *  image, and then deleted. Adopting them instead is free and removes a full
+ *  round trip from the critical path of the ONE request that matters most:
+ *  /trending/movie/week is the endpoint slide 0 is pinned to, so it is the
+ *  endpoint that decides the LCP image's URL.
+ *
+ *  Adopted into tmdbCache rather than into inFlightRequests, deliberately. The
+ *  in-flight map hands its promise straight back to callers, so a rejection there
+ *  would propagate into the ~40 call sites that read `r.results` off the result —
+ *  none of which expect one. Priming the cache cannot fail that way: a path that
+ *  arrives is answered instantly by tmdb() and is dropped from the batch plan by
+ *  _mzTmdbAnsweredFromCache(); a path that does not simply stays in the plan and
+ *  the old behaviour is what happens.
+ */
+const MZ_HEAD_START_BUDGET_MS = 600;
+
+/*  Resolves once the <head> fetches have been taken up, or once the budget
+ *  expires — whichever is first, so a stalled connection can never hold the
+ *  first paint. Idempotent: the registry is cleared on the first call, and every
+ *  later call resolves immediately.
+ */
+let _mzHeadStartDone = null;
+function _mzAdoptHeadStart() {
+  if (_mzHeadStartDone) return _mzHeadStartDone;
+
+  const registry = (typeof window !== 'undefined' && window.__mzHeadStart) || null;
+  const urls = registry ? Object.keys(registry) : [];
+  if (!urls.length) {
+    _mzHeadStartDone = Promise.resolve();
+    return _mzHeadStartDone;
+  }
+  // Released immediately so a later caller cannot adopt the same promises twice.
+  try { delete window.__mzHeadStart; } catch (e) { window.__mzHeadStart = null; }
+
+  const adopted = urls.map((urlStr) => Promise.resolve(registry[urlStr])
+    .then((data) => {
+      /*  The shape check is what makes a 503, an HTML error page or an SPA
+       *  fallback a no-op rather than a poisoned cache entry. */
+      if (!data || typeof data !== 'object' || !('results' in data || 'id' in data)) return;
+      tmdbCache.set(urlStr, data);
+      // Same deferred queue tmdb() uses, so the 20-50 KB serialise cannot land
+      // on the main thread during the first paint.
+      _mzQueueCacheWrite('mz_cache_' + urlStr, data);
+    })
+    .catch(() => {}));
+
+  _mzHeadStartDone = Promise.race([
+    Promise.all(adopted),
+    new Promise((resolve) => setTimeout(resolve, MZ_HEAD_START_BUDGET_MS))
+  ]);
+  return _mzHeadStartDone;
+}
+
 /*  True when tmdb() can answer this URL without the network. Read-only: it
  *  promotes a fresh localStorage copy into the memory cache, which is what
  *  tmdb() would do a moment later anyway, so the parse is not wasted.
@@ -1658,6 +1786,14 @@ async function tmdbBatch(plan) {
   try {
     if (isLocalhost) return run(); // dev server has no batch endpoint
 
+    /*  Take up whatever <head> already fetched before deciding what is cold.
+     *  This costs nothing on the clock — those requests were issued while the
+     *  parser was in <head>, so they are normally finished by the time this line
+     *  runs — and it removes their paths from the plan below, which on the
+     *  homepage is the hero's own source. Budgeted, so a stalled head-start
+     *  cannot hold the first paint. */
+    await _mzAdoptHeadStart();
+
     // Only ask for what no cache can answer. On a warm repeat visit this is
     // usually empty and the batch is skipped entirely.
     const cold = [];
@@ -1683,12 +1819,30 @@ async function tmdbBatch(plan) {
      *  anyway, the shared cache is a KV entry keyed on the plan, and the
      *  per-endpoint responses are already held in memory and in localStorage
      *  for 12h by tmdb() itself.
+     *
+     *  ── THE TIMEOUT IS LOAD-BEARING ──
+     *  This request had none, and it is the single request a cold first screen
+     *  cannot paint without: the individual /api/tmdb GETs below go through
+     *  _mzFetchWithRetry, which has a per-attempt abort, but this one had only
+     *  whatever the browser's default is - minutes on a stalled mobile radio,
+     *  with nothing else in the page able to proceed. The fallback path underneath
+     *  was therefore unreachable in exactly the case it exists for.
+     *
+     *  The budget is sized against the Worker's own ceiling, not guessed:
+     *  tmdbUpstream does 2 attempts of TMDB_TIMEOUT_MS (3000 in wrangler.jsonc),
+     *  and runBatchPlan fans the plan out with Promise.all, so a cold batch is
+     *  bounded at ~6s of upstream plus KV and assembly - not 6s per path. 10s
+     *  leaves real headroom above that while still being a fraction of the ~47s
+     *  worst case the retry path can reach. On abort, the catch below runs and the
+     *  page falls back to individual requests, which is a recovery it could not
+     *  previously make.
      */
     const response = await fetch(BASE + '/batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ paths }),
-      credentials: 'same-origin'
+      credentials: 'same-origin',
+      signal: _mzTimeoutSignal(MZ_BATCH_TIMEOUT_MS)
     });
     if (!response.ok) throw new Error('batch responded ' + response.status);
     if (!(response.headers.get('content-type') || '').includes('application/json')) {
@@ -2573,15 +2727,40 @@ function allFeedPriorityGroup(title, qualityState, freshTier) {
 /** Annotates a pool in place with ranking fields, then sorts by the strict
  *  ALL-feed group first. Freshness and composite relevance only decide order
  *  among titles in the same group. */
+/*  How long a derived quality state may be reused instead of recomputed.
+ *
+ *  titleQualityState's output moves on DAY boundaries - upgradedDaysAgo against
+ *  thresholds of 25/55/85 days - so any window well under a day is provably
+ *  equivalent to recomputing. An hour is chosen because it comfortably covers the
+ *  15-minute pool cache and every page change within a visit, while still
+ *  discarding a state restored from localStorage in an earlier session. */
+const MZ_QUALITY_REUSE_MS = 60 * 60 * 1000;
+
 function rankByFreshness(pool, nowMs) {
   const now = nowMs || Date.now();
   pool.forEach(m => {
     const state = titleQualityState(m, now);
     m._qualityState = state;
+    /*  When the state was derived. The annotations on these objects outlive the
+     *  gather: the pool cache holds them for 15 minutes, and because
+     *  _mzFlushCacheWrites runs at idle - after ranking has already mutated the
+     *  objects tmdb() handed over - they also get serialised into the localStorage
+     *  copy and can come back hours later. Anything reusing _qualityState outside
+     *  this loop therefore has to know how old it is. */
+    m._qualityAt = now;
     m._eventAgeDays = catalogueEventAgeDays(m, now, state);
     m._freshTier = freshnessTier(m, m._eventAgeDays);
     m._priorityGroup = allFeedPriorityGroup(m, state, m._freshTier);
-    m._rankScore = calculateMovieScore(m);
+    /*  `now` and `state` are handed over rather than letting calculateMovieScore
+     *  find them again. It used to take neither, so it called Date.now() and
+     *  titleQualityState(m, now) itself - re-deriving, per title, the exact state
+     *  assigned two lines above. titleQualityState parses a date string and then
+     *  walks the quality timeline twice (forward to find the stage, backward to
+     *  find the first stage carrying the same label), so on the ~200-320 title
+     *  homepage pool that duplicate was about half the total cost of this loop,
+     *  and this loop is the one synchronous un-yieldable block on the gather path.
+     *  Same numbers out, roughly half the work. */
+    m._rankScore = calculateMovieScore(m, now, state);
   });
   return pool.sort((a, b) =>
     (a._priorityGroup - b._priorityGroup)
@@ -3212,7 +3391,6 @@ function isFeedBlocked(item) {
 const CATALOGUE_ERA_GRACE_YEARS = 2;
 const CATALOGUE_ERA_DECAY = 0.06;
 const YEAR_MS = 31557600000;
-
 /** Multiplier in (0, 1] expressing how current a catalogue MOVIE is. Series,
  *  anime and undated titles are returned unweighted (1) — see the note above. */
 function catalogueEraFactor(item, nowMs) {
@@ -3754,8 +3932,8 @@ const RATING_PRIOR_MEAN = 6.2;
 /*  Below this many votes the popularity/votes ratio is noise, not velocity. */
 const TRENDING_MIN_VOTES = 20;
 
-function calculateMovieScore(movie) {
-  const now = Date.now();
+function calculateMovieScore(movie, nowMs, qualityState) {
+  const now = nowMs || Date.now();
   const releaseDate = new Date(movie.release_date || movie.first_air_date || '2020-01-01');
   const daysSinceRelease = Math.max(0, (now - releaseDate) / (1000 * 60 * 60 * 24));
   
@@ -3803,7 +3981,12 @@ function calculateMovieScore(movie) {
   // isse purani release dobara top par aa jaati hai. Windows timeline se aate
   // hain, hardcoded din se nahi — badge aur ranking dono ek hi table padhte hain.
   let qualityUpgradeBoost = 0;
-  const upgradedDaysAgo = titleQualityState(movie, now).upgradedDaysAgo;
+  /*  Reused when the caller already has it. rankByFreshness assigns
+   *  m._qualityState immediately before calling this, so recomputing here meant a
+   *  second date parse and a second double walk of the quality timeline for every
+   *  title in the pool. Both parameters are optional, so the carousel callers that
+   *  pass only `movie` behave exactly as before. */
+  const upgradedDaysAgo = (qualityState || titleQualityState(movie, now)).upgradedDaysAgo;
   if (upgradedDaysAgo != null) {
     if (upgradedDaysAgo <= 25) qualityUpgradeBoost = 70;       // print just landed — as strong as a new release
     else if (upgradedDaysAgo <= 55) qualityUpgradeBoost = 55;  // still the current print everyone is looking for
@@ -6766,10 +6949,18 @@ const _ottVerifyCache = new Map();
  *  and the chunks go out together — chunking sequentially would rebuild the
  *  very wave structure this exists to remove.
  */
+/*  Must stay <= MAX_BATCH_PATHS in worker.js, which is 24. The Worker rejects a
+ *  larger batch with a 400, and a rejected batch falls back to individual
+ *  requests through the 8-lane gate - three sequential round trips where this was
+ *  buying one. The chunks are posted in PARALLEL below, so splitting a 40-path
+ *  wave into two costs no extra latency and halves the peak work the Worker does
+ *  per invocation. worker-perf-check.js asserts the two constants agree. */
+const MZ_BATCH_CHUNK = 24;
+
 async function _ottPrimeBatch(pairs) {
   if (typeof tmdbBatch !== 'function') return;
   if (!pairs || pairs.length < 2) return;      // one URL is not worth a batch
-  const CHUNK = 40;
+  const CHUNK = MZ_BATCH_CHUNK;
   const chunks = [];
   for (let i = 0; i < pairs.length; i += CHUNK) chunks.push(pairs.slice(i, i + CHUNK));
   try {
@@ -9116,7 +9307,23 @@ function renderMovies(movies, append = false) {
     // Derived from the release→quality timeline the ALL feed also ranks by
     // (MOVIE_QUALITY_TIMELINE for films, TV_QUALITY_TIMELINE for series and
     // anime), so the badge and the ordering can never disagree.
-    const qualityState = titleQualityState(m, mzNow);
+    /*  Reuses the state rankByFreshness derived, but only while it is provably
+     *  still the same answer. It is the SAME derivation the comment above
+     *  describes, so recomputing it per card bought nothing but another date parse
+     *  and another double walk of the quality timeline - 30 times per page paint,
+     *  inside the chunked render loop.
+     *
+     *  The freshness guard is not decoration. These annotations reach localStorage
+     *  (see the note on _qualityAt in rankByFreshness) and can be restored hours
+     *  later, and the self-ranked feeds - toprated, kids, anime - never run
+     *  rankByFreshness at all, so they would otherwise paint a badge derived from
+     *  a previous session. upgradedDaysAgo moves on day boundaries against
+     *  thresholds of 25/55/85 days, so a state stamped within the hour cannot
+     *  differ from one derived now; past that, recompute. */
+    const cachedQuality = (m._qualityAt && mzNow - m._qualityAt < MZ_QUALITY_REUSE_MS)
+      ? m._qualityState
+      : null;
+    const qualityState = cachedQuality || titleQualityState(m, mzNow);
     let qual = qualityState.qual;
     let qualClass = qualityState.cls;
 
@@ -14217,7 +14424,21 @@ function goHome(e) {
 
 
 // -- AD-BLOCKER DETECTION --
-(function detectAdBlocker() {
+/*  Idle-only, and it was not before.
+ *
+ *  This appends a node to <body> and then reads adSlot.offsetHeight, which is a
+ *  forced synchronous layout. It used to run the moment the bundle was parsed -
+ *  i.e. inside the startup window, against a document with a 188 KB stylesheet
+ *  attached - and the 300ms setTimeout did not move it off that window, it just
+ *  landed the layout read in the middle of the first feed paint instead.
+ *
+ *  Nothing needs the answer early, or arguably at all: the only effect is a
+ *  console.warn and an 'adblocker-detected' event, and grep finds no listener for
+ *  it anywhere in the codebase. So it waits for genuine idle time now. The 300ms
+ *  inner delay is kept because that part is load-bearing for a different reason -
+ *  it is what gives the blocker's content script time to act on the insertion.
+ */
+scheduleIdleWork([function detectAdBlocker() {
   const adSlot = document.createElement('div');
   adSlot.className = 'ad_slot'; // Class heavily targeted by adblockers
   adSlot.style.position = 'absolute';
@@ -14235,7 +14456,7 @@ function goHome(e) {
     }
     adSlot.remove(); // Clean up
   }, 300);
-})();
+}], 6000);
 
 
 // -- TOP KEYWORDS EXTRACTOR --

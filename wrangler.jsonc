@@ -21,6 +21,23 @@
    *                    or the edge retry would land after the client gave up.
    *                    Before any timeout existed, a stalled TMDB connection held
    *                    the request open forever — that is what produced 504s.
+   *
+   *                    RAISED 3000 -> 5000 (Sep 2026), measured rather than
+   *                    guessed. A forced-cold /api/tmdb/discover/movie through the
+   *                    Worker from the DEL colo answered in 892-1628ms end to end,
+   *                    and that figure still includes the client's own round trip
+   *                    — so the upstream leg is roughly 0.7-1.4s and 3000 left
+   *                    barely 2x headroom on the slow end. It matters only on a
+   *                    COLD path: a warm path is answered from KV or the colo
+   *                    cache and never reaches the timeout at all, while a cold
+   *                    path that times out returns a 503 that is deliberately not
+   *                    cached, so the visitor gets an empty rail. 5000 gives >3x
+   *                    headroom there. It is not 6000 or 7000: two attempts must
+   *                    stay clear of the client's 15s per-attempt budget with room
+   *                    left for the KV read and the JSON assembly, and 2x6000
+   *                    leaves only 3s for all of that — the invariant the comment
+   *                    on TMDB_UPSTREAM_TIMEOUT_MS in worker.js protects. 2x5000
+   *                    leaves 5s.
    *  PUSH_TIMEOUT_MS   same idea for the push services.
    *
    *  There is deliberately NO single TMDB_CACHE_TTL. One number cannot be right
@@ -29,9 +46,33 @@
    *  the "what is out now" answer (3 hours). A flat 3600 would re-fetch the
    *  unchanging majority all day AND still be the shortest link in the chain.
    *  Both are separately overridable below.
+   *
+   *  ── DO NOT LOWER TMDB_CACHE_TTL TO "FIX" STALE DATA OR COLD READS ──
+   *  It has been proposed twice, on the reasoning that 604800 means a visitor can
+   *  be served a 7-day-old body. It does not, and the confusion is worth writing
+   *  down because the change would make both symptoms worse.
+   *
+   *  These two numbers are FRESHNESS WINDOWS, not retention. Retention is a
+   *  separate value putTmdb() derives from them (expirationTtl = softTtl * 8,
+   *  capped at 30 days) and it only decides when KV deletes the bytes. Freshness
+   *  lives in the entry's METADATA: putTmdb stores `{ t: Date.now() }`, and
+   *  fetchTmdbJson compares `Date.now() - storedAt < softTtl * 1000`. Past that it
+   *  serves the stale body AND fires refreshTmdb() through ctx.waitUntil — so no
+   *  entry is ever handed over without a refresh being started behind it. Nothing
+   *  in that decision reads expirationTtl.
+   *
+   *  Concretely:
+   *    volatile  freshness 3h,  retention 1d   <- the entire home feed
+   *    static    freshness 7d,  retention 30d  <- /movie/{id}, /tv/{id} only
+   *
+   *  So the home feed is already on a 3-hour window; 604800 never touches it. It
+   *  applies to a title's own record — cast, runtime, overview, poster path — and
+   *  those do not change. Lowering it to 86400 would re-fetch every one of those
+   *  records SEVEN TIMES more often: more upstream calls, more KV writes, and more
+   *  cold reads. It would worsen the exact number it is meant to improve.
    */
   "vars": {
-    "TMDB_TIMEOUT_MS": "3000",
+    "TMDB_TIMEOUT_MS": "5000",
     "PUSH_TIMEOUT_MS": "8000",
     "TMDB_VOLATILE_CACHE_TTL": "10800",
     "TMDB_CACHE_TTL": "604800"

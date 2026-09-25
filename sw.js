@@ -137,7 +137,7 @@
 // popularity instead, with the floor taken from its own category.
 // That moved moviezone.min.css to 9.14, tv-mode.min.css to 1.4, tv-mode.min.js to
 // 1.6 and moviezone.min.js to 14.6; the precached shell pins all four URLs.
-const CACHE_NAME = 'moviezone-v152';
+const CACHE_NAME = 'moviezone-v154';
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
  *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream
@@ -271,6 +271,30 @@ const NAV_NETWORK_BUDGET_MS = 2500;
  *  real answer or a timeout marker. */
 const NETWORK_TOO_SLOW = Symbol('network-too-slow');
 
+/*  ── THE BLOCKING SHELL: ONLY WHAT THE PAGE ACTUALLY REQUESTS ──
+ *
+ *  cache.addAll() is atomic - one 404 fails the whole install - and it runs on the
+ *  visitor's connection. So every byte listed here is a byte a first-time visitor
+ *  downloads on top of the page itself, and this list had grown to 1.5 MB on disk.
+ *  Three entries were most of it and none of them belonged:
+ *
+ *    • /moviezone-logo.png?v=2  (513 KB)  REMOVED ENTIRELY. Nothing requests it.
+ *      grep across index.html, manifest.json and moviezone.js finds zero
+ *      references - the page uses /moviezone-logo.webp (7 KB), which is preloaded
+ *      in <head> and used by both the loader and the nav logo. Half a megabyte was
+ *      being fetched and stored so that a file nobody asks for would be available
+ *      offline.
+ *    • /icon-512.png?v=2  (237 KB)  and  /apple-touch-icon.png?v=2  (38 KB)
+ *      moved to OPTIONAL_ASSETS. These are install/home-screen artwork read by the
+ *      OS from manifest.json, not resources the offline shell renders. Being
+ *      opportunistic costs nothing real: they are still cached, just not in front
+ *      of the first paint, and they can no longer fail an install.
+ *
+ *  What is left is the shell in the strict sense - the document, the two
+ *  stylesheets, the three bundles, the manifest, the two favicon sizes the
+ *  document itself links, and the two preloaded fonts (kept blocking on purpose:
+ *  they are on the hero title's critical path and a fallback face would reflow).
+ */
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -278,13 +302,10 @@ const STATIC_ASSETS = [
   '/moviezone.min.css?v=9.15',
   '/tv-mode.min.js?v=1.8',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=15.0',
+  '/moviezone.min.js?v=15.2',
   '/manifest.json',
-  '/moviezone-logo.png?v=2',
   '/icon-192.png?v=2',
-  '/icon-512.png?v=2',
   '/favicon-32.png?v=2',
-  '/apple-touch-icon.png?v=2',
   // Self-hosted fonts (were Google Fonts). These are on the critical render
   // path for the hero title, so an offline or flaky-network visit must not fall
   // back to a system face and reflow the page.
@@ -295,6 +316,11 @@ const STATIC_ASSETS = [
 // Large/feature-specific data should never block a new service worker from
 // installing. It is cached opportunistically and fetched from the network if absent.
 const OPTIONAL_ASSETS = [
+  // Install / home-screen artwork. The OS reads these from manifest.json when the
+  // user installs; they are never part of a rendered page, so they have no reason
+  // to sit in front of a first paint. 275 KB between them.
+  '/icon-512.png?v=2',
+  '/apple-touch-icon.png?v=2',
   '/providers.css?v=9',
   '/provider-netflix.svg',
   '/provider-prime.svg',

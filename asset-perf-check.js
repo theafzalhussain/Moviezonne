@@ -106,7 +106,32 @@ const brotliOf = (p) => zlib.brotliCompressSync(fs.readFileSync(p), {
   params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 }
 }).length;
 
-const CRITICAL_WIRE_BUDGET = 121 * 1024;
+const CRITICAL_WIRE_BUDGET = 122 * 1024;
+
+/*  Raised 121 -> 122 KB (Sep 2026) for _mzAdoptHeadStart() in moviezone.js.
+ *  +0.7 KB brotli, all JS, and it buys a NETWORK ROUND TRIP off the LCP path —
+ *  which on a mobile radio is 150-400 ms against a 0.7 KB transfer cost of
+ *  roughly 5-10 ms. The trade is not close.
+ *
+ *  What it does: index.html has always fired /movie/popular and
+ *  /trending/movie/week from <head>, while the parser is still working — several
+ *  hundred ms before this bundle has been downloaded, decompressed, parsed and
+ *  executed far enough to ask for anything. Both payloads were then DISCARDED;
+ *  the block existed only to warm the edge, which is already warm for everyone
+ *  but the hour's first visitor. So 40-100 KB was pulled down the visitor's own
+ *  connection at high priority, in competition with the stylesheet and the LCP
+ *  image, and deleted. This code adopts them into tmdbCache instead, so
+ *  /trending/movie/week — the endpoint slide 0 is pinned to, i.e. the one that
+ *  decides the LCP image's URL — is resolved before the bundle finishes parsing
+ *  rather than a full round trip after it.
+ *
+ *  Note this budget is the wire, and the wire is not where this page's problem
+ *  was: the first-paint set is ~122 KB brotli and arrives in well under a second
+ *  on any 4G link. The costs that actually moved p75/p95 were a 1.5 MB
+ *  service-worker precache firing during <head> parse and a hero preload pointing
+ *  at an image that had rotated out of /trending weeks earlier — neither of which
+ *  any byte budget can see. Keep that in mind before shrinking something here.
+ */
 
 /*  Raised 120 -> 121 KB, and the parse ceiling 453 -> 454, for the four main-thread
  *  fixes on the big-screen path (Sep 2026). +0.3 KB brotli, +0.9 KB parse, all JS.
@@ -798,8 +823,22 @@ check('Session Replay is switched off on weak devices only', () => {
 check('errors and metrics still reach Datadog on every device', () => {
   assert.ok(!/trackLongTasks:\s*false/.test(htmlCode) && /trackLongTasks:\s*true/.test(htmlCode),
     'long-task collection was turned off — the TV data we act on comes from it');
-  assert.ok(/trackResources:\s*true/.test(htmlCode) && /trackUserInteractions:\s*true/.test(htmlCode),
-    'resource or interaction tracking was turned off');
+  assert.ok(/trackUserInteractions:\s*true/.test(htmlCode),
+    'interaction tracking was turned off');
+  /*  Resource collection is now weak-device-gated rather than unconditional. It
+   *  is the one RUM feature whose cost scales with the page: a cold homepage
+   *  produces ~90 resource entries, each an event to serialise and beacon, and on
+   *  a 2-core phone that is main-thread time spent measuring instead of
+   *  rendering. What must not happen is it being switched off outright - a
+   *  capable device has to keep reporting it or the resource panels go dark and
+   *  nobody can tell a regression from a quiet day. So this asserts the gate, not
+   *  a constant, and it asserts the gate is the WEAK one: tying it to anything
+   *  broader (isMobile, say) would blind the majority of real traffic. */
+  assert.ok(/trackResources:\s*window\.__mzRumProfile\.trackResources/.test(htmlCode),
+    'trackResources is not read from the device profile');
+  assert.ok(/trackResources:\s*!isWeak/.test(htmlCode),
+    'trackResources is not gated on the weak-device verdict, so either every '
+      + 'device pays for it or no device reports it');
 });
 
 check('the RUM noise filter drops only third-party, non-actionable errors', () => {
