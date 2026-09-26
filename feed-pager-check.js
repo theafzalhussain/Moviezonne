@@ -144,8 +144,14 @@ check('loadMovies no longer takes a per-page target — pages are not fetched',
 
 // No refetch for a page the pool already covers: this is what makes Prev and any
 // revisited page instant, and it is the "no fresh reload" the report asked for.
+// The one call allowed in that branch is _mzMaybePrefetchNextFeedPage(), which
+// replaced the unconditional +800 ms next-page batch loadMovies used to fire after
+// every load: it never touches the page being shown, and is checked below.
 check('a page the pool already covers is rendered without a fetch',
-  /if \(mzFeedPageIsReady\(target\)\) \{\s*renderCurrentFeedPage\(\);\s*renderFeedPager\(\);\s*return;/.test(js));
+  /if \(mzFeedPageIsReady\(target\)\) \{\s*renderCurrentFeedPage\(\);\s*renderFeedPager\(\);\s*(?:_mzMaybePrefetchNextFeedPage\(\);\s*)?return;/.test(js));
+check('...and the next TMDB page is only warmed at idle, near the end of the pool',
+  /function _mzMaybePrefetchNextFeedPage\(\)[\s\S]{0,400}if \(mzFeedPage < mzFeedTotalPages\(\) - 1\) return;[\s\S]{0,300}requestIdleCallback\(warm/.test(js),
+  'the next-page warm-up must stay idle-scheduled and gated on the pool end');
 check('readiness is decided from the pool length, not from a guess',
   /function mzFeedPageIsReady[\s\S]{0,300}allMovies\.length >= start \+ MZ_FEED_PAGE_SIZE/.test(js));
 

@@ -137,7 +137,17 @@
 // popularity instead, with the floor taken from its own category.
 // That moved moviezone.min.css to 9.14, tv-mode.min.css to 1.4, tv-mode.min.js to
 // 1.6 and moviezone.min.js to 14.6; the precached shell pins all four URLs.
-const CACHE_NAME = 'moviezone-v154';
+// v155: the performance pass. moviezone.min.js 15.4 and moviezone.min.css 9.17:
+// the first-screen batches no longer wait on <head> fetches (the <head> TMDB
+// warm-up is gone) and always send the same plan (one edge-cached answer for
+// everybody), a returning visitor on a slow link paints from their own cache
+// after 1 s instead of waiting, the unconditional +800 ms next-page batch is
+// gone, hero print badges resolve in one request instead of one per slide,
+// hover/touch prefetch needs a 150 ms dwell, the localStorage flush yields to
+// input, and the diagnostic idle tasks no longer run in production. The
+// image-cache trim below now runs at most every 20 s instead of after every
+// poster. The precached shell pins both URLs.
+const CACHE_NAME = 'moviezone-v155';
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
  *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream
@@ -299,10 +309,10 @@ const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/tv-mode.min.css?v=1.5',
-  '/moviezone.min.css?v=9.15',
+  '/moviezone.min.css?v=9.17',
   '/tv-mode.min.js?v=1.8',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=15.2',
+  '/moviezone.min.js?v=15.4',
   '/manifest.json',
   '/icon-192.png?v=2',
   '/favicon-32.png?v=2',
@@ -429,6 +439,21 @@ async function trimImageCache() {
   if (excess > 0) await Promise.all(keys.slice(0, excess).map(k => cache.delete(k)));
 }
 
+/*  Trimming enumerates the WHOLE image cache (cache.keys() over up to
+ *  IMAGE_CACHE_MAX_ENTRIES records) and it used to run after EVERY image put -
+ *  ~30 full enumerations while the first page of posters streamed in, competing
+ *  for the same device I/O the page was decoding those posters from. Once per
+ *  TRIM_EVERY_MS is plenty: the ceiling is a soft bound, and overshooting it by a
+ *  few dozen entries for a few seconds costs nothing. */
+const TRIM_EVERY_MS = 20000;
+let lastImageTrimAt = 0;
+function trimImageCacheSoon() {
+  const now = Date.now();
+  if (now - lastImageTrimAt < TRIM_EVERY_MS) return Promise.resolve();
+  lastImageTrimAt = now;
+  return trimImageCache();
+}
+
 const isTmdbImage = url =>
   url.hostname === 'image.tmdb.org' || url.pathname.startsWith('/tmdb-image/');
 
@@ -477,7 +502,7 @@ self.addEventListener('fetch', event => {
         if (response && (response.ok || response.type === 'opaque')) {
           const copy = response.clone();
           event.waitUntil(
-            cache.put(request, copy).then(trimImageCache).catch(() => {})
+            cache.put(request, copy).then(trimImageCacheSoon).catch(() => {})
           );
         }
         return response;

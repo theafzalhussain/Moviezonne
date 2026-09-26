@@ -37,7 +37,11 @@ const ASSETS = ['moviezone.min.js', 'moviezone.min.css', 'tv-mode.min.js', 'tv-m
    *  way to invalidate a client. Five franchises were once added to it while the
    *  version stayed at 2, and every returning browser kept rendering the old
    *  twelve. Same failure mode as the min.js story above, so: same seal. */
-  'collections-catalog.json'];
+  'collections-catalog.json',
+  /*  _headers serves these three as `immutable` for a year straight from the
+   *  asset router (the Worker never sees them), so a changed file under an old
+   *  ?v= would never reach a returning visitor. Same failure mode: same seal. */
+  'providers.css', 'universes.css', 'universes-rail.js'];
 
 const html = fs.readFileSync('index.html', 'utf8');
 const sw = fs.readFileSync('sw.js', 'utf8');

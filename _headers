@@ -1,0 +1,61 @@
+# Response headers for files the Workers asset router serves DIRECTLY.
+#
+# Only the paths listed in wrangler.jsonc assets.run_worker_first reach worker.js.
+# Every other static file - the bundles, the stylesheets, fonts, logos - is served
+# by the asset router without the Worker, so the Cache-Control branch inside
+# worker.js fetch() never ran for any of them. They all went out with the router's
+# default `public, max-age=0, must-revalidate`: every repeat view re-validated
+# every bundle, font and logo before it could use it (one round trip each on a
+# phone), and Lighthouse flagged the whole set as "no efficient cache policy".
+#
+# This file is parsed by Workers and is not itself served. Max 100 rules.
+
+# Security headers the Worker already sets on what it serves.
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+# Versioned bundles and stylesheets. Every URL the site emits for these carries
+# ?v=<version>, bumped (and enforced by asset-seal.js / asset-perf-check.js)
+# whenever the bytes change, so a given URL never changes meaning: immutable.
+/*.min.js
+  Cache-Control: public, max-age=31536000, immutable
+
+/*.min.css
+  Cache-Control: public, max-age=31536000, immutable
+
+/providers.css
+  Cache-Control: public, max-age=31536000, immutable
+
+/universes.css
+  Cache-Control: public, max-age=31536000, immutable
+
+/universes-rail.js
+  Cache-Control: public, max-age=31536000, immutable
+
+/collections-catalog.json
+  Cache-Control: public, max-age=31536000, immutable
+
+# Self-hosted fonts are content-final.
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Logos and icons are NOT versioned in every reference (provider logos have been
+# replaced in place before), so a week plus a day of background revalidation -
+# long enough to stop the per-visit revalidation, short enough that a replaced
+# logo shows up.
+/*.png
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+
+/*.webp
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+
+/*.svg
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+
+/*.jpeg
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+
+# sw.js and manifest.json deliberately keep the router default
+# (max-age=0, must-revalidate): a service worker update has to reach every
+# visitor on the next navigation.

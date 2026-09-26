@@ -3620,7 +3620,9 @@ body {
   border-radius: 999px;
   background: rgba(8, 8, 16, 0.82);
   border: 1px solid rgba(236, 72, 153, 0.35);
-  backdrop-filter: blur(12px);
+  /* No backdrop blur (also .card-quality, .top10-rating, .top10-quality): on a
+     0.8+ alpha fill it was invisible, yet every card in a scrolling grid paid a
+     blur pass per repaint on laptop GPUs. */
   transform: translateZ(25px);
   font-size: 0.55rem;
   font-weight: 800;
@@ -4110,7 +4112,6 @@ html[data-mz-tv="true"] .cat-group-menu {
   top: 9px;
   left: 9px;
   background: rgba(8, 8, 16, 0.8);
-  backdrop-filter: blur(14px);
   border: 1px solid rgba(245, 197, 24, 0.22);
   padding: 0.24rem 0.58rem;
   border-radius: 999px;
@@ -4170,7 +4171,10 @@ html[data-mz-tv="true"] .cat-group-menu {
   border-color: rgba(6, 182, 212, 0.5);
   color: #fff;
   box-shadow: 0 2px 12px rgba(6, 182, 212, 0.4);
-  animation: newPulse 2s ease-in-out infinite;
+  /* 3 cycles, not infinite (same for the FRESH/DUBBED/anime/4K pulses below):
+     box-shadow is not composited, so a loop that never stops repaints every
+     card it is on for as long as the tab stays open. */
+  animation: newPulse 2s ease-in-out 3;
 }
 
 /* ── FRESHNESS BADGE (Release Recency) ── */
@@ -4187,7 +4191,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   text-transform: uppercase;
   z-index: 3;
   transform: translateZ(25px);
-  animation: freshPulse 2.5s ease-in-out infinite;
+  animation: freshPulse 2.5s ease-in-out 3;
 }
 
 .card-fresh-today {
@@ -4269,7 +4273,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   box-shadow: 0 4px 12px rgba(255, 152, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2);
   z-index: 3;
   transform: translateZ(25px);
-  animation: dubbedPulse 2.5s ease-in-out infinite;
+  animation: dubbedPulse 2.5s ease-in-out 3;
 }
 
 @keyframes dubbedPulse {
@@ -6460,7 +6464,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   margin-left: 3px;
   flex-shrink: 0;
   box-shadow: 0 0 6px rgba(255, 152, 0, 0.6);
-  animation: dubbedDotPulse 2s ease-in-out infinite;
+  animation: dubbedDotPulse 2s ease-in-out 3;
 }
 
 @keyframes dubbedDotPulse {
@@ -6501,7 +6505,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   margin-left: 5px;
   letter-spacing: 0.6px;
   box-shadow: 0 2px 8px rgba(236, 72, 153, 0.45);
-  animation: animeBadgeGlow 2.6s ease-in-out infinite;
+  animation: animeBadgeGlow 2.6s ease-in-out 3;
 }
 
 @keyframes animeBadgeGlow {
@@ -6540,7 +6544,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   margin-left: 5px;
   letter-spacing: 0.5px;
   box-shadow: 0 2px 8px rgba(0, 229, 255, 0.5);
-  animation: fourkGlow 2.5s ease-in-out infinite;
+  animation: fourkGlow 2.5s ease-in-out 3;
 }
 
 @keyframes fourkGlow {
@@ -12643,10 +12647,10 @@ img { content-visibility: auto; }
           drop-shadow(0 -3px 16px rgba(255, 214, 90, 0.2))
           drop-shadow(0 6px 22px rgba(214, 158, 12, 0.26));
   white-space: nowrap;
-  /*  Slow idle "breathing" of the glow — the wordmark reads as a lit object that
-   *  is alive rather than a static outline. Animates filter/opacity only (both
-   *  composited, no layout), so it clears asset-perf-check's per-frame gate. */
-  animation: top10BigBreathe 4.5s ease-in-out infinite;
+  /*  Two slow "breathing" cycles of the glow on arrival, then it holds still: a
+   *  triple drop-shadow filter re-applied every frame, forever, was a constant GPU
+   *  cost on the one section every visitor scrolls past (TVs never close the tab). */
+  animation: top10BigBreathe 4.5s ease-in-out 2;
 }
 @keyframes top10BigBreathe {
   0%, 100% {
@@ -13104,7 +13108,6 @@ img { content-visibility: auto; }
   color: #fff;
   background: rgba(8, 8, 16, 0.82);
   border: 1px solid rgba(245, 197, 24, 0.28);
-  backdrop-filter: blur(12px);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 3px 10px rgba(0, 0, 0, 0.35);
 }
 .top10-rating svg { color: var(--gold); flex-shrink: 0; }
@@ -13133,7 +13136,6 @@ img { content-visibility: auto; }
   color: var(--gold);
   background: rgba(8, 8, 16, 0.82);
   border: 1px solid rgba(245, 197, 24, 0.22);
-  backdrop-filter: blur(12px);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 3px 10px rgba(0, 0, 0, 0.3);
   white-space: nowrap;
 }

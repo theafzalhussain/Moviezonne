@@ -3104,77 +3104,17 @@ const PERF_HEAD_MARK = '<!--MZ_PERF_HEAD-->';
  *  index.html — watch-page-check.js now asserts exactly that. */
 const PERF_HEAD_RE = /<!--MZ_PERF_HEAD-->[\s\S]*?<!--\/MZ_PERF_HEAD-->\r?\n?/;
 
-/** Endpoints the homepage renders its first screen from, taken from a trace. */
-const WARM_ENDPOINTS = [
-  '/api/tmdb/movie/popular?language=en-US&page=1',
-  '/api/tmdb/trending/movie/week?language=en-US&page=1'
-];
-
-/*  How long the warm-up trusts the app's own cache before firing again. Must stay
- *  equal to the tmdb() discovery TTL that _mzFlushCacheWrites stamps mz_warm_ts
- *  from, or the two disagree about what "warm" means. */
-const WARM_SKIP_MS = 10800000;      // 3h
-
-/*  ── THE HEAD START, AND WHY IT IS WRITTEN HERE RATHER THAN BY HAND ──
+/*  ── NO TMDB WARM-UP IN <head> ANY MORE ──
  *
- *  This block used to be generated WITHOUT the mz_warm_ts guard, and index.html
- *  was then hand-edited to add it. That is a drift, not a fix: optimizeHomeHead()
- *  deletes the delimited region and rewrites it from this template, so the next
- *  nightly `npm run seo:refresh` silently reverted the hand edit — reinstating two
- *  fetches that download 40-100 KB for nobody on every warm load, and putting back
- *  a duplicate stylesheet preload the same tuning had removed. It was found by
- *  running the build step and reading the diff.
- *
- *  So the template IS the source of truth now, and index.html is a pure product of
- *  it. Keeping them byte-identical is what makes the nightly run a no-op on the
- *  head, which is the only state in which the tuning survives.
- *
- *  ── WHAT CHANGED: THE BODIES ARE NO LONGER THROWN AWAY ──
- *
- *  These two fetches used to exist only to warm the EDGE, and discarded both
- *  payloads on arrival. That was close to worthless and not free:
- *
- *    • The edge is already warm for everyone except the hour's first visitor, so
- *      there was usually nothing to warm; and
- *    • 40-100 KB was downloaded at high priority on the visitor's own connection,
- *      competing with the stylesheet, the fonts, the bundle and the LCP image,
- *      and then deleted.
- *
- *  The far more valuable thing about firing them here was never the edge — it is
- *  the TIMING. They start while the parser is still inside <head>, which is
- *  several hundred milliseconds before moviezone.min.js has been downloaded,
- *  decompressed, parsed, compiled and executed far enough to ask for anything. So
- *  the payloads are now kept: _mzAdoptHeadStart() in moviezone.js takes them and
- *  primes tmdbCache, which means /trending/movie/week — the source slide 0 is
- *  pinned to, i.e. the LCP image's own URL — is resolved before the bundle
- *  finishes parsing rather than a full round trip after it.
- *
- *  A failed or non-JSON response resolves to null and changes nothing: tmdbBatch()
- *  simply finds nothing primed and asks for those paths itself, exactly as before.
- */
-function warmUpScript() {
-  return '<script>\n'
-    + '/* Head start for the two paths the first screen cannot paint without, fired\n'
-    + '   while the parser is still in <head> so the round trip overlaps the stylesheet,\n'
-    + '   the fonts and the bundle\u0027s own download and parse instead of queueing behind\n'
-    + '   them. The payloads are kept, not discarded: _mzAdoptHeadStart in moviezone.js\n'
-    + '   primes tmdbCache from them, so /trending/movie/week - the hero\u0027s own source -\n'
-    + '   is resolved before the bundle has finished parsing. Skipped on localhost, and\n'
-    + '   skipped when mz_warm_ts says the app already holds a fresh cache. See\n'
-    + '   _mzFlushCacheWrites in moviezone.js for why that decision is made from a\n'
-    + '   13-byte marker. */\n'
-    + '(function(){try{\n'
-    + '  if(/^(localhost|127\\.0\\.0\\.1)$/.test(location.hostname))return;\n'
-    + '  try{var t=parseInt(localStorage.getItem("mz_warm_ts")||"0",10);\n'
-    + '      if(t&&Date.now()-t<' + WARM_SKIP_MS + ')return;}catch(e){}\n'
-    + '  var u=' + JSON.stringify(WARM_ENDPOINTS) + ';\n'
-    + '  var m=window.__mzHeadStart={};\n'
-    + '  for(var i=0;i<u.length;i++)m[u[i]]=fetch(u[i],{credentials:"same-origin"})\n'
-    + '    .then(function(r){return r.ok&&(r.headers.get("content-type")||"")\n'
-    + '      .indexOf("json")>-1?r.json():null;}).catch(function(){return null;});\n'
-    + '}catch(e){}})();\n'
-    + '</script>\n';
-}
+ *  This block used to end with a script that fired /movie/popular and
+ *  /trending/movie/week from <head>, and moviezone.js waited up to 600 ms to
+ *  adopt them and drop them from its first batch. That wait made the batch plan
+ *  timing-dependent (12, 11 or 10 paths for the same carousel), and the Worker
+ *  caches an assembled plan by its hash - so most first screens became cold
+ *  assembles at the edge. tmdbBatch() now always sends the full, identical plan,
+ *  which already contains both paths, so the warm-up had become a second
+ *  download of the same data plus two extra Worker invocations per cold visit.
+ *  It is gone, along with the mz_warm_ts marker that only it read. */
 
 /**
  * Rewrites the <head> of index.html for the critical path.
@@ -3243,10 +3183,10 @@ function optimizeHomeHead(shell, heroUrl) {
    *  which the preload scanner has already discovered at the highest priority in
    *  the same pass. Chrome reports it as a duplicate-priority preload. It was
    *  removed from index.html by hand once and this template put it straight back
-   *  on the next build — see the note above warmUpScript(). */
+   *  on the next build: the template is the source of truth, and index.html has
+   *  to stay a byte-identical product of it. */
   const block = PERF_HEAD_MARK + '\n'
     + (heroUrl ? heroPreloadTag(heroUrl) : '')
-    + warmUpScript()
     + '<!--/MZ_PERF_HEAD-->';
 
   /*  Built with '\n' throughout for readability, then normalised to the host

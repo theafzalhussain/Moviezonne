@@ -37,7 +37,10 @@
    *                    left for the KV read and the JSON assembly, and 2x6000
    *                    leaves only 3s for all of that — the invariant the comment
    *                    on TMDB_UPSTREAM_TIMEOUT_MS in worker.js protects. 2x5000
-   *                    leaves 5s.
+   *                    leaves 5s. (Since then the second attempt is only 3000
+   *                    when the first one TIMED OUT - TMDB_RETRY_AFTER_TIMEOUT_MS -
+   *                    so the real worst case is 8s, and a batch answers at
+   *                    BATCH_DEADLINE_MS (7s) with whatever has arrived.)
    *  PUSH_TIMEOUT_MS   same idea for the push services.
    *
    *  There is deliberately NO single TMDB_CACHE_TTL. One number cannot be right
@@ -114,9 +117,10 @@
      *  for it; only the route was missing.
      *
      *  Cost is one Worker invocation, and it is recovered immediately: the
-     *  homepage now also lands in caches.default under a tracking-param-scrubbed
-     *  key, so every ?utm_* / ?fbclid variant of a shared link shares one edge
-     *  entry instead of missing individually.
+     *  homepage is kept in caches.default for a day under one key per deployed
+     *  version (see version_metadata below and serveHome() in worker.js), answered
+     *  stale-while-revalidate, so every ?utm_* / ?fbclid variant of a shared link
+     *  shares one edge entry and only the first request a location sees renders.
      */
     "run_worker_first": [
       "/api/*",
@@ -136,6 +140,11 @@
   },
   "kv_namespaces": [
     {
+      // TMDB responses (/api/tmdb/<path>), assembled batch plans (batch:<hash>),
+      // OTT charts and the sitemap catalogue. Since the free plan allows 1,000
+      // KV writes a day account-wide, worker.js writes here only what every
+      // location shares - the home-feed lists, title records, plans - and keeps
+      // long-tail paths (search, per-title sub-resources) in caches.default.
       "binding": "TMDB_CACHE",
       "id": "7afa38a8eae1409285fbbd368e6d0063"
     },
@@ -145,7 +154,14 @@
       "binding": "PUSH_SUBS",
       "id": "11aac5b94b014f7bb1c04fc45a23f4a0"
     }
-  ]
+  ],
+
+  /*  The deployed version id. worker.js puts it in the homepage's edge cache key,
+   *  so a deploy can never keep serving a cached document that points at the
+   *  previous deploy's ?v= bundles. Read-only metadata; no cost, no quota. */
+  "version_metadata": {
+    "binding": "CF_VERSION_METADATA"
+  }
 
   // SECRETS THIS WORKER NEEDS — set with `wrangler secret put <NAME>`, never here.
   // They are not optional: without the VAPID pair /api/push/vapid-key answers 503

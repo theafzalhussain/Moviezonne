@@ -372,20 +372,30 @@ function fakeKv() {
       'no media-scoped w1280 preload hint: ' + link);
   });
 
-  check('the asset validator is dropped once the body is rewritten', () => {
+  check('the asset validator is replaced once the body is rewritten', () => {
     /*  env.ASSETS' ETag describes index.html as stored, and those are no longer
      *  the bytes being sent. Left in place a client could revalidate its way back
      *  into a document pinning last week's backdrop, and two hero generations
-     *  would collapse onto one cache entry. */
-    assert.strictEqual(live.response.headers.get('ETag'), null,
+     *  would collapse onto one cache entry. The Worker now derives a NEW weak
+     *  validator from the asset tag AND the hero path - so a returning visitor can
+     *  get a 304 again - and that validator must differ from the asset's own. */
+    const etag = live.response.headers.get('ETag');
+    assert.notStrictEqual(etag, '"assets-index-html"',
       'the ETag still describes the un-rewritten asset');
+    assert.ok(etag === null || /^W\//.test(etag),
+      'a rewritten document must only carry a weak validator: ' + etag);
+    assert.ok(etag === null || etag.indexOf('assets-index-html') === -1,
+      'the validator is the asset tag passed through: ' + etag);
     assert.strictEqual(live.response.headers.get('Last-Modified'), null,
       'Last-Modified still describes the un-rewritten asset');
   });
 
   check('the rewritten document is what gets stored at the edge', () => {
-    assert.strictEqual(live.cacheLayer.store.size, 1,
-      'expected exactly one edge entry, got ' + live.cacheLayer.store.size);
+    // TMDB paths the hero lookup cached for itself live under /api/tmdb/ and are
+    // not the document; everything else in the store is.
+    const docs = [...live.cacheLayer.store.keys()].filter((k) => k.indexOf('/api/tmdb/') === -1);
+    assert.strictEqual(docs.length, 1,
+      'expected exactly one edge document entry, got ' + docs.length + ': ' + docs.join(', '));
   });
 
   check('the document is still the homepage, not just the head', () => {
@@ -440,6 +450,89 @@ function fakeKv() {
     assert.ok(slowKv.store.size > 0,
       'nothing was written to KV, so the next request is just as cold');
   });
+
+  // ── 4. the NEXT visitor is answered from the edge ─────────────────────────
+  /*  The homepage used to redo env.ASSETS + the hero lookup + the rewrite on every
+   *  edge miss, and it missed constantly on a quiet location. It is now kept at
+   *  the edge for a day and rebuilt behind a stale answer, so only the first
+   *  request a location sees renders inline. */
+  {
+    const cacheLayer = fakeCaches();
+    global.caches = cacheLayer;
+    let assetFetches = 0;
+    let tmdbCalls = 0;
+    global.fetch = async (input) => {
+      const href = typeof input === 'string' ? input : input.url;
+      if (href.indexOf('api.themoviedb.org') !== -1) {
+        tmdbCalls++;
+        return new Response(
+          JSON.stringify({ results: [{ id: 1, title: 'Live Pick', backdrop_path: LIVE_BACKDROP }] }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        );
+      }
+      return realFetch(input);
+    };
+    const env = {
+      TMDB_TOKEN: 'test-token',
+      TMDB_CACHE: fakeKv(),
+      ASSETS: {
+        async fetch() {
+          assetFetches++;
+          return new Response(homeHtml, {
+            status: 200,
+            headers: { 'content-type': 'text/html; charset=utf-8', ETag: '"assets-index-html"' }
+          });
+        }
+      }
+    };
+    const visit = async (request) => {
+      const { ctx, settle } = makeCtx();
+      const res = await worker.default.fetch(request, env, ctx);
+      const body = await res.text();
+      await settle();
+      return { res, body };
+    };
+
+    const first = await visit(new Request('https://moviezone.dev/'));
+    const assetsAfterFirst = assetFetches;
+    const second = await visit(new Request('https://moviezone.dev/?utm_source=whatsapp'));
+
+    check('the next visitor - any query string - is answered from the edge copy', () => {
+      assert.strictEqual(assetFetches, assetsAfterFirst, 'env.ASSETS was read again');
+      assert.strictEqual(tmdbCalls, 1, 'TMDB was asked again (' + tmdbCalls + ' calls)');
+      assert.strictEqual(second.body, first.body, 'the edge copy differs from the rendered document');
+    });
+
+    check('a returning visitor who already holds the document gets a 304', () => {
+      assert.ok(first.res.headers.get('ETag'), 'the rewritten document carries no validator');
+    });
+    const conditional = await visit(new Request('https://moviezone.dev/', {
+      headers: { 'If-None-Match': first.res.headers.get('ETag') || '"none"' }
+    }));
+    check('  ...and the 304 costs no render', () => {
+      assert.strictEqual(conditional.res.status, 304, 'got ' + conditional.res.status);
+      assert.strictEqual(assetFetches, assetsAfterFirst, 'the 304 re-read env.ASSETS');
+    });
+
+    // Age the stored document past HOME_FRESH_MS.
+    const homeKey = [...cacheLayer.store.keys()].find((k) => k.indexOf('/__mz/home') !== -1);
+    const stored = cacheLayer.store.get(homeKey);
+    const agedHeaders = new Headers(stored.headers);
+    agedHeaders.set('x-mz-stored', String(Date.now() - 3600 * 1000));
+    cacheLayer.store.set(homeKey, new Response(await stored.clone().text(),
+      { status: 200, headers: agedHeaders }));
+
+    const beforeStale = assetFetches;
+    const stale = await visit(new Request('https://moviezone.dev/'));
+    check('a stale edge copy is served at once and rebuilt behind the response', () => {
+      assert.strictEqual(stale.res.status, 200, 'the stale copy was not served');
+      assert.ok(stale.body.includes('</html>'), 'the stale copy is incomplete');
+      assert.strictEqual(assetFetches, beforeStale + 1, 'no rebuild ran behind the stale answer');
+      const rebuilt = cacheLayer.store.get(homeKey);
+      assert.ok(Number(rebuilt.headers.get('x-mz-stored')) > Date.now() - 60000,
+        'the edge copy was not replaced by the rebuild');
+    });
+  }
 
   global.fetch = realFetch;
   delete global.caches;

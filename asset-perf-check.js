@@ -109,6 +109,8 @@ const brotliOf = (p) => zlib.brotliCompressSync(fs.readFileSync(p), {
 const CRITICAL_WIRE_BUDGET = 122 * 1024;
 
 /*  Raised 121 -> 122 KB (Sep 2026) for _mzAdoptHeadStart() in moviezone.js.
+ *  (Both it and the <head> warm-up it adopted were deleted later the same month;
+ *  see the Sep 2026 parse-budget note. The wire budget was left at 122.)
  *  +0.7 KB brotli, all JS, and it buys a NETWORK ROUND TRIP off the LCP path —
  *  which on a mobile radio is 150-400 ms against a 0.7 KB transfer cost of
  *  roughly 5-10 ms. The trade is not close.
@@ -569,7 +571,33 @@ const CRITICAL_WIRE_BUDGET = 122 * 1024;
  *
  *  Headroom left: 1.4 KB. The standing deletion list is still empty.
  */
-const CRITICAL_PARSE_BUDGET = 454 * 1024;
+/*  Raised 454 -> 456 KB for the load-at-scale pass (Sep 2026).
+ *
+ *  +1.3 KB, all of it JS. The CSS went DOWN (188.4 -> 188.3 KB): the badge blur
+ *  and pulse changes were made in the original rules instead of an override
+ *  block, so no style recalculation was added - the expensive half of this
+ *  ceiling shrank.
+ *
+ *  Every byte removes requests or main-thread work from a real visit:
+ *    - the first-screen batches send one stable plan - one edge-cached answer for
+ *      everybody - instead of waiting up to 600 ms on two <head> GETs and dropping
+ *      whichever had landed (a different plan hash per timing);
+ *    - a returning visitor on a slow link paints from their own cache after 1 s
+ *      instead of waiting on the batch;
+ *    - identical in-flight batch plans are sent once (hover prefetch + click);
+ *    - the unconditional +800 ms next-page batch after every load is on-demand;
+ *    - hero print badges are one batch instead of one request per slide;
+ *    - hover/touch prefetch needs a 150 ms dwell, so scrolling fires nothing;
+ *    - the localStorage flush yields to input instead of one long task;
+ *    - the reminder-list sync runs twice a day instead of on every page view.
+ *
+ *  Paid down first: the <head> TMDB warm-up (seo-ssr.js) and _mzAdoptHeadStart
+ *  are deleted - both paths are in the carousel plan, so they had become a
+ *  second download plus two Worker invocations per cold visit - and so are two
+ *  diagnostics nothing consumed (the ad-blocker probe and the keyword extractor).
+ *  index.html is ~1.3 KB smaller for it.
+ */
+const CRITICAL_PARSE_BUDGET = 456 * 1024;
 
 check('the first-paint transfer stays inside its brotli budget', () => {
   const parts = ['index.html', 'moviezone.min.css', 'moviezone.min.js'];

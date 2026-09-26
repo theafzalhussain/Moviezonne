@@ -1,11 +1,11 @@
 {
   "moviezone.min.js": {
-    "version": "15.2",
-    "sha256": "cebb6a0dda214383"
+    "version": "15.4",
+    "sha256": "0b48890fde407df1"
   },
   "moviezone.min.css": {
-    "version": "9.15",
-    "sha256": "78af73578da321dd"
+    "version": "9.17",
+    "sha256": "b0a362a5ef82a21e"
   },
   "tv-mode.min.js": {
     "version": "1.8",
@@ -26,5 +26,17 @@
   "collections-catalog.json": {
     "version": "4",
     "sha256": "9694fd8dde60e4be"
+  },
+  "providers.css": {
+    "version": "9",
+    "sha256": "af9cf0a4003cd644"
+  },
+  "universes.css": {
+    "version": "4",
+    "sha256": "5b726ca98e8df6b0"
+  },
+  "universes-rail.js": {
+    "version": "4",
+    "sha256": "6975d8e9193992b6"
   }
 }

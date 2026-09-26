@@ -319,12 +319,32 @@
     ok('cards stay keyboard reachable', !!firstCard && firstCard.tabIndex === 0,
       firstCard ? 'tabIndex=' + firstCard.tabIndex : 'no card');
 
+    var hoverChecked = Promise.resolve();
     if (firstCard) {
-      // Hover prefetch: delegated via mouseover, deduped by data-mzprefetched.
+      /*  Hover prefetch: delegated via mouseover, deduped by data-mzprefetched,
+       *  and gated by a dwell (MZ_PREFETCH_DWELL_MS in moviezone.js): a pointer
+       *  that only passes over a card costs nothing, one that rests on it
+       *  prefetches. Both halves are checked - the sweep on a second card, the
+       *  rest on the first - once the dwell has had time to elapse. */
+      var sweptCard = doc.querySelectorAll('#movieGrid .movie-card')[1] || null;
+      if (sweptCard) {
+        sweptCard.dispatchEvent(new win.MouseEvent('mouseover', { bubbles: true }));
+        sweptCard.dispatchEvent(new win.MouseEvent('mouseout', { bubbles: true, relatedTarget: doc.body }));
+      }
       firstCard.dispatchEvent(new win.MouseEvent('mouseover', { bubbles: true }));
-      ok('hover prefetch fires through delegation',
-        firstCard.hasAttribute('data-mzprefetched'),
-        'data-mzprefetched=' + firstCard.getAttribute('data-mzprefetched'));
+      hoverChecked = new Promise(function (resolve) {
+        setTimeout(function () {
+          ok('hover prefetch fires through delegation once the pointer rests',
+            firstCard.hasAttribute('data-mzprefetched'),
+            'data-mzprefetched=' + firstCard.getAttribute('data-mzprefetched'));
+          if (sweptCard) {
+            ok('a pointer that only passes over a card prefetches nothing',
+              !sweptCard.hasAttribute('data-mzprefetched'),
+              'data-mzprefetched=' + sweptCard.getAttribute('data-mzprefetched'));
+          }
+          resolve();
+        }, 400);
+      });
 
       /*  The click assertion targets the delegated handler, not the modal.
        *  openModal() opens with `if (!claimExplicitDetailActivation(event)) return`
@@ -379,7 +399,7 @@
     // inline style. What must never come back is display:none baked into the
     // HTML, because that outranks the stylesheet and forces the reveal to happen
     // after first paint.
-    fetch('/index.html').then(function (r) { return r.text(); }).then(function (src) {
+    hoverChecked.then(function () { return fetch('/index.html'); }).then(function (r) { return r.text(); }).then(function (src) {
       ok('Continue Watching is not hidden by an inline style in the served HTML',
         !/id="continue-watching"[^>]*style="display:none/.test(src));
       ok('the served HTML reserves the Continue Watching row before paint',

@@ -189,12 +189,16 @@ const PLAN = [
   const realFetch = global.fetch;
   let upstream = 0;
   let failPath = null;
+  let slowPath = null;
   global.fetch = async (input) => {
     const target = typeof input === 'string' ? input : input.url;
     if (!/api\.themoviedb\.org/.test(target)) return realFetch(input);
     upstream++;
     if (failPath && target.includes(failPath)) {
       return new Response('{"status_message":"nope"}', { status: 500 });
+    }
+    if (slowPath && target.includes(slowPath)) {
+      await new Promise((resolve) => setTimeout(resolve, 800));
     }
     return new Response(JSON.stringify({
       page: 1,
@@ -417,6 +421,174 @@ const PLAN = [
     check('a fully cold plan reads KV per path plus the plan key',
       m1.kvReads === PLAN.length + 1,
       'expected ' + (PLAN.length + 1) + ', got ' + m1.kvReads);
+
+    // ── 9. THE BATCH BODY IS SPLICED, NOT RE-SERIALISED ────────────────────
+    /*  The batch used to JSON.parse every path and JSON.stringify the combined
+     *  answer - most of a free-plan invocation's 10 ms CPU budget for a 16-path
+     *  plan. It now concatenates the cached bodies. The client must still receive
+     *  valid JSON whose values are exactly the stored bodies. */
+    console.log('\n9. the batch body is the cached bodies spliced verbatim');
+    {
+      const e = { TMDB_TOKEN: 'stub-token', TMDB_CACHE: countingKV() };
+      cacheLayer.store.clear();
+      const c = makeCtx();
+      const res = await worker.routeApi(batchReq(PLAN), e, c.ctx,
+        new URL('https://moviezone.dev/api/tmdb/batch'));
+      await c.settle();
+      const raw = await res.text();
+      let parsed = null;
+      try { parsed = JSON.parse(raw); } catch (err) { /* reported below */ }
+      check('the spliced body is valid JSON', parsed !== null, raw.slice(0, 160));
+      check('with one allSettled entry per path',
+        parsed && parsed.results.length === PLAN.length
+          && parsed.results.every((r) => r.status === 'fulfilled' && r.value && r.value.results));
+      const stored = e.TMDB_CACHE.data.get('/api/tmdb' + PLAN[0]);
+      check('and each value is the cached body byte-for-byte',
+        Boolean(stored) && raw.indexOf('"value":' + stored) !== -1,
+        'the first path\'s KV body does not appear verbatim in the batch');
+    }
+
+    // ── 10. LONG-TAIL PATHS STAY OUT OF KV ─────────────────────────────────
+    /*  Every distinct search query and per-title sub-resource used to be a KV
+     *  write, against a free-plan allowance of 1,000 writes a DAY. Once spent,
+     *  nothing new can be cached anywhere. Those paths now live at the edge only;
+     *  the lists and title records everyone shares still go to KV. */
+    console.log('\n10. long-tail paths are edge-cached but never written to KV');
+    {
+      const e = { TMDB_TOKEN: 'stub-token', TMDB_CACHE: countingKV() };
+      cacheLayer.store.clear();
+      upstream = 0;
+      const searchUrl = 'https://moviezone.dev/api/tmdb/search/multi?query=dune&page=1';
+      const c1 = makeCtx();
+      const first = await worker.routeApi(new Request(searchUrl), e, c1.ctx, new URL(searchUrl));
+      await c1.settle();
+      equal('a search answers 200', first.status, 200);
+      equal('a search is not written to KV', e.TMDB_CACHE.counters.writes, 0);
+      check('but it is kept at the edge',
+        [...cacheLayer.store.keys()].some((k) => k.includes('/api/tmdb/search/multi')));
+
+      // A fresh isolate in the same location: no memory, same caches.default.
+      const e2 = { TMDB_TOKEN: 'stub-token', TMDB_CACHE: countingKV() };
+      const c2 = makeCtx();
+      const again = await worker.routeApi(new Request(searchUrl), e2, c2.ctx, new URL(searchUrl));
+      await c2.settle();
+      equal('a repeat in the same location is answered by the edge',
+        again.headers.get('x-cache-layer'), 'edge');
+      equal('with no KV read', e2.TMDB_CACHE.counters.reads, 0);
+      equal('and no second upstream fetch', upstream, 1);
+
+      const detailUrl = 'https://moviezone.dev/api/tmdb/movie/550?language=en-US';
+      const c3 = makeCtx();
+      await worker.routeApi(new Request(detailUrl), e, c3.ctx, new URL(detailUrl));
+      await c3.settle();
+      equal('a title record IS still shared through KV', e.TMDB_CACHE.counters.writes, 1);
+
+      const subUrl = 'https://moviezone.dev/api/tmdb/movie/550/release_dates';
+      const c4 = makeCtx();
+      await worker.routeApi(new Request(subUrl), e, c4.ctx, new URL(subUrl));
+      await c4.settle();
+      equal('a per-title sub-resource is not', e.TMDB_CACHE.counters.writes, 1);
+    }
+
+    // ── 11. A SLOW PATH CANNOT HOLD THE BATCH ──────────────────────────────
+    /*  The browser aborts the batch at MZ_BATCH_TIMEOUT_MS and re-requests every
+     *  path individually. The Worker must answer before that with what it has. */
+    console.log('\n11. a slow upstream path cannot hold the batch past its deadline');
+    {
+      const e = { TMDB_TOKEN: 'stub-token', TMDB_CACHE: countingKV(), BATCH_DEADLINE_MS: '300' };
+      cacheLayer.store.clear();
+      slowPath = 'tv/popular';
+      const c = makeCtx();
+      const started = Date.now();
+      const res = await worker.routeApi(batchReq(PLAN), e, c.ctx,
+        new URL('https://moviezone.dev/api/tmdb/batch'));
+      const took = Date.now() - started;
+      const body = await res.json();
+      check('the batch answered at its deadline, not the slow path\'s pace', took < 750,
+        'took ' + took + 'ms against a 300ms deadline and an 800ms path');
+      equal('the slow path is reported as rejected', body.results[PLAN.length - 1].status, 'rejected');
+      check('every other path is served',
+        body.results.slice(0, -1).every((r) => r.status === 'fulfilled'));
+      equal('a partial answer is not stored', res.headers.get('x-batch-stored'), 'no');
+      await c.settle();
+      slowPath = null;
+      check('the whole plan is stored once the slow path lands',
+        [...e.TMDB_CACHE.data.keys()].some((k) => k.startsWith('batch:')));
+    }
+
+    // ── 12. A COLD PLAN FITS THE FREE PLAN'S SUBREQUEST LIMIT ──────────────
+    /*  On Workers Free one invocation gets 50 subrequests, and Cache API
+     *  match/put calls count against the same quota as fetch(). The per-path edge
+     *  layer costs two cache calls per path, which took a cold 16-path plan to 50
+     *  and a 24-title OTT chart past it - after which every fetch() throws. A plan
+     *  must skip it: one plan-level match + put, plus one fetch per cold path. */
+    console.log('\n12. a cold plan stays inside the 50-subrequest Free plan limit');
+    {
+      const e = { TMDB_TOKEN: 'stub-token', TMDB_CACHE: countingKV() };
+      cacheLayer.store.clear();
+      cacheLayer.counters.matches = 0;
+      cacheLayer.counters.puts = 0;
+      upstream = 0;
+      const c = makeCtx();
+      const res = await worker.routeApi(batchReq(PLAN), e, c.ctx,
+        new URL('https://moviezone.dev/api/tmdb/batch'));
+      await res.text();
+      await c.settle();
+      const cacheCalls = cacheLayer.counters.matches + cacheLayer.counters.puts;
+      const subrequests = cacheCalls + upstream;
+      console.log('          cache calls ' + cacheCalls + ' + upstream fetches ' + upstream
+        + ' = ' + subrequests + ' subrequests for a cold ' + PLAN.length + '-path plan');
+      check('the per-path edge layer is not used inside a plan', cacheCalls <= 2,
+        cacheCalls + ' Cache API calls - two per path would be ' + (PLAN.length * 2 + 2));
+      check('a cold 24-path plan (MAX_BATCH_PATHS) would still fit in 50',
+        24 + cacheCalls <= 50, (24 + cacheCalls) + ' subrequests');
+    }
+
+    // ── 13. PER-VISITOR PLANS STAY OUT OF KV; THEIR PARTS DO NOT ───────────
+    /*  A hero deck's release_dates or an OTT wave's watch/providers differ per
+     *  visitor, so a KV copy of the assembled plan is a write nobody else reads -
+     *  against 1,000 writes a day. The plan lives in the location cache; each
+     *  part goes to KV, so the next visitor's (different) plan over the same
+     *  titles is KV reads, not TMDB traffic. */
+    console.log('\n13. a per-title plan is kept at the edge, its parts shared through KV');
+    {
+      const kvStore = countingKV();
+      const e = { TMDB_TOKEN: 'stub-token', TMDB_CACHE: kvStore };
+      cacheLayer.store.clear();
+      upstream = 0;
+      const subPlan = ['/movie/11/release_dates', '/movie/12/release_dates', '/movie/13/release_dates'];
+      const c = makeCtx();
+      const res = await worker.routeApi(batchReq(subPlan), e, c.ctx,
+        new URL('https://moviezone.dev/api/tmdb/batch'));
+      await res.text();
+      await c.settle();
+      const keys = [...kvStore.data.keys()];
+      check('the assembled plan is not written to KV', !keys.some((k) => k.startsWith('batch:')),
+        keys.join(', '));
+      check('each part is shared through KV', subPlan.every((p) => keys.includes('/api/tmdb' + p)),
+        keys.join(', '));
+      check('the plan is kept in the location cache',
+        [...cacheLayer.store.keys()].some((k) => k.includes('/api/tmdb/batch/')));
+
+      // Another visitor, another isolate, the same titles in another order.
+      const before = upstream;
+      const e2 = { TMDB_TOKEN: 'stub-token', TMDB_CACHE: kvStore };
+      const c2 = makeCtx();
+      const res2 = await worker.routeApi(batchReq(subPlan.slice().reverse()), e2, c2.ctx,
+        new URL('https://moviezone.dev/api/tmdb/batch'));
+      await res2.text();
+      await c2.settle();
+      equal('a different plan over the same titles fetches nothing from TMDB', upstream - before, 0);
+
+      // Search keys are never read from KV, not even on a cold location.
+      const e3 = { TMDB_TOKEN: 'stub-token', TMDB_CACHE: countingKV() };
+      cacheLayer.store.clear();
+      const searchUrl = 'https://moviezone.dev/api/tmdb/search/multi?query=xyz&page=1';
+      const c3 = makeCtx();
+      await worker.routeApi(new Request(searchUrl), e3, c3.ctx, new URL(searchUrl));
+      await c3.settle();
+      equal('a cold search costs no KV read', e3.TMDB_CACHE.counters.reads, 0);
+    }
   } finally {
     global.fetch = realFetch;
     delete global.caches;

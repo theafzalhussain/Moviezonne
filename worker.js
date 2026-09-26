@@ -782,15 +782,46 @@ const TMDB_STALE_MULT = 8;
 /** Hard ceiling on retention, so the 7-day paths do not sit in KV for two months. */
 const TMDB_MAX_RETENTION = 2592000;   // 30 days
 
-/** A stalled upstream connection must fail, not hang. Two attempts, so 12s worst
- *  case — deliberately inside the client's own 15s per-attempt timeout, or the
- *  retry would land after the browser had already given up on it. */
+/** A stalled upstream connection must fail, not hang. This is only the compiled-in
+ *  fallback: wrangler.jsonc sets TMDB_TIMEOUT_MS, and envInt() clamps it. */
 const TMDB_UPSTREAM_TIMEOUT_MS = 6000;
+
+/*  ── THE SECOND ATTEMPT IS SHORTER WHEN THE FIRST ONE TIMED OUT ──
+ *  A 5xx or a reset connection is worth an immediate full-length retry: TMDB
+ *  answered, just badly, and a fresh connection usually lands in ~150 ms. A
+ *  TIMEOUT means the upstream is slow right now, and waiting the whole budget a
+ *  second time is how one slow path became a 10 s batch (2 x TMDB_TIMEOUT_MS) that
+ *  landed exactly on the browser's own 10 s batch abort - the page threw the
+ *  answer away and re-requested every path one by one. After a timeout the retry
+ *  gets this much instead, so the worst case is 5 s + 3 s. */
+const TMDB_RETRY_AFTER_TIMEOUT_MS = 3000;
 
 /*  Per-isolate, per-path in-flight map. Deliberately not persisted anywhere:
  *  it exists to collapse a burst, and a burst is by definition inside one
  *  isolate's lifetime. */
 const _tmdbInFlight = new Map();
+
+/*  A 200 is only cacheable if the body is JSON.
+ *
+ *  TMDB always answers JSON, but anything in front of it can answer 200 with an
+ *  HTML error page - and the batch endpoint now splices cached bodies into its
+ *  response verbatim instead of parsing and re-serialising them (see batchBody).
+ *  One non-JSON body in the cache would make every batch that contains it
+ *  unparseable for its whole freshness window. So it is checked once, here, at
+ *  the only place bytes enter the cache: a structural check on the first and last
+ *  non-blank characters, which is free, instead of a JSON.parse, which costs about
+ *  1 ms per 100 KB against the free plan's 10 ms CPU budget. */
+function looksLikeJson(text) {
+  if (typeof text !== 'string' || !text) return false;
+  let start = 0;
+  let end = text.length - 1;
+  while (start <= end && text.charCodeAt(start) <= 32) start++;
+  while (end >= start && text.charCodeAt(end) <= 32) end--;
+  if (start > end) return false;
+  const first = text.charCodeAt(start);
+  const last = text.charCodeAt(end);
+  return (first === 123 && last === 125) || (first === 91 && last === 93);   // {...} or [...]
+}
 
 async function tmdbUpstream(path, env) {
   const headers = new Headers();
@@ -800,11 +831,12 @@ async function tmdbUpstream(path, env) {
   const timeout = envInt(env, 'TMDB_TIMEOUT_MS', TMDB_UPSTREAM_TIMEOUT_MS, 1000, 20000);
 
   let lastError = null;
+  let attemptTimeout = timeout;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const response = await fetch(`https://api.themoviedb.org/3${path}`, {
         headers,
-        signal: AbortSignal.timeout(timeout),
+        signal: AbortSignal.timeout(attemptTimeout),
         cf: { cacheEverything: true, cacheTtl: 300 }
       });
       /*  One immediate retry for a 5xx, because a retry HERE costs the ~130ms
@@ -814,12 +846,21 @@ async function tmdbUpstream(path, env) {
        *  and 4xx is an answer, not a fault. */
       if (attempt === 0 && response.status >= 500) {
         lastError = new Error('TMDB responded ' + response.status);
+        // Release the connection instead of leaving an unread body behind.
+        try { if (response.body) response.body.cancel().catch(() => {}); } catch (e) { /* already consumed */ }
         continue;
       }
-      return { status: response.status, text: await response.text() };
+      const text = await response.text();
+      if (response.status === 200 && !looksLikeJson(text)) {
+        return { status: 502, text: '{"error":"upstream returned a non-JSON body"}' };
+      }
+      return { status: response.status, text };
     } catch (err) {
       // Timeout or transport fault. Worth exactly one more try.
       lastError = err;
+      if (err && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+        attemptTimeout = Math.min(timeout, TMDB_RETRY_AFTER_TIMEOUT_MS);
+      }
     }
   }
   throw lastError || new Error('TMDB request abandoned');
@@ -837,62 +878,348 @@ function tmdbOnce(path, env) {
   return started;
 }
 
-function putTmdb(cacheKey, text, softTtl, env) {
-  return env.TMDB_CACHE.put(cacheKey, text, {
-    expirationTtl: Math.min(softTtl * TMDB_STALE_MULT, TMDB_MAX_RETENTION),
-    metadata: { t: Date.now() }
+/*  ══════════════════════════════════════════════════════════════════════════
+ *  FOUR LAYERS, CHEAPEST FIRST — and why KV stopped being the first stop
+ *  ══════════════════════════════════════════════════════════════════════════
+ *  Every TMDB read used to BE a KV read, and every upstream answer was written
+ *  back to KV. For a site with modest traffic spread over many Cloudflare
+ *  locations that is the wrong first stop, for three reasons that all showed up
+ *  in the dashboards:
+ *
+ *    • COLD READS. KV keeps a value in a location for `cacheTtl` (60 s) after it
+ *      is read there. With a visitor every few minutes per location almost every
+ *      read found that copy gone and went to the central store - tens to hundreds
+ *      of ms, on the request path. That is the "cold reads" figure.
+ *    • WRITE QUOTA. Every distinct search query, every title's watch/providers and
+ *      release_dates, every refresh from every location was a KV write, and the
+ *      free plan allows 1,000 writes a DAY, account-wide. Once spent, put() throws
+ *      for the rest of the day, nothing new can be cached, and every miss goes to
+ *      TMDB. (PUSH_SUBS and the SEO workflow have both run into that quota.)
+ *    • DURATION. All of it lands in the Worker's own CPU and wall time, including
+ *      the background refreshes: waitUntil work is billed to the invocation that
+ *      started it.
+ *
+ *  So a read now goes
+ *    L1  isolate memory   microseconds, small LRU, per isolate
+ *    L2  caches.default   ~1-3 ms, per location, free and unmetered
+ *    L3  KV               global and durable, metered, cold reads are slow
+ *    L4  TMDB             the origin
+ *  and an upstream answer is written to L1 + L2 always, and to KV only when the
+ *  path is worth sharing between locations (tmdbKvWorthy). Freshness is decided
+ *  identically in every layer - the stored-at stamp against the path's soft TTL -
+ *  so a stale copy from ANY layer is still answered instantly and refreshed
+ *  behind the response, exactly as before.
+ */
+
+/** Longest body kept in isolate memory; a detail payload with credits fits. */
+const TMDB_MEMO_MAX_CHARS = 262144;
+/** Entries kept in isolate memory (~2-4 MB typical, 16 MB worst case). */
+const TMDB_MEMO_MAX = 64;
+/** A path refreshed in the background is not refreshed again for this long. */
+const TMDB_REFRESH_COOLDOWN_MS = 60000;
+/** After a failed KV write (quota spent), KV writes pause for this long. */
+const TMDB_KV_WRITE_BACKOFF_MS = 600000;
+/*  A path is written to KV at most once per this window per isolate. Every caller
+ *  that shares one collapsed upstream fetch (tmdbOnce) used to store the answer
+ *  itself - N visitors on a cold path were one TMDB request but N identical KV
+ *  writes, against the free plan's 1,000 writes a day. */
+const TMDB_KV_REWRITE_MIN_MS = 60000;
+
+/** Stored-at stamp on every entry this Worker puts into caches.default. */
+const TMDB_STORED_HEADER = 'x-mz-stored';
+
+/*  L2 keys are built on the public site origin. The Cache API is zone-scoped and
+ *  silently drops an off-zone key (see batchCacheKey), and moviezone.dev is the
+ *  zone this Worker is routed on. The path under /api/tmdb is the same one the
+ *  proxy serves, so one entry answers the proxy, the batch, SSR and the hero. */
+const TMDB_EDGE_ORIGIN = seo.SITE_URL;
+
+/*  Paths cached at the edge but NOT written to KV. All of them are long-tail keys
+ *  whose value to the NEXT location is low and whose count is unbounded: every
+ *  search query, and every per-title sub-resource (release_dates,
+ *  watch/providers, season pages, similar/credits) plus person and collection
+ *  pages. The title record itself (/movie/{id}?..., /tv/{id}?...) and every list
+ *  the home feed is built from are shared by everyone, and those stay in KV. */
+const EDGE_ONLY_TMDB_PATH_RE = /^\/search\/|^\/(?:movie|tv)\/\d+\/|^\/person\/|^\/collection\//;
+
+/*  Search keys are unbounded user input: never read from or written to KV, even
+ *  inside a batch. (Every other edge-only path may still be shared through KV
+ *  when a batch asks for it - see batchPart.) */
+const TMDB_SEARCH_PATH_RE = /^\/search\//;
+
+function tmdbKvWorthy(path) {
+  return !EDGE_ONLY_TMDB_PATH_RE.test(String(path || ''));
+}
+
+/*  How long KV may keep answering from a location's own copy.
+ *
+ *  60 s for the volatile lists, because a refresh written in another location
+ *  has to become visible quickly or every request there sees "stale" and starts a
+ *  refresh of its own. A title record does not change for a week, so an hour-long
+ *  local copy costs no freshness at all and turns repeat reads into hot reads. */
+function tmdbKvReadTtl(path) {
+  return isVolatileTmdbPath(path) ? 60 : 3600;
+}
+
+/** How long an entry is kept past its freshness window, for the SWR read. */
+function tmdbRetention(softTtl) {
+  return Math.min(softTtl * TMDB_STALE_MULT, TMDB_MAX_RETENTION);
+}
+
+/*  Per-isolate cache state, keyed on `env` for the same reason sitemapMemo is:
+ *  env is one stable object per isolate in production, and keying on it means two
+ *  test environments can never read each other's entries. */
+const _tmdbStateByEnv = new WeakMap();
+
+function tmdbState(env) {
+  if (!env || typeof env !== 'object') return null;
+  let state = _tmdbStateByEnv.get(env);
+  if (!state) {
+    state = {
+      memo: new Map(),
+      refreshedAt: new Map(),
+      batchRefreshedAt: new Map(),
+      kvWrittenAt: new Map(),
+      homeRefreshedAt: 0,
+      kvBlockedUntil: 0,
+      kvErrorLoggedAt: 0
+    };
+    _tmdbStateByEnv.set(env, state);
+  }
+  return state;
+}
+
+function memoGet(state, path) {
+  if (!state) return null;
+  const entry = state.memo.get(path);
+  if (!entry) return null;
+  // Re-inserted so the Map's insertion order doubles as least-recently-used.
+  state.memo.delete(path);
+  state.memo.set(path, entry);
+  return entry;
+}
+
+function memoPut(state, path, text, storedAt) {
+  if (!state || typeof text !== 'string' || text.length > TMDB_MEMO_MAX_CHARS) return;
+  state.memo.delete(path);
+  state.memo.set(path, { text, t: storedAt });
+  while (state.memo.size > TMDB_MEMO_MAX) state.memo.delete(state.memo.keys().next().value);
+}
+
+/** Records a cooldown slot for `key`; false when one was taken too recently. */
+function takeCooldown(map, key, windowMs) {
+  const now = Date.now();
+  if (now - (map.get(key) || 0) < windowMs) return false;
+  map.set(key, now);
+  if (map.size > 1024) map.delete(map.keys().next().value);
+  return true;
+}
+
+/*  Hands background work to the runtime and makes sure it can never surface as an
+ *  unhandled rejection: a cache write is an optimisation, and a failed one must
+ *  not show up as an error in the log used to diagnose real faults. */
+function waitFor(ctx, work) {
+  const guarded = Promise.resolve(work).catch((err) => {
+    console.log('[cache] background work failed: ' + (err && err.message));
+  });
+  if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(guarded);
+  return guarded;
+}
+
+function noteKvWriteFailure(state, err) {
+  const now = Date.now();
+  if (state) state.kvBlockedUntil = now + TMDB_KV_WRITE_BACKOFF_MS;
+  if (!state || now - state.kvErrorLoggedAt > TMDB_KV_WRITE_BACKOFF_MS) {
+    if (state) state.kvErrorLoggedAt = now;
+    console.warn('[tmdb] KV write failed; KV writes paused for 10 min, the edge cache '
+      + 'keeps serving: ' + (err && err.message));
+  }
+}
+
+function kvWritesPaused(state) {
+  return Boolean(state && Date.now() < state.kvBlockedUntil);
+}
+
+function tmdbEdgeKey(path) {
+  return new Request(TMDB_EDGE_ORIGIN + '/api/tmdb' + path, { method: 'GET' });
+}
+
+function tmdbEdgeEntry(text, storedAt, softTtl) {
+  return new Response(text, {
+    status: 200,
+    headers: {
+      'content-type': 'application/json',
+      // Retention only; freshness is the stored-at stamp.
+      'cache-control': 'public, s-maxage=' + tmdbRetention(softTtl),
+      [TMDB_STORED_HEADER]: String(storedAt)
+    }
   });
 }
 
-/*  Background refresh for a stale entry. Never throws: the stale copy has
- *  already gone out to the visitor, so a failed refresh just means the next
- *  request tries again. */
-async function refreshTmdb(path, cacheKey, softTtl, env) {
-  try {
-    const res = await tmdbOnce(path, env);
-    if (res.status === 200) await putTmdb(cacheKey, res.text, softTtl, env);
-  } catch (err) {
-    console.log('[tmdb] background refresh failed for ' + path + ': ' + (err && err.message));
+/** Writes an upstream answer to every layer that should hold it. `layers` is
+ *  fetchTmdbJson's { edge, kv } decision; without it the path's defaults apply. */
+function storeTmdb(path, text, softTtl, storedAt, env, ctx, layers) {
+  const state = tmdbState(env);
+  memoPut(state, path, text, storedAt);
+
+  const colo = layers && layers.edge === false ? null : coloCache();
+  if (colo) waitFor(ctx, colo.put(tmdbEdgeKey(path), tmdbEdgeEntry(text, storedAt, softTtl)));
+
+  const kv = layers ? layers.kv : tmdbKvWorthy(path);
+  if (env && env.TMDB_CACHE && kv && !kvWritesPaused(state)
+      && (!state || takeCooldown(state.kvWrittenAt, path, TMDB_KV_REWRITE_MIN_MS))) {
+    waitFor(ctx, Promise.resolve(env.TMDB_CACHE.put('/api/tmdb' + path, text, {
+      expirationTtl: tmdbRetention(softTtl),
+      metadata: { t: storedAt }
+    })).catch((err) => noteKvWriteFailure(state, err)));
   }
 }
 
-async function fetchTmdbJson(path, env, ctx) {
+/** Fetches a fresh copy and stores it. Resolves null on a non-200 answer. */
+async function refreshTmdbNow(path, softTtl, env, ctx, layers) {
+  const res = await tmdbOnce(path, env);
+  if (res.status !== 200) return null;
+  const storedAt = Date.now();
+  storeTmdb(path, res.text, softTtl, storedAt, env, ctx, layers);
+  return { status: 200, text: res.text, cache: 'MISS', layer: 'origin', storedAt };
+}
+
+/*  Background refresh for a stale entry. Never throws: the stale copy has already
+ *  gone out, so a failed refresh just means a later request tries again - but not
+ *  sooner than TMDB_REFRESH_COOLDOWN_MS, so a burst of visitors on a stale path is
+ *  one upstream request, not one each. */
+function scheduleTmdbRefresh(path, softTtl, env, ctx, layers) {
+  const state = tmdbState(env);
+  if (state && !takeCooldown(state.refreshedAt, path, TMDB_REFRESH_COOLDOWN_MS)) return;
+  waitFor(ctx, refreshTmdbNow(path, softTtl, env, ctx, layers).catch((err) => {
+    console.log('[tmdb] background refresh failed for ' + path + ': ' + (err && err.message));
+  }));
+}
+
+/**
+ * One TMDB path through L1 -> L2 -> KV -> TMDB.
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.revalidate] wait for a fresh copy instead of answering
+ *        stale. Only for work that runs BEHIND a response (refreshBatch), where
+ *        waiting costs the visitor nothing and a rebuilt plan must not be
+ *        assembled from the same stale bodies it is replacing.
+ * @param {boolean} [opts.edge] false = skip the per-path edge layer (L2). For
+ *        fan-outs: on the Workers Free plan every Cache API match/put counts
+ *        against the SAME 50-subrequests-per-invocation quota as fetch(), and
+ *        waits in the same 6 connection slots. Two edge calls per path took a
+ *        cold 16-path batch to 50 and a 24-title OTT chart to ~73, past which
+ *        every fetch() throws "Too many subrequests". A batch has its own
+ *        plan-level edge entry, so the per-path copy bought it nothing anyway.
+ * @param {boolean} [opts.share] also keep a per-title sub-resource in KV. A
+ *        fan-out that skips L2 would otherwise cache it nowhere shared, and
+ *        re-fetch every /watch/providers or /release_dates in the plan from TMDB
+ *        on each cold assemble. Search is never shared.
+ * @returns {Promise<{status:number, text:string, cache:string, layer:string, storedAt:number}>}
+ *        `cache` keeps its old vocabulary (HIT / STALE / MISS); `layer` says
+ *        which layer answered.
+ */
+async function fetchTmdbJson(path, env, ctx, opts) {
+  const options = opts || {};
+  const isSearch = TMDB_SEARCH_PATH_RE.test(path);
+  const layers = {
+    edge: options.edge !== false,
+    kv: !isSearch && (options.share === true || tmdbKvWorthy(path))
+  };
+  const edge = layers.edge;
   const cacheKey = '/api/tmdb' + path;
   const softTtl = tmdbCacheTtl(path, env);
+  const freshMs = softTtl * 1000;
+  const state = tmdbState(env);
+  const now = Date.now();
 
-  if (env.TMDB_CACHE) {
-    /*  cacheTtl is 60 rather than 300 because the colo cache sits IN FRONT of
-     *  the staleness check: a background refresh that has already landed in KV
-     *  would otherwise keep being masked by a colo copy for five minutes, and
-     *  the refresh would be re-triggered on every request in that window. */
-    const hit = await env.TMDB_CACHE.getWithMetadata(cacheKey, { type: 'text', cacheTtl: 60 });
-    if (hit && hit.value) {
-      const storedAt = hit.metadata && hit.metadata.t;
-      if (!storedAt || Date.now() - storedAt < softTtl * 1000) {
-        return { status: 200, text: hit.value, cache: 'HIT' };
+  let stale = null;
+  const consider = (text, t, layer) => { if (!stale || t > stale.t) stale = { text, t, layer }; };
+
+  // L1 — this isolate's memory.
+  const memo = memoGet(state, path);
+  if (memo) {
+    if (now - memo.t < freshMs) {
+      return { status: 200, text: memo.text, cache: 'HIT', layer: 'memo', storedAt: memo.t };
+    }
+    consider(memo.text, memo.t, 'memo');
+  }
+
+  // L2 — this location's cache.
+  const colo = edge ? coloCache() : null;
+  if (colo) {
+    try {
+      const hit = await colo.match(tmdbEdgeKey(path));
+      if (hit) {
+        const text = await hit.text();
+        const t = Number(hit.headers.get(TMDB_STORED_HEADER)) || 0;
+        if (looksLikeJson(text)) {
+          /*  An entry without a stamp predates this layer: the old generic edge
+           *  put stored only non-stale proxy answers, for at most s-maxage, so it
+           *  is treated as fresh - the same rule legacy KV entries get. */
+          if (!t || now - t < freshMs) {
+            const storedAt = t || now;
+            memoPut(state, path, text, storedAt);
+            return { status: 200, text, cache: 'HIT', layer: 'edge', storedAt };
+          }
+          consider(text, t, 'edge');
+        }
       }
-      ctx.waitUntil(refreshTmdb(path, cacheKey, softTtl, env));
-      return { status: 200, text: hit.value, cache: 'STALE' };
+    } catch (err) {
+      // An edge lookup must never fail the request — fall through to KV.
+      console.log('[tmdb] edge read failed for ' + path + ': ' + (err && err.message));
     }
   }
 
-  const res = await tmdbOnce(path, env);
-  if (env.TMDB_CACHE && res.status === 200) {
-    ctx.waitUntil(putTmdb(cacheKey, res.text, softTtl, env));
+  // L3 — KV. (Never for a search key: nothing writes those to KV.)
+  if (env && env.TMDB_CACHE && !isSearch) {
+    try {
+      const hit = await env.TMDB_CACHE.getWithMetadata(cacheKey,
+        { type: 'text', cacheTtl: tmdbKvReadTtl(path) });
+      if (hit && hit.value) {
+        const t = (hit.metadata && hit.metadata.t) || 0;
+        /*  Legacy entries written before the SWR read carry no metadata. Their
+         *  own expirationTtl WAS the freshness window, so a hit on one is fresh. */
+        if (!t || now - t < freshMs) {
+          const storedAt = t || now;
+          memoPut(state, path, hit.value, storedAt);
+          // Promoted, so the next read in this location stops at L2.
+          if (colo) waitFor(ctx, colo.put(tmdbEdgeKey(path), tmdbEdgeEntry(hit.value, storedAt, softTtl)));
+          return { status: 200, text: hit.value, cache: 'HIT', layer: 'kv', storedAt };
+        }
+        consider(hit.value, t, 'kv');
+      }
+    } catch (err) {
+      /*  A KV read failure - including a spent daily read quota - used to throw
+       *  straight out of here and turn into a 503. Falling through to TMDB is
+       *  strictly better: the visitor still gets the data. */
+      console.log('[tmdb] kv read failed for ' + path + ': ' + (err && err.message));
+    }
   }
-  return { status: res.status, text: res.text, cache: 'MISS' };
+
+  if (stale) {
+    if (options.revalidate) {
+      const fresh = await refreshTmdbNow(path, softTtl, env, ctx, layers).catch(() => null);
+      if (fresh) return fresh;
+    } else {
+      scheduleTmdbRefresh(path, softTtl, env, ctx, layers);
+    }
+    return { status: 200, text: stale.text, cache: 'STALE', layer: stale.layer, storedAt: stale.t };
+  }
+
+  // L4 — TMDB, collapsed to one request per path per isolate.
+  const res = await tmdbOnce(path, env);
+  const storedAt = Date.now();
+  if (res.status === 200) storeTmdb(path, res.text, softTtl, storedAt, env, ctx, layers);
+  return { status: res.status, text: res.text, cache: 'MISS', layer: 'origin', storedAt };
 }
 
-/*  Shared-cache freshness for a TMDB path.
+/*  Browser-facing freshness for a TMDB path.
  *
- *  max-age (the browser's own copy) keeps the split it always had. What is new is
- *  everything after it: s-maxage lets the Cloudflare cache hold the body far
- *  longer than a browser should, and stale-while-revalidate lets that cache
- *  answer instantly from an expired copy while it refreshes underneath. Without
- *  those two, every s-maxage boundary reached the Worker and — before the SWR
- *  read above existed — TMDB. stale-if-error is the outage behaviour the Express
- *  implementation had and this one did not: a week-old body beats an error page.
- */
+ *  max-age is the browser's own copy. s-maxage and stale-while-revalidate are for
+ *  shared caches; stale-if-error is the outage behaviour the Express
+ *  implementation had: a week-old body beats an error page. The edge copy this
+ *  Worker keeps for itself is described separately, by tmdbEdgeEntry(). */
 function tmdbCacheControl(path) {
   const volatile = isVolatileTmdbPath(path);
   return 'public'
@@ -901,6 +1228,10 @@ function tmdbCacheControl(path) {
     + ', stale-while-revalidate=' + (volatile ? 86400 : 604800)
     + ', stale-if-error=604800';
 }
+
+/*  A STALE answer is already being refreshed behind the response, so the browser
+ *  is told to come back in a minute rather than pin the old body for 30. */
+const TMDB_STALE_BROWSER_CACHE = 'public, max-age=60, stale-if-error=604800';
 
 async function handleTmdbProxy(request, env, ctx, url) {
   const path = url.pathname.replace('/api/tmdb', '') + url.search;
@@ -915,12 +1246,16 @@ async function handleTmdbProxy(request, env, ctx, url) {
     return json({ error: 'upstream unavailable', detail: String(err && err.message).slice(0, 120) }, 503);
   }
 
+  const ok = result.status === 200;
   return new Response(result.text, {
     status: result.status,
     headers: {
       'content-type': 'application/json',
       'x-cache': result.cache,
-      'cache-control': result.status === 200 ? tmdbCacheControl(path) : 'no-store'
+      'x-cache-layer': result.layer || 'origin',
+      'cache-control': !ok
+        ? 'no-store'
+        : (result.cache === 'STALE' ? TMDB_STALE_BROWSER_CACHE : tmdbCacheControl(path))
     }
   });
 }
@@ -1077,58 +1412,163 @@ async function readBatchPlan(request, url) {
   return parsed;
 }
 
+/*  ══════════════════════════════════════════════════════════════════════════
+ *  THE BATCH NO LONGER PARSES ANYTHING
+ *  ══════════════════════════════════════════════════════════════════════════
+ *  runBatchPlan used to JSON.parse every path's body, and the handler then
+ *  JSON.stringify'd the combined { results } object. For the 16-path ALL plan
+ *  that is sixteen parses of 20-50 KB each plus one ~0.5 MB serialise - all to
+ *  produce a string made of the very bytes it started from. Against the free
+ *  plan's 10 ms CPU budget that was most of an invocation, and it was paid on
+ *  every cold plan AND every background refresh, because waitUntil work is billed
+ *  to the request that started it. It is the single largest CPU cost this Worker
+ *  had.
+ *
+ *  The bodies are already JSON - TMDB wrote them and looksLikeJson() checked them
+ *  on the way into the cache - so they are now spliced into the response as they
+ *  are. The client receives byte-for-byte the same document and parses it once,
+ *  exactly as before.
+ */
+
+/** One path of a plan, as a raw JSON fragment. Never throws. The per-path edge
+ *  layer is skipped: the plan has its own edge entry, and on the Free plan two
+ *  Cache API calls per path would push a cold plan past 50 subrequests. `share`
+ *  keeps per-title sub-resources in KV instead, so a re-assemble does not go
+ *  back to TMDB for them. `stale` marks a body that could not be refreshed. */
+async function batchPart(path, env, ctx, opts) {
+  try {
+    const result = await fetchTmdbJson(path, env, ctx,
+      Object.assign({ edge: false, share: true }, opts));
+    if (result.status !== 200) return { ok: false, reason: `TMDB responded ${result.status}` };
+    return { ok: true, text: result.text, stale: result.cache === 'STALE' };
+  } catch (err) {
+    return { ok: false, reason: String((err && err.message) || err || 'unavailable') };
+  }
+}
+
+/** `{"results":[...]}` in Promise.allSettled's shape, built by concatenation. */
+function batchBody(parts) {
+  let body = '{"results":[';
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (i) body += ',';
+    body += part && part.ok
+      ? '{"status":"fulfilled","value":' + part.text + '}'
+      : '{"status":"rejected","reason":' + JSON.stringify(String((part && part.reason) || 'unavailable')) + '}';
+  }
+  return body + ']}';
+}
+
 /*  The fan-out itself, lifted out of handleTmdbBatch so the background refresh
  *  below can reuse it verbatim. One dead source must never fail the whole first
  *  screen, which is why every path is individually caught and the
  *  Promise.allSettled shape the client used to build itself is preserved exactly.
+ *
+ *  Returns the combined promise AND a live array that fills in as paths settle:
+ *  the array is what lets handleTmdbBatch answer at its deadline with whatever
+ *  has already arrived instead of waiting on the slowest path.
  */
-function runBatchPlan(paths, env, ctx) {
-  return Promise.all(paths.map(async (path) => {
-    try {
-      const result = await fetchTmdbJson(path, env, ctx);
-      if (result.status !== 200) {
-        return { status: 'rejected', reason: `TMDB responded ${result.status}` };
-      }
-      return { status: 'fulfilled', value: JSON.parse(result.text) };
-    } catch (err) {
-      return { status: 'rejected', reason: err.message };
-    }
-  }));
+function runBatchPlan(paths, env, ctx, opts) {
+  const parts = new Array(paths.length).fill(null);
+  const all = Promise.all(paths.map((path, i) => batchPart(path, env, ctx, opts)
+    .then((part) => { parts[i] = part; return part; })));
+  return { parts, all };
 }
 
 function putBatch(planKey, body, env) {
-  return env.TMDB_CACHE.put(planKey, body, {
+  const state = tmdbState(env);
+  if (kvWritesPaused(state)) return Promise.resolve();
+  return Promise.resolve(env.TMDB_CACHE.put(planKey, body, {
     // Kept well past its freshness window so the SWR read has something to
     // answer with; the metadata timestamp, not the expiry, decides freshness.
     expirationTtl: Math.min(BATCH_CACHE_TTL * TMDB_STALE_MULT, TMDB_MAX_RETENTION),
     metadata: { t: Date.now() }
-  });
+  })).catch((err) => noteKvWriteFailure(state, err));
 }
 
-/*  Rebuilds a stale plan after its stale copy has already been sent. Cheap by
- *  construction: every path inside it is itself SWR-cached, so this is normally
- *  a handful of KV reads rather than a round of upstream requests.
+/** A stale plan is rebuilt at most this often per isolate. */
+const BATCH_REFRESH_COOLDOWN_MS = 30000;
+/** ...and after a rebuild TMDB could not complete, at most this often. */
+const BATCH_RETRY_AFTER_FAIL_MS = 300000;
+
+/*  Whether an assembled plan is worth a KV write. A plan made only of lists and
+ *  title records is the same for every visitor (the home feed, the carousel, a
+ *  category tab), so one KV copy serves every location. A plan holding per-title
+ *  sub-resources (a hero deck's release_dates, an OTT wave's watch/providers)
+ *  differs per visitor - their own deck, their own locally fresh paths - so KV
+ *  would pay one write per visitor for an entry nobody else reads. Those plans
+ *  live in the location's cache only; their parts are in KV (batchPart), so a
+ *  re-assemble is KV reads, not TMDB traffic. */
+function planSharedInKv(paths, env) {
+  return Boolean(env && env.TMDB_CACHE) && paths.every(tmdbKvWorthy);
+}
+
+/*  Rebuilds a stale plan after its stale copy has already been sent.
  *
  *  `planCacheKey` is optional and, when given, the colo copy is rewritten too.
  *  It has to be: the colo layer is checked BEFORE KV, so refreshing only KV
  *  would leave the stale colo entry answering every request in that colo until
  *  its retention window expired — the refresh would run on every request and
  *  never be observed by anyone.
+ *
+ *  `coloStoredAt` is passed when the trigger was a stale COLO copy. That does
+ *  not mean the plan is stale everywhere - another location may already have
+ *  rebuilt it into KV - so one KV read settles it first. When KV is newer, the
+ *  plan is promoted into this location for no assembly, no TMDB traffic and no
+ *  KV write. Without that, every location rebuilt and re-wrote the same plan once
+ *  per freshness window, which is exactly the kind of write volume the free
+ *  plan's 1,000 writes/day cannot absorb.
  */
-async function refreshBatch(paths, planKey, env, ctx, planCacheKey) {
+async function refreshBatch(paths, planKey, env, ctx, planCacheKey, coloStoredAt) {
   try {
-    const settled = await runBatchPlanOnce(planKey, paths, env, ctx);
-    if (settled.every((r) => r.status === 'fulfilled')) {
-      const body = JSON.stringify({ results: settled });
+    const planInKv = planSharedInKv(paths, env);
+    if (coloStoredAt !== undefined && planInKv) {
+      const hit = await env.TMDB_CACHE.getWithMetadata(planKey, { type: 'text', cacheTtl: 60 });
+      const t = hit && hit.value && hit.metadata && hit.metadata.t;
+      if (t && t > coloStoredAt && Date.now() - t < BATCH_CACHE_TTL * 1000) {
+        const colo = coloCache();
+        if (colo && planCacheKey) await colo.put(planCacheKey, batchCacheEntry(hit.value, t));
+        return;
+      }
+    }
+
+    /*  revalidate: the per-path entries inside a stale plan are normally stale
+     *  too - they were written by the same assemble - and without it the rebuilt
+     *  plan was put together from those same stale bodies and then stored as
+     *  FRESH, so a list could reach a visitor two freshness windows old. This runs
+     *  behind a response that has already gone out, so waiting for TMDB here costs
+     *  the visitor nothing. */
+    const run = runBatchPlanOnce(planKey, paths, env, ctx, { revalidate: true });
+    const parts = await run.all;
+    if (parts.every((p) => p && p.ok && !p.stale)) {
+      const body = batchBody(parts);
       if (planCacheKey) {
-        await putBatchEverywhere(planCacheKey, planKey, body, env, ctx);
-      } else if (env.TMDB_CACHE) {
+        await putBatchEverywhere(planCacheKey, planKey, body, env, ctx, planInKv);
+      } else if (planInKv) {
         await putBatch(planKey, body, env);
+      }
+    } else {
+      /*  TMDB could not refresh part of the plan. Storing it anyway would stamp
+       *  the old bodies as fresh for another BATCH_CACHE_TTL (pre-outage data
+       *  served as current for hours after TMDB recovers), and retrying every
+       *  30 s would hammer an upstream that is already failing. The stale copy
+       *  keeps being served; the next attempt waits BATCH_RETRY_AFTER_FAIL_MS. */
+      const state = tmdbState(env);
+      if (state) {
+        state.batchRefreshedAt.set(planKey,
+          Date.now() + BATCH_RETRY_AFTER_FAIL_MS - BATCH_REFRESH_COOLDOWN_MS);
       }
     }
   } catch (err) {
     console.log('[batch] background refresh failed: ' + (err && err.message));
   }
+}
+
+/** Starts a plan refresh unless this isolate started one moments ago. */
+function scheduleBatchRefresh(paths, planKey, env, ctx, planCacheKey, coloStoredAt) {
+  const state = tmdbState(env);
+  if (state && !takeCooldown(state.batchRefreshedAt, planKey, BATCH_REFRESH_COOLDOWN_MS)) return;
+  ctx.waitUntil(refreshBatch(paths, planKey, env, ctx, planCacheKey, coloStoredAt));
 }
 
 /*  ══════════════════════════════════════════════════════════════════════════
@@ -1204,11 +1644,11 @@ function batchCacheEntry(body, storedAt) {
  *  KV remains the durable copy that a cold colo populates itself from. Writing
  *  only to the colo would give every Cloudflare location its own cold start.
  */
-function putBatchEverywhere(planCacheKey, planKey, body, env, ctx) {
+function putBatchEverywhere(planCacheKey, planKey, body, env, ctx, kv) {
   const storedAt = Date.now();
   const colo = coloCache();
   const work = [];
-  if (env.TMDB_CACHE) work.push(putBatch(planKey, body, env));
+  if (kv !== false && env.TMDB_CACHE) work.push(putBatch(planKey, body, env));
   if (colo) work.push(colo.put(planCacheKey, batchCacheEntry(body, storedAt)));
   return Promise.all(work.map(p => p.catch((err) => {
     // A cache write is an optimisation; a failed one must never surface as an
@@ -1221,25 +1661,38 @@ function putBatchEverywhere(planCacheKey, planKey, body, env, ctx) {
  *
  *  `_tmdbInFlight` already collapses concurrent requests for the same PATH, but
  *  nothing collapsed them at the plan level — so N visitors arriving together on
- *  a cold plan each ran their own `runBatchPlan`: N Ã— the assemble, the
- *  JSON.parse of every path, the re-serialise and the KV write, to produce N
- *  identical bodies. The per-path map meant they at least shared the upstream
- *  fetches, which is why this was invisible in TMDB request counts while still
- *  burning CPU time and KV writes on every cold start.
+ *  a cold plan each ran their own `runBatchPlan`: N x the assemble, the
+ *  per-path cache reads, the serialise and the KV write, to produce N identical
+ *  bodies. The per-path map meant they at least shared the upstream fetches,
+ *  which is why this was invisible in TMDB request counts while still burning
+ *  CPU time and KV writes on every cold start.
  */
 const _batchInFlight = new Map();
 
 /** One assemble per plan per isolate, however many callers ask for it at once. */
-function runBatchPlanOnce(planKey, paths, env, ctx) {
+function runBatchPlanOnce(planKey, paths, env, ctx, opts) {
   const pending = _batchInFlight.get(planKey);
   if (pending) return pending;
-  const started = runBatchPlan(paths, env, ctx);
-  _batchInFlight.set(planKey, started);
-  // Cleared on both outcomes: a rejected promise must not become the permanent
+  const run = runBatchPlan(paths, env, ctx, opts);
+  _batchInFlight.set(planKey, run);
+  // Cleared once settled, so a finished run can never become the permanent
   // answer for this plan.
-  started.then(() => {}, () => {}).then(() => { _batchInFlight.delete(planKey); });
-  return started;
+  run.all.then(() => {}, () => {}).then(() => {
+    if (_batchInFlight.get(planKey) === run) _batchInFlight.delete(planKey);
+  });
+  return run;
 }
+
+/*  ── THE EDGE ANSWERS BEFORE THE BROWSER GIVES UP ──
+ *  tmdbBatch in moviezone.js aborts the batch POST at MZ_BATCH_TIMEOUT_MS (10 s)
+ *  and falls back to one request per path. A cold assemble waits on its slowest
+ *  path, and one slow TMDB path could take that whole budget - so the Worker kept
+ *  working on an answer the browser had already thrown away, and the fallback
+ *  then sent every path again. Now the assemble answers at this deadline with
+ *  everything that has arrived; a path still in flight is reported as rejected
+ *  (the client fetches just that one), keeps running under waitUntil, and fills
+ *  the caches for the next visitor. */
+const BATCH_DEADLINE_MS = 7000;
 
 async function handleTmdbBatch(request, env, ctx, url) {
   let paths;
@@ -1267,6 +1720,7 @@ async function handleTmdbBatch(request, env, ctx, url) {
   ).slice(0, 32);
 
   const planCacheKey = batchCacheKey(url, planKey);
+  const planInKv = planSharedInKv(paths, env);
 
   const batchHeaders = (cacheState) => ({
     'content-type': 'application/json',
@@ -1288,7 +1742,7 @@ async function handleTmdbBatch(request, env, ctx, url) {
         const storedAt = Number(cached.headers.get(BATCH_STORED_HEADER)) || 0;
         const fresh = !storedAt || Date.now() - storedAt < BATCH_CACHE_TTL * 1000;
         if (!fresh) {
-          ctx.waitUntil(refreshBatch(paths, planKey, env, ctx, planCacheKey));
+          scheduleBatchRefresh(paths, planKey, env, ctx, planCacheKey, storedAt);
         }
         return new Response(cached.body, {
           status: 200,
@@ -1301,7 +1755,7 @@ async function handleTmdbBatch(request, env, ctx, url) {
     }
   }
 
-  if (env.TMDB_CACHE) {
+  if (planInKv) {
     /*  LAYER 2 — KV. Same stale-while-revalidate read, and for a bigger reason
      *  than the per-path one: this entry IS the first screen. Every
      *  BATCH_CACHE_TTL boundary used to hand one visitor the whole fan-out — 16
@@ -1313,19 +1767,13 @@ async function handleTmdbBatch(request, env, ctx, url) {
       if (hit && hit.value) {
         const storedAt = hit.metadata && hit.metadata.t;
         const fresh = !storedAt || Date.now() - storedAt < BATCH_CACHE_TTL * 1000;
-        if (!fresh) ctx.waitUntil(refreshBatch(paths, planKey, env, ctx, planCacheKey));
+        if (!fresh) scheduleBatchRefresh(paths, planKey, env, ctx, planCacheKey);
         /*  Promote a KV hit into the colo cache, which is what makes the NEXT
          *  request in this colo skip KV entirely. Only a fresh body is promoted: a
          *  stale one already has a refresh running behind it, and pinning it here
-         *  would mask the fresher copy that lands a moment later — the same rule
-         *  the generic edge layer in fetch() applies to STALE proxy responses. */
-        if (fresh) {
-          const promote = coloCache();
-          if (promote) {
-            ctx.waitUntil(promote
-              .put(planCacheKey, batchCacheEntry(hit.value, storedAt || Date.now()))
-              .catch(() => {}));
-          }
+         *  would mask the fresher copy that lands a moment later. */
+        if (fresh && colo) {
+          waitFor(ctx, colo.put(planCacheKey, batchCacheEntry(hit.value, storedAt || Date.now())));
         }
         return new Response(hit.value, {
           status: 200,
@@ -1339,16 +1787,37 @@ async function handleTmdbBatch(request, env, ctx, url) {
     }
   }
 
-  // LAYER 3 — assemble, collapsed to one run per plan per isolate.
-  const settled = await runBatchPlanOnce(planKey, paths, env, ctx);
+  // LAYER 3 — assemble, collapsed to one run per plan per isolate, bounded by
+  // BATCH_DEADLINE_MS.
+  const run = runBatchPlanOnce(planKey, paths, env, ctx);
+  // Keeps every path alive past a deadline answer, so its cache writes still land.
+  waitFor(ctx, run.all);
 
-  const body = JSON.stringify({ results: settled });
+  let timer = null;
+  // Overridable like the other tunables (and so the deadline is testable).
+  const deadlineMs = envInt(env, 'BATCH_DEADLINE_MS', BATCH_DEADLINE_MS, 100, 9000);
+  const finished = await Promise.race([
+    run.all.then(() => true),
+    new Promise((resolve) => { timer = setTimeout(() => resolve(false), deadlineMs); })
+  ]);
+  if (timer !== null) clearTimeout(timer);
+
+  const parts = finished
+    ? run.parts
+    : run.parts.map((part) => part || { ok: false, reason: 'still loading at the edge' });
+  const body = batchBody(parts);
 
   // Only cache a batch that actually worked. Caching a half-empty first screen
-  // for 30 minutes would turn one bad moment into a lasting one.
-  const allOk = settled.every((r) => r.status === 'fulfilled');
+  // for 3 hours would turn one bad moment into a lasting one.
+  const allOk = finished && parts.every((part) => part && part.ok);
   if (allOk) {
-    ctx.waitUntil(putBatchEverywhere(planCacheKey, planKey, body, env, ctx));
+    waitFor(ctx, putBatchEverywhere(planCacheKey, planKey, body, env, ctx, planInKv));
+  } else if (!finished) {
+    // The plan is stored once the slow paths land, so the NEXT visitor gets it
+    // whole in one read instead of repeating this assemble.
+    waitFor(ctx, run.all.then((late) => (late.every((part) => part && part.ok)
+      ? putBatchEverywhere(planCacheKey, planKey, batchBody(late), env, ctx, planInKv)
+      : null)));
   }
 
   return new Response(body, {
@@ -1422,9 +1891,11 @@ function slimChartCard(detail, mediaType) {
  *  or has no poster, is DROPPED rather than rendered blank: loadMovies filters
  *  posterless titles on the client anyway, so passing one would waste a rank. */
 async function hydrateOttChart(order, env, ctx) {
+  // edge: false for the same reason as batchPart: up to OTT_CHART_HEAD detail
+  // reads in one invocation must stay inside the Free plan's 50 subrequests.
   const settled = await Promise.allSettled(
     order.map((entry) => fetchTmdbJson(
-      '/' + entry.media_type + '/' + entry.id + '?language=en-US', env, ctx))
+      '/' + entry.media_type + '/' + entry.id + '?language=en-US', env, ctx, { edge: false }))
   );
 
   const cards = [];
@@ -1663,10 +2134,10 @@ const SSR_DETAIL_APPEND = 'credits,similar,recommendations,videos,watch/provider
  * seo-ssr renderers were written against, including the `tmdbStatus` property
  * their 404 handling looks for.
  */
-function ssrTmdb(env, ctx) {
+function ssrTmdb(env, ctx, opts) {
   return async (apiPath, params) => {
     const query = new URLSearchParams(params || {}).toString();
-    const result = await fetchTmdbJson(apiPath + (query ? '?' + query : ''), env, ctx);
+    const result = await fetchTmdbJson(apiPath + (query ? '?' + query : ''), env, ctx, opts);
     if (result.status !== 200) {
       const err = new Error('TMDB responded ' + result.status);
       err.tmdbStatus = result.status;
@@ -2027,7 +2498,9 @@ async function getSitemapItems(kind, env, ctx) {
   if (!result) {
     let items = [];
     try {
-      items = await seo.collectSitemapItems(ssrTmdb(env, ctx), wanted, SITEMAP_LIVE_PAGES);
+      // edge: false - up to 21 list reads in one invocation, and on the Free plan
+      // two Cache API calls per path would take this build past 50 subrequests.
+      items = await seo.collectSitemapItems(ssrTmdb(env, ctx, { edge: false }), wanted, SITEMAP_LIVE_PAGES);
     } catch (err) {
       console.warn('[ssr] sitemap ' + wanted + ' live build failed:', err && err.message);
     }
@@ -2226,6 +2699,15 @@ async function browseEntries(env, ctx) {
  */
 const BROWSE_MEMO_KEY = 'browse:index';
 
+/*  One collator for the whole sort. `a.localeCompare(b, 'en')` resolves a locale
+ *  and builds collation state on EVERY comparison; an ~8,000-title catalogue sorts
+ *  in ~100k comparisons, which made this the most CPU-hungry cold path the Worker
+ *  had after the sitemap XML. Intl.Collator('en').compare produces the identical
+ *  order - it is what localeCompare uses underneath - with the setup paid once. */
+const BROWSE_COLLATOR = (typeof Intl !== 'undefined' && Intl.Collator)
+  ? new Intl.Collator('en')
+  : null;
+
 function browseIndexFrom(entries) {
   const counts = {};
   const byLetter = new Map();
@@ -2238,9 +2720,14 @@ function browseIndexFrom(entries) {
   }
   /*  Sorted here, once per memo window, rather than inside serveBrowseLetter
    *  once per request. Same comparator and same locale, so the published page
-   *  order is unchanged. */
-  for (const bucket of byLetter.values()) {
-    bucket.sort((a, b) => ssrTitleOf(a).localeCompare(ssrTitleOf(b), 'en'));
+   *  order is unchanged. Titles are read once per entry, not once per compare. */
+  const compare = BROWSE_COLLATOR
+    ? BROWSE_COLLATOR.compare
+    : (a, b) => a.localeCompare(b, 'en');
+  for (const [letter, bucket] of byLetter) {
+    const keyed = bucket.map((entry) => [ssrTitleOf(entry), entry]);
+    keyed.sort((a, b) => compare(a[0], b[0]));
+    byLetter.set(letter, keyed.map((pair) => pair[1]));
   }
   return { total: entries.length, counts, byLetter };
 }
@@ -2568,6 +3055,175 @@ function heroEarlyHints(backdropPath) {
   ];
 }
 
+/*  ══════════════════════════════════════════════════════════════════════════
+ *  THE HOMEPAGE IS ANSWERED FROM THE EDGE AND REBUILT BEHIND THE RESPONSE
+ *  ══════════════════════════════════════════════════════════════════════════
+ *  "/" is the most-requested document on the site, and since the hero rewrite
+ *  landed every edge miss did real work in front of the visitor: an env.ASSETS
+ *  read, a TMDB lookup for the hero (a KV read, usually a COLD one at this site's
+ *  traffic level), a race of up to HERO_RESOLVE_BUDGET_MS against it, and an
+ *  HTMLRewriter pass over ~133 KB. And it missed often: caches.default is
+ *  per-location, the entry lived for s-maxage (1 h), and a request whose hero lost
+ *  the race was deliberately not stored - so on a quiet location the next visitor
+ *  paid the whole thing again. That is up to 400 ms on the TTFB of the document
+ *  every other metric on the page waits for.
+ *
+ *  It is now stale-while-revalidate at the edge, the scheme the batch endpoint
+ *  already uses. The rendered document is kept for a day under a synthetic key,
+ *  freshness is its stored-at stamp (HOME_FRESH_MS), and a stale copy is answered
+ *  at once while the rebuild runs under waitUntil. Only the first request a
+ *  location sees - or the first after a deploy - renders inline.
+ *
+ *  The key carries the deployed version (version_metadata in wrangler.jsonc), so
+ *  a new deploy never serves an old document that points at old ?v= bundles.
+ *  Without the binding it degrades to one key that HOME_FRESH_MS keeps recent.
+ *  Every query string shares the entry: env.ASSETS ignores the query for "/", so
+ *  ?utm_*, ?fbclid and ?search= variants are byte-identical documents anyway.
+ *
+ *  The rewritten document also gets a real validator now. It used to ship with
+ *  none (the asset's ETag no longer described the bytes), so every returning
+ *  visitor re-downloaded the whole document. The new ETag is derived from the
+ *  asset's own tag AND the hero path, so it changes whenever either does - which
+ *  is exactly the property the old "drop it" rule was protecting.
+ */
+const HOME_FRESH_MS = 5 * 60 * 1000;
+const HOME_EDGE_RETENTION = 86400;
+const HOME_STORED_HEADER = 'x-mz-stored';
+const HOME_CACHE_CONTROL = 'public, max-age=300, s-maxage=' + HOME_EDGE_RETENTION
+  + ', stale-while-revalidate=86400';
+/** One background rebuild per isolate per this window, however many visitors. */
+const HOME_REFRESH_COOLDOWN_MS = 60000;
+
+/*  "/" only. The asset router answers /index.html with a redirect to "/", and
+ *  sharing the home entry would hand /index.html a duplicate 200 instead. */
+function isHomePath(pathname) {
+  return pathname === '/';
+}
+
+/** The deployed version id, or '' where the binding is absent (tests, dev). */
+function deployVersion(env) {
+  const meta = env && env.CF_VERSION_METADATA;
+  return String((meta && (meta.id || meta.tag)) || '');
+}
+
+function homeEdgeKey(url, env) {
+  const version = deployVersion(env);
+  return new Request(url.origin + '/__mz/home'
+    + (version ? '?v=' + encodeURIComponent(version) : ''), { method: 'GET' });
+}
+
+/*  Renders the homepage: the asset, its headers, and - when it resolves inside
+ *  the budget - the live hero. `cacheable` is false when the hero did not
+ *  resolve, for the reason worker-hero-check.js pins: storing the pass-through
+ *  would pin the stale hard-coded preload at the edge. */
+async function renderHome(request, env, ctx) {
+  /*  A plain GET, not the visitor's request: its conditional headers must not
+   *  turn the render into a 304 from env.ASSETS that then gets treated as the
+   *  document. */
+  const assetResponse = await env.ASSETS.fetch(new Request(request.url, { method: 'GET' }));
+
+  const headers = new Headers(assetResponse.headers);
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('X-Frame-Options', 'SAMEORIGIN');
+  headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  headers.set('Cache-Control', HOME_CACHE_CONTROL);
+  /*  Consumed by Cloudflare Early Hints: the browser can open the TLS connection
+   *  to the poster/backdrop host while the HTML is still on its way. */
+  headers.append('Link', '<https://image.tmdb.org>; rel=preconnect');
+
+  if (assetResponse.status !== 200) {
+    return {
+      response: new Response(assetResponse.body, {
+        status: assetResponse.status,
+        statusText: assetResponse.statusText,
+        headers
+      }),
+      cacheable: false
+    };
+  }
+
+  /*  ── THE HERO HINT ──
+   *  See heroBackdropPath() for why the value in the file cannot be trusted.
+   *  heroWork is kept alive past the response on purpose: when the race times out
+   *  it is the fetch that fills the caches, and without waitUntil it would be
+   *  cancelled with the request. With the L1/L2 layers in fetchTmdbJson this is
+   *  normally an in-memory or same-location read, well inside the budget. */
+  const heroWork = heroBackdropPath(env, ctx);
+  ctx.waitUntil(heroWork.catch(() => {}));
+  let timer = null;
+  const heroPath = await Promise.race([
+    heroWork,
+    new Promise((resolve) => { timer = setTimeout(() => resolve(''), HERO_RESOLVE_BUDGET_MS); })
+  ]);
+  if (timer !== null) clearTimeout(timer);
+
+  if (heroPath) {
+    for (const hint of heroEarlyHints(heroPath)) headers.append('Link', hint);
+    // The asset's validator describes bytes that are no longer being sent.
+    const assetTag = assetResponse.headers.get('ETag') || '';
+    headers.delete('ETag');
+    headers.delete('Last-Modified');
+    // The deploy is part of the validator too: a Worker-only change to the
+    // rewritten bytes must not revalidate into a 304 for the old ones.
+    if (assetTag) {
+      headers.set('ETag', weakEtag(bareEtag(assetTag) + '|' + heroPath + '|' + deployVersion(env)));
+    }
+    headers.set(HOME_STORED_HEADER, String(Date.now()));
+  }
+
+  let response = new Response(assetResponse.body, {
+    status: assetResponse.status,
+    statusText: assetResponse.statusText,
+    headers
+  });
+  if (heroPath) response = rewriteHeroPreload(response, heroPath);
+  return { response, cacheable: Boolean(heroPath) };
+}
+
+/** Rebuilds the stored homepage behind a stale answer. Never throws. */
+async function refreshHome(request, env, ctx, colo, key) {
+  try {
+    const { response, cacheable } = await renderHome(request, env, ctx);
+    if (cacheable) {
+      await colo.put(key, response);
+    } else if (response.body) {
+      await response.body.cancel();
+    }
+  } catch (err) {
+    console.log('[home] background rebuild failed: ' + (err && err.message));
+  }
+}
+
+async function serveHome(request, env, ctx, url) {
+  const colo = coloCache();
+  const key = homeEdgeKey(url, env);
+
+  if (colo) {
+    try {
+      const cached = await colo.match(key);
+      if (cached) {
+        const storedAt = Number(cached.headers.get(HOME_STORED_HEADER)) || 0;
+        const state = tmdbState(env);
+        if (Date.now() - storedAt > HOME_FRESH_MS
+            && (!state || Date.now() - state.homeRefreshedAt > HOME_REFRESH_COOLDOWN_MS)) {
+          if (state) state.homeRefreshedAt = Date.now();
+          ctx.waitUntil(refreshHome(request, env, ctx, colo, key));
+        }
+        return notModified(request, cached) || cached;
+      }
+    } catch (err) {
+      // An edge lookup must never fail the homepage — render it instead.
+      console.log('[home] edge lookup failed: ' + (err && err.message));
+    }
+  }
+
+  const { response, cacheable } = await renderHome(request, env, ctx);
+  if (colo && cacheable) waitFor(ctx, colo.put(key, response.clone()));
+  /*  Stored as the full 200 above, answered as a 304 below when the visitor
+   *  already holds these bytes — caching the 304 would poison the entry. */
+  return notModified(request, response) || response;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -2577,13 +3233,27 @@ export default {
       return Response.redirect(`https://moviezone.dev${url.pathname}${url.search}`, 301);
     }
 
+    /*  /api/* is decided entirely inside routeApi. The TMDB proxy runs its own
+     *  edge layer inside fetchTmdbJson (so the proxy, the batch, SSR and the hero
+     *  share ONE cache entry per path), the batch has its plan-level colo layer,
+     *  and the push endpoints are per-subscriber and must never be shared. The
+     *  generic edge match that used to run here first found nothing for any of
+     *  them except the proxy, and cost every /api request a cache lookup. */
+    if (url.pathname.startsWith('/api/')) {
+      return routeApi(request, env, ctx, url);
+    }
+
+    if (request.method === 'GET' && isHomePath(url.pathname)) {
+      return serveHome(request, env, ctx, url);
+    }
+
     /*  ✅ Edge Cache: checked before any expensive work (FREE, no KV quota).
      *  The key is computed ONCE and reused by every put below — a match and a put
      *  that disagree is worse than no cache at all, because it never hits and
      *  writes an entry per request. */
-    const edgeCache = caches.default;
+    const edgeCache = coloCache();
     const cacheKey = request.method === 'GET' ? edgeCacheKey(request, url) : request;
-    if (request.method === 'GET') {
+    if (edgeCache && request.method === 'GET') {
       const cached = await edgeCache.match(cacheKey);
       if (cached) {
         /*  The revalidation check belongs HERE, not only on freshly rendered
@@ -2593,25 +3263,6 @@ export default {
         const fresh = notModified(request, cached);
         return fresh || cached;
       }
-    }
-
-    const apiResponse = await routeApi(request, env, ctx, url);
-    if (apiResponse) {
-      /*  Cache TMDB proxy GET responses only — not batch (POST, per-plan) and not
-       *  the push endpoints (per-subscriber).
-       *
-       *  A STALE body is deliberately NOT stored. It was served from an expired KV
-       *  entry and a refresh is already running behind this response, so pinning
-       *  it here for the full s-maxage would mask the fresher copy that lands a
-       *  moment later. Skipping the put costs one extra Worker invocation on the
-       *  next request and buys the newest body. */
-      if (request.method === 'GET' && apiResponse.status === 200
-          && url.pathname.startsWith('/api/tmdb/')
-          && !url.pathname.includes('/batch')
-          && apiResponse.headers.get('x-cache') !== 'STALE') {
-        ctx.waitUntil(edgeCache.put(cacheKey, apiResponse.clone()));
-      }
-      return apiResponse;
     }
 
     let ssr = null;
@@ -2627,8 +3278,8 @@ export default {
        *  non-GET key — which would surface as an unhandled waitUntil rejection in
        *  the observability logs, i.e. noise in the one place you look when
        *  diagnosing errors. */
-      if (ssr.status === 200 && request.method === 'GET') {
-        ctx.waitUntil(edgeCache.put(cacheKey, ssr.clone()));
+      if (edgeCache && ssr.status === 200 && request.method === 'GET') {
+        waitFor(ctx, edgeCache.put(cacheKey, ssr.clone()));
       }
       /*  Store the full 200 above, hand the client a 304 below. Doing it in that
        *  order matters: caching the 304 instead would poison the entry for every
@@ -2646,7 +3297,6 @@ export default {
     newHeaders.set('Referrer-Policy', 'strict-origin-when-cross-origin');
 
     const path = url.pathname;
-    let isHomeDocument = false;
 
     if (path === '/sw.js') {
       /*  MUST come before the .js branch below, which was giving the service
@@ -2664,79 +3314,29 @@ export default {
        *  asset-seal.js already guarantees that every ?v= bundle is byte-stable
        *  for its version — that is the whole point of the seal — and the font
        *  files are content-final. Those are exactly the conditions `immutable`
-       *  describes, and vercel.json/netlify.toml have granted them a year for the
-       *  same files all along; only this path was still handing out 30 days, so
-       *  the live deployment had the weakest static caching of the three.
-       *  Unversioned assets keep the month, since their bytes can change. */
+       *  describes. Unversioned assets keep the month, since their bytes can
+       *  change. (Only requests that reach this Worker get these headers; the
+       *  files the asset router serves directly are covered by _headers.) */
       const stable = url.searchParams.has('v') || path.startsWith('/fonts/');
       newHeaders.set('Cache-Control', stable
         ? 'public, max-age=31536000, immutable'
         : 'public, max-age=2592000, immutable');
     } else if (path.endsWith('.html') || path === '/') {
-      /*  Was a flat max-age=3600, which meant a visitor could hold an hour-old
-       *  shell with no way to revalidate and the edge had to re-fetch on every
-       *  boundary. s-maxage + stale-while-revalidate moves the long hold to the
-       *  shared cache, where it can be refreshed underneath a request instead of
-       *  in front of one, and shortens what the browser pins. */
-      newHeaders.set('Cache-Control', 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400');
-      /*  Consumed by Cloudflare Early Hints: the browser can open the TLS
-       *  connection to the poster/backdrop host while the HTML is still being
-       *  assembled, which is earlier than the <link rel=preconnect> in <head>
-       *  can possibly fire. Ignored harmlessly where Early Hints is off. */
+      /*  HEAD / and any other document that reaches here. GET / never does: it
+       *  is answered by serveHome() above. */
+      newHeaders.set('Cache-Control', HOME_CACHE_CONTROL);
       newHeaders.append('Link', '<https://image.tmdb.org>; rel=preconnect');
-      isHomeDocument = (path === '/' || path === '/index.html');
     }
 
-    /*  ── THE HERO HINT (homepage only) ──
-     *  See heroBackdropPath() above for why the value in the file cannot be
-     *  trusted. Resolved before the response is constructed because the Early
-     *  Hint has to go on these headers, and applied to the body by
-     *  rewriteHeroPreload() below so tag and header can never disagree. */
-    let heroPath = '';
-    if (isHomeDocument && request.method === 'GET') {
-      const heroWork = heroBackdropPath(env, ctx);
-      /*  Kept alive past the response on purpose. When the race below times out
-       *  this is the fetch that populates KV, and without waitUntil it would be
-       *  cancelled with the request — so every visitor would time out forever and
-       *  the hero would never resolve at all. */
-      ctx.waitUntil(heroWork.catch(() => {}));
-      heroPath = await Promise.race([
-        heroWork,
-        new Promise((resolve) => setTimeout(() => resolve(''), HERO_RESOLVE_BUDGET_MS))
-      ]);
-      if (heroPath) {
-        for (const hint of heroEarlyHints(heroPath)) newHeaders.append('Link', hint);
-        /*  The validator describes the bytes env.ASSETS handed over, and those are
-         *  no longer the bytes being sent. Left in place it would let a client
-         *  revalidate its way back into a document pinning last week's backdrop,
-         *  and it would collapse two different hero generations onto one entry.
-         *  Dropped rather than recomputed: hashing the rewritten body means
-         *  buffering it, and freshness here is already carried by Cache-Control —
-         *  notModified() returns null when there is no ETag, so the 304 path just
-         *  stays out of the way for this one document. */
-        newHeaders.delete('ETag');
-        newHeaders.delete('Last-Modified');
-      }
-    }
-
-    let finalResponse = new Response(assetResponse.body, {
+    const finalResponse = new Response(assetResponse.body, {
       status: assetResponse.status,
       statusText: assetResponse.statusText,
       headers: newHeaders
     });
 
-    if (heroPath) finalResponse = rewriteHeroPreload(finalResponse, heroPath);
-
-    /*  ✅ Cache static assets (200 only)
-     *
-     *  The homepage is stored only once its hero actually resolved. Caching the
-     *  pass-through would pin the stale hard-coded preload at the edge for the
-     *  full s-maxage — turning a transient KV miss into an hour of the exact bug
-     *  this code exists to remove. Skipping the put costs one extra invocation
-     *  and the next request finds KV warm. */
-    if (request.method === 'GET' && finalResponse.status === 200 && path !== '/sw.js'
-        && (!isHomeDocument || heroPath)) {
-      ctx.waitUntil(edgeCache.put(cacheKey, finalResponse.clone()));
+    // ✅ Cache static assets (200 only)
+    if (edgeCache && request.method === 'GET' && finalResponse.status === 200 && path !== '/sw.js') {
+      waitFor(ctx, edgeCache.put(cacheKey, finalResponse.clone()));
     }
 
     return finalResponse;

@@ -220,9 +220,11 @@ check('impossible ids are rejected before a request is built', () => {
   assert.ok(/Number\(seg\) <= 0/.test(fn), 'non-positive numeric ids are not rejected');
   assert.ok(/season/.test(jsCode), 'sanity: season endpoints exist');
   // The check must run before the URL is assembled, otherwise a request still goes out.
+  // (The URL is built by _mzTmdbUrl() now; `const urlStr = BASE` was the older form.)
   const t = jsCode.indexOf('async function tmdb');
   const body = jsCode.slice(t, t + 900);
-  assert.ok(body.indexOf('_mzInvalidIdSegment(endpoint)') < body.indexOf('const urlStr = BASE'),
+  const built = Math.max(body.indexOf('const urlStr = BASE'), body.indexOf('const urlStr = _mzTmdbUrl('));
+  assert.ok(built !== -1 && body.indexOf('_mzInvalidIdSegment(endpoint)') < built,
     'id validation runs after the URL is built');
 });
 
@@ -308,9 +310,13 @@ check("TMDB's rate limit is respected, not just concurrency", () => {
   assert.ok(/_mzRateDelayMs\(\)/.test(jsCode), 'the rate budget is never actually waited on');
 });
 
-check('concurrency stays at or below 4 lanes', () => {
+check('concurrency stays at or below 8 lanes', () => {
+  /*  Was "<= 4", sized for the Render origin's single 12-socket agent shared by
+   *  every visitor. The Workers origin has no shared pool (see the UPDATE note on
+   *  MZ_MAX_CONCURRENT_FETCHES), so 8 is the documented ceiling now; the rate
+   *  budget above is what protects TMDB. */
   const n = Number((/const MZ_MAX_CONCURRENT_FETCHES = (\d+);/.exec(jsCode) || [])[1]);
-  assert.ok(n > 0 && n <= 4, 'concurrency is ' + n + '; the origin holds only 12 upstream sockets, shared across all visitors');
+  assert.ok(n > 0 && n <= 8, 'concurrency is ' + n + '; more than 8 lanes lets background work crowd out the first screen');
 });
 
 check('the rate wait happens before a concurrency lane is taken', () => {

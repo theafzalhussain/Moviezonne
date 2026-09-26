@@ -898,7 +898,24 @@ function _mzEvictCacheEntries(count) {
   return doomed.length;
 }
 
-function _mzFlushCacheWrites() {
+/*  How much of an idle period one flush may use before it yields.
+ *
+ *  The flush used to serialise and write the WHOLE queue in one idle callback -
+ *  on a cold homepage ~25-30 responses of 20-50 KB each, i.e. 0.5-1.2 MB of
+ *  JSON.stringify plus synchronous localStorage writes in a single task. On a
+ *  mid-range phone that is a 30-150 ms long task landing ~2 s into the visit,
+ *  right when the viewer starts to scroll and tap (Datadog counts it as a long
+ *  task and it shows up in INP). It now writes while the idle deadline has room,
+ *  at least one record per callback, and re-queues the rest. pagehide and a
+ *  hidden tab still flush everything synchronously - that path passes no
+ *  deadline - so closing the tab never loses the session's cache. */
+const MZ_FLUSH_MIN_IDLE_MS = 6;
+/*  A requestIdleCallback that fires on its TIMEOUT reports timeRemaining() = 0,
+ *  so a busy page would otherwise crawl at one record per 2 s. When the deadline
+ *  has expired, this many records are written before yielding again. */
+const MZ_FLUSH_RECORDS_ON_TIMEOUT = 3;
+
+function _mzFlushCacheWrites(deadline) {
   _mzCacheFlushScheduled = false;
   if (!_mzCacheWriteQueue.size) return;
   /*  Tells the 60s housekeeping sweep that there is something new to trim. Without
@@ -907,35 +924,38 @@ function _mzFlushCacheWrites() {
    *  not a single byte had been written — a synchronous main-thread pass for
    *  nothing. See the sweep for why that matters most on a weak device. */
   _mzCacheDirty = true;
-  const entries = Array.from(_mzCacheWriteQueue);
-  _mzCacheWriteQueue.clear();
-  for (const [cacheKey, data] of entries) {
+
+  // Only a real IdleDeadline bounds the work; pagehide / visibilitychange pass an
+  // Event or nothing, and must flush everything.
+  const bounded = Boolean(deadline && typeof deadline.timeRemaining === 'function');
+  let written = 0;
+  const hasRoom = () => {
+    if (!bounded || written === 0) return true;
+    if (deadline.didTimeout) return written < MZ_FLUSH_RECORDS_ON_TIMEOUT;
+    return deadline.timeRemaining() > MZ_FLUSH_MIN_IDLE_MS;
+  };
+
+  for (const [cacheKey, data] of _mzCacheWriteQueue) {
+    if (!hasRoom()) break;
+    _mzCacheWriteQueue.delete(cacheKey);
+    written++;
     try {
       localStorage.setItem(cacheKey, JSON.stringify({ timestamp: Date.now(), data }));
     } catch (err) {
       // Out of quota — free some room and abandon the rest of this batch
       // rather than throwing repeatedly for every remaining entry.
-      if (!_mzEvictCacheEntries(30)) return;
+      if (!_mzEvictCacheEntries(30)) { _mzCacheWriteQueue.clear(); return; }
       try {
         localStorage.setItem(cacheKey, JSON.stringify({ timestamp: Date.now(), data }));
-      } catch (e2) { return; }
+      } catch (e2) { _mzCacheWriteQueue.clear(); return; }
     }
   }
-  /*  A single small marker saying "this browser has a warm first-screen cache".
-   *
-   *  The pre-parse warm-up in index.html reads it to decide whether to fetch
-   *  /movie/popular and /trending/movie/week before the bundle has parsed. Those
-   *  two fetches discard their bodies by design — they exist to populate the edge
-   *  cache on a cold load — so on a warm load they were downloading 40-100 KB
-   *  that nobody would ever read. That script cannot make the decision from the
-   *  real cache records: they are 20-50 KB each and would need a JSON.parse
-   *  before paint, which is the very cost it is there to avoid. Hence a
-   *  ~13-byte timestamp it can read and compare with no parsing.
-   *
-   *  Written here rather than at queue time so it only ever claims a cache that
-   *  actually landed on disk.
-   */
-  try { localStorage.setItem('mz_warm_ts', String(Date.now())); } catch (e) {}
+
+  if (_mzCacheWriteQueue.size) {
+    // More to write: yield the frame and continue in the next idle period.
+    _mzCacheFlushScheduled = true;
+    _mzOnIdle(_mzFlushCacheWrites);
+  }
 }
 
 function _mzQueueCacheWrite(cacheKey, data) {
@@ -1690,86 +1710,47 @@ function _mzTimeoutSignal(ms) {
 }
 
 /*  ══════════════════════════════════════════════════════════════════════
- *  HEAD START — the two first-screen paths that were already in flight
+ *  STALE-IF-SLOW — a returning visitor never waits on a slow network for a
+ *  first screen that is already sitting in their own browser
  *  ══════════════════════════════════════════════════════════════════════
- *  index.html fires /movie/popular and /trending/movie/week from <head>, while
- *  the parser is still working. That happens several hundred milliseconds before
- *  this bundle has been downloaded, decompressed, parsed, compiled and executed
- *  far enough to ask for anything itself — so by the time init() runs, those two
- *  answers are usually already on the machine.
+ *  tmdb() has always been stale-while-revalidate for a single URL, but the
+ *  first screen does not reach tmdb() first: it goes through tmdbBatch, and
+ *  tmdbBatch treated a stale localStorage copy exactly like no copy at all. The
+ *  path went into the batch and the page WAITED for the POST before painting.
+ *  So the normal daily visitor - back after the 3 h freshness window - waited a
+ *  full batch round trip, seconds on a weak mobile link, for data they had.
  *
- *  They used to be thrown away. The block existed to warm the edge and discarded
- *  both bodies, which meant 40-100 KB was pulled down the visitor's own
- *  connection at high priority, in competition with the stylesheet and the LCP
- *  image, and then deleted. Adopting them instead is free and removes a full
- *  round trip from the critical path of the ONE request that matters most:
- *  /trending/movie/week is the endpoint slide 0 is pinned to, so it is the
- *  endpoint that decides the LCP image's URL.
- *
- *  Adopted into tmdbCache rather than into inFlightRequests, deliberately. The
- *  in-flight map hands its promise straight back to callers, so a rejection there
- *  would propagate into the ~40 call sites that read `r.results` off the result —
- *  none of which expect one. Priming the cache cannot fail that way: a path that
- *  arrives is answered instantly by tmdb() and is dropped from the batch plan by
- *  _mzTmdbAnsweredFromCache(); a path that does not simply stays in the plan and
- *  the old behaviour is what happens.
+ *  Now, when EVERY cold path in a plan has a usable stale copy (younger than
+ *  MZ_STALE_PAINT_MAX_MS), the batch is still sent - fresh data is still the
+ *  goal - but it gets MZ_STALE_PAINT_AFTER_MS to answer. A healthy connection
+ *  beats that and paints fresh data exactly as before; a slow one paints the
+ *  stale copy at that point and the batch lands behind it, re-priming memory and
+ *  localStorage for the rest of the session and the next visit. Nothing already
+ *  on screen is re-rendered under the viewer.
  */
-const MZ_HEAD_START_BUDGET_MS = 600;
+const MZ_STALE_PAINT_AFTER_MS = 1000;
+const MZ_STALE_PAINT_MAX_MS = 72 * 60 * 60 * 1000;
+/** When fresh data last landed behind a stale paint (read by carouselIsStale). */
+let _mzFreshAfterStaleAt = 0;
 
-/*  Resolves once the <head> fetches have been taken up, or once the budget
- *  expires — whichever is first, so a stalled connection can never hold the
- *  first paint. Idempotent: the registry is cleared on the first call, and every
- *  later call resolves immediately.
- */
-let _mzHeadStartDone = null;
-function _mzAdoptHeadStart() {
-  if (_mzHeadStartDone) return _mzHeadStartDone;
-
-  const registry = (typeof window !== 'undefined' && window.__mzHeadStart) || null;
-  const urls = registry ? Object.keys(registry) : [];
-  if (!urls.length) {
-    _mzHeadStartDone = Promise.resolve();
-    return _mzHeadStartDone;
-  }
-  // Released immediately so a later caller cannot adopt the same promises twice.
-  try { delete window.__mzHeadStart; } catch (e) { window.__mzHeadStart = null; }
-
-  const adopted = urls.map((urlStr) => Promise.resolve(registry[urlStr])
-    .then((data) => {
-      /*  The shape check is what makes a 503, an HTML error page or an SPA
-       *  fallback a no-op rather than a poisoned cache entry. */
-      if (!data || typeof data !== 'object' || !('results' in data || 'id' in data)) return;
-      tmdbCache.set(urlStr, data);
-      // Same deferred queue tmdb() uses, so the 20-50 KB serialise cannot land
-      // on the main thread during the first paint.
-      _mzQueueCacheWrite('mz_cache_' + urlStr, data);
-    })
-    .catch(() => {}));
-
-  _mzHeadStartDone = Promise.race([
-    Promise.all(adopted),
-    new Promise((resolve) => setTimeout(resolve, MZ_HEAD_START_BUDGET_MS))
-  ]);
-  return _mzHeadStartDone;
-}
-
-/*  True when tmdb() can answer this URL without the network. Read-only: it
- *  promotes a fresh localStorage copy into the memory cache, which is what
- *  tmdb() would do a moment later anyway, so the parse is not wasted.
- */
-function _mzTmdbAnsweredFromCache(urlStr) {
-  if (tmdbCache.has(urlStr)) return true;
+/*  One read of a URL's cache state: fresh (and promoted into memory), stale but
+ *  usable, or nothing - one JSON.parse per record. */
+function _mzTmdbProbe(urlStr) {
+  if (tmdbCache.has(urlStr)) return { fresh: true, stale: null };
   try {
     const raw = localStorage.getItem('mz_cache_' + urlStr);
-    if (!raw) return false;
+    if (!raw) return { fresh: false, stale: null };
     const parsed = JSON.parse(raw);
-    if (parsed && parsed.timestamp
-        && (Date.now() - parsed.timestamp < _mzTmdbFreshMs(urlStr))) {
-      tmdbCache.set(urlStr, parsed.data);
-      return true;
+    if (parsed && parsed.timestamp && parsed.data) {
+      const age = Date.now() - parsed.timestamp;
+      if (age < _mzTmdbFreshMs(urlStr)) {
+        tmdbCache.set(urlStr, parsed.data);
+        return { fresh: true, stale: null };
+      }
+      if (age < MZ_STALE_PAINT_MAX_MS) return { fresh: false, stale: parsed.data };
     }
   } catch (e) { /* unreadable cache entry — treat as a miss */ }
-  return false;
+  return { fresh: false, stale: null };
 }
 
 /**
@@ -1783,26 +1764,75 @@ function _mzTmdbAnsweredFromCache(urlStr) {
 async function tmdbBatch(plan) {
   const run = () => Promise.allSettled(plan.map(([endpoint, params]) => tmdb(endpoint, params)));
 
-  try {
-    if (isLocalhost) return run(); // dev server has no batch endpoint
+  if (isLocalhost) return run(); // dev server has no batch endpoint
 
-    /*  Take up whatever <head> already fetched before deciding what is cold.
-     *  This costs nothing on the clock — those requests were issued while the
-     *  parser was in <head>, so they are normally finished by the time this line
-     *  runs — and it removes their paths from the plan below, which on the
-     *  homepage is the hero's own source. Budgeted, so a stalled head-start
-     *  cannot hold the first paint. */
-    await _mzAdoptHeadStart();
+  /*  The plan goes out whole and at once.
+   *
+   *  This used to await the two GETs index.html fired from <head> - up to 600 ms -
+   *  and drop whichever had landed from the plan. That made the plan itself
+   *  timing-dependent: the carousel went out as 12, 11 or 10 paths and the ALL
+   *  feed as 16, 15 or 14 - three different plan hashes for the same screen,
+   *  while the Worker caches an assembled plan BY ITS HASH, so on a quiet site
+   *  most first-screen batches became cold assembles at the edge. Every cold
+   *  visitor now sends the identical full plan (one hash, one edge entry shared
+   *  by everybody) and nothing waits. The <head> fetches were deleted with the
+   *  wait: both paths are in the carousel plan, so they had become a second
+   *  download of data this batch already carries. */
+  const cold = [];
+  const staleCopies = [];
+  let everyColdPathHasStale = true;
+  for (const [endpoint, params] of plan) {
+    const urlStr = _mzTmdbUrl(endpoint, params);
+    const probe = _mzTmdbProbe(urlStr);
+    if (probe.fresh) continue;
+    cold.push(urlStr);
+    staleCopies.push(probe.stale);
+    if (!probe.stale) everyColdPathHasStale = false;
+  }
 
-    // Only ask for what no cache can answer. On a warm repeat visit this is
-    // usually empty and the batch is skipped entirely.
-    const cold = [];
-    for (const [endpoint, params] of plan) {
-      const urlStr = _mzTmdbUrl(endpoint, params);
-      if (!_mzTmdbAnsweredFromCache(urlStr)) cold.push(urlStr);
+  // Only ask for what no cache can answer. On a warm repeat visit this is
+  // usually empty and the batch is skipped entirely.
+  if (cold.length < MZ_BATCH_MIN_REQUESTS) return run();
+
+  const batch = _mzSendBatchOnce(cold);   // never rejects
+
+  if (everyColdPathHasStale) {
+    let timer = null;
+    const outcome = await Promise.race([
+      batch.then(() => 'network'),
+      new Promise((resolve) => { timer = setTimeout(() => resolve('stale'), MZ_STALE_PAINT_AFTER_MS); })
+    ]);
+    if (timer !== null) clearTimeout(timer);
+    if (outcome === 'stale') {
+      // Paint what the visitor already has; the batch keeps running and
+      // re-primes both caches when it lands.
+      cold.forEach((urlStr, i) => {
+        if (!tmdbCache.has(urlStr) && staleCopies[i]) tmdbCache.set(urlStr, staleCopies[i]);
+      });
+      /*  A path the batch then fails to deliver must not stay pinned in memory
+       *  as if it were fresh: un-pinned, the next tmdb() call for it takes the
+       *  normal stale-while-revalidate path and refreshes it on its own. What did
+       *  arrive is fresh in memory now, and the hero's refresh watch is told so:
+       *  a TV that never closes the tab would otherwise keep the stale deck for
+       *  a whole CAROUSEL_MAX_AGE_MS. */
+      batch.then(() => cold.forEach((urlStr, i) => {
+        if (tmdbCache.get(urlStr) === staleCopies[i]) tmdbCache.delete(urlStr);
+        else _mzFreshAfterStaleAt = Date.now();
+      }));
+      console.debug('[MovieZone] slow network: painted ' + cold.length + ' cached endpoints');
     }
-    if (cold.length < MZ_BATCH_MIN_REQUESTS) return run();
+  } else {
+    await batch;
+  }
 
+  return run();
+}
+
+/*  The batch POST itself. Primes tmdbCache and the deferred localStorage queue,
+ *  and NEVER rejects: a failed batch just means tmdb() does the work URL by URL,
+ *  which is the behaviour this replaced. */
+async function _mzSendBatch(cold) {
+  try {
     // The Worker wants paths relative to /api/tmdb, which is what BASE is.
     const paths = cold.map((urlStr) => urlStr.slice(BASE.length));
 
@@ -1816,26 +1846,17 @@ async function tmdbBatch(plan) {
      *  forever. A body has no length limit, so that failure mode is gone.
      *
      *  No HTTP caching is lost: the Worker is invoked for every /api/* request
-     *  anyway, the shared cache is a KV entry keyed on the plan, and the
-     *  per-endpoint responses are already held in memory and in localStorage
-     *  for 12h by tmdb() itself.
+     *  anyway, the shared cache is an edge + KV entry keyed on the plan, and the
+     *  per-endpoint responses are already held in memory and in localStorage by
+     *  tmdb() itself.
      *
      *  ── THE TIMEOUT IS LOAD-BEARING ──
-     *  This request had none, and it is the single request a cold first screen
-     *  cannot paint without: the individual /api/tmdb GETs below go through
-     *  _mzFetchWithRetry, which has a per-attempt abort, but this one had only
-     *  whatever the browser's default is - minutes on a stalled mobile radio,
-     *  with nothing else in the page able to proceed. The fallback path underneath
-     *  was therefore unreachable in exactly the case it exists for.
-     *
-     *  The budget is sized against the Worker's own ceiling, not guessed:
-     *  tmdbUpstream does 2 attempts of TMDB_TIMEOUT_MS (3000 in wrangler.jsonc),
-     *  and runBatchPlan fans the plan out with Promise.all, so a cold batch is
-     *  bounded at ~6s of upstream plus KV and assembly - not 6s per path. 10s
-     *  leaves real headroom above that while still being a fraction of the ~47s
-     *  worst case the retry path can reach. On abort, the catch below runs and the
-     *  page falls back to individual requests, which is a recovery it could not
-     *  previously make.
+     *  This is the single request a cold first screen cannot paint without, so it
+     *  must not be able to hang: on abort the catch below runs and the page falls
+     *  back to individual requests. It is sized against the Worker, which answers
+     *  a cold assemble at BATCH_DEADLINE_MS (7 s) with whatever has arrived rather
+     *  than waiting on its slowest path - so a slow TMDB path no longer lands on
+     *  top of this abort and makes the page throw the whole answer away.
      */
     const response = await fetch(BASE + '/batch', {
       method: 'POST',
@@ -1874,14 +1895,27 @@ async function tmdbBatch(plan) {
     console.debug('[MovieZone] edge batch primed ' + primed + '/' + paths.length
       + ' endpoints in one request (' + (response.headers.get('x-cache') || '?') + ')');
   } catch (err) {
-    /*  Never fatal. A failed batch just means the loop below does the work the
-     *  old way, which is the behaviour this replaced.
+    /*  Never fatal. A failed batch just means tmdb() does the work the old way,
+     *  which is the behaviour this replaced.
      */
     console.debug('[MovieZone] edge batch unavailable, falling back to individual requests:',
       err && err.message);
   }
+}
 
-  return run();
+/*  One POST per identical plan, however many callers ask at once. A tab tap
+ *  and its own intent prefetch, or the carousel and a quick re-render, used to
+ *  send the same plan twice because nothing is cached until the first answer
+ *  lands. */
+const _mzBatchInFlight = new Map();
+function _mzSendBatchOnce(cold) {
+  const key = cold.join('\n');
+  const pending = _mzBatchInFlight.get(key);
+  if (pending) return pending;
+  const started = _mzSendBatch(cold);
+  _mzBatchInFlight.set(key, started);
+  started.then(() => { _mzBatchInFlight.delete(key); });
+  return started;
 }
 
 async function tmdb(endpoint, params) {
@@ -5322,6 +5356,9 @@ function maybeSwapCarouselDeck(force) {
 function carouselIsStale() {
   if (!_mzCarouselBuiltAt) return false;          // never built — the load path owns it
   if (Date.now() < _mzCarouselRetryAfter) return false;
+  // Built from a slow-network stale paint, and the fresh answer has since landed
+  // in memory: rebuilding costs no request.
+  if (_mzFreshAfterStaleAt > _mzCarouselBuiltAt) return true;
   if (istDateStr(0) !== _mzCarouselBuiltDay) return true;
   return (Date.now() - _mzCarouselBuiltAt) >= CAROUSEL_MAX_AGE_MS;
 }
@@ -6151,15 +6188,26 @@ function buildCarousel() {
     }
   }
 
-  /*  Correct slide 0's print badge from real release data.
+  /*  Correct the print badges from real release data.
    *
-   *  At idle, and only for the slide on screen: this is one extra TMDB call, and
-   *  the reason it is not made for all ten slides up front is the same reason the
-   *  slide bodies are batched — a ten-call fan-out in the load tick queues at the
-   *  origin and makes every request in it, including the hero backdrop, look
-   *  slow. goToSlide() picks up the rest as the viewer reaches them, and tmdb()
-   *  caches each answer for 12 h. */
-  const settleHeroQuality = () => refreshSlideQuality(currentSlide);
+   *  Slide 0 at idle, on its own: one small GET the Worker answers from its edge
+   *  copy, exactly as before. The rest of the deck used to follow one request per
+   *  autoplay tick - ~7 Worker invocations in the visitor's first minute, each
+   *  through the lane gate and the 30-per-10 s budget - and now goes out as ONE
+   *  batch one autoplay interval later: after the load window Datadog measures,
+   *  and before the first slide change needs it. Sorted by id, so visitors
+   *  holding the same deck send the same plan. Under Data Saver nothing is
+   *  fetched ahead; goToSlide() still resolves each slide as it is reached. */
+  const settleHeroQuality = () => {
+    refreshSlideQuality(currentSlide);
+    if (typeof isDataSaver === 'function' && isDataSaver()) return;
+    setTimeout(() => {
+      const ids = new Set();
+      carouselMovies.forEach((m) => { if (m && m.id && mediaTypeOf(m) === 'movie') ids.add(m.id); });
+      const plan = [...ids].sort((a, b) => a - b).map((id) => ['/movie/' + id + '/release_dates']);
+      if (plan.length >= MZ_BATCH_MIN_REQUESTS) tmdbBatch(plan);
+    }, CAROUSEL_AUTOPLAY_MS);
+  };
   if ('requestIdleCallback' in window) requestIdleCallback(settleHeroQuality, { timeout: 4000 });
   else setTimeout(settleHeroQuality, 1500);
  
@@ -7885,6 +7933,9 @@ function _mzPrefetchCategory(cat) {
   if (!cat || _mzTabPrefetched.has(cat)) return;
   if (_mzTabPrefetched.size >= MZ_TAB_PREFETCH_MAX) return;
   if (typeof isDataSaver === 'function' && isDataSaver()) return;
+  // The tab being prefetched is already the one loading (a tap's click beat
+  // the dwell timer): its own loadMovies is sending this exact plan.
+  if (cat === mzFeedPagerCategory) return;
   if (_mzReadPool(cat)) return;   // pool already built and still fresh
   const plan = _mzCatPlan(cat, 1);
   if (!plan) return;
@@ -7892,23 +7943,78 @@ function _mzPrefetchCategory(cat) {
   tmdbBatch(plan);
 }
 
+/*  How long a pointer or finger has to REST on a card or tab before it costs a
+ *  request.
+ *
+ *  Intent used to be read from the first mouseover / touchstart. On a phone every
+ *  scroll gesture starts with a touchstart on whatever it lands on, so scrolling
+ *  the grid or swiping the category strip fired detail fetches (up to 24 a
+ *  session, each 30-60 KB with credits and videos) and whole category batches
+ *  (up to 8) that nobody asked for - Worker invocations, mobile data, and slots in
+ *  the 30-per-10 s client budget that the visitor's real click then queued
+ *  behind. A finger that MOVES is scrolling, so touchmove disarms; a pointer that
+ *  passes over a card on its way somewhere else never reaches the dwell. Keyboard
+ *  and D-pad focus stay immediate: a focus move is always deliberate. */
+const MZ_PREFETCH_DWELL_MS = 150;
+
+/*  One armed element at a time, shared by the tab strip and the grid: a pointer
+ *  or a finger is only ever resting on one thing. `fire(el)` runs only if `el` is
+ *  still armed when the dwell ends. */
+let _mzDwellEl = null;
+let _mzDwellTimer = 0;
+function _mzDwellArm(el, fire) {
+  if (el === _mzDwellEl) return;
+  _mzDwellDisarm();
+  _mzDwellEl = el;
+  _mzDwellTimer = setTimeout(() => {
+    _mzDwellEl = null;
+    _mzDwellTimer = 0;
+    fire(el);
+  }, MZ_PREFETCH_DWELL_MS);
+}
+/** Cancels the armed element; with an argument, only if that one is armed. */
+function _mzDwellDisarm(el) {
+  if (el && el !== _mzDwellEl) return;
+  clearTimeout(_mzDwellTimer);
+  _mzDwellEl = null;
+  _mzDwellTimer = 0;
+}
+/** True when a mouseout really leaves `el`, not just moves onto a child of it. */
+function _mzDwellLeft(event, el) {
+  return !(event.relatedTarget && el.contains(event.relatedTarget));
+}
+
 /*  One set of listeners on the document, not one per tab: the category strip is
  *  re-rendered by the group menus, and per-tab handlers would leak a set every
- *  time. All three are passive — none of them can cancel the gesture they ride
+ *  time. All of them are passive — none of them can cancel the gesture they ride
  *  on, and touchstart in particular must never delay a tap. */
 let _mzTabPrefetchWired = false;
 function ensureTabPrefetch() {
   if (_mzTabPrefetchWired) return;
   _mzTabPrefetchWired = true;
-  const onIntent = (event) => {
+
+  const opts = { passive: true };
+  const tabOf = (event) => {
     const target = event.target;
-    if (!target || !target.closest) return;
-    const tab = target.closest('.cat-tab');
-    if (tab) _mzPrefetchCategory(_mzTabCat(tab));
+    return target && target.closest ? target.closest('.cat-tab') : null;
   };
-  document.addEventListener('mouseover', onIntent, { passive: true });
-  document.addEventListener('focusin', onIntent, { passive: true });
-  document.addEventListener('touchstart', onIntent, { passive: true });
+  const fire = (tab) => _mzPrefetchCategory(_mzTabCat(tab));
+  const arm = (event) => {
+    const tab = tabOf(event);
+    if (tab) _mzDwellArm(tab, fire);
+  };
+  document.addEventListener('mouseover', arm, opts);
+  document.addEventListener('touchstart', arm, opts);
+  document.addEventListener('mouseout', (event) => {
+    const tab = tabOf(event);
+    if (tab && _mzDwellLeft(event, tab)) _mzDwellDisarm(tab);
+  }, opts);
+  // A finger that moves is scrolling, whatever it started on.
+  document.addEventListener('touchmove', () => _mzDwellDisarm(), opts);
+  document.addEventListener('focusin', (event) => {
+    const tab = tabOf(event);
+    if (tab) fire(tab);
+  }, opts);
 }
  
 function prefetchUpcomingPage(pageNum) {
@@ -9142,11 +9248,17 @@ async function loadMovies(cat, isLoadMore = false) {
    *  on the load-more path too, because the extension replaced allMovies with a
    *  new array and the stored reference would otherwise be the shorter one. */
   _mzSavePool(cat, loadPoolKey);
- 
-  // Har load ke baad agle page ko chupke se fetch karke ready rakho
-  if (!isMzTV()) {
-    setTimeout(() => prefetchMoviesPage(cat, currentMoviePage + 1), 800);
-  }
+
+  /*  The next TMDB page is fetched only when the viewer is about to need it.
+   *
+   *  This used to fire unconditionally, 800 ms after EVERY load: for the ALL feed
+   *  a second full 16-path batch, on every cold visit, in the middle of the
+   *  first-screen work (and inside the window Datadog counts as loading time).
+   *  But one gather already fills ~200-300 titles, which the pager shows 30 at a
+   *  time - the next TMDB page is not read until the viewer is ~6 pages deep, and
+   *  almost nobody is. _mzMaybePrefetchNextFeedPage keeps "Next" instant for the
+   *  viewers who do get there, and costs nothing for everyone else. */
+  _mzMaybePrefetchNextFeedPage();
 
   if (isLoadMore) {
     isLoadingMore = false;
@@ -9242,15 +9354,22 @@ function ensureGridDelegation(grid) {
 
   // mouseenter does not bubble, so delegation uses mouseover; the
   // data-mzprefetched guard makes the repeat fires from pointer movement free.
+  // Both hover and touch go through the dwell (MZ_PREFETCH_DWELL_MS), so a
+  // pointer sweeping across the grid or a finger scrolling it costs nothing.
   if (!isMzTV()) {
-    grid.addEventListener('mouseover', (event) => {
+    const opts = { passive: true };
+    const arm = (event) => {
       const card = event.target.closest('.movie-card[data-id]');
-      if (card) _mzCardPrefetch(card);
-    }, { passive: true });
-    grid.addEventListener('touchstart', (event) => {
+      if (card && !card.hasAttribute('data-mzprefetched')) _mzDwellArm(card, _mzCardPrefetch);
+    };
+    grid.addEventListener('mouseover', arm, opts);
+    grid.addEventListener('touchstart', arm, opts);
+    grid.addEventListener('mouseout', (event) => {
       const card = event.target.closest('.movie-card[data-id]');
-      if (card) _mzCardPrefetch(card);
-    }, { passive: true });
+      if (card && _mzDwellLeft(event, card)) _mzDwellDisarm(card);
+    }, opts);
+    // A finger that moves is scrolling the grid, not choosing a card.
+    grid.addEventListener('touchmove', () => _mzDwellDisarm(), opts);
   }
 
   // focusin is the bubbling counterpart of focus. This is how D-pad navigation
@@ -10014,6 +10133,7 @@ function goToFeedPage(page) {
   if (mzFeedPageIsReady(target)) {
     renderCurrentFeedPage();
     renderFeedPager();
+    _mzMaybePrefetchNextFeedPage();
     return;
   }
 
@@ -10024,6 +10144,21 @@ function goToFeedPage(page) {
   loadMovies(mzFeedPagerCategory, true);
 }
 window.goToFeedPage = goToFeedPage;
+
+/*  Warms the next TMDB page once the viewer is within one page of the end of
+ *  what the pool already holds - the only moment "Next" would otherwise have to
+ *  wait on the network. Idle-scheduled, skipped on TV and under Data Saver, and
+ *  a no-op for URLs tmdbBatch finds already cached. */
+function _mzMaybePrefetchNextFeedPage() {
+  if (isMzTV() || mzFeedPoolExhausted) return;
+  if (typeof isDataSaver === 'function' && isDataSaver()) return;
+  if (mzFeedPage < mzFeedTotalPages() - 1) return;
+  const cat = mzFeedPagerCategory || 'all';
+  const nextTmdbPage = currentMoviePage + 1;
+  const warm = () => prefetchMoviesPage(cat, nextTmdbPage);
+  if ('requestIdleCallback' in window) requestIdleCallback(warm, { timeout: 3000 });
+  else setTimeout(warm, 600);
+}
 
 /*  The single source of truth for "which category is on screen".
  *
@@ -10248,9 +10383,15 @@ async function loadUpcoming(isLoadMore = false) {
   } catch(e) { console.warn(e); }
  
   // Har load ke baad agle upcoming page ko chupke se fetch karke ready rakho
-  // — but not past the cap, where that page will never be requested.
-  if (!isMzTV() && currentUpcomingPage < MZ_UPCOMING_MAX_PAGES) {
-    setTimeout(() => prefetchUpcomingPage(currentUpcomingPage + 1), 800);
+  // — but not past the cap, where that page will never be requested. At idle,
+  // not on a fixed 800 ms timer, so it never lands on top of the render it
+  // follows; and never under Data Saver.
+  if (!isMzTV() && currentUpcomingPage < MZ_UPCOMING_MAX_PAGES
+      && !(typeof isDataSaver === 'function' && isDataSaver())) {
+    const nextUpcomingPage = currentUpcomingPage + 1;
+    const warmUpcoming = () => prefetchUpcomingPage(nextUpcomingPage);
+    if ('requestIdleCallback' in window) requestIdleCallback(warmUpcoming, { timeout: 3000 });
+    else setTimeout(warmUpcoming, 800);
   }
 }
 
@@ -14423,83 +14564,23 @@ function goHome(e) {
 // -- ADVANCED SECURITY (Disabled for development) --
 
 
-// -- AD-BLOCKER DETECTION --
-/*  Idle-only, and it was not before.
- *
- *  This appends a node to <body> and then reads adSlot.offsetHeight, which is a
- *  forced synchronous layout. It used to run the moment the bundle was parsed -
- *  i.e. inside the startup window, against a document with a 188 KB stylesheet
- *  attached - and the 300ms setTimeout did not move it off that window, it just
- *  landed the layout read in the middle of the first feed paint instead.
- *
- *  Nothing needs the answer early, or arguably at all: the only effect is a
- *  console.warn and an 'adblocker-detected' event, and grep finds no listener for
- *  it anywhere in the codebase. So it waits for genuine idle time now. The 300ms
- *  inner delay is kept because that part is load-bearing for a different reason -
- *  it is what gives the blocker's content script time to act on the insertion.
- */
-scheduleIdleWork([function detectAdBlocker() {
-  const adSlot = document.createElement('div');
-  adSlot.className = 'ad_slot'; // Class heavily targeted by adblockers
-  adSlot.style.position = 'absolute';
-  adSlot.style.top = '-9999px';
-  adSlot.style.left = '-9999px';
-  adSlot.style.height = '10px'; // Explicit height to verify against
-  adSlot.style.width = '10px';
-  document.body.appendChild(adSlot);
-
-  // Short delay allows the ad-blocker's content script to process the DOM change
-  setTimeout(() => {
-    if (adSlot.offsetHeight === 0) {
-      console.warn('Ad Blocker detected!');
-      window.dispatchEvent(new CustomEvent('adblocker-detected'));
-    }
-    adSlot.remove(); // Clean up
-  }, 300);
-}], 6000);
-
-
-// -- TOP KEYWORDS EXTRACTOR --
-function extractTopKeywords() {
-  // Clone the body so we don't accidentally modify the actual visible DOM
-  const clone = document.body.cloneNode(true);
-  
-  // Filter out scripts, styles, and other non-text elements
-  const elementsToRemove = clone.querySelectorAll('script, style, noscript, svg');
-  elementsToRemove.forEach(el => el.remove());
-
-  const text = clone.textContent || '';
-  
-  // Extract words (only alphabetical, minimum 3 characters long to filter out small noise)
-  const words = text.toLowerCase().match(/\b[a-z]{3,}\b/g) || [];
-  
-  // Common stop words to ignore to get actual keywords
-  const stopWords = new Set(['the', 'and', 'for', 'that', 'this', 'with', 'you', 'not', 'are', 'from', 'your', 'all', 'have', 'was', 'but', 'out', 'has', 'can', 'will', 'now']);
-  
-  const wordCounts = {};
-  words.forEach(word => {
-    if (!stopWords.has(word)) {
-      wordCounts[word] = (wordCounts[word] || 0) + 1;
-    }
-  });
-
-  // Sort frequencies and get the top 3
-  const top3 = Object.entries(wordCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
-    .map(entry => ({ word: entry[0], count: entry[1] }));
-
-  // Debug-only: this used to log on every production page load, adding console
-  // noise for no benefit. The keywords are still computed and returned.
-  if (isLocalhost) console.log('Top 3 Keywords on this page:', top3);
-  return top3;
-}
-
-// Run it only when the main thread is idle, after movies have finished loading
-scheduleIdleWork([extractTopKeywords], 5000);
+/*  ── DIAGNOSTICS ARE OPT-IN ──
+ *  Two idle tasks that used to live here were deleted outright: an ad-blocker
+ *  probe (a forced layout read whose 'adblocker-detected' event nothing listens
+ *  for) and a "top keywords" extractor that deep-cloned the entire <body> -
+ *  thousands of nodes - to print three words to the console on localhost. Both
+ *  were paid on EVERY production page load, in the same 1.5-6 s window as the
+ *  feed tail, the carousel drain and the cache flush, and on a TV WebKit without
+ *  requestIdleCallback they ran back to back right after the bundle. The WebGL
+ *  renderer hint below is kept, but it now runs only on a dev host or with
+ *  ?mzdebug in the URL: a WebGL context is GPU-process start-up on most devices. */
+const _mzDiagnostics = isLocalhost || /[?&]mzdebug(?:[=&]|$)/.test(window.location.search || '');
 
 // -- BOT DETECTION (WebGL Renderer Check) --
 (function detectBot() {
+  // Opt-in, like the other diagnostics: a WebGL context is GPU-process start-up
+  // on most devices, spent on a console.debug line.
+  if (!_mzDiagnostics) return;
   // Idle-only: creating a WebGL context is a real GPU/CPU cost and nothing here
   // is on the user's critical path.
   scheduleIdleWork([() => {
@@ -15371,7 +15452,7 @@ init();
     /*  A 200 carrying index.html would make response.json() throw here, and this
      *  runs from a bare setTimeout — an unhandled rejection that silently stops
      *  the rest of the sync. Treated as "nothing to load" instead. */
-    if (!response.ok || servedSpaShell(response)) return;
+    if (!response.ok || servedSpaShell(response)) return false;
     const { movies = [] } = await response.json().catch(() => ({ movies: [] }));
     localStorage.setItem(NOTIFY_KEY, JSON.stringify(movies.map(movie => ({
       id: movie.movieId,
@@ -15379,7 +15460,19 @@ init();
       releaseDate: movie.releaseDate,
       addedAt: movie.createdAt ? new Date(movie.createdAt).getTime() : Date.now()
     }))));
+    return true;
   }
+
+  /*  How often this browser re-reads its reminder list from the server.
+   *
+   *  It used to be EVERY page view of every visitor who had granted notification
+   *  permission: one Worker invocation, one KV list() and one KV read per saved
+   *  movie, just to rewrite a list this same browser already holds - it is the
+   *  browser that adds and removes entries. On the free plan KV list() is capped
+   *  at 1,000 operations a day, account-wide. Twice a day is plenty to pick up a
+   *  reminder the server delivered (and deleted) in between. */
+  const NOTIFY_SYNC_KEY = 'mz_notify_synced_at';
+  const NOTIFY_SYNC_EVERY_MS = 12 * 60 * 60 * 1000;
 
   // Keep both the device subscription and movie choices synchronized.
   if ('Notification' in window && Notification.permission === 'granted' && 'serviceWorker' in navigator) {
@@ -15389,7 +15482,12 @@ init();
       if (!localStorage.getItem('mz_notify_migrated_v1')) {
         await syncLocalNotifyMovies(subscription);
       }
-      await loadServerNotifyMovies(subscription);
+      let lastSync = 0;
+      try { lastSync = Number(localStorage.getItem(NOTIFY_SYNC_KEY) || 0); } catch (e) { lastSync = 0; }
+      if (Date.now() - lastSync < NOTIFY_SYNC_EVERY_MS) return;
+      if (await loadServerNotifyMovies(subscription)) {
+        try { localStorage.setItem(NOTIFY_SYNC_KEY, String(Date.now())); } catch (e) {}
+      }
     }, 1500);
   }
 
