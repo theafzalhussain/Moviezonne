@@ -24,6 +24,13 @@ node_modules/
 **/node_modules/
 .git/
 **/.git/
+# Wrangler's local dev state (miniflare KV/D1 sqlite, tmp bundles) and the
+# dry-run build output: both contain the bundled worker source. Verified against
+# production (Sep 2026): /.wrangler/tmp/.../worker.js and /.wrangler-dryrun/
+# answered 200.
+.wrangler/
+.wrangler-dryrun/
+worker-startup.cpuprofile
 **/.DS_Store
 **/wrangler.jsonc
 

@@ -428,14 +428,18 @@ if (!isMzTV() && !isTouchOnly && !isMobile) {
 })();
 
 // -- SCROLL REVEAL ANIMATIONS (Intersection Observer) --
-const scrollObserver = new IntersectionObserver((entries, observer) => {
+// Guarded like lazyImageObserver above: on an engine without IntersectionObserver
+// (older Smart-TV WebKits) an unguarded `new` here threw at load and took the
+// whole script - init() included - down with it. Such engines just reveal at once.
+const scrollObserver = ('IntersectionObserver' in window) ? new IntersectionObserver((entries, observer) => {
   entries.forEach(entry => {
     if (entry.isIntersecting) {
       entry.target.classList.add('in-view');
       observer.unobserve(entry.target);
     }
   });
-}, { root: null, rootMargin: '0px 0px -40px 0px', threshold: 0.05 });
+}, { root: null, rootMargin: '0px 0px -40px 0px', threshold: 0.05 })
+  : { observe(el) { if (el && el.classList) el.classList.add('in-view'); }, unobserve() {}, disconnect() {} };
  
 // -- SECURITY HELPER (XSS Protection) --
 const escapeHTML = (str) => {
@@ -1485,8 +1489,16 @@ function _mzReportFetchError(err, meta) {
   // Structured, queryable context beats a stringified console line. RUM's error
   // tracking also picks up console.error, so this uses console.warn to avoid
   // reporting the same failure twice.
+  //
+  // A failure the visitor never saw - a background refresh that failed while
+  // their cached copy was already on screen - is a DEGRADATION, not an error:
+  // it goes to RUM as an action, so the error count means "a user was left
+  // without content". The cross-endpoint 403 (a revoked token) stays an error.
   try {
-    if (window.DD_RUM && typeof window.DD_RUM.addError === 'function') {
+    const degraded = meta && meta.hadStaleCache && !meta.reason;
+    if (degraded && window.DD_RUM && typeof window.DD_RUM.addAction === 'function') {
+      window.DD_RUM.addAction('tmdb_degraded', Object.assign({ message: String(err && err.message) }, meta));
+    } else if (window.DD_RUM && typeof window.DD_RUM.addError === 'function') {
       window.DD_RUM.addError(err, Object.assign({ source: 'tmdb' }, meta));
     }
   } catch (e) { /* never let telemetry break a fetch */ }
@@ -1942,7 +1954,10 @@ async function tmdb(endpoint, params) {
   
   // ZERO-LATENCY SWR (Stale-While-Revalidate) CACHING
   const cacheKey = 'mz_cache_' + urlStr;
-  const localDataStr = localStorage.getItem(cacheKey);
+  // Guarded: storage can THROW (blocked cookies, some in-app browsers), and an
+  // unguarded read here turned every tmdb() call into a rejected promise.
+  let localDataStr = null;
+  try { localDataStr = localStorage.getItem(cacheKey); } catch (e) { localDataStr = null; }
   let cachedData = null;
   let isFresh = false;
 
@@ -10608,7 +10623,8 @@ async function openUpcomingDetail(id, type, activationEvent) {
     if (err && err.name === 'AbortError') return;
     if (_udAbortController && _udAbortController.signal.aborted) return;
     console.error('Upcoming Detail Error:', err);
-    document.getElementById('udTitle').textContent = 'Error loading movie details';
+    const udTitle = document.getElementById('udTitle');
+    if (udTitle) udTitle.textContent = 'Error loading movie details';
   }
 }
 
@@ -11249,6 +11265,11 @@ async function searchAndDisplay(query) {
   setSectionNote('');
   const section = document.getElementById('movies-section');
   if (section) section.scrollIntoView({ behavior: isMzTVMode() ? 'auto' : 'smooth' });
+
+  // INP: the skeleton above is what the Enter key is waiting to see; ranking and
+  // rendering 40 results is not. Hand the frame back before starting that work.
+  await mzYieldToPaint();
+  if (signal && signal.aborted) return;
 
   try {
     const search = await intelligentMovieSearch(query, 40, signal);
@@ -15440,7 +15461,7 @@ init();
   async function syncLocalNotifyMovies(subscription) {
     const movies = getNotifyList().filter(movie => movie.releaseDate);
     await Promise.allSettled(movies.map(movie => saveNotifyMovie(subscription, movie, false)));
-    localStorage.setItem('mz_notify_migrated_v1', '1');
+    try { localStorage.setItem('mz_notify_migrated_v1', '1'); } catch (e) { /* retried next visit */ }
   }
 
   async function loadServerNotifyMovies(subscription) {
@@ -15547,7 +15568,9 @@ init();
       }
       return true;
     } catch (err) {
-      console.error('[MovieZone] Notify Me failed:', err);
+      // Already shown to the user as a toast; permission denied / push not
+      // configured are expected outcomes, not app errors for the RUM feed.
+      console.warn('[MovieZone] Notify Me failed:', err && err.message);
       if (typeof showToast === 'function') showToast(err.message || 'Could not save notification');
       return idx > -1;
     }

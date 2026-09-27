@@ -417,19 +417,53 @@ async function readJson(store, key) {
   try { return JSON.parse(raw); } catch (e) { return null; }
 }
 
-/** Walks every key under a prefix, following the list cursor. */
-async function listKeys(store, prefix, limit = Infinity) {
-  const keys = [];
+/** Walks every entry under a prefix, following the list cursor. Each entry is
+ *  `{ name, metadata }` - KV list() returns metadata with the key, and a list is
+ *  one operation however many keys it returns, where reading each value is one
+ *  metered read per key. */
+async function listEntries(store, prefix, limit = Infinity) {
+  const entries = [];
   let cursor;
   do {
     const page = await store.list({ prefix, cursor });
     for (const entry of page.keys) {
-      keys.push(entry.name);
-      if (keys.length >= limit) return keys;
+      entries.push(entry);
+      if (entries.length >= limit) return entries;
     }
     cursor = page.list_complete ? null : page.cursor;
   } while (cursor);
-  return keys;
+  return entries;
+}
+
+/** Walks every key under a prefix, following the list cursor. */
+async function listKeys(store, prefix, limit = Infinity) {
+  return (await listEntries(store, prefix, limit)).map((entry) => entry.name);
+}
+
+/*  ── A REMINDER'S SCHEDULE TRAVELS WITH ITS KEY ──
+ *  The hourly cron used to read EVERY notify:* row, due or not - up to 500 metered
+ *  reads an hour, 12,000 a day, to find the handful released today. The release
+ *  date (and what the list endpoint shows) now rides in the key's metadata, which
+ *  list() hands back for free, so a run reads only the rows that are actually due.
+ *  KV caps metadata at 1024 bytes; the display fields are dropped before that is
+ *  reached, and a row without them is simply read the old way. */
+const NOTIFY_META_MAX_BYTES = 1000;
+
+function notifyMeta(record) {
+  const meta = { d: record.releaseDate, m: record.movieId };
+  const full = Object.assign({}, meta, {
+    t: String(record.title || '').slice(0, 200),
+    u: record.url,
+    c: record.createdAt
+  });
+  return TE.encode(JSON.stringify(full)).length <= NOTIFY_META_MAX_BYTES ? full : meta;
+}
+
+/** The list endpoint's view of a row, straight from its metadata when complete. */
+function notifyFromMeta(meta) {
+  if (!meta || !isCalendarDate(meta.d) || !Number.isInteger(meta.m)
+      || typeof meta.t !== 'string' || typeof meta.u !== 'string') return null;
+  return { movieId: meta.m, title: meta.t, releaseDate: meta.d, url: meta.u, createdAt: meta.c };
 }
 
 async function loadActiveSubscription(store, id) {
@@ -564,8 +598,7 @@ async function handleNotifyMovieSave(request, env) {
   }
 
   try {
-    await store.put(notifyKey(id, movieId), JSON.stringify({
-
+    const record = {
       endpoint: subscription.endpoint,
       endpointId: id,
       movieId,
@@ -576,7 +609,10 @@ async function handleNotifyMovieSave(request, env) {
       notifiedAt: null,
       createdAt: (existing && existing.createdAt) || now,
       updatedAt: now
-    }));
+    };
+    // metadata: the cron and the list endpoint read the schedule from list()
+    // instead of reading every row (see notifyMeta).
+    await store.put(notifyKey(id, movieId), JSON.stringify(record), { metadata: notifyMeta(record) });
   } catch (err) {
     console.error('[push] could not store movie notification:', (err && err.message) || err);
     return json({ error: 'Could not save movie notification' }, 503);
@@ -630,8 +666,12 @@ async function handleNotifyMovieList(request, env) {
   if (!value.endpoint) return json({ error: 'Endpoint is required' }, 400);
 
   const id = await endpointId(value.endpoint);
-  const keys = await listKeys(store, notifyPrefix(id));
-  const records = await Promise.all(keys.map((key) => readJson(store, key)));
+  const entries = await listEntries(store, notifyPrefix(id));
+  // Rows saved since the schedule moved into metadata need no read at all.
+  const records = await Promise.all(entries.map((entry) => {
+    const fromMeta = notifyFromMeta(entry.metadata);
+    return fromMeta ? Object.assign({ active: true }, fromMeta) : readJson(store, entry.name);
+  }));
 
   const movies = records
     .filter((record) => record && record.active !== false)
@@ -665,22 +705,58 @@ async function handleNotifyMovieList(request, env) {
  */
 const PUSH_WAVE_SIZE = 10;
 
+/*  Push POSTs per run. They are external subrequests, and Workers Free allows 50
+ *  per invocation; whatever is still due waits for the next hourly run. */
+const PUSH_SENDS_PER_RUN = 40;
+
+/*  Rows written before the schedule moved into metadata have none, so they must
+ *  be read once to learn their date - and are then rewritten WITH it, so they are
+ *  never read by the cron again. Bounded, because each rewrite is one of the
+ *  free plan's 1,000 daily KV writes. */
+const NOTIFY_MIGRATE_PER_RUN = 25;
+
 async function processDueNotifications(env) {
   const store = subsStore(env);
   if (!store) return { checked: 0, sent: 0, failed: 0 };
 
   const today = new Date().toISOString().slice(0, 10);
-  const keys = await listKeys(store, 'notify:', MAX_DUE_PER_RUN);
+  const entries = await listEntries(store, 'notify:', MAX_DUE_PER_RUN);
 
-  // One round-trip for every record instead of one each.
-  const records = await Promise.all(keys.map(async (key) => ({ key, record: await readJson(store, key) })));
+  /*  One list() instead of a read per row: a row whose metadata says it is not
+   *  due yet costs nothing. Only due rows - and a bounded number of legacy rows
+   *  with no metadata - are read. */
+  const dueKeys = [];
+  const legacyKeys = [];
+  for (const entry of entries) {
+    const date = entry.metadata && entry.metadata.d;
+    if (isCalendarDate(date)) {
+      if (date <= today) dueKeys.push(entry.name);
+    } else if (legacyKeys.length < NOTIFY_MIGRATE_PER_RUN) {
+      legacyKeys.push(entry.name);
+    }
+  }
+
+  const legacy = new Set(legacyKeys);
+  const records = await Promise.all(dueKeys.concat(legacyKeys)
+    .map(async (key) => ({ key, record: await readJson(store, key), legacy: legacy.has(key) })));
+
+  // Legacy rows that are not due yet get their metadata now, once.
+  await Promise.all(records.map(async ({ key, record, legacy: isLegacy }) => {
+    if (!isLegacy || !record || !isCalendarDate(record.releaseDate) || record.releaseDate <= today) return;
+    try {
+      await store.put(key, JSON.stringify(record), { metadata: notifyMeta(record) });
+    } catch (err) {
+      // Quota or a transient fault: the row is simply read again next run.
+    }
+  }));
 
   const due = records.filter(({ record }) =>
     record
     && record.active !== false
     && !record.notifiedAt
     && isCalendarDate(record.releaseDate)
-    && record.releaseDate <= today);
+    && record.releaseDate <= today)
+    .slice(0, envInt(env, 'PUSH_SENDS_PER_RUN', PUSH_SENDS_PER_RUN, 1, 900));
 
   const checked = due.length;
   let sent = 0;
@@ -690,7 +766,11 @@ async function processDueNotifications(env) {
     const id = record.endpointId || await endpointId(record.endpoint);
     const subscription = await loadActiveSubscription(store, id);
     if (!subscription) {
+      /*  The subscription is gone (unsubscribed, or dropped after a 404/410), so
+       *  this reminder can never be delivered. It used to stay behind and cost
+       *  two KV reads every hour, forever. */
       failed++;
+      await store.delete(key).catch(() => {});
       return;
     }
 
@@ -736,18 +816,18 @@ function cronAuthorised(request, env) {
 }
 
 /*  ── TMDB PROXY ─────────────────────────────────────────────────────────────
- *  Fetches one TMDB path, KV-cached.
+ *  Fetches one TMDB path, edge-cached (memory + caches.default; never KV).
  *
  *  `path` is everything after /api/tmdb, query string included, e.g.
  *  "/movie/popular?language=en-US&page=1". The cache key is deliberately the
  *  full public path — "/api/tmdb" + path — so a title fetched individually and
- *  the same title fetched inside a batch share one KV entry instead of storing
- *  the response twice.
+ *  the same title fetched inside a batch share one cache entry instead of
+ *  storing the response twice.
  */
 /*  ══════════════════════════════════════════════════════════════════════════
  *  NOBODY WAITS FOR TMDB TWICE
  *  ══════════════════════════════════════════════════════════════════════════
- *  The KV entry used to be a plain expiry: fresh until the TTL, then gone. So
+ *  A cache entry used to be a plain expiry: fresh until the TTL, then gone. So
  *  every TTL boundary handed one unlucky visitor the full upstream round-trip —
  *  ~136ms on a good day, seconds when TMDB is slow — and there was no timeout at
  *  all, so a connection that opened and then stalled held the request open
@@ -755,31 +835,26 @@ function cronAuthorised(request, env) {
  *
  *  Three changes, all of them about who is made to wait:
  *
- *  1. STALE-WHILE-REVALIDATE. The entry is now kept on disk far longer than it
- *     is considered fresh, and the store timestamp travels in KV metadata rather
- *     than in the body (so the body stays byte-identical and nothing has to be
- *     re-encoded). Past the freshness window we answer with the copy we already
- *     have and refresh behind the response via waitUntil. After the very first
- *     fill of a path, no visitor is ever blocked on TMDB again — and the next
- *     one gets the new body. Freshness is unchanged: the same 3h/7d windows
- *     decide when a refresh is triggered, only the waiting is gone.
+ *  1. STALE-WHILE-REVALIDATE. An entry is kept far longer than it is considered
+ *     fresh, and its store timestamp travels beside the body (the x-mz-stored
+ *     header in caches.default, the memo's `t`) so the body stays byte-identical.
+ *     Past the freshness window we answer with the copy we already have and
+ *     refresh behind the response via waitUntil. After the very first fill of a
+ *     path in a location, no visitor there is blocked on TMDB again. Freshness is
+ *     unchanged: the same 3h/7d windows decide when a refresh is triggered.
  *
- *  2. SINGLE-FLIGHT. A cold plan fans out 16-40 paths and popular paths repeat
+ *  2. SINGLE-FLIGHT. A cold plan fans out 16-24 paths and popular paths repeat
  *     across concurrent visitors; each miss used to open its own upstream
- *     connection because the KV write lands asynchronously and cannot dedupe
+ *     connection because the cache write lands asynchronously and cannot dedupe
  *     them. One in-flight promise per path per isolate now serves every caller.
  *
  *  3. A HARD TIMEOUT, so a stalled upstream fails in 8s instead of hanging.
- *
- *  Legacy entries written before this carry no metadata. Their own expirationTtl
- *  WAS the freshness window, so a hit on one is treated as fresh — the cache
- *  warms over into the new shape without a flush.
  */
 
 /** How much longer than its freshness window an entry is kept, for the SWR read. */
 const TMDB_STALE_MULT = 8;
 
-/** Hard ceiling on retention, so the 7-day paths do not sit in KV for two months. */
+/** Hard ceiling on retention, so the 7-day paths do not sit in the cache for two months. */
 const TMDB_MAX_RETENTION = 2592000;   // 30 days
 
 /** A stalled upstream connection must fail, not hang. This is only the compiled-in
@@ -823,7 +898,7 @@ function looksLikeJson(text) {
   return (first === 123 && last === 125) || (first === 91 && last === 93);   // {...} or [...]
 }
 
-async function tmdbUpstream(path, env) {
+async function tmdbUpstream(path, env, budget) {
   const headers = new Headers();
   headers.set('Authorization', `Bearer ${env.TMDB_TOKEN}`);
   headers.set('accept', 'application/json');
@@ -833,6 +908,10 @@ async function tmdbUpstream(path, env) {
   let lastError = null;
   let attemptTimeout = timeout;
   for (let attempt = 0; attempt < 2; attempt++) {
+    /*  The first attempt was paid for by tmdbOnce(). A retry is a second
+     *  subrequest, so inside a fan-out it is only made while it leaves every
+     *  other path's reserved fetch intact (see SUBREQUEST BUDGET). */
+    if (attempt > 0 && !budgetOptional(budget)) break;
     try {
       const response = await fetch(`https://api.themoviedb.org/3${path}`, {
         headers,
@@ -866,11 +945,17 @@ async function tmdbUpstream(path, env) {
   throw lastError || new Error('TMDB request abandoned');
 }
 
-/** One upstream request per path, however many callers ask for it at once. */
-function tmdbOnce(path, env) {
+/** One upstream request per path, however many callers ask for it at once.
+ *  Only the caller that actually starts the request pays for it; a caller that
+ *  joins one already in flight hands its reservation back. */
+function tmdbOnce(path, env, budget) {
   const pending = _tmdbInFlight.get(path);
-  if (pending) return pending;
-  const started = tmdbUpstream(path, env);
+  if (pending) {
+    budgetRelease(budget);
+    return pending;
+  }
+  if (!budgetRequire(budget)) return Promise.reject(budgetError());
+  const started = tmdbUpstream(path, env, budget);
   _tmdbInFlight.set(path, started);
   // Cleared on both outcomes: a failure must not pin a rejected promise as the
   // answer for every later caller.
@@ -879,36 +964,38 @@ function tmdbOnce(path, env) {
 }
 
 /*  ══════════════════════════════════════════════════════════════════════════
- *  FOUR LAYERS, CHEAPEST FIRST — and why KV stopped being the first stop
+ *  NO KV ON THE TMDB PATH — memory, then the location cache, then TMDB
  *  ══════════════════════════════════════════════════════════════════════════
- *  Every TMDB read used to BE a KV read, and every upstream answer was written
- *  back to KV. For a site with modest traffic spread over many Cloudflare
- *  locations that is the wrong first stop, for three reasons that all showed up
- *  in the dashboards:
+ *  TMDB data used to be read from and written to KV (TMDB_CACHE) as a third,
+ *  "global" layer. On the free plan that is the wrong tool for a cache, and the
+ *  dashboards showed exactly how:
  *
- *    • COLD READS. KV keeps a value in a location for `cacheTtl` (60 s) after it
- *      is read there. With a visitor every few minutes per location almost every
- *      read found that copy gone and went to the central store - tens to hundreds
- *      of ms, on the request path. That is the "cold reads" figure.
- *    • WRITE QUOTA. Every distinct search query, every title's watch/providers and
- *      release_dates, every refresh from every location was a KV write, and the
- *      free plan allows 1,000 writes a DAY, account-wide. Once spent, put() throws
- *      for the rest of the day, nothing new can be cached, and every miss goes to
- *      TMDB. (PUSH_SUBS and the SEO workflow have both run into that quota.)
- *    • DURATION. All of it lands in the Worker's own CPU and wall time, including
- *      the background refreshes: waitUntil work is billed to the invocation that
- *      started it.
+ *    • READ QUOTA. KV allows 100,000 reads a day, account-wide, and EVERY get()
+ *      counts - hit, miss or hot local copy alike (cacheTtl changes latency, not
+ *      the count). Every edge miss, every batch part (fan-outs skipped the edge
+ *      and read each path from KV), every OTT chart request, and every crawler
+ *      hit on an SSR page was one or more metered reads. With ~10 human visitors
+ *      a day the namespace still ran out, because crawlers and fan-outs, not
+ *      people, were spending it.
+ *    • WRITE QUOTA. 1,000 writes a day. Once spent, put() throws, KV stays cold,
+ *      and every later read is a counted miss - the two quotas fed each other.
+ *    • COLD READS. At this traffic level a KV read almost never found a warm
+ *      local copy, so it was a round trip to the central store on the request
+ *      path - slower than the location cache it was supposed to back up.
  *
  *  So a read now goes
  *    L1  isolate memory   microseconds, small LRU, per isolate
- *    L2  caches.default   ~1-3 ms, per location, free and unmetered
- *    L3  KV               global and durable, metered, cold reads are slow
- *    L4  TMDB             the origin
- *  and an upstream answer is written to L1 + L2 always, and to KV only when the
- *  path is worth sharing between locations (tmdbKvWorthy). Freshness is decided
- *  identically in every layer - the stored-at stamp against the path's soft TTL -
- *  so a stale copy from ANY layer is still answered instantly and refreshed
- *  behind the response, exactly as before.
+ *    L2  caches.default   ~1-3 ms, per location, free, unmetered, no daily quota
+ *    L3  TMDB             the origin, single-flight per path per isolate
+ *  and an upstream answer is written to L1 + L2. Freshness is the stored-at stamp
+ *  against the path's soft TTL (3 h for "what is out now" lists, 7 days for a
+ *  title's own record), so a stale copy is answered instantly and refreshed
+ *  behind the response. The cost of dropping KV is that each Cloudflare location
+ *  fills its own cache once per freshness window - a handful of TMDB requests per
+ *  location per hour, which TMDB does not meter.
+ *
+ *  KV is still used, but only for data that is not a cache: push subscriptions
+ *  (PUSH_SUBS) and the nightly SEO catalogue/sitemaps, both behind the edge.
  */
 
 /** Longest body kept in isolate memory; a detail payload with credits fits. */
@@ -917,13 +1004,6 @@ const TMDB_MEMO_MAX_CHARS = 262144;
 const TMDB_MEMO_MAX = 64;
 /** A path refreshed in the background is not refreshed again for this long. */
 const TMDB_REFRESH_COOLDOWN_MS = 60000;
-/** After a failed KV write (quota spent), KV writes pause for this long. */
-const TMDB_KV_WRITE_BACKOFF_MS = 600000;
-/*  A path is written to KV at most once per this window per isolate. Every caller
- *  that shares one collapsed upstream fetch (tmdbOnce) used to store the answer
- *  itself - N visitors on a cold path were one TMDB request but N identical KV
- *  writes, against the free plan's 1,000 writes a day. */
-const TMDB_KV_REWRITE_MIN_MS = 60000;
 
 /** Stored-at stamp on every entry this Worker puts into caches.default. */
 const TMDB_STORED_HEADER = 'x-mz-stored';
@@ -934,31 +1014,60 @@ const TMDB_STORED_HEADER = 'x-mz-stored';
  *  proxy serves, so one entry answers the proxy, the batch, SSR and the hero. */
 const TMDB_EDGE_ORIGIN = seo.SITE_URL;
 
-/*  Paths cached at the edge but NOT written to KV. All of them are long-tail keys
- *  whose value to the NEXT location is low and whose count is unbounded: every
- *  search query, and every per-title sub-resource (release_dates,
- *  watch/providers, season pages, similar/credits) plus person and collection
- *  pages. The title record itself (/movie/{id}?..., /tv/{id}?...) and every list
- *  the home feed is built from are shared by everyone, and those stay in KV. */
-const EDGE_ONLY_TMDB_PATH_RE = /^\/search\/|^\/(?:movie|tv)\/\d+\/|^\/person\/|^\/collection\//;
+/*  ══════════════════════════════════════════════════════════════════════════
+ *  THE SUBREQUEST BUDGET — why a fan-out can use the edge cache
+ *  ══════════════════════════════════════════════════════════════════════════
+ *  Workers Free allows 50 subrequests per invocation, and Cache API match/put
+ *  calls share that quota with fetch() (KV has a separate one). That is the only
+ *  reason the fan-outs - a batch plan, an OTT chart, the sitemap live build -
+ *  used to skip the per-path edge layer and read every path from KV instead.
+ *
+ *  A fan-out now carries a budget instead. A TMDB fetch is REQUIRED, and one is
+ *  reserved for every path up front (plus the plan's own cache write). Edge
+ *  lookups, edge writes and retries are OPTIONAL: they are made only while they
+ *  leave every reservation intact. So a warm plan is answered from the location
+ *  cache, a cold 24-path plan degrades to "TMDB only" for its last few paths
+ *  instead of dying with "Too many subrequests", and nothing touches KV.
+ *
+ *  Budgets are per invocation and never shared across requests. A caller with no
+ *  budget (a single proxy GET: at most match + fetch + put) is unlimited.
+ *  SUBREQUEST_LIMIT (wrangler vars) raises the ceiling on Workers Paid.
+ */
+const SUBREQUEST_LIMIT_FREE = 50;
+/** Kept back for anything not counted below, e.g. a redirect in a subrequest chain. */
+const SUBREQUEST_HEADROOM = 5;
 
-/*  Search keys are unbounded user input: never read from or written to KV, even
- *  inside a batch. (Every other edge-only path may still be shared through KV
- *  when a batch asks for it - see batchPart.) */
-const TMDB_SEARCH_PATH_RE = /^\/search\//;
-
-function tmdbKvWorthy(path) {
-  return !EDGE_ONLY_TMDB_PATH_RE.test(String(path || ''));
+function subrequestBudget(env, reserved) {
+  const limit = envInt(env, 'SUBREQUEST_LIMIT', SUBREQUEST_LIMIT_FREE, 10, 10000);
+  return { left: limit - SUBREQUEST_HEADROOM, reserve: Math.max(0, reserved || 0) };
 }
 
-/*  How long KV may keep answering from a location's own copy.
- *
- *  60 s for the volatile lists, because a refresh written in another location
- *  has to become visible quickly or every request there sees "stale" and starts a
- *  refresh of its own. A title record does not change for a week, so an hour-long
- *  local copy costs no freshness at all and turns repeat reads into hot reads. */
-function tmdbKvReadTtl(path) {
-  return isVolatileTmdbPath(path) ? 60 : 3600;
+/** A call the answer depends on. Draws on the reservation made for it. */
+function budgetRequire(budget) {
+  if (!budget) return true;
+  if (budget.left <= 0) return false;
+  budget.left--;
+  if (budget.reserve > 0) budget.reserve--;
+  return true;
+}
+
+/** A call that only makes a later request faster. Never eats a reservation. */
+function budgetOptional(budget) {
+  if (!budget) return true;
+  if (budget.left - 1 < budget.reserve) return false;
+  budget.left--;
+  return true;
+}
+
+/** A path answered without its reserved fetch hands the reservation back. */
+function budgetRelease(budget) {
+  if (budget && budget.reserve > 0) budget.reserve--;
+}
+
+function budgetError() {
+  const err = new Error('edge subrequest budget spent for this request');
+  err.name = 'SubrequestBudgetError';
+  return err;
 }
 
 /** How long an entry is kept past its freshness window, for the SWR read. */
@@ -979,10 +1088,8 @@ function tmdbState(env) {
       memo: new Map(),
       refreshedAt: new Map(),
       batchRefreshedAt: new Map(),
-      kvWrittenAt: new Map(),
-      homeRefreshedAt: 0,
-      kvBlockedUntil: 0,
-      kvErrorLoggedAt: 0
+      ottFailedAt: new Map(),
+      homeRefreshedAt: 0
     };
     _tmdbStateByEnv.set(env, state);
   }
@@ -1026,20 +1133,6 @@ function waitFor(ctx, work) {
   return guarded;
 }
 
-function noteKvWriteFailure(state, err) {
-  const now = Date.now();
-  if (state) state.kvBlockedUntil = now + TMDB_KV_WRITE_BACKOFF_MS;
-  if (!state || now - state.kvErrorLoggedAt > TMDB_KV_WRITE_BACKOFF_MS) {
-    if (state) state.kvErrorLoggedAt = now;
-    console.warn('[tmdb] KV write failed; KV writes paused for 10 min, the edge cache '
-      + 'keeps serving: ' + (err && err.message));
-  }
-}
-
-function kvWritesPaused(state) {
-  return Boolean(state && Date.now() < state.kvBlockedUntil);
-}
-
 function tmdbEdgeKey(path) {
   return new Request(TMDB_EDGE_ORIGIN + '/api/tmdb' + path, { method: 'GET' });
 }
@@ -1056,31 +1149,21 @@ function tmdbEdgeEntry(text, storedAt, softTtl) {
   });
 }
 
-/** Writes an upstream answer to every layer that should hold it. `layers` is
- *  fetchTmdbJson's { edge, kv } decision; without it the path's defaults apply. */
-function storeTmdb(path, text, softTtl, storedAt, env, ctx, layers) {
-  const state = tmdbState(env);
-  memoPut(state, path, text, storedAt);
-
-  const colo = layers && layers.edge === false ? null : coloCache();
-  if (colo) waitFor(ctx, colo.put(tmdbEdgeKey(path), tmdbEdgeEntry(text, storedAt, softTtl)));
-
-  const kv = layers ? layers.kv : tmdbKvWorthy(path);
-  if (env && env.TMDB_CACHE && kv && !kvWritesPaused(state)
-      && (!state || takeCooldown(state.kvWrittenAt, path, TMDB_KV_REWRITE_MIN_MS))) {
-    waitFor(ctx, Promise.resolve(env.TMDB_CACHE.put('/api/tmdb' + path, text, {
-      expirationTtl: tmdbRetention(softTtl),
-      metadata: { t: storedAt }
-    })).catch((err) => noteKvWriteFailure(state, err)));
+/** Writes an upstream answer to memory and - budget permitting - the location cache. */
+function storeTmdb(path, text, softTtl, storedAt, env, ctx, budget) {
+  memoPut(tmdbState(env), path, text, storedAt);
+  const colo = coloCache();
+  if (colo && budgetOptional(budget)) {
+    waitFor(ctx, colo.put(tmdbEdgeKey(path), tmdbEdgeEntry(text, storedAt, softTtl)));
   }
 }
 
 /** Fetches a fresh copy and stores it. Resolves null on a non-200 answer. */
-async function refreshTmdbNow(path, softTtl, env, ctx, layers) {
-  const res = await tmdbOnce(path, env);
+async function refreshTmdbNow(path, softTtl, env, ctx, budget) {
+  const res = await tmdbOnce(path, env, budget);
   if (res.status !== 200) return null;
   const storedAt = Date.now();
-  storeTmdb(path, res.text, softTtl, storedAt, env, ctx, layers);
+  storeTmdb(path, res.text, softTtl, storedAt, env, ctx, budget);
   return { status: 200, text: res.text, cache: 'MISS', layer: 'origin', storedAt };
 }
 
@@ -1088,46 +1171,35 @@ async function refreshTmdbNow(path, softTtl, env, ctx, layers) {
  *  gone out, so a failed refresh just means a later request tries again - but not
  *  sooner than TMDB_REFRESH_COOLDOWN_MS, so a burst of visitors on a stale path is
  *  one upstream request, not one each. */
-function scheduleTmdbRefresh(path, softTtl, env, ctx, layers) {
+function scheduleTmdbRefresh(path, softTtl, env, ctx, budget) {
   const state = tmdbState(env);
-  if (state && !takeCooldown(state.refreshedAt, path, TMDB_REFRESH_COOLDOWN_MS)) return;
-  waitFor(ctx, refreshTmdbNow(path, softTtl, env, ctx, layers).catch((err) => {
+  if (state && !takeCooldown(state.refreshedAt, path, TMDB_REFRESH_COOLDOWN_MS)) {
+    budgetRelease(budget);
+    return;
+  }
+  waitFor(ctx, refreshTmdbNow(path, softTtl, env, ctx, budget).catch((err) => {
     console.log('[tmdb] background refresh failed for ' + path + ': ' + (err && err.message));
   }));
 }
 
 /**
- * One TMDB path through L1 -> L2 -> KV -> TMDB.
+ * One TMDB path through L1 (memory) -> L2 (caches.default) -> TMDB. No KV.
  *
  * @param {object} [opts]
  * @param {boolean} [opts.revalidate] wait for a fresh copy instead of answering
  *        stale. Only for work that runs BEHIND a response (refreshBatch), where
  *        waiting costs the visitor nothing and a rebuilt plan must not be
  *        assembled from the same stale bodies it is replacing.
- * @param {boolean} [opts.edge] false = skip the per-path edge layer (L2). For
- *        fan-outs: on the Workers Free plan every Cache API match/put counts
- *        against the SAME 50-subrequests-per-invocation quota as fetch(), and
- *        waits in the same 6 connection slots. Two edge calls per path took a
- *        cold 16-path batch to 50 and a 24-title OTT chart to ~73, past which
- *        every fetch() throws "Too many subrequests". A batch has its own
- *        plan-level edge entry, so the per-path copy bought it nothing anyway.
- * @param {boolean} [opts.share] also keep a per-title sub-resource in KV. A
- *        fan-out that skips L2 would otherwise cache it nowhere shared, and
- *        re-fetch every /watch/providers or /release_dates in the plan from TMDB
- *        on each cold assemble. Search is never shared.
+ * @param {object} [opts.budget] the invocation's subrequest budget, for fan-outs
+ *        (see SUBREQUEST BUDGET). Without one, every layer is used.
+ * @param {boolean} [opts.edge] false = skip L2 entirely.
  * @returns {Promise<{status:number, text:string, cache:string, layer:string, storedAt:number}>}
  *        `cache` keeps its old vocabulary (HIT / STALE / MISS); `layer` says
  *        which layer answered.
  */
 async function fetchTmdbJson(path, env, ctx, opts) {
   const options = opts || {};
-  const isSearch = TMDB_SEARCH_PATH_RE.test(path);
-  const layers = {
-    edge: options.edge !== false,
-    kv: !isSearch && (options.share === true || tmdbKvWorthy(path))
-  };
-  const edge = layers.edge;
-  const cacheKey = '/api/tmdb' + path;
+  const budget = options.budget || null;
   const softTtl = tmdbCacheTtl(path, env);
   const freshMs = softTtl * 1000;
   const state = tmdbState(env);
@@ -1136,18 +1208,20 @@ async function fetchTmdbJson(path, env, ctx, opts) {
   let stale = null;
   const consider = (text, t, layer) => { if (!stale || t > stale.t) stale = { text, t, layer }; };
 
-  // L1 — this isolate's memory.
+  // L1 — this isolate's memory. Free, so it is always asked first.
   const memo = memoGet(state, path);
   if (memo) {
     if (now - memo.t < freshMs) {
+      budgetRelease(budget);
       return { status: 200, text: memo.text, cache: 'HIT', layer: 'memo', storedAt: memo.t };
     }
     consider(memo.text, memo.t, 'memo');
   }
 
-  // L2 — this location's cache.
-  const colo = edge ? coloCache() : null;
-  if (colo) {
+  // L2 — this location's cache. Inside a fan-out the lookup is optional: it is
+  // skipped when it would eat a TMDB fetch another path has reserved.
+  const colo = options.edge === false ? null : coloCache();
+  if (colo && budgetOptional(budget)) {
     try {
       const hit = await colo.match(tmdbEdgeKey(path));
       if (hit) {
@@ -1156,61 +1230,36 @@ async function fetchTmdbJson(path, env, ctx, opts) {
         if (looksLikeJson(text)) {
           /*  An entry without a stamp predates this layer: the old generic edge
            *  put stored only non-stale proxy answers, for at most s-maxage, so it
-           *  is treated as fresh - the same rule legacy KV entries get. */
+           *  is treated as fresh. */
           if (!t || now - t < freshMs) {
             const storedAt = t || now;
             memoPut(state, path, text, storedAt);
+            budgetRelease(budget);
             return { status: 200, text, cache: 'HIT', layer: 'edge', storedAt };
           }
           consider(text, t, 'edge');
         }
       }
     } catch (err) {
-      // An edge lookup must never fail the request — fall through to KV.
+      // An edge lookup must never fail the request — fall through to TMDB.
       console.log('[tmdb] edge read failed for ' + path + ': ' + (err && err.message));
-    }
-  }
-
-  // L3 — KV. (Never for a search key: nothing writes those to KV.)
-  if (env && env.TMDB_CACHE && !isSearch) {
-    try {
-      const hit = await env.TMDB_CACHE.getWithMetadata(cacheKey,
-        { type: 'text', cacheTtl: tmdbKvReadTtl(path) });
-      if (hit && hit.value) {
-        const t = (hit.metadata && hit.metadata.t) || 0;
-        /*  Legacy entries written before the SWR read carry no metadata. Their
-         *  own expirationTtl WAS the freshness window, so a hit on one is fresh. */
-        if (!t || now - t < freshMs) {
-          const storedAt = t || now;
-          memoPut(state, path, hit.value, storedAt);
-          // Promoted, so the next read in this location stops at L2.
-          if (colo) waitFor(ctx, colo.put(tmdbEdgeKey(path), tmdbEdgeEntry(hit.value, storedAt, softTtl)));
-          return { status: 200, text: hit.value, cache: 'HIT', layer: 'kv', storedAt };
-        }
-        consider(hit.value, t, 'kv');
-      }
-    } catch (err) {
-      /*  A KV read failure - including a spent daily read quota - used to throw
-       *  straight out of here and turn into a 503. Falling through to TMDB is
-       *  strictly better: the visitor still gets the data. */
-      console.log('[tmdb] kv read failed for ' + path + ': ' + (err && err.message));
     }
   }
 
   if (stale) {
     if (options.revalidate) {
-      const fresh = await refreshTmdbNow(path, softTtl, env, ctx, layers).catch(() => null);
+      const fresh = await refreshTmdbNow(path, softTtl, env, ctx, budget).catch(() => null);
       if (fresh) return fresh;
     } else {
-      scheduleTmdbRefresh(path, softTtl, env, ctx, layers);
+      scheduleTmdbRefresh(path, softTtl, env, ctx, budget);
     }
     return { status: 200, text: stale.text, cache: 'STALE', layer: stale.layer, storedAt: stale.t };
   }
 
-  // L4 — TMDB, collapsed to one request per path per isolate.
-  const res = await tmdbOnce(path, env);
+  // L3 — TMDB, collapsed to one request per path per isolate.
+  const res = await tmdbOnce(path, env, budget);
   const storedAt = Date.now();
-  if (res.status === 200) storeTmdb(path, res.text, softTtl, storedAt, env, ctx, layers);
+  if (res.status === 200) storeTmdb(path, res.text, softTtl, storedAt, env, ctx, budget);
   return { status: res.status, text: res.text, cache: 'MISS', layer: 'origin', storedAt };
 }
 
@@ -1271,14 +1320,15 @@ async function handleTmdbProxy(request, env, ctx, url) {
  *  have been lazy with a proper srcset for a while.
  *
  *  Here the fan-out happens at the edge instead. The Worker sits next to TMDB
- *  and its KV cache, so the 26 fetches cost one client round-trip in total.
+ *  and the location cache, so the 26 fetches cost one client round-trip in total.
  *
  *  It also fixes the scaling shape, which matters more than the single-visitor
  *  win. The plan is identical for every visitor on a given day — the date
  *  windows in it are derived from today's date — so the assembled response is
- *  cached under a hash of the plan. The first visitor of the hour pays the
- *  fan-out; everyone after them is answered by ONE KV read. Traffic can grow
- *  without TMDB seeing more requests.
+ *  cached under a hash of the plan. The first visitor of the window in a
+ *  location pays the fan-out; everyone after them is answered by ONE location
+ *  cache read (no KV, no quota). Traffic can grow without TMDB seeing more
+ *  requests.
  *
  *  SECURITY: this takes a caller-supplied list of paths, so it must not become
  *  an open proxy. Paths are matched against a strict allowlist, the count is
@@ -1390,10 +1440,10 @@ function validBatchPath(path) {
  *
  *  Losing GET costs no caching that matters here. run_worker_first sends every
  *  /api/* request to this Worker regardless of the HTTP cache, so the thing that
- *  actually makes this scale is the KV entry keyed on the plan hash below — and
- *  that works identically for POST. On the client side the individual endpoints
- *  are already held in memory and in a 12h localStorage copy, which is a better
- *  cache than an HTTP-cached blob would be.
+ *  actually makes this scale is the location-cache entry keyed on the plan hash
+ *  below — and that works identically for POST. On the client side the
+ *  individual endpoints are already held in memory and in a localStorage copy,
+ *  which is a better cache than an HTTP-cached blob would be.
  *
  *  GET ?r=<json array> is kept so a live batch can still be inspected by hand.
  */
@@ -1431,14 +1481,14 @@ async function readBatchPlan(request, url) {
  */
 
 /** One path of a plan, as a raw JSON fragment. Never throws. The per-path edge
- *  layer is skipped: the plan has its own edge entry, and on the Free plan two
- *  Cache API calls per path would push a cold plan past 50 subrequests. `share`
- *  keeps per-title sub-resources in KV instead, so a re-assemble does not go
- *  back to TMDB for them. `stale` marks a body that could not be refreshed. */
+ *  layer is used within the invocation's subrequest budget (opts.budget), so a
+ *  re-assemble - or a different visitor's plan over the same titles - is served
+ *  from the location cache instead of TMDB. `stale` marks a body that could not
+ *  be refreshed; a path the budget could not cover is reported as rejected and
+ *  the client fetches just that one on its own. */
 async function batchPart(path, env, ctx, opts) {
   try {
-    const result = await fetchTmdbJson(path, env, ctx,
-      Object.assign({ edge: false, share: true }, opts));
+    const result = await fetchTmdbJson(path, env, ctx, opts);
     if (result.status !== 200) return { ok: false, reason: `TMDB responded ${result.status}` };
     return { ok: true, text: result.text, stale: result.cache === 'STALE' };
   } catch (err) {
@@ -1475,78 +1525,31 @@ function runBatchPlan(paths, env, ctx, opts) {
   return { parts, all };
 }
 
-function putBatch(planKey, body, env) {
-  const state = tmdbState(env);
-  if (kvWritesPaused(state)) return Promise.resolve();
-  return Promise.resolve(env.TMDB_CACHE.put(planKey, body, {
-    // Kept well past its freshness window so the SWR read has something to
-    // answer with; the metadata timestamp, not the expiry, decides freshness.
-    expirationTtl: Math.min(BATCH_CACHE_TTL * TMDB_STALE_MULT, TMDB_MAX_RETENTION),
-    metadata: { t: Date.now() }
-  })).catch((err) => noteKvWriteFailure(state, err));
-}
-
 /** A stale plan is rebuilt at most this often per isolate. */
 const BATCH_REFRESH_COOLDOWN_MS = 30000;
 /** ...and after a rebuild TMDB could not complete, at most this often. */
 const BATCH_RETRY_AFTER_FAIL_MS = 300000;
 
-/*  Whether an assembled plan is worth a KV write. A plan made only of lists and
- *  title records is the same for every visitor (the home feed, the carousel, a
- *  category tab), so one KV copy serves every location. A plan holding per-title
- *  sub-resources (a hero deck's release_dates, an OTT wave's watch/providers)
- *  differs per visitor - their own deck, their own locally fresh paths - so KV
- *  would pay one write per visitor for an entry nobody else reads. Those plans
- *  live in the location's cache only; their parts are in KV (batchPart), so a
- *  re-assemble is KV reads, not TMDB traffic. */
-function planSharedInKv(paths, env) {
-  return Boolean(env && env.TMDB_CACHE) && paths.every(tmdbKvWorthy);
-}
-
-/*  Rebuilds a stale plan after its stale copy has already been sent.
+/*  Rebuilds a stale plan after its stale copy has already been sent, and rewrites
+ *  the location's copy. It has to rewrite that copy: the location cache is what
+ *  answers the next request, so refreshing anything else would leave the stale
+ *  entry answering every request here until its retention window expired.
  *
- *  `planCacheKey` is optional and, when given, the colo copy is rewritten too.
- *  It has to be: the colo layer is checked BEFORE KV, so refreshing only KV
- *  would leave the stale colo entry answering every request in that colo until
- *  its retention window expired — the refresh would run on every request and
- *  never be observed by anyone.
- *
- *  `coloStoredAt` is passed when the trigger was a stale COLO copy. That does
- *  not mean the plan is stale everywhere - another location may already have
- *  rebuilt it into KV - so one KV read settles it first. When KV is newer, the
- *  plan is promoted into this location for no assembly, no TMDB traffic and no
- *  KV write. Without that, every location rebuilt and re-wrote the same plan once
- *  per freshness window, which is exactly the kind of write volume the free
- *  plan's 1,000 writes/day cannot absorb.
+ *  `budget` is the invoking request's subrequest budget - background work is
+ *  billed to the invocation that started it, so it must fit in the same 50.
  */
-async function refreshBatch(paths, planKey, env, ctx, planCacheKey, coloStoredAt) {
+async function refreshBatch(paths, planKey, env, ctx, planCacheKey, budget) {
   try {
-    const planInKv = planSharedInKv(paths, env);
-    if (coloStoredAt !== undefined && planInKv) {
-      const hit = await env.TMDB_CACHE.getWithMetadata(planKey, { type: 'text', cacheTtl: 60 });
-      const t = hit && hit.value && hit.metadata && hit.metadata.t;
-      if (t && t > coloStoredAt && Date.now() - t < BATCH_CACHE_TTL * 1000) {
-        const colo = coloCache();
-        if (colo && planCacheKey) await colo.put(planCacheKey, batchCacheEntry(hit.value, t));
-        return;
-      }
-    }
-
     /*  revalidate: the per-path entries inside a stale plan are normally stale
      *  too - they were written by the same assemble - and without it the rebuilt
      *  plan was put together from those same stale bodies and then stored as
      *  FRESH, so a list could reach a visitor two freshness windows old. This runs
      *  behind a response that has already gone out, so waiting for TMDB here costs
      *  the visitor nothing. */
-    const run = runBatchPlanOnce(planKey, paths, env, ctx, { revalidate: true });
+    const run = runBatchPlanOnce(planKey, paths, env, ctx, { revalidate: true, budget });
     const parts = await run.all;
     if (parts.every((p) => p && p.ok && !p.stale)) {
-      const body = batchBody(parts);
-      if (planCacheKey) {
-        await putBatchEverywhere(planCacheKey, planKey, body, env, ctx, planInKv);
-      } else if (planInKv) {
-        await putBatch(planKey, body, env);
-      }
+      await putBatchColo(planCacheKey, batchBody(parts), Date.now(), budget);
     } else {
       /*  TMDB could not refresh part of the plan. Storing it anyway would stamp
        *  the old bodies as fresh for another BATCH_CACHE_TTL (pre-outage data
@@ -1565,43 +1568,34 @@ async function refreshBatch(paths, planKey, env, ctx, planCacheKey, coloStoredAt
 }
 
 /** Starts a plan refresh unless this isolate started one moments ago. */
-function scheduleBatchRefresh(paths, planKey, env, ctx, planCacheKey, coloStoredAt) {
+function scheduleBatchRefresh(paths, planKey, env, ctx, planCacheKey, budget) {
   const state = tmdbState(env);
   if (state && !takeCooldown(state.batchRefreshedAt, planKey, BATCH_REFRESH_COOLDOWN_MS)) return;
-  ctx.waitUntil(refreshBatch(paths, planKey, env, ctx, planCacheKey, coloStoredAt));
+  ctx.waitUntil(refreshBatch(paths, planKey, env, ctx, planCacheKey, budget));
 }
 
 /*  ══════════════════════════════════════════════════════════════════════════
- *  A COLO CACHE LAYER IN FRONT OF THE BATCH  —  and why KV was not enough
+ *  THE LOCATION CACHE IS THE BATCH'S ONLY SHARED LAYER
  *  ══════════════════════════════════════════════════════════════════════════
- *  The batch entry IS the first screen, and until now the steady state for it
- *  was: Worker invocation + one KV `getWithMetadata`. That is already fast, but
- *  it is the wrong shape for the hottest object on the site, for two reasons.
+ *  The batch entry IS the first screen. It used to be backed by a KV copy of the
+ *  assembled plan (plus KV copies of every part), which made every colo miss a
+ *  metered KV read - and plan refreshes a metered KV write - against quotas of
+ *  100,000 reads and 1,000 writes a day. `caches.default` is a local read in the
+ *  location that served the request, costs no quota, and at this site's traffic
+ *  level was faster than KV even when KV hit.
  *
- *  1. EVERY visitor pays a KV read, forever. KV reads are a metered, rate-limited
- *     resource, and the homepage plan is identical for every visitor on a given
- *     day — so the site was spending its KV read budget re-answering one
- *     question. `caches.default` is a local disk read in the same colo that
- *     served the request, consumes no KV quota, and is measurably closer than KV
- *     even on a KV hot-cache hit.
- *
- *  2. It cannot be reached by the generic edge-cache layer in fetch(). That layer
- *     deliberately skips `/batch` (see the comment there) because the batch is a
- *     POST and the Cache API rejects a non-GET key. So the one endpoint that
- *     would benefit most from the colo cache was the one endpoint excluded from
- *     it.
- *
- *  The fix is a SYNTHETIC key: the plan hash is already a content address, so
+ *  The generic edge-cache layer in fetch() cannot hold it: the batch is a POST
+ *  and the Cache API rejects a non-GET key. So the plan is stored under a
+ *  SYNTHETIC key: the plan hash is already a content address, so
  *  `/api/tmdb/batch/<planKey>` as a GET on this same origin is a perfectly good
  *  cache key for a POST body's answer. Built on `url.origin` rather than an
  *  invented hostname on purpose — the Cache API is zone-scoped, and an off-zone
  *  key is silently unstorable, which would look exactly like a cache that never
  *  hits while still costing a put on every request.
  *
- *  Freshness is decided by the stored-at header rather than by cache expiry, the
- *  same way the KV read decides it, so a stale colo copy can still be served
- *  instantly with a refresh running behind it. The colo TTL is only the
- *  RETENTION bound.
+ *  Freshness is decided by the stored-at header rather than by cache expiry, so
+ *  a stale copy can still be served instantly with a refresh running behind it.
+ *  The cache TTL is only the RETENTION bound.
  */
 const BATCH_STORED_HEADER = 'x-mz-stored';
 
@@ -1611,8 +1605,7 @@ const BATCH_STORED_HEADER = 'x-mz-stored';
  *  routeApi() directly, where `caches` is simply not defined — so an unguarded
  *  `caches.default` here turns the batch endpoint into a ReferenceError in the
  *  one harness that covers it. Treating the layer as optional is also the honest
- *  model of what it is: a best-effort accelerator in front of KV, never the
- *  source of truth.
+ *  model of what it is: a best-effort accelerator, never the source of truth.
  */
 function coloCache() {
   return (typeof caches !== 'undefined' && caches && caches.default) ? caches.default : null;
@@ -1638,23 +1631,24 @@ function batchCacheEntry(body, storedAt) {
   });
 }
 
-/*  Stores an assembled plan in BOTH layers.
- *
- *  Both, not either: the colo cache is per-colo and evictable under pressure, so
- *  KV remains the durable copy that a cold colo populates itself from. Writing
- *  only to the colo would give every Cloudflare location its own cold start.
- */
-function putBatchEverywhere(planCacheKey, planKey, body, env, ctx, kv) {
-  const storedAt = Date.now();
+/*  Stores an assembled plan in the location cache. Uses the reservation the
+ *  batch made for exactly this write. Never rejects: a cache write is an
+ *  optimisation, and a failed one must never surface as an unhandled rejection. */
+function putBatchColo(planCacheKey, body, storedAt, budget) {
   const colo = coloCache();
-  const work = [];
-  if (kv !== false && env.TMDB_CACHE) work.push(putBatch(planKey, body, env));
-  if (colo) work.push(colo.put(planCacheKey, batchCacheEntry(body, storedAt)));
-  return Promise.all(work.map(p => p.catch((err) => {
-    // A cache write is an optimisation; a failed one must never surface as an
-    // unhandled rejection in the observability log used to diagnose real faults.
-    console.log('[batch] cache write failed: ' + (err && err.message));
-  })));
+  if (!colo || !planCacheKey || !budgetRequire(budget)) return Promise.resolve();
+  return Promise.resolve()
+    .then(() => colo.put(planCacheKey, batchCacheEntry(body, storedAt)))
+    .catch((err) => { console.log('[batch] cache write failed: ' + (err && err.message)); });
+}
+
+/*  When an assembled plan counts as stored. A plan put together from a STALE
+ *  part is stored as already stale, so the next request serves it instantly AND
+ *  rebuilds it (revalidating that part) instead of pinning an old body as fresh
+ *  for a whole BATCH_CACHE_TTL. */
+function planStoredAt(parts) {
+  const now = Date.now();
+  return parts.some((part) => part && part.stale) ? now - BATCH_CACHE_TTL * 1000 : now;
 }
 
 /*  Per-isolate, per-PLAN in-flight map.
@@ -1662,10 +1656,10 @@ function putBatchEverywhere(planCacheKey, planKey, body, env, ctx, kv) {
  *  `_tmdbInFlight` already collapses concurrent requests for the same PATH, but
  *  nothing collapsed them at the plan level — so N visitors arriving together on
  *  a cold plan each ran their own `runBatchPlan`: N x the assemble, the
- *  per-path cache reads, the serialise and the KV write, to produce N identical
- *  bodies. The per-path map meant they at least shared the upstream fetches,
- *  which is why this was invisible in TMDB request counts while still burning
- *  CPU time and KV writes on every cold start.
+ *  per-path cache reads, the serialise and the cache write, to produce N
+ *  identical bodies. The per-path map meant they at least shared the upstream
+ *  fetches, which is why this was invisible in TMDB request counts while still
+ *  burning CPU time and subrequests on every cold start.
  */
 const _batchInFlight = new Map();
 
@@ -1720,29 +1714,35 @@ async function handleTmdbBatch(request, env, ctx, url) {
   ).slice(0, 32);
 
   const planCacheKey = batchCacheKey(url, planKey);
-  const planInKv = planSharedInKv(paths, env);
+
+  /*  One budget for this invocation. The plan lookup is required; a stale hit
+   *  or a miss then reserves one TMDB fetch per path plus the plan's own write
+   *  before anything optional (per-path edge lookups/writes, retries) runs. */
+  const budget = subrequestBudget(env, 0);
+  const reserveForAssemble = () => { budget.reserve = paths.length + 1; };
 
   const batchHeaders = (cacheState) => ({
     'content-type': 'application/json',
     'x-cache': cacheState,
     'x-batch-size': String(paths.length),
-    // The assembled copy lives in the colo cache and KV under the plan hash;
+    // The assembled copy lives in the location cache under the plan hash;
     // nothing downstream of here should hold a per-visitor copy.
     'cache-control': 'no-store'
   });
 
-  /*  LAYER 1 — the colo cache. No KV quota, no Worker-side assemble, and it is
+  /*  LAYER 1 — the location cache. No quota, no Worker-side assemble, and it is
    *  the layer that answers the overwhelming majority of homepage loads once a
-   *  colo is warm. Checked before KV precisely because it is cheaper than KV. */
+   *  location is warm. */
   const colo = coloCache();
-  if (colo) {
+  if (colo && budgetRequire(budget)) {
     try {
       const cached = await colo.match(planCacheKey);
       if (cached) {
         const storedAt = Number(cached.headers.get(BATCH_STORED_HEADER)) || 0;
         const fresh = !storedAt || Date.now() - storedAt < BATCH_CACHE_TTL * 1000;
         if (!fresh) {
-          scheduleBatchRefresh(paths, planKey, env, ctx, planCacheKey, storedAt);
+          reserveForAssemble();
+          scheduleBatchRefresh(paths, planKey, env, ctx, planCacheKey, budget);
         }
         return new Response(cached.body, {
           status: 200,
@@ -1750,46 +1750,15 @@ async function handleTmdbBatch(request, env, ctx, url) {
         });
       }
     } catch (err) {
-      // A colo lookup must never be able to fail the request — fall through to KV.
+      // A lookup must never be able to fail the request — assemble instead.
       console.log('[batch] colo lookup failed: ' + (err && err.message));
     }
   }
 
-  if (planInKv) {
-    /*  LAYER 2 — KV. Same stale-while-revalidate read, and for a bigger reason
-     *  than the per-path one: this entry IS the first screen. Every
-     *  BATCH_CACHE_TTL boundary used to hand one visitor the whole fan-out — 16
-     *  to 40 paths — before a single card could paint. Now that visitor is
-     *  answered from the assembled copy in one KV read and the fan-out happens
-     *  behind the response. */
-    try {
-      const hit = await env.TMDB_CACHE.getWithMetadata(planKey, { type: 'text', cacheTtl: 60 });
-      if (hit && hit.value) {
-        const storedAt = hit.metadata && hit.metadata.t;
-        const fresh = !storedAt || Date.now() - storedAt < BATCH_CACHE_TTL * 1000;
-        if (!fresh) scheduleBatchRefresh(paths, planKey, env, ctx, planCacheKey);
-        /*  Promote a KV hit into the colo cache, which is what makes the NEXT
-         *  request in this colo skip KV entirely. Only a fresh body is promoted: a
-         *  stale one already has a refresh running behind it, and pinning it here
-         *  would mask the fresher copy that lands a moment later. */
-        if (fresh && colo) {
-          waitFor(ctx, colo.put(planCacheKey, batchCacheEntry(hit.value, storedAt || Date.now())));
-        }
-        return new Response(hit.value, {
-          status: 200,
-          headers: batchHeaders(fresh ? 'HIT' : 'STALE')
-        });
-      }
-    } catch (err) {
-      // A KV read failure must not 500 the whole first screen — fall through
-      // and assemble from the colo cache / TMDB instead.
-      console.log('[batch] kv read failed: ' + (err && err.message));
-    }
-  }
-
-  // LAYER 3 — assemble, collapsed to one run per plan per isolate, bounded by
-  // BATCH_DEADLINE_MS.
-  const run = runBatchPlanOnce(planKey, paths, env, ctx);
+  // LAYER 2 — assemble, collapsed to one run per plan per isolate, bounded by
+  // BATCH_DEADLINE_MS. Parts come from memory, the location cache or TMDB.
+  reserveForAssemble();
+  const run = runBatchPlanOnce(planKey, paths, env, ctx, { budget });
   // Keeps every path alive past a deadline answer, so its cache writes still land.
   waitFor(ctx, run.all);
 
@@ -1811,12 +1780,12 @@ async function handleTmdbBatch(request, env, ctx, url) {
   // for 3 hours would turn one bad moment into a lasting one.
   const allOk = finished && parts.every((part) => part && part.ok);
   if (allOk) {
-    waitFor(ctx, putBatchEverywhere(planCacheKey, planKey, body, env, ctx, planInKv));
+    waitFor(ctx, putBatchColo(planCacheKey, body, planStoredAt(parts), budget));
   } else if (!finished) {
     // The plan is stored once the slow paths land, so the NEXT visitor gets it
     // whole in one read instead of repeating this assemble.
     waitFor(ctx, run.all.then((late) => (late.every((part) => part && part.ok)
-      ? putBatchEverywhere(planCacheKey, planKey, batchBody(late), env, ctx, planInKv)
+      ? putBatchColo(planCacheKey, batchBody(late), planStoredAt(late), budget)
       : null)));
   }
 
@@ -1840,10 +1809,13 @@ async function handleTmdbBatch(request, env, ctx, url) {
  *  while looking correct locally. That divergence is the whole reason this block
  *  is not optional.
  *
- *  Same two-stage shape as fetchTmdbJson: the chart is read from KV when fresh,
- *  served stale while a refresh runs in the background, and hydrated into TMDB
- *  cards HERE rather than on the client, because 24 detail calls would eat most
- *  of the client's 30-per-10s budget on ordering alone.
+ *  Same two-stage shape as fetchTmdbJson: the chart is read from memory or the
+ *  location cache when fresh, served stale while a refresh runs in the
+ *  background, and hydrated into TMDB cards HERE rather than on the client,
+ *  because 24 detail calls would eat most of the client's 30-per-10s budget on
+ *  ordering alone. It used to be read from KV on EVERY request - one metered
+ *  read per platform click, plus up to 24 more when a stale chart re-hydrated
+ *  without any cooldown - and it is now KV-free.
  *
  *  The reasoning for JustWatch as the source — including why each platform's own
  *  site is not usable, and the proof that JustWatch's packageId IS TMDB's
@@ -1885,17 +1857,16 @@ function slimChartCard(detail, mediaType) {
 
 /*  Chart ids -> renderable cards, in chart order.
  *
- *  Each detail read goes through fetchTmdbJson, so it inherits the KV cache, the
- *  single-flight collapse and the timeout the proxy already has — a chart
- *  refresh mostly costs KV reads, not TMDB calls. A title that fails to hydrate,
- *  or has no poster, is DROPPED rather than rendered blank: loadMovies filters
+ *  Each detail read goes through fetchTmdbJson, so it inherits the location
+ *  cache, the single-flight collapse and the timeout the proxy already has, and
+ *  all of them share the invocation's subrequest budget (24 detail reads plus
+ *  JustWatch must fit the Free plan's 50). A title that fails to hydrate, or has
+ *  no poster, is DROPPED rather than rendered blank: loadMovies filters
  *  posterless titles on the client anyway, so passing one would waste a rank. */
-async function hydrateOttChart(order, env, ctx) {
-  // edge: false for the same reason as batchPart: up to OTT_CHART_HEAD detail
-  // reads in one invocation must stay inside the Free plan's 50 subrequests.
+async function hydrateOttChart(order, env, ctx, budget) {
   const settled = await Promise.allSettled(
     order.map((entry) => fetchTmdbJson(
-      '/' + entry.media_type + '/' + entry.id + '?language=en-US', env, ctx, { edge: false }))
+      '/' + entry.media_type + '/' + entry.id + '?language=en-US', env, ctx, { budget }))
   );
 
   const cards = [];
@@ -1916,11 +1887,19 @@ async function hydrateOttChart(order, env, ctx) {
   return cards;
 }
 
+/** JustWatch calls one chart build makes (trending + newly), see ott-charts.js. */
+const OTT_CHART_UPSTREAM_CALLS = 2;
+
 /** Fetch + hydrate one platform chart. Throws if it would be empty. */
-async function buildOttChart(platform, region, env, ctx) {
+async function buildOttChart(platform, region, env, ctx, budget) {
+  // JustWatch and the chart's own cache write are reserved before any optional
+  // per-title edge lookup can spend the budget.
+  if (budget) budget.reserve += OTT_CHART_UPSTREAM_CALLS + 1;
+  for (let i = 0; i < OTT_CHART_UPSTREAM_CALLS; i++) budgetRequire(budget);
   const chart = await ottCharts.fetchPlatformChart(platform, { region });
   const order = ottCharts.mergeChartOrder(chart, OTT_CHART_HEAD);
-  const items = await hydrateOttChart(order, env, ctx);
+  if (budget) budget.reserve += order.length;
+  const items = await hydrateOttChart(order, env, ctx, budget);
 
   /*  Throwing on empty is deliberate: a transient JustWatch failure that
    *  hydrated to nothing must not be STORED as a successful answer, or the
@@ -1939,18 +1918,89 @@ async function buildOttChart(platform, region, env, ctx) {
   };
 }
 
-/** Background refresh behind a stale read. Never throws — the stale copy already went out. */
-async function refreshOttChart(platform, region, cacheKey, store, env, ctx) {
-  try {
-    const payload = await buildOttChart(platform, region, env, ctx);
-    await store.put(cacheKey, JSON.stringify(payload), {
-      expirationTtl: OTT_CHART_TTL * OTT_CHART_STALE_MULT,
-      metadata: { t: Date.now() }
-    });
-  } catch (err) {
-    console.log('[ott-charts] refresh failed for ' + platform + '/' + region
-      + ': ' + (err && err.message));
-  }
+/** How long the location cache keeps a chart: the fresh window plus a day of fallback. */
+const OTT_CHART_RETENTION = OTT_CHART_TTL * OTT_CHART_STALE_MULT;
+/** A stale chart is rebuilt at most this often per isolate. */
+const OTT_CHART_REFRESH_COOLDOWN_MS = 60000;
+/** After a failed build, this isolate answers "no chart" for this long instead of
+ *  repeating JustWatch + 24 hydrations on every click against a failing upstream. */
+const OTT_CHART_FAILURE_HOLD_MS = 60000;
+
+const ottChartMemoKey = (platform, region) => 'ott-chart:' + platform + ':' + region;
+
+/*  Synthetic, on-zone GET key. /__mz/* is not in run_worker_first, so no public
+ *  request can ever reach this Worker at that path and overwrite the entry. */
+function ottChartCacheKey(platform, region) {
+  return new Request(TMDB_EDGE_ORIGIN + '/__mz/ott-chart/' + encodeURIComponent(platform)
+    + '/' + encodeURIComponent(region), { method: 'GET' });
+}
+
+function ottChartEntry(body, storedAt) {
+  return new Response(body, {
+    status: 200,
+    headers: {
+      'content-type': 'application/json',
+      // Retention only; freshness is the stored-at stamp, as everywhere else.
+      'cache-control': 'public, s-maxage=' + OTT_CHART_RETENTION,
+      [TMDB_STORED_HEADER]: String(storedAt)
+    }
+  });
+}
+
+function ottChartResponse(body, cacheState) {
+  const fresh = cacheState !== 'STALE';
+  return new Response(body, {
+    status: 200,
+    headers: {
+      'content-type': 'application/json',
+      'x-cache': cacheState,
+      'cache-control': fresh
+        ? 'public, max-age=1800, s-maxage=7200, stale-while-revalidate=86400'
+        : 'public, max-age=60, must-revalidate'
+    }
+  });
+}
+
+/*  One build per platform/region per isolate, however many callers ask at once.
+ *  The finished chart goes to memory and the location cache - never KV. */
+const _ottChartInFlight = new Map();
+
+function buildOttChartOnce(platform, region, env, ctx, budget) {
+  const memoKey = ottChartMemoKey(platform, region);
+  const pending = _ottChartInFlight.get(memoKey);
+  if (pending) return pending;
+  const started = (async () => {
+    const payload = await buildOttChart(platform, region, env, ctx, budget);
+    const body = JSON.stringify(payload);
+    const storedAt = Date.now();
+    memoPut(tmdbState(env), memoKey, body, storedAt);
+    const colo = coloCache();
+    if (colo && budgetRequire(budget)) {
+      waitFor(ctx, colo.put(ottChartCacheKey(platform, region), ottChartEntry(body, storedAt)));
+    }
+    return body;
+  })();
+  _ottChartInFlight.set(memoKey, started);
+  // Cleared on both outcomes, so a failure never becomes the pinned answer.
+  started.then(() => {}, () => {}).then(() => {
+    if (_ottChartInFlight.get(memoKey) === started) _ottChartInFlight.delete(memoKey);
+  });
+  return started;
+}
+
+/** The empty-but-valid answer: the tab keeps its provider-gated ordering. */
+function ottChartUnavailable(platform, region) {
+  return new Response(JSON.stringify({
+    platform, region, source: 'justwatch', fetchedAt: Date.now(),
+    unavailable: true, counts: { trending: 0, newly: 0 }, items: []
+  }), {
+    status: 200,
+    headers: {
+      'content-type': 'application/json',
+      'x-cache': 'MISS',
+      'cache-control': 'public, max-age=60, must-revalidate'
+    }
+  });
 }
 
 async function handleOttCharts(request, env, ctx, url) {
@@ -1960,36 +2010,63 @@ async function handleOttCharts(request, env, ctx, url) {
   if (!ottCharts.isKnownChartPlatform(platform)) {
     return json({ error: 'Unknown platform', platforms: ottCharts.chartPlatforms() }, 400);
   }
+  if (!/^[A-Z]{2}$/.test(region)) {
+    return json({ error: 'region must be a two-letter country code' }, 400);
+  }
 
-  const cacheKey = 'ott-chart:' + platform + ':' + region;
-  /*  The chart cache rides on TMDB_CACHE rather than needing its own binding:
-   *  one namespace, distinct key prefix, and no wrangler.toml change required to
-   *  deploy — a missing binding would otherwise make every platform click a full
-   *  JustWatch + 24-hydration round trip. */
-  const store = env.OTT_CHART_CACHE || env.TMDB_CACHE;
+  const state = tmdbState(env);
+  const memoKey = ottChartMemoKey(platform, region);
+  const freshMs = OTT_CHART_TTL * 1000;
+  const budget = subrequestBudget(env, 0);
+  const now = Date.now();
+  let stale = null;
 
-  if (store) {
-    const hit = await store.getWithMetadata(cacheKey, { type: 'text', cacheTtl: 60 });
-    if (hit && hit.value) {
-      const storedAt = hit.metadata && hit.metadata.t;
-      const fresh = !storedAt || Date.now() - storedAt < OTT_CHART_TTL * 1000;
-      if (!fresh) ctx.waitUntil(refreshOttChart(platform, region, cacheKey, store, env, ctx));
-      return new Response(hit.value, {
-        status: 200,
-        headers: {
-          'content-type': 'application/json',
-          'x-cache': fresh ? 'HIT' : 'STALE',
-          'cache-control': fresh
-            ? 'public, max-age=1800, s-maxage=7200, stale-while-revalidate=86400'
-            : 'public, max-age=60, must-revalidate'
+  // L1 — this isolate's memory.
+  const memo = memoGet(state, memoKey);
+  if (memo) {
+    if (now - memo.t < freshMs) return ottChartResponse(memo.text, 'HIT');
+    stale = { text: memo.text, t: memo.t };
+  }
+
+  // L2 — this location's cache (another isolate may hold a fresher copy).
+  const colo = coloCache();
+  if (colo && budgetRequire(budget)) {
+    try {
+      const hit = await colo.match(ottChartCacheKey(platform, region));
+      if (hit) {
+        const text = await hit.text();
+        const t = Number(hit.headers.get(TMDB_STORED_HEADER)) || 0;
+        if (looksLikeJson(text) && (!stale || t > stale.t)) {
+          if (t && now - t < freshMs) {
+            memoPut(state, memoKey, text, t);
+            return ottChartResponse(text, 'HIT');
+          }
+          stale = { text, t };
         }
-      });
+      }
+    } catch (err) {
+      console.log('[ott-charts] edge read failed for ' + memoKey + ': ' + (err && err.message));
     }
   }
 
-  let payload;
+  if (stale) {
+    // Served at once; rebuilt behind the response, at most once a minute here.
+    if (!state || takeCooldown(state.refreshedAt, memoKey, OTT_CHART_REFRESH_COOLDOWN_MS)) {
+      waitFor(ctx, buildOttChartOnce(platform, region, env, ctx, budget).catch((err) => {
+        console.log('[ott-charts] refresh failed for ' + platform + '/' + region
+          + ': ' + (err && err.message));
+      }));
+    }
+    return ottChartResponse(stale.text, 'STALE');
+  }
+
+  if (state && now - (state.ottFailedAt.get(memoKey) || 0) < OTT_CHART_FAILURE_HOLD_MS) {
+    return ottChartUnavailable(platform, region);
+  }
+
+  let body;
   try {
-    payload = await buildOttChart(platform, region, env, ctx);
+    body = await buildOttChartOnce(platform, region, env, ctx, budget);
   } catch (err) {
     /*  200 with an empty list, NOT a 5xx.
      *
@@ -2000,35 +2077,14 @@ async function handleOttCharts(request, env, ctx, url) {
      *  make the client retry against an upstream already known to be down. */
     console.log('[ott-charts] ' + platform + '/' + region + ' unavailable: '
       + (err && err.message));
-    return new Response(JSON.stringify({
-      platform, region, source: 'justwatch', fetchedAt: Date.now(),
-      unavailable: true, counts: { trending: 0, newly: 0 }, items: []
-    }), {
-      status: 200,
-      headers: {
-        'content-type': 'application/json',
-        'x-cache': 'MISS',
-        'cache-control': 'public, max-age=60, must-revalidate'
-      }
-    });
-  }
-
-  const body = JSON.stringify(payload);
-  if (store) {
-    ctx.waitUntil(store.put(cacheKey, body, {
-      expirationTtl: OTT_CHART_TTL * OTT_CHART_STALE_MULT,
-      metadata: { t: Date.now() }
-    }));
-  }
-
-  return new Response(body, {
-    status: 200,
-    headers: {
-      'content-type': 'application/json',
-      'x-cache': 'MISS',
-      'cache-control': 'public, max-age=1800, s-maxage=7200, stale-while-revalidate=86400'
+    if (state) {
+      state.ottFailedAt.set(memoKey, Date.now());
+      if (state.ottFailedAt.size > 256) state.ottFailedAt.delete(state.ottFailedAt.keys().next().value);
     }
-  });
+    return ottChartUnavailable(platform, region);
+  }
+
+  return ottChartResponse(body, 'MISS');
 }
 
 /*  Dispatch for /api/*.
@@ -2130,9 +2186,9 @@ const SSR_DETAIL_APPEND = 'credits,similar,recommendations,videos,watch/provider
 
 
 /**
- * Adapts the KV-cached TMDB proxy to the `tmdb(path, params)` contract the
- * seo-ssr renderers were written against, including the `tmdbStatus` property
- * their 404 handling looks for.
+ * Adapts the edge-cached TMDB path (fetchTmdbJson) to the `tmdb(path, params)`
+ * contract the seo-ssr renderers were written against, including the
+ * `tmdbStatus` property their 404 handling looks for.
  */
 function ssrTmdb(env, ctx, opts) {
   return async (apiPath, params) => {
@@ -2231,8 +2287,54 @@ function notModified(request, response) {
  *  TMDB fetch and the render instead of queueing behind them.
  *
  *  The static-asset branch in fetch() has had this header all along; the SSR
- *  responses were the ones missing it. */
-const SSR_EARLY_HINT_LINK = '<https://image.tmdb.org>; rel=preconnect; crossorigin';
+ *  responses were the ones missing it.
+ *
+ *  NO `crossorigin`. The backdrops and posters are plain <img> / <link
+ *  rel=preload as=image> requests - no-cors, credentialed - and a crossorigin
+ *  preconnect opens a socket in the OTHER (anonymous) connection pool, which
+ *  those requests can never use. With the attribute, the hint bought nothing and
+ *  the LCP image still paid a full DNS+TCP+TLS setup. */
+const SSR_EARLY_HINT_LINK = '<https://image.tmdb.org>; rel=preconnect';
+
+/*  ══════════════════════════════════════════════════════════════════════════
+ *  WHAT THE BROWSER IS TOLD ON AN EDGE HIT
+ *  ══════════════════════════════════════════════════════════════════════════
+ *  Measured on production (Sep 2026): a response answered from caches.default
+ *  comes back with its max-age REWRITTEN. "/" was stored with max-age=300 and
+ *  served as `public, max-age=86400, s-maxage=86400, ...`; /movies/popular was
+ *  stored with max-age=1800 and served with max-age=86400. So every edge hit
+ *  told the browser to keep the HTML for a DAY. After a deploy, a returning
+ *  visitor kept running yesterday's document - its markup and its ?v= bundle
+ *  URLs - and because the asset router ignores ?v=, any bundle that browser no
+ *  longer held came back as TODAY's code under yesterday's URL: old HTML with
+ *  new JS. That is the "every fix adds new errors" pattern.
+ *
+ *  So the policy meant for the browser travels on the stored copy in its own
+ *  header (x-mz-cc) and is put back on every edge hit. Entries stored before
+ *  this change carry no such header; an HTML one gets "always revalidate".
+ */
+const BROWSER_CC_HEADER = 'x-mz-cc';
+const LEGACY_EDGE_HTML_CC = 'public, max-age=0, must-revalidate';
+
+/** The copy that goes into caches.default: the same response plus its browser policy. */
+function forEdgeStore(response) {
+  const copy = new Response(response.body, response);
+  copy.headers.set(BROWSER_CC_HEADER, response.headers.get('cache-control') || '');
+  return copy;
+}
+
+/** An edge hit as the browser should see it: the stored policy restored. */
+function fromEdgeStore(cached) {
+  if (!cached) return cached;
+  const stored = cached.headers.get(BROWSER_CC_HEADER);
+  const isHtml = /text\/html/i.test(cached.headers.get('content-type') || '');
+  const policy = stored || (isHtml ? LEGACY_EDGE_HTML_CC : '');
+  if (!policy && stored === null) return cached;
+  const res = new Response(cached.body, cached);
+  if (policy) res.headers.set('cache-control', policy);
+  res.headers.delete(BROWSER_CC_HEADER);
+  return res;
+}
 
 function ssrHtml(html, cacheControl, robots) {
   const headers = {
@@ -2377,7 +2479,6 @@ const SITEMAP_CHUNK = 2000;
 const SITEMAP_LIVE_PAGES = 3;
 
 const SITEMAP_CATALOG_KV_KEY = 'sitemap:catalog';
-const sitemapItemsKvKey = (kind) => 'sitemap:items:' + kind;
 
 // Same values the Express handlers set, so both runtimes cache identically.
 const SITEMAP_CACHE = 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800';
@@ -2448,46 +2549,150 @@ async function collectionsCatalogItems(kind, env) {
   return out;
 }
 
+/*  ══════════════════════════════════════════════════════════════════════════
+ *  THE CATALOGUE: KV AT MOST ONCE PER LOCATION PER SIX HOURS
+ *  ══════════════════════════════════════════════════════════════════════════
+ *  sitemap:catalog is real data, not a cache: the nightly seo-refresh workflow
+ *  uploads it and nothing in the Worker can rebuild it, so it stays in KV. But it
+ *  used to be READ from KV on every sitemap and browse edge miss - up to three
+ *  times per cold isolate (movie and tv in parallel, then browse) - and crawlers
+ *  generate a lot of edge misses across /browse/<letter>?page=N. Every one was a
+ *  metered read of a ~500 KB value.
+ *
+ *  Now the raw value sits in the location cache for six hours and the parsed one
+ *  in isolate memory for thirty minutes, with one in-flight read per isolate, so
+ *  KV is asked roughly four times a day per Cloudflare location that sees a
+ *  crawler - a few dozen reads a day in total. A catalogue uploaded tonight
+ *  reaches every location within six hours, which is well inside the sitemap's
+ *  own s-maxage of a day.
+ */
+const SITEMAP_CATALOG_MEMO_KEY = 'sitemap:catalog';
+const SITEMAP_CATALOG_MEMO_MS = 1800000;          // 30 min, parsed, per isolate
+const SITEMAP_CATALOG_EDGE_RETENTION = 21600;     // 6 h, raw, per location
+/** "No catalogue uploaded" is remembered this long, so a missing key is not a KV read per request. */
+const SITEMAP_CATALOG_MISS_MS = SITEMAP_MEMO_MS;
+
+/** Synthetic on-zone key for Worker-internal SEO data. /__mz/* never reaches the Worker. */
+function seoEdgeKey(name) {
+  return new Request(TMDB_EDGE_ORIGIN + '/__mz/seo/' + name, { method: 'GET' });
+}
+
+const _catalogInFlight = new WeakMap();
+
+/** The parsed nightly catalogue ({ movie:[], tv:[], generated }), or null. Never throws. */
+function readSitemapCatalog(env, ctx) {
+  const memoStore = sitemapMemoFor(env);
+  const memo = memoStore && memoStore.get(SITEMAP_CATALOG_MEMO_KEY);
+  if (memo && memo.expires > Date.now()) return Promise.resolve(memo.value);
+
+  const inflightKey = env && typeof env === 'object' ? env : null;
+  const pending = inflightKey && _catalogInFlight.get(inflightKey);
+  if (pending) return pending;
+
+  const work = (async () => {
+    const colo = coloCache();
+    const edgeKey = seoEdgeKey('catalog');
+    let raw = null;
+    let fromKv = false;
+
+    if (colo) {
+      try {
+        const hit = await colo.match(edgeKey);
+        if (hit) raw = await hit.text();
+      } catch (err) {
+        console.log('[ssr] catalogue edge read failed: ' + (err && err.message));
+      }
+    }
+
+    if (!raw) {
+      const store = seoStore(env);
+      if (store) {
+        try {
+          raw = await store.get(SITEMAP_CATALOG_KV_KEY, { cacheTtl: SITEMAP_KV_CACHE_TTL });
+          fromKv = Boolean(raw);
+        } catch (err) {
+          console.warn('[ssr] sitemap catalogue unreadable:', err && err.message);
+        }
+      }
+    }
+
+    let parsed = null;
+    if (raw) {
+      try {
+        parsed = JSON.parse(raw);
+      } catch (err) {
+        console.warn('[ssr] sitemap catalogue is not valid JSON:', err && err.message);
+      }
+    }
+    if (parsed && typeof parsed !== 'object') parsed = null;
+
+    if (parsed && fromKv && colo) {
+      waitFor(ctx, colo.put(edgeKey, new Response(raw, {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          'cache-control': 'public, s-maxage=' + SITEMAP_CATALOG_EDGE_RETENTION
+        }
+      })));
+    }
+
+    if (memoStore) {
+      memoStore.set(SITEMAP_CATALOG_MEMO_KEY, {
+        expires: Date.now() + (parsed ? SITEMAP_CATALOG_MEMO_MS : SITEMAP_CATALOG_MISS_MS),
+        value: parsed
+      });
+    }
+    return parsed;
+  })();
+
+  if (inflightKey) {
+    _catalogInFlight.set(inflightKey, work);
+    work.then(() => {}, () => {}).then(() => {
+      if (_catalogInFlight.get(inflightKey) === work) _catalogInFlight.delete(inflightKey);
+    });
+  }
+  return work;
+}
+
+/** TMDB paths collectSitemapItems() in seo-ssr.js fetches per kind, per page. */
+const SITEMAP_LIVE_ENDPOINTS = { movie: 4, tv: 3 };
+
 /**
  * The catalogue for one kind, with the date to stamp the sitemap index with.
  *
+ * @param {object} [budget] a subrequest budget shared with sibling calls in the
+ *        same invocation (the index builds movie and tv side by side).
  * @returns {Promise<{items: object[], generated: string, source: string}>}
  */
-async function getSitemapItems(kind, env, ctx) {
+async function getSitemapItems(kind, env, ctx, budget) {
   const wanted = kind === 'tv' ? 'tv' : 'movie';
   const memoStore = sitemapMemoFor(env);
   const memo = memoStore && memoStore.get(wanted);
   if (memo && memo.expires > Date.now()) return memo.value;
 
-  const store = seoStore(env);
   let result = null;
 
   // 1. the full nightly catalogue, if it has been uploaded
-  if (store) {
-    try {
-      const raw = await store.get(SITEMAP_CATALOG_KV_KEY, { cacheTtl: SITEMAP_KV_CACHE_TTL });
-      const parsed = raw ? JSON.parse(raw) : null;
-      const items = parsed && Array.isArray(parsed[wanted]) ? parsed[wanted] : null;
-      if (items && items.length) {
-        const generated = String((parsed && parsed.generated) || '').slice(0, 10);
-        result = {
-          items,
-          generated: /^\d{4}-\d{2}-\d{2}$/.test(generated) ? generated : seo.SITEMAP_FALLBACK_DATE,
-          source: 'kv-catalog'
-        };
-      }
-    } catch (err) {
-      console.warn('[ssr] sitemap catalogue unreadable:', err && err.message);
-    }
+  const parsed = await readSitemapCatalog(env, ctx);
+  const catalogItems = parsed && Array.isArray(parsed[wanted]) ? parsed[wanted] : null;
+  if (catalogItems && catalogItems.length) {
+    const generated = String((parsed && parsed.generated) || '').slice(0, 10);
+    result = {
+      items: catalogItems,
+      generated: /^\d{4}-\d{2}-\d{2}$/.test(generated) ? generated : seo.SITEMAP_FALLBACK_DATE,
+      source: 'kv-catalog'
+    };
   }
 
-  // 2. a previous live build
-  if (!result && store) {
+  // 2. a previous live build, kept in this location's cache (never KV)
+  const colo = coloCache();
+  const liveKey = seoEdgeKey('items-' + wanted);
+  if (!result && colo) {
     try {
-      const raw = await store.get(sitemapItemsKvKey(wanted), { cacheTtl: SITEMAP_KV_CACHE_TTL });
-      const items = raw ? JSON.parse(raw) : null;
+      const hit = await colo.match(liveKey);
+      const items = hit ? JSON.parse(await hit.text()) : null;
       if (Array.isArray(items) && items.length) {
-        result = { items, generated: seo.SITEMAP_FALLBACK_DATE, source: 'kv-live' };
+        result = { items, generated: seo.SITEMAP_FALLBACK_DATE, source: 'edge-live' };
       }
     } catch (err) {
       console.warn('[ssr] sitemap live cache unreadable:', err && err.message);
@@ -2496,11 +2701,11 @@ async function getSitemapItems(kind, env, ctx) {
 
   // 3. build one now, bounded, and keep it for a day
   if (!result) {
+    const liveBudget = budget || subrequestBudget(env, 0);
+    liveBudget.reserve += SITEMAP_LIVE_PAGES * SITEMAP_LIVE_ENDPOINTS[wanted];
     let items = [];
     try {
-      // edge: false - up to 21 list reads in one invocation, and on the Free plan
-      // two Cache API calls per path would take this build past 50 subrequests.
-      items = await seo.collectSitemapItems(ssrTmdb(env, ctx, { edge: false }), wanted, SITEMAP_LIVE_PAGES);
+      items = await seo.collectSitemapItems(ssrTmdb(env, ctx, { budget: liveBudget }), wanted, SITEMAP_LIVE_PAGES);
     } catch (err) {
       console.warn('[ssr] sitemap ' + wanted + ' live build failed:', err && err.message);
     }
@@ -2515,12 +2720,11 @@ async function getSitemapItems(kind, env, ctx) {
 
     result = { items, generated: seo.SITEMAP_FALLBACK_DATE, source: 'live' };
 
-    if (store && items.length && ctx && typeof ctx.waitUntil === 'function') {
-      ctx.waitUntil(store.put(
-        sitemapItemsKvKey(wanted),
-        JSON.stringify(items),
-        { expirationTtl: SITEMAP_KV_TTL }
-      ));
+    if (colo && items.length && budgetOptional(liveBudget)) {
+      waitFor(ctx, colo.put(liveKey, new Response(JSON.stringify(items), {
+        status: 200,
+        headers: { 'content-type': 'application/json', 'cache-control': 'public, s-maxage=' + SITEMAP_KV_TTL }
+      })));
     }
   }
 
@@ -2555,9 +2759,11 @@ function sitemapShardPaths(kind, count) {
  *  movie URLs never submitted.
  */
 async function buildSitemapIndexXml(env, ctx) {
+  // One budget: both kinds may fall back to a live build in this invocation.
+  const budget = subrequestBudget(env, 0);
   const [movie, tv] = await Promise.all([
-    getSitemapItems('movie', env, ctx),
-    getSitemapItems('tv', env, ctx)
+    getSitemapItems('movie', env, ctx, budget),
+    getSitemapItems('tv', env, ctx, budget)
   ]);
 
   const lastmod = movie.generated || tv.generated || seo.SITEMAP_FALLBACK_DATE;
@@ -2646,36 +2852,27 @@ async function serveMediaSitemap(kind, chunkStr, env, ctx) {
   const xml = seo.buildMediaSitemap(slice, kind);
 
   // waitUntil, so the crawler is never made to wait on the write that only helps
-  // the NEXT request.
-  if (store) ctx.waitUntil(store.put(xmlKey, xml, { expirationTtl: SITEMAP_XML_KV_TTL }));
+  // the NEXT request. Guarded: a spent write quota must not surface as an
+  // unhandled rejection in the logs used to diagnose real faults.
+  if (store) waitFor(ctx, store.put(xmlKey, xml, { expirationTtl: SITEMAP_XML_KV_TTL }));
 
   return xmlResponse(xml);
 }
 
 /** Every catalogue entry, tagged with the kind its detail URL needs. */
 async function browseEntries(env, ctx) {
-  const store = seoStore(env);
-  if (store) {
-    try {
-      /*  cacheTtl was missing here, so this ~500 KB read fell back to the 60 s
-       *  default colo TTL — on a route the CDN holds for a day. An hour matches
-       *  what the sitemap XML read already asks for, and the catalogue is only
-       *  rewritten nightly. */
-      const raw = await store.get(SITEMAP_CATALOG_KV_KEY, { cacheTtl: SITEMAP_KV_CACHE_TTL });
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        const movies = Array.isArray(parsed.movie) ? parsed.movie : [];
-        const tv = Array.isArray(parsed.tv) ? parsed.tv : [];
-        return movies.map((m) => Object.assign({ media_type: 'movie' }, m))
-          .concat(tv.map((t) => Object.assign({ media_type: 'tv' }, t)));
-      }
-    } catch (err) {
-      console.warn('[ssr] browseEntries catalog fallback:', err && err.message);
-    }
+  // Same memo / location cache / single KV read as the sitemaps (readSitemapCatalog).
+  const parsed = await readSitemapCatalog(env, ctx);
+  if (parsed) {
+    const movies = Array.isArray(parsed.movie) ? parsed.movie : [];
+    const tv = Array.isArray(parsed.tv) ? parsed.tv : [];
+    return movies.map((m) => Object.assign({ media_type: 'movie' }, m))
+      .concat(tv.map((t) => Object.assign({ media_type: 'tv' }, t)));
   }
+  const budget = subrequestBudget(env, 0);
   const [movie, tv] = await Promise.all([
-    getSitemapItems('movie', env, ctx),
-    getSitemapItems('tv', env, ctx)
+    getSitemapItems('movie', env, ctx, budget),
+    getSitemapItems('tv', env, ctx, budget)
   ]);
   return movie.items.map((m) => Object.assign({ media_type: 'movie' }, m))
     .concat(tv.items.map((t) => Object.assign({ media_type: 'tv' }, t)));
@@ -2683,7 +2880,7 @@ async function browseEntries(env, ctx) {
 
 /*  ── BROWSE INDEX ───────────────────────────────────────────────────────────
  *  /browse and /browse/<letter> used to redo the entire pipeline on every single
- *  request: the ~500 KB KV read above, a ~6 ms JSON.parse, ~8000 Object.assign
+ *  request: a ~500 KB catalogue read, a ~6 ms JSON.parse, ~8000 Object.assign
  *  allocations to tag media_type, an O(n) letter tally for the hub, and — per
  *  letter — a full-catalogue filter plus a localeCompare sort.
  *
@@ -3089,8 +3286,11 @@ function heroEarlyHints(backdropPath) {
 const HOME_FRESH_MS = 5 * 60 * 1000;
 const HOME_EDGE_RETENTION = 86400;
 const HOME_STORED_HEADER = 'x-mz-stored';
-const HOME_CACHE_CONTROL = 'public, max-age=300, s-maxage=' + HOME_EDGE_RETENTION
-  + ', stale-while-revalidate=86400';
+/*  The BROWSER always revalidates the homepage (max-age=0 + ETag = a ~150-byte
+ *  304 when nothing changed); only the edge keeps it (s-maxage). The document
+ *  pins the ?v= bundle URLs, so a browser-cached copy is exactly how a returning
+ *  visitor ended up on an old document with new code after a deploy. */
+const HOME_CACHE_CONTROL = 'public, max-age=0, must-revalidate, s-maxage=' + HOME_EDGE_RETENTION;
 /** One background rebuild per isolate per this window, however many visitors. */
 const HOME_REFRESH_COOLDOWN_MS = 60000;
 
@@ -3185,7 +3385,7 @@ async function refreshHome(request, env, ctx, colo, key) {
   try {
     const { response, cacheable } = await renderHome(request, env, ctx);
     if (cacheable) {
-      await colo.put(key, response);
+      await colo.put(key, forEdgeStore(response));
     } else if (response.body) {
       await response.body.cancel();
     }
@@ -3209,7 +3409,9 @@ async function serveHome(request, env, ctx, url) {
           if (state) state.homeRefreshedAt = Date.now();
           ctx.waitUntil(refreshHome(request, env, ctx, colo, key));
         }
-        return notModified(request, cached) || cached;
+        // The browser policy is restored BEFORE the 304 check, which copies it.
+        const hit = fromEdgeStore(cached);
+        return notModified(request, hit) || hit;
       }
     } catch (err) {
       // An edge lookup must never fail the homepage — render it instead.
@@ -3218,7 +3420,7 @@ async function serveHome(request, env, ctx, url) {
   }
 
   const { response, cacheable } = await renderHome(request, env, ctx);
-  if (colo && cacheable) waitFor(ctx, colo.put(key, response.clone()));
+  if (colo && cacheable) waitFor(ctx, colo.put(key, forEdgeStore(response.clone())));
   /*  Stored as the full 200 above, answered as a 304 below when the visitor
    *  already holds these bytes — caching the 304 would poison the entry. */
   return notModified(request, response) || response;
@@ -3254,14 +3456,21 @@ export default {
     const edgeCache = coloCache();
     const cacheKey = request.method === 'GET' ? edgeCacheKey(request, url) : request;
     if (edgeCache && request.method === 'GET') {
-      const cached = await edgeCache.match(cacheKey);
+      let cached = null;
+      try {
+        cached = await edgeCache.match(cacheKey);
+      } catch (err) {
+        // A cache lookup must never be able to fail the page — render it instead.
+        console.log('[edge] lookup failed for ' + url.pathname + ': ' + (err && err.message));
+      }
       if (cached) {
         /*  The revalidation check belongs HERE, not only on freshly rendered
          *  responses. An edge hit is the common case for a returning visitor, so
          *  checking only the render path would have left the 304 unreachable for
-         *  almost everyone who could benefit from it. */
-        const fresh = notModified(request, cached);
-        return fresh || cached;
+         *  almost everyone who could benefit from it. The browser policy is
+         *  restored first (see WHAT THE BROWSER IS TOLD ON AN EDGE HIT). */
+        const hit = fromEdgeStore(cached);
+        return notModified(request, hit) || hit;
       }
     }
 
@@ -3279,7 +3488,7 @@ export default {
        *  the observability logs, i.e. noise in the one place you look when
        *  diagnosing errors. */
       if (edgeCache && ssr.status === 200 && request.method === 'GET') {
-        waitFor(ctx, edgeCache.put(cacheKey, ssr.clone()));
+        waitFor(ctx, edgeCache.put(cacheKey, forEdgeStore(ssr.clone())));
       }
       /*  Store the full 200 above, hand the client a 304 below. Doing it in that
        *  order matters: caching the 304 instead would poison the entry for every
@@ -3336,7 +3545,7 @@ export default {
 
     // ✅ Cache static assets (200 only)
     if (edgeCache && request.method === 'GET' && finalResponse.status === 200 && path !== '/sw.js') {
-      waitFor(ctx, edgeCache.put(cacheKey, finalResponse.clone()));
+      waitFor(ctx, edgeCache.put(cacheKey, forEdgeStore(finalResponse.clone())));
     }
 
     return finalResponse;

@@ -444,11 +444,16 @@ function fakeKv() {
     assert.strictEqual(slow.response.status, 200, 'the slow path did not serve a page');
   });
 
-  check('the abandoned fetch still warms KV for the next request', () => {
+  check('the abandoned fetch still warms the location cache for the next request', () => {
     /*  ctx.waitUntil keeps it alive past the response. Without that every visitor
-     *  would time out forever and the hero would never resolve at all. */
-    assert.ok(slowKv.store.size > 0,
-      'nothing was written to KV, so the next request is just as cold');
+     *  would time out forever and the hero would never resolve at all. It lands in
+     *  caches.default - KV is no longer a TMDB cache at all. */
+    const keys = [...slow.cacheLayer.store.keys()];
+    assert.ok(keys.some((k) => k.includes('/api/tmdb/trending/movie/week')),
+      'the hero list was not stored at the edge, so the next request is just as cold: '
+        + keys.join(', '));
+    assert.strictEqual(slowKv.store.size, 0,
+      'the hero lookup wrote to KV, which spends the daily quota on a cache');
   });
 
   // ── 4. the NEXT visitor is answered from the edge ─────────────────────────

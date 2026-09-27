@@ -1118,8 +1118,13 @@ check('a fresh localStorage hit is promoted into the memory cache', () => {
    *  note that sat above the branch, and it broke the moment that note was
    *  rewritten — a green-to-red flip with no behaviour change behind it. The
    *  getItem line is the actual start of the SWR read and cannot be reworded. */
-  const idx = js.indexOf('const localDataStr = localStorage.getItem(cacheKey);');
+  const idx = js.indexOf('localDataStr = localStorage.getItem(cacheKey);');
   assert.ok(idx !== -1, 'the SWR read of the localStorage copy was not found');
+  /*  The read must be guarded: storage can throw (blocked cookies, some in-app
+   *  browsers), and an unguarded getItem turned every tmdb() call on such a
+   *  device into a rejected promise - unhandled rejections in the RUM feed. */
+  assert.ok(/try\s*\{\s*localDataStr = localStorage\.getItem\(cacheKey\);/.test(js),
+    'the localStorage read in tmdb() is not inside a try');
   const branch = js.slice(idx, idx + 1200);
   assert.ok(/_mzTmdbFreshMs\(urlStr\)/.test(branch),
     'the freshness window is no longer resolved per endpoint — a discovery list '

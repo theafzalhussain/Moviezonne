@@ -147,7 +147,15 @@
 // input, and the diagnostic idle tasks no longer run in production. The
 // image-cache trim below now runs at most every 20 s instead of after every
 // poster. The precached shell pins both URLs.
-const CACHE_NAME = 'moviezone-v155';
+// v156: the navigation fallback never serves a REDIRECTED response any more.
+// '/index.html' answers 307 on Workers static assets, so the precached copy was a
+// redirect, and Chromium turns a redirected response for a navigation into a
+// network error: every slow-network race and offline fallback showed an error
+// page. The shell is now '/', only the home navigation is raced or stored (deep
+// links wait for the network instead of being shown the homepage), and every
+// branch falls back to the network when Cache Storage itself fails.
+// moviezone.min.js 15.5 lands with it (crash guards, RUM noise, search INP).
+const CACHE_NAME = 'moviezone-v156';
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
  *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream
@@ -306,13 +314,19 @@ const NETWORK_TOO_SLOW = Symbol('network-too-slow');
  *  they are on the hero title's critical path and a fallback face would reflow).
  */
 const STATIC_ASSETS = [
+  /*  '/' ONLY - not '/index.html' as well. On Workers static assets
+   *  /index.html answers 307 -> '/', so cache.addAll() stored a REDIRECTED
+   *  response under that key, and the navigation fallbacks below served it.
+   *  Chromium refuses a redirected response for a navigation ("a redirected
+   *  response was used for a request whose redirect mode is not follow"), so
+   *  every slow-network or offline fallback turned into a browser error page
+   *  instead of the shell. '/' is the same document, answered 200 directly. */
   '/',
-  '/index.html',
   '/tv-mode.min.css?v=1.5',
   '/moviezone.min.css?v=9.17',
   '/tv-mode.min.js?v=1.8',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=15.4',
+  '/moviezone.min.js?v=15.5',
   '/manifest.json',
   '/icon-192.png?v=2',
   '/favicon-32.png?v=2',
@@ -457,6 +471,33 @@ function trimImageCacheSoon() {
 const isTmdbImage = url =>
   url.hostname === 'image.tmdb.org' || url.pathname.startsWith('/tmdb-image/');
 
+/*  A cached response that may be handed to a NAVIGATION. A response whose
+ *  `redirected` flag is set is a network error for a navigation in Chromium, so
+ *  the flag is shed by copying the response (same status, headers and body). */
+function navigable(response) {
+  if (!response || !response.redirected) return response;
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers
+  });
+}
+
+/** The offline / slow-network shell: the home document, never a redirect. */
+async function cachedShell() {
+  const shell = (await caches.match('/')) || (await caches.match('/index.html'));
+  return navigable(shell || null);
+}
+
+/** Stores a copy without ever letting a quota or storage fault reject anything. */
+function putQuietly(event, key, response) {
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then(cache => cache.put(key, response))
+      .catch(() => {})
+  );
+}
+
 self.addEventListener('fetch', event => {
   const request = event.request;
   if (request.method !== 'GET') return;
@@ -491,23 +532,29 @@ self.addEventListener('fetch', event => {
    *  visitor's LCP a local cache read instead of a cross-origin round trip.
    *  ──────────────────────────────────────────────────────────────────────── */
   if (isTmdbImage(url)) {
-    event.respondWith(
-      caches.open(IMAGE_CACHE).then(async cache => {
+    event.respondWith((async () => {
+      // A storage fault (quota, a corrupted profile on a TV) must degrade to the
+      // network, never to a broken image: respondWith() rejecting IS a failure.
+      let cache = null;
+      try {
+        cache = await caches.open(IMAGE_CACHE);
         const cached = await cache.match(request);
         if (cached) return cached;
+      } catch (e) {
+        cache = null;
+      }
 
-        const response = await fetch(request);
-        // Opaque (no-cors) responses have status 0; they are still storable and
-        // still render, so accept them rather than skipping the cache entirely.
-        if (response && (response.ok || response.type === 'opaque')) {
-          const copy = response.clone();
-          event.waitUntil(
-            cache.put(request, copy).then(trimImageCacheSoon).catch(() => {})
-          );
-        }
-        return response;
-      })
-    );
+      const response = await fetch(request);
+      // Opaque (no-cors) responses have status 0; they are still storable and
+      // still render, so accept them rather than skipping the cache entirely.
+      if (cache && response && (response.ok || response.type === 'opaque')) {
+        const copy = response.clone();
+        event.waitUntil(
+          cache.put(request, copy).then(trimImageCacheSoon).catch(() => {})
+        );
+      }
+      return response;
+    })());
     return;
   }
 
@@ -547,18 +594,17 @@ self.addEventListener('fetch', event => {
   const isFont = sameOrigin && url.pathname.startsWith('/fonts/');
 
   if (isVersionedAsset || isFont) {
-    event.respondWith(
-      caches.match(request).then(cached => {
+    event.respondWith((async () => {
+      // If Cache Storage itself fails, the bundle must still load from the
+      // network - a rejected respondWith() here would take the whole app down.
+      try {
+        const cached = await caches.match(request);
         if (cached) return cached;
-        return fetch(request).then(response => {
-          if (response.ok && response.type === 'basic') {
-            const copy = response.clone();
-            event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.put(request, copy)));
-          }
-          return response;
-        });
-      })
-    );
+      } catch (e) { /* storage unavailable: fall through to the network */ }
+      const response = await fetch(request);
+      if (response.ok && response.type === 'basic') putQuietly(event, request, response.clone());
+      return response;
+    })());
     return;
   }
 
@@ -569,6 +615,16 @@ self.addEventListener('fetch', event => {
     request.destination === 'style';
 
   if (networkFirst) {
+    const isNavigation = request.mode === 'navigate';
+    /*  Only the HOME document is raced against, and stored as, the shell. The
+     *  shell IS the homepage; painting it for /movie/<id> or a watch URL showed
+     *  the wrong page under the right URL. Every other navigation simply waits
+     *  for the network (with navigation preload), like a browser with no service
+     *  worker would, and falls back to the shell only when the network FAILS.
+     *  Storing every navigation also grew this cache without bound (one entry per
+     *  detail page, per ?utm variant). */
+    const isHomeNavigation = isNavigation && url.pathname === '/';
+
     event.respondWith(
       (async () => {
         /*  One promise, consumed at most once. event.preloadResponse is the
@@ -583,9 +639,10 @@ self.addEventListener('fetch', event => {
             try { response = await event.preloadResponse; } catch (e) { response = null; }
           }
           if (!response) response = await fetch(request);
-          if (response.ok && response.type === 'basic') {
-            const copy = response.clone();
-            event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.put(request, copy)));
+          if (response.ok && response.type === 'basic' && !response.redirected
+              && (!isNavigation || isHomeNavigation)) {
+            // One key for the home document, whatever ?utm_* it arrived with.
+            putQuietly(event, isHomeNavigation ? '/' : request, response.clone());
           }
           return response;
         })();
@@ -604,11 +661,9 @@ self.addEventListener('fetch', event => {
          *  abandoned.
          *
          *  There is no stale-version hazard: activate() deletes every cache but
-         *  CACHE_NAME and install() refills it, so the cached shell is always the
-         *  currently deployed one, referencing the currently deployed ?v= bundles. */
-        const shell = request.mode === 'navigate'
-          ? await caches.match('/index.html')
-          : null;
+         *  CACHE_NAME and install() refills it, so the cached shell references the
+         *  ?v= bundles this worker precached. */
+        const shell = isHomeNavigation ? await cachedShell().catch(() => null) : null;
 
         if (shell) {
           let timer = null;
@@ -632,37 +687,40 @@ self.addEventListener('fetch', event => {
           return await fromNetwork;
         } catch (e) {
           // Try exact match first, then try stripping query string for pre-cached assets
-          let cached = await caches.match(request);
-          if (!cached && url.search) {
-            cached = await caches.match(url.pathname + url.search, { ignoreSearch: false });
-            if (!cached) cached = await caches.match(url.pathname);
+          let cached = null;
+          try {
+            cached = await caches.match(request);
+            if (!cached && url.search) {
+              cached = await caches.match(url.pathname + url.search, { ignoreSearch: false });
+              if (!cached) cached = await caches.match(url.pathname);
+            }
+          } catch (err) {
+            cached = null;
           }
-          if (cached) return cached;
-          if (request.mode === 'navigate') return caches.match('/index.html');
-          throw new Error('Offline asset unavailable');
+          if (cached) return isNavigation ? navigable(cached) : cached;
+          if (isNavigation) {
+            const offlineShell = await cachedShell().catch(() => null);
+            if (offlineShell) return offlineShell;
+          }
+          // A clean network error rather than a rejected promise.
+          return Response.error();
         }
       })()
     );
     return;
   }
 
-  event.respondWith(
-    caches.match(request).then(cached => {
+  event.respondWith((async () => {
+    try {
+      const cached = (await caches.match(request))
+        // Fallback: try ignoring search params for pre-cached assets
+        || (url.search ? await caches.match(url.pathname) : null);
       if (cached) return cached;
-      // Fallback: try ignoring search params for pre-cached assets
-      return (url.search ? caches.match(url.pathname) : Promise.resolve(null))
-        .then(altCached => {
-          if (altCached) return altCached;
-          return fetch(request).then(response => {
-            if (response.ok && response.type === 'basic') {
-              const copy = response.clone();
-              event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.put(request, copy)));
-            }
-            return response;
-          });
-        });
-    })
-  );
+    } catch (e) { /* storage unavailable: fall through to the network */ }
+    const response = await fetch(request);
+    if (response.ok && response.type === 'basic') putQuietly(event, request, response.clone());
+    return response;
+  })());
 });
 
 self.addEventListener('push', event => {

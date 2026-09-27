@@ -1,48 +1,48 @@
 
 /*  Measures and guards the WORKER-SIDE TMDB path — the batch endpoint's cache
- *  layers, its single-flight, and the cost of a warm request.
+ *  layers, its single-flight, the subrequest budget, the OTT charts, and the cost
+ *  of a warm request.
  *
- *  ── why this file had to exist ──
+ *  ── why this file exists ──
  *  /api/tmdb/batch is the hottest object on the site: it IS the homepage's first
- *  screen, assembled from 16-40 TMDB paths in one round trip. And until now it
- *  had no measurement at all. tmdb-e2e.js and tmdb-stale.js both `require`
- *  server.js, which has no /batch route, so they exercise the Express fan-out
- *  path — the one that only runs on localhost. Nothing anywhere asserted the
- *  Worker's KV hit behaviour, its cache-layer ordering, or how many KV reads a
- *  warm homepage costs. An optimisation there was unverifiable by construction.
+ *  screen, assembled from 12-24 TMDB paths in one round trip. tmdb-e2e.js and
+ *  tmdb-stale.js both `require` server.js, which has no /batch route, so nothing
+ *  else asserts the Worker's cache layering or what a request costs.
+ *
+ *  ── the model being guarded (Sep 2026) ──
+ *  TMDB data never touches KV any more. KV's free plan allows 100,000 reads and
+ *  1,000 writes a DAY, account-wide, and every get() counts - so using it as a
+ *  cache exhausted it with ~10 human visitors a day (crawlers and fan-outs did
+ *  the spending). The layers are now:
+ *      L1 isolate memory  ->  L2 caches.default (per location, unmetered)  ->  TMDB
+ *  and every fan-out (a batch plan, an OTT chart) runs inside a per-invocation
+ *  SUBREQUEST BUDGET, because on Workers Free fetch() and Cache API calls share
+ *  one quota of 50 per invocation.
  *
  *  ── what is asserted, and why each one is a real failure mode ──
- *    1. COLD      a first request assembles once and stores in BOTH layers.
- *                 Storing in only one gives every Cloudflare colo its own cold
- *                 start (colo-only) or throws away the free layer (KV-only).
- *    2. WARM      the second identical request is answered by the colo cache
- *                 with ZERO KV reads. This is the entire point of the layer: KV
- *                 reads are metered, and the homepage plan is identical for
- *                 every visitor on a given day, so a KV read per visitor is the
- *                 site spending quota to re-answer one question.
- *    3. PROMOTION a colo miss with a fresh KV entry answers from KV and copies
- *                 it into the colo, so the NEXT request in that colo skips KV.
- *                 Without this the colo layer only ever fills on a hard miss.
- *    4. STALENESS a stale copy is served immediately and refreshed behind the
- *                 response, in BOTH layers. Refreshing only KV would leave the
- *                 stale colo entry answering every request in that colo until
- *                 its retention expired — the refresh would run forever and be
- *                 observed by nobody.
- *    5. SINGLE-   N concurrent cold requests for the same plan must assemble
- *       FLIGHT    ONCE. Per-path single-flight already shared the upstream
- *                 fetches, which is why this was invisible in TMDB request
- *                 counts while still burning N x the parse, re-serialise and KV
- *                 write on every cold start.
- *    6. POISONING a GET to the synthetic colo cache key must 404. The generic
- *                 edge layer in fetch() stores any 200 it sees under /api/tmdb/,
- *                 so if that path resolved to anything, one GET to a guessed
- *                 plan key could overwrite a plan's cached first screen.
- *    7. FAILURE   a plan with a failing path is not stored in either layer.
- *                 Caching a half-empty first screen turns one bad moment into a
- *                 lasting one.
+ *    1. COLD      a first request assembles once and stores the plan at the edge,
+ *                 with ZERO KV operations.
+ *    2. WARM      the second identical request is answered by the location cache:
+ *                 one cache read, zero upstream, zero KV.
+ *    3. REUSE     a fresh isolate whose plan entry is gone re-assembles from the
+ *                 per-path edge entries instead of going back to TMDB for them.
+ *    4. STALENESS a stale plan is served immediately and rebuilt behind the
+ *                 response, and the location copy is rewritten.
+ *    5. SINGLE-   N concurrent cold requests for the same plan assemble ONCE.
+ *       FLIGHT
+ *    6. POISONING a GET to the synthetic plan key must 404.
+ *    7. FAILURE   a plan with a failing path is not stored.
+ *    8.           the cost of one homepage plan, by cache state, printed.
+ *    9. SPLICE    the batch body is the cached bodies concatenated, valid JSON.
+ *   10. LONG TAIL search and per-title paths are edge-cached, never in KV.
+ *   11. DEADLINE  a slow path cannot hold the batch past its deadline.
+ *   12. BUDGET    a cold 16- and 24-path plan both stay inside 50 subrequests.
+ *   13. PER-TITLE a per-visitor plan's parts are shared through the edge.
+ *   14. OTT       charts: KV-free, memo -> edge -> build, stale refresh cooldown,
+ *                 and a cold 24-title chart inside the subrequest limit.
  *
- *  No network: TMDB is stubbed, so this is deterministic and runs offline. The
- *  numbers it prints are KV/colo operation COUNTS, which is the unit that
+ *  No network: TMDB and JustWatch are stubbed, so this is deterministic and runs
+ *  offline. The numbers it prints are operation COUNTS, which is the unit that
  *  matters here — wall-clock latency against a stub would measure nothing.
  *
  *  Run: node worker-perf-check.js
@@ -76,15 +76,14 @@ function equal(label, actual, expected) {
     'expected ' + JSON.stringify(expected) + ', got ' + JSON.stringify(actual));
 }
 
-/*  A KV double that COUNTS reads and writes.
- *
- *  The counters are the measurement: "how many KV reads does a warm homepage
- *  cost" is the question this file exists to answer, and it is not observable
- *  from a response body. */
+/*  A KV double that COUNTS every operation. It is bound as TMDB_CACHE in every
+ *  environment below precisely so that "the TMDB path never touches KV" is an
+ *  observed fact and not an assumption: if any code path regressed to reading
+ *  or writing it, these counters would move. */
 function countingKV(seed = {}) {
   const data = new Map(Object.entries(seed));
   const meta = new Map();
-  const counters = { reads: 0, writes: 0 };
+  const counters = { reads: 0, writes: 0, lists: 0 };
   return {
     data,
     meta,
@@ -101,16 +100,17 @@ function countingKV(seed = {}) {
       if (options && options.metadata) meta.set(key, options.metadata);
     },
     async delete(key) { data.delete(key); meta.delete(key); },
-    async list() { return { keys: [], list_complete: true, cursor: '0' }; }
+    async list() { counters.lists++; return { keys: [], list_complete: true, cursor: '0' }; }
   };
 }
+const kvOps = (kv) => kv.counters.reads + kv.counters.writes + kv.counters.lists;
 
 /*  A Cache API double.
  *
  *  Keyed on the request URL, which is exactly how the real one keys a GET, and
- *  the reason the Worker builds its synthetic key on `url.origin` rather than an
- *  invented hostname: an off-zone key is silently unstorable in production, so a
- *  double that accepted anything would hide that class of bug. */
+ *  the reason the Worker builds its synthetic keys on the site origin rather than
+ *  an invented hostname: an off-zone key is silently unstorable in production, so
+ *  a double that accepted anything would hide that class of bug. */
 function fakeCaches() {
   const store = new Map();
   const counters = { matches: 0, puts: 0 };
@@ -138,7 +138,10 @@ function makeCtx() {
   const pending = [];
   return {
     ctx: { waitUntil(p) { pending.push(Promise.resolve(p).catch(() => {})); } },
-    settle: () => Promise.all(pending.splice(0))
+    settle: async () => {
+      // Background work can schedule more background work; drain until quiet.
+      while (pending.length) await Promise.all(pending.splice(0));
+    }
   };
 }
 
@@ -147,6 +150,7 @@ const batchReq = (paths) => new Request('https://moviezone.dev/api/tmdb/batch', 
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify({ paths })
 });
+const BATCH_URL = new URL('https://moviezone.dev/api/tmdb/batch');
 
 /*  The homepage-shaped plan. 16 paths, matching _mzCatPlan('all') in
  *  moviezone.js, so the counts printed below are the real homepage's counts and
@@ -170,9 +174,16 @@ const PLAN = [
   '/tv/popular?language=en-US&page=1'
 ];
 
+/** MAX_BATCH_PATHS-sized plan: the largest a client may send. */
+const PLAN_24 = Array.from({ length: 24 }, (_, i) =>
+  '/discover/movie?language=en-US&page=' + (i + 1) + '&with_genres=28');
+
+const isBatchKey = (k) => k.includes('/api/tmdb/batch/');
+const isPathKey = (k) => k.includes('/api/tmdb/') && !isBatchKey(k);
+
 (async () => {
-  console.log('\nWorker TMDB path — batch cache layers, single-flight and warm cost');
-  console.log('-'.repeat(74));
+  console.log('\nWorker TMDB path — cache layers, subrequest budget, single-flight, OTT charts');
+  console.log('-'.repeat(78));
 
   /*  Same data:-URL import the other worker suites use, with relative specifiers
    *  made absolute: the real module, unmodified, with real ESM semantics. */
@@ -183,16 +194,36 @@ const PLAN = [
     'data:text/javascript;base64,' + Buffer.from(source).toString('base64')
   );
 
-  /*  TMDB is stubbed at global fetch. `upstream` counts how many times a path was
-   *  actually fetched, which is what proves single-flight rather than merely
-   *  suggesting it. */
+  /*  TMDB and JustWatch are stubbed at global fetch. `upstream` counts TMDB
+   *  fetches, `jwCalls` JustWatch ones, which is what proves single-flight and
+   *  the budget rather than merely suggesting them. */
   const realFetch = global.fetch;
   let upstream = 0;
+  let jwCalls = 0;
   let failPath = null;
   let slowPath = null;
-  global.fetch = async (input) => {
+  const STUB_LIST = JSON.stringify({
+    page: 1,
+    results: [{ id: 1, title: 'Stub', poster_path: '/p.jpg' }]
+  });
+  global.fetch = async (input, init) => {
     const target = typeof input === 'string' ? input : input.url;
-    if (!/api\.themoviedb\.org/.test(target)) return realFetch(input);
+    if (target.startsWith('https://apis.justwatch.com/')) {
+      jwCalls++;
+      const body = JSON.parse((init && init.body) || '{}');
+      const trending = /popularTitles/.test(body.query || '');
+      const ids = trending
+        ? Array.from({ length: 20 }, (_, i) => 5000 + i)
+        : Array.from({ length: 10 }, (_, i) => 6000 + i);
+      const edges = ids.map((id) => ({ node: {
+        objectType: 'MOVIE',
+        content: { title: 'JW ' + id, originalReleaseYear: 2026, externalIds: { tmdbId: String(id) } }
+      } }));
+      return new Response(JSON.stringify({ data: trending
+        ? { popularTitles: { edges } }
+        : { newTitles: { edges } } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (!/api\.themoviedb\.org/.test(target)) return realFetch(input, init);
     upstream++;
     if (failPath && target.includes(failPath)) {
       return new Response('{"status_message":"nope"}', { status: 500 });
@@ -200,25 +231,35 @@ const PLAN = [
     if (slowPath && target.includes(slowPath)) {
       await new Promise((resolve) => setTimeout(resolve, 800));
     }
-    return new Response(JSON.stringify({
-      page: 1,
-      results: [{ id: 1, title: 'Stub', poster_path: '/p.jpg' }]
-    }), { status: 200, headers: { 'content-type': 'application/json' } });
+    const detail = /\/3\/(movie|tv)\/(\d+)\?/.exec(target);
+    if (detail) {
+      return new Response(JSON.stringify({
+        id: Number(detail[2]), title: 'Title ' + detail[2], poster_path: '/p' + detail[2] + '.jpg',
+        genres: [{ id: 18, name: 'Drama' }], original_language: 'hi'
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    return new Response(STUB_LIST, { status: 200, headers: { 'content-type': 'application/json' } });
   };
 
   // `caches` is a Worker global; under Node it has to be provided.
   const cacheLayer = fakeCaches();
   global.caches = cacheLayer;
+  const resetCounters = () => {
+    cacheLayer.counters.matches = 0;
+    cacheLayer.counters.puts = 0;
+    upstream = 0;
+    jwCalls = 0;
+  };
+  const subrequests = () => cacheLayer.counters.matches + cacheLayer.counters.puts + upstream + jwCalls;
 
-  const env = { TMDB_TOKEN: 'stub-token', TMDB_CACHE: countingKV() };
-  const call = (request, ctx) =>
-    worker.routeApi(request, env, ctx, new URL(request.url));
+  const newEnv = (extra) => Object.assign({ TMDB_TOKEN: 'stub-token', TMDB_CACHE: countingKV() }, extra || {});
+  const env = newEnv();
+  const call = (request, ctx, e) => worker.routeApi(request, e || env, ctx, new URL(request.url));
 
   try {
     // ── 1. COLD ────────────────────────────────────────────────────────────
-    console.log('\n1. cold request — assemble once, store in both layers');
-    let kv = env.TMDB_CACHE.counters;
-    let c1 = makeCtx();
+    console.log('\n1. cold request — assemble once, store at the edge, never touch KV');
+    const c1 = makeCtx();
     const cold = await call(batchReq(PLAN), c1.ctx);
     await c1.settle();
 
@@ -228,212 +269,178 @@ const PLAN = [
     equal('every path in the plan was fetched exactly once', upstream, PLAN.length);
     const coldBody = await cold.json();
     equal('the response carries one result per path', coldBody.results.length, PLAN.length);
-    check('every result is fulfilled',
-      coldBody.results.every(r => r.status === 'fulfilled'));
+    check('every result is fulfilled', coldBody.results.every((r) => r.status === 'fulfilled'));
 
-    const planKeys = [...env.TMDB_CACHE.data.keys()].filter(k => k.startsWith('batch:'));
-    equal('the assembled plan was written to KV once', planKeys.length, 1);
-    const coloKeys = [...cacheLayer.store.keys()].filter(k => k.includes('/api/tmdb/batch/'));
-    equal('the assembled plan was written to the colo cache', coloKeys.length, 1);
-    check('the colo key is on-zone and derived from the plan hash',
-      coloKeys[0].startsWith('https://moviezone.dev/api/tmdb/batch/batch:'),
-      'got ' + coloKeys[0]);
+    const coloKeys = [...cacheLayer.store.keys()].filter(isBatchKey);
+    equal('the assembled plan was written to the location cache', coloKeys.length, 1);
+    check('the plan key is on-zone and derived from the plan hash',
+      coloKeys[0].startsWith('https://moviezone.dev/api/tmdb/batch/batch:'), 'got ' + coloKeys[0]);
+    equal('a cold homepage plan costs ZERO KV operations', kvOps(env.TMDB_CACHE), 0);
+    check('the cold assemble stayed inside the Free plan limit (50)', subrequests() <= 50,
+      subrequests() + ' subrequests');
 
     // ── 2. WARM ────────────────────────────────────────────────────────────
-    console.log('\n2. warm request — colo answers it, KV is not touched');
-    const kvReadsBefore = kv.reads;
-    const upstreamBefore = upstream;
+    console.log('\n2. warm request — the location cache answers it');
+    resetCounters();
     const c2 = makeCtx();
     const warm = await call(batchReq(PLAN), c2.ctx);
     await c2.settle();
 
     equal('warm batch answers 200', warm.status, 200);
     equal('warm batch reports EDGE-HIT', warm.headers.get('x-cache'), 'EDGE-HIT');
-    equal('a warm homepage costs ZERO KV reads', kv.reads - kvReadsBefore, 0);
-    equal('a warm homepage costs ZERO upstream fetches', upstream - upstreamBefore, 0);
+    equal('a warm homepage costs ONE cache read', cacheLayer.counters.matches, 1);
+    equal('and zero upstream fetches', upstream, 0);
+    equal('and zero KV operations', kvOps(env.TMDB_CACHE), 0);
     const warmBody = await warm.json();
     check('the warm body is byte-identical to the cold one',
       JSON.stringify(warmBody) === JSON.stringify(coldBody));
 
-    // ── 3. PROMOTION ───────────────────────────────────────────────────────
-    console.log('\n3. colo miss with a fresh KV entry — answered from KV, then promoted');
-    cacheLayer.store.clear();
-    const kvReadsBeforePromo = kv.reads;
+    // ── 3. REUSE ───────────────────────────────────────────────────────────
+    console.log('\n3. a fresh isolate, plan entry gone — parts come from the edge, not TMDB');
+    const pathEntries = [...cacheLayer.store.keys()].filter(isPathKey).length;
+    check('the cold assemble also kept per-path copies (budget permitting)', pathEntries > 0,
+      pathEntries + ' per-path entries');
+    for (const k of [...cacheLayer.store.keys()].filter(isBatchKey)) cacheLayer.store.delete(k);
+    resetCounters();
+    const reuseEnv = newEnv();
     const c3 = makeCtx();
-    const fromKv = await call(batchReq(PLAN), c3.ctx);
+    const reused = await call(batchReq(PLAN), c3.ctx, reuseEnv);
     await c3.settle();
-
-    equal('a colo miss falls through to KV', fromKv.headers.get('x-cache'), 'HIT');
-    check('it cost exactly one KV read', kv.reads - kvReadsBeforePromo === 1,
-      'took ' + (kv.reads - kvReadsBeforePromo));
-    equal('no upstream fetch was needed', upstream, upstreamBefore);
-    equal('the KV hit was promoted into the colo cache',
-      [...cacheLayer.store.keys()].filter(k => k.includes('/api/tmdb/batch/')).length, 1);
-
-    const c3b = makeCtx();
-    const afterPromo = await call(batchReq(PLAN), c3b.ctx);
-    await c3b.settle();
-    equal('so the next request skips KV entirely',
-      afterPromo.headers.get('x-cache'), 'EDGE-HIT');
+    equal('the re-assembled plan answers 200', reused.status, 200);
+    equal('only the paths without an edge copy went to TMDB', upstream, PLAN.length - pathEntries);
+    equal('still no KV', kvOps(reuseEnv.TMDB_CACHE), 0);
+    check('the re-assemble stayed inside 50 subrequests', subrequests() <= 50, subrequests() + '');
 
     // ── 4. STALENESS ───────────────────────────────────────────────────────
-    console.log('\n4. stale copies are served instantly and refreshed in both layers');
-    // Age both layers past BATCH_CACHE_TTL (3h) by rewriting their timestamps.
+    console.log('\n4. a stale plan is served instantly and rebuilt behind the response');
     const staleAt = Date.now() - (4 * 3600 * 1000);
-    const planKey = planKeys[0];
-    env.TMDB_CACHE.meta.set(planKey, { t: staleAt });
-    const coloKey = [...cacheLayer.store.keys()].find(k => k.includes('/api/tmdb/batch/'));
+    const coloKey = [...cacheLayer.store.keys()].find(isBatchKey);
     const staleBody = await cacheLayer.store.get(coloKey).text();
     cacheLayer.store.set(coloKey, new Response(staleBody, {
       status: 200,
       headers: { 'content-type': 'application/json', 'x-mz-stored': String(staleAt) }
     }));
 
-    const upstreamBeforeStale = upstream;
-    const kvReadsBeforeStale = kv.reads;
+    resetCounters();
     const c4 = makeCtx();
-    const stale = await call(batchReq(PLAN), c4.ctx);
-    equal('a stale colo copy is served as EDGE-STALE',
-      stale.headers.get('x-cache'), 'EDGE-STALE');
+    const stale = await call(batchReq(PLAN), c4.ctx, reuseEnv);
+    equal('a stale location copy is served as EDGE-STALE', stale.headers.get('x-cache'), 'EDGE-STALE');
     check('and it is served before the refresh completes',
       (await stale.json()).results.length === PLAN.length);
     await c4.settle();
 
-    /*  The refresh must have re-read the per-path entries — that is what "cheap
-     *  by construction" means here — and must NOT have gone upstream: every path
-     *  inside the plan is itself SWR-cached, so a plan-key expiry is a
-     *  re-assemble from KV, not a fresh round of TMDB requests. Asserting the
-     *  absence of upstream traffic is the point: if this ever starts fetching,
-     *  every 3h boundary becomes a 16-request burst against TMDB. */
-    check('the refresh re-read the plan\'s paths from KV', kv.reads > kvReadsBeforeStale,
-      'no KV read happened, so nothing was re-assembled');
-    equal('and needed no upstream fetch at all', upstream, upstreamBeforeStale);
-    const refreshedMeta = env.TMDB_CACHE.meta.get(planKey);
-    check('KV was rewritten with a fresh timestamp',
-      refreshedMeta && refreshedMeta.t > staleAt);
+    /*  Every part is fresh in this isolate's memory, so the rebuild is a
+     *  re-assemble, not a round of TMDB requests. If this ever starts fetching,
+     *  every 3h boundary becomes a 16-request burst per location. */
+    equal('the rebuild needed no upstream fetch (parts were fresh)', upstream, 0);
+    equal('and no KV', kvOps(reuseEnv.TMDB_CACHE), 0);
     const refreshedColo = cacheLayer.store.get(coloKey);
-    check('the colo copy was rewritten too — otherwise it would answer stale forever',
+    check('the location copy was rewritten — otherwise it would answer stale forever',
       refreshedColo && Number(refreshedColo.headers.get('x-mz-stored')) > staleAt);
 
     const c4b = makeCtx();
-    const afterRefresh = await call(batchReq(PLAN), c4b.ctx);
+    const afterRefresh = await call(batchReq(PLAN), c4b.ctx, reuseEnv);
     await c4b.settle();
-    equal('the next request sees a fresh colo copy',
-      afterRefresh.headers.get('x-cache'), 'EDGE-HIT');
+    equal('the next request sees a fresh copy', afterRefresh.headers.get('x-cache'), 'EDGE-HIT');
 
     // ── 5. PLAN-LEVEL SINGLE-FLIGHT ────────────────────────────────────────
     console.log('\n5. concurrent cold visitors assemble the plan once, not N times');
-    const coldEnv = { TMDB_TOKEN: 'stub-token', TMDB_CACHE: countingKV() };
+    const coldEnv = newEnv();
     cacheLayer.store.clear();
-    upstream = 0;
+    resetCounters();
     const CONCURRENT = 5;
     const ctxs = Array.from({ length: CONCURRENT }, () => makeCtx());
-    const responses = await Promise.all(ctxs.map(c =>
-      worker.routeApi(batchReq(PLAN), coldEnv, c.ctx,
-        new URL('https://moviezone.dev/api/tmdb/batch'))));
-    await Promise.all(ctxs.map(c => c.settle()));
+    const responses = await Promise.all(ctxs.map((c) =>
+      worker.routeApi(batchReq(PLAN), coldEnv, c.ctx, BATCH_URL)));
+    await Promise.all(ctxs.map((c) => c.settle()));
 
-    check('every concurrent caller got a 200',
-      responses.every(r => r.status === 200));
+    check('every concurrent caller got a 200', responses.every((r) => r.status === 200));
     equal('the plan was fetched upstream exactly once, not ' + CONCURRENT + ' times',
       upstream, PLAN.length);
-    const bodies = await Promise.all(responses.map(r => r.json()));
+    const bodies = await Promise.all(responses.map((r) => r.json()));
     check('every caller got the same assembled result',
-      bodies.every(b => JSON.stringify(b) === JSON.stringify(bodies[0])));
+      bodies.every((b) => JSON.stringify(b) === JSON.stringify(bodies[0])));
 
     // ── 6. CACHE-POISONING GUARD ───────────────────────────────────────────
-    console.log('\n6. the synthetic colo key is not a reachable endpoint');
+    console.log('\n6. the synthetic plan key is not a reachable endpoint');
+    const planKey = coloKey.split('/api/tmdb/batch/')[1];
     const c6 = makeCtx();
     const poke = await worker.routeApi(
       new Request('https://moviezone.dev/api/tmdb/batch/' + planKey, { method: 'GET' }),
       env, c6.ctx, new URL('https://moviezone.dev/api/tmdb/batch/' + planKey));
     await c6.settle();
     equal('a GET to the plan cache key answers 404', poke.status, 404);
-    check('a 404 is never stored by the generic edge layer, so a plan cannot be'
-      + ' overwritten', poke.status !== 200);
 
     const c6b = makeCtx();
     const del = await worker.routeApi(
       new Request('https://moviezone.dev/api/tmdb/batch', { method: 'DELETE' }),
-      env, c6b.ctx, new URL('https://moviezone.dev/api/tmdb/batch'));
+      env, c6b.ctx, BATCH_URL);
     await c6b.settle();
     equal('DELETE on the batch endpoint is rejected', del.status, 405);
 
     // ── 7. A BROKEN PLAN IS NOT CACHED ─────────────────────────────────────
-    console.log('\n7. a plan with a failing path is not stored in either layer');
-    const brokenEnv = { TMDB_TOKEN: 'stub-token', TMDB_CACHE: countingKV() };
+    console.log('\n7. a plan with a failing path is not stored');
+    const brokenEnv = newEnv();
     cacheLayer.store.clear();
     failPath = 'tv/popular';
     const c7 = makeCtx();
-    const broken = await worker.routeApi(batchReq(PLAN), brokenEnv, c7.ctx,
-      new URL('https://moviezone.dev/api/tmdb/batch'));
+    const broken = await worker.routeApi(batchReq(PLAN), brokenEnv, c7.ctx, BATCH_URL);
     await c7.settle();
     failPath = null;
 
     equal('a partial failure still answers 200', broken.status, 200);
-    equal('and reports that it was NOT stored',
-      broken.headers.get('x-batch-stored'), 'no');
-    equal('nothing was written to KV',
-      [...brokenEnv.TMDB_CACHE.data.keys()].filter(k => k.startsWith('batch:')).length, 0);
-    equal('nothing was written to the colo cache',
-      [...cacheLayer.store.keys()].filter(k => k.includes('/api/tmdb/batch/')).length, 0);
+    equal('and reports that it was NOT stored', broken.headers.get('x-batch-stored'), 'no');
+    equal('nothing was written to the location cache for the plan',
+      [...cacheLayer.store.keys()].filter(isBatchKey).length, 0);
+    equal('nothing was written to KV', kvOps(brokenEnv.TMDB_CACHE), 0);
 
     // ── 8. THE MEASUREMENT, PRINTED ────────────────────────────────────────
-    console.log('\n8. cost of one homepage plan, by cache state');
+    console.log('\n8. cost of one homepage plan, by cache state (per invocation)');
     const measure = async (label, prepare) => {
-      const e = { TMDB_TOKEN: 'stub-token', TMDB_CACHE: countingKV() };
+      const e = newEnv();
       cacheLayer.store.clear();
-      cacheLayer.counters.matches = 0;
-      cacheLayer.counters.puts = 0;
-      upstream = 0;
       await prepare(e);
-      const before = { kv: e.TMDB_CACHE.counters.reads, up: upstream };
+      resetCounters();
       const c = makeCtx();
-      const res = await worker.routeApi(batchReq(PLAN), e, c.ctx,
-        new URL('https://moviezone.dev/api/tmdb/batch'));
+      const res = await worker.routeApi(batchReq(PLAN), e, c.ctx, BATCH_URL);
+      await res.text();
       await c.settle();
-      console.log('      ' + label.padEnd(22)
-        + 'x-cache=' + String(res.headers.get('x-cache')).padEnd(10)
-        + 'kvReads=' + (e.TMDB_CACHE.counters.reads - before.kv)
-        + '  upstream=' + (upstream - before.up));
-      return { res, kvReads: e.TMDB_CACHE.counters.reads - before.kv };
+      const cost = { cache: cacheLayer.counters.matches + cacheLayer.counters.puts, up: upstream, kv: kvOps(e.TMDB_CACHE) };
+      console.log('      ' + label.padEnd(28)
+        + 'x-cache=' + String(res.headers.get('x-cache')).padEnd(11)
+        + 'cacheOps=' + String(cost.cache).padEnd(4)
+        + 'upstream=' + String(cost.up).padEnd(4)
+        + 'kv=' + cost.kv);
+      return cost;
+    };
+    const warmUp = async (e) => {
+      const c = makeCtx();
+      const r = await worker.routeApi(batchReq(PLAN), e, c.ctx, BATCH_URL);
+      await r.text();
+      await c.settle();
     };
 
-    const m1 = await measure('cold (nothing warm)', async () => {});
-    const m2 = await measure('KV warm, colo cold', async (e) => {
-      const c = makeCtx();
-      await worker.routeApi(batchReq(PLAN), e, c.ctx,
-        new URL('https://moviezone.dev/api/tmdb/batch'));
-      await c.settle();
-      cacheLayer.store.clear();
-    });
-    const m3 = await measure('colo warm', async (e) => {
-      const c = makeCtx();
-      await worker.routeApi(batchReq(PLAN), e, c.ctx,
-        new URL('https://moviezone.dev/api/tmdb/batch'));
-      await c.settle();
+    const m1 = await measure('cold (nothing anywhere)', async () => {});
+    const m2 = await measure('location warm', warmUp);
+    const m3 = await measure('parts warm, plan evicted', async (e) => {
+      await warmUp(e);
+      for (const k of [...cacheLayer.store.keys()].filter(isBatchKey)) cacheLayer.store.delete(k);
     });
 
-    check('the steady state (colo warm) costs no KV reads at all', m3.kvReads === 0,
-      'cost ' + m3.kvReads + ' KV reads');
-    check('a colo-cold / KV-warm plan costs exactly one KV read', m2.kvReads === 1,
-      'cost ' + m2.kvReads + ' KV reads');
-    check('a fully cold plan reads KV per path plus the plan key',
-      m1.kvReads === PLAN.length + 1,
-      'expected ' + (PLAN.length + 1) + ', got ' + m1.kvReads);
+    check('no cache state costs a single KV operation', m1.kv + m2.kv + m3.kv === 0,
+      'kv ops: ' + [m1.kv, m2.kv, m3.kv].join(', '));
+    check('the steady state is one cache read and nothing else', m2.cache === 1 && m2.up === 0,
+      JSON.stringify(m2));
+    check('a fully cold plan fits the Free plan limit', m1.cache + m1.up <= 50,
+      (m1.cache + m1.up) + ' subrequests');
 
     // ── 9. THE BATCH BODY IS SPLICED, NOT RE-SERIALISED ────────────────────
-    /*  The batch used to JSON.parse every path and JSON.stringify the combined
-     *  answer - most of a free-plan invocation's 10 ms CPU budget for a 16-path
-     *  plan. It now concatenates the cached bodies. The client must still receive
-     *  valid JSON whose values are exactly the stored bodies. */
     console.log('\n9. the batch body is the cached bodies spliced verbatim');
     {
-      const e = { TMDB_TOKEN: 'stub-token', TMDB_CACHE: countingKV() };
+      const e = newEnv();
       cacheLayer.store.clear();
       const c = makeCtx();
-      const res = await worker.routeApi(batchReq(PLAN), e, c.ctx,
-        new URL('https://moviezone.dev/api/tmdb/batch'));
+      const res = await worker.routeApi(batchReq(PLAN), e, c.ctx, BATCH_URL);
       await c.settle();
       const raw = await res.text();
       let parsed = null;
@@ -442,152 +449,187 @@ const PLAN = [
       check('with one allSettled entry per path',
         parsed && parsed.results.length === PLAN.length
           && parsed.results.every((r) => r.status === 'fulfilled' && r.value && r.value.results));
-      const stored = e.TMDB_CACHE.data.get('/api/tmdb' + PLAN[0]);
-      check('and each value is the cached body byte-for-byte',
-        Boolean(stored) && raw.indexOf('"value":' + stored) !== -1,
-        'the first path\'s KV body does not appear verbatim in the batch');
+      check('and each value is the upstream body byte-for-byte',
+        raw.indexOf('"value":' + STUB_LIST) !== -1, 'the stub body does not appear verbatim');
     }
 
-    // ── 10. LONG-TAIL PATHS STAY OUT OF KV ─────────────────────────────────
-    /*  Every distinct search query and per-title sub-resource used to be a KV
-     *  write, against a free-plan allowance of 1,000 writes a DAY. Once spent,
-     *  nothing new can be cached anywhere. Those paths now live at the edge only;
-     *  the lists and title records everyone shares still go to KV. */
-    console.log('\n10. long-tail paths are edge-cached but never written to KV');
+    // ── 10. LONG-TAIL PATHS: EDGE, NEVER KV ────────────────────────────────
+    console.log('\n10. search and title paths are edge-cached and never touch KV');
     {
-      const e = { TMDB_TOKEN: 'stub-token', TMDB_CACHE: countingKV() };
+      const e = newEnv();
       cacheLayer.store.clear();
-      upstream = 0;
+      resetCounters();
       const searchUrl = 'https://moviezone.dev/api/tmdb/search/multi?query=dune&page=1';
       const c1 = makeCtx();
       const first = await worker.routeApi(new Request(searchUrl), e, c1.ctx, new URL(searchUrl));
       await c1.settle();
       equal('a search answers 200', first.status, 200);
-      equal('a search is not written to KV', e.TMDB_CACHE.counters.writes, 0);
-      check('but it is kept at the edge',
+      check('it is kept at the edge',
         [...cacheLayer.store.keys()].some((k) => k.includes('/api/tmdb/search/multi')));
 
       // A fresh isolate in the same location: no memory, same caches.default.
-      const e2 = { TMDB_TOKEN: 'stub-token', TMDB_CACHE: countingKV() };
+      const e2 = newEnv();
       const c2 = makeCtx();
       const again = await worker.routeApi(new Request(searchUrl), e2, c2.ctx, new URL(searchUrl));
       await c2.settle();
       equal('a repeat in the same location is answered by the edge',
         again.headers.get('x-cache-layer'), 'edge');
-      equal('with no KV read', e2.TMDB_CACHE.counters.reads, 0);
       equal('and no second upstream fetch', upstream, 1);
 
       const detailUrl = 'https://moviezone.dev/api/tmdb/movie/550?language=en-US';
       const c3 = makeCtx();
       await worker.routeApi(new Request(detailUrl), e, c3.ctx, new URL(detailUrl));
       await c3.settle();
-      equal('a title record IS still shared through KV', e.TMDB_CACHE.counters.writes, 1);
-
-      const subUrl = 'https://moviezone.dev/api/tmdb/movie/550/release_dates';
-      const c4 = makeCtx();
-      await worker.routeApi(new Request(subUrl), e, c4.ctx, new URL(subUrl));
-      await c4.settle();
-      equal('a per-title sub-resource is not', e.TMDB_CACHE.counters.writes, 1);
+      equal('a title record is not written to KV either', kvOps(e.TMDB_CACHE) + kvOps(e2.TMDB_CACHE), 0);
     }
 
     // ── 11. A SLOW PATH CANNOT HOLD THE BATCH ──────────────────────────────
-    /*  The browser aborts the batch at MZ_BATCH_TIMEOUT_MS and re-requests every
-     *  path individually. The Worker must answer before that with what it has. */
     console.log('\n11. a slow upstream path cannot hold the batch past its deadline');
     {
-      const e = { TMDB_TOKEN: 'stub-token', TMDB_CACHE: countingKV(), BATCH_DEADLINE_MS: '300' };
+      const e = newEnv({ BATCH_DEADLINE_MS: '300' });
       cacheLayer.store.clear();
       slowPath = 'tv/popular';
       const c = makeCtx();
       const started = Date.now();
-      const res = await worker.routeApi(batchReq(PLAN), e, c.ctx,
-        new URL('https://moviezone.dev/api/tmdb/batch'));
+      const res = await worker.routeApi(batchReq(PLAN), e, c.ctx, BATCH_URL);
       const took = Date.now() - started;
       const body = await res.json();
       check('the batch answered at its deadline, not the slow path\'s pace', took < 750,
         'took ' + took + 'ms against a 300ms deadline and an 800ms path');
       equal('the slow path is reported as rejected', body.results[PLAN.length - 1].status, 'rejected');
-      check('every other path is served',
-        body.results.slice(0, -1).every((r) => r.status === 'fulfilled'));
+      check('every other path is served', body.results.slice(0, -1).every((r) => r.status === 'fulfilled'));
       equal('a partial answer is not stored', res.headers.get('x-batch-stored'), 'no');
       await c.settle();
       slowPath = null;
       check('the whole plan is stored once the slow path lands',
-        [...e.TMDB_CACHE.data.keys()].some((k) => k.startsWith('batch:')));
+        [...cacheLayer.store.keys()].some(isBatchKey));
     }
 
-    // ── 12. A COLD PLAN FITS THE FREE PLAN'S SUBREQUEST LIMIT ──────────────
+    // ── 12. THE SUBREQUEST BUDGET ──────────────────────────────────────────
     /*  On Workers Free one invocation gets 50 subrequests, and Cache API
-     *  match/put calls count against the same quota as fetch(). The per-path edge
-     *  layer costs two cache calls per path, which took a cold 16-path plan to 50
-     *  and a 24-title OTT chart past it - after which every fetch() throws. A plan
-     *  must skip it: one plan-level match + put, plus one fetch per cold path. */
-    console.log('\n12. a cold plan stays inside the 50-subrequest Free plan limit');
-    {
-      const e = { TMDB_TOKEN: 'stub-token', TMDB_CACHE: countingKV() };
+     *  match/put calls count against the same quota as fetch(). Past it, every
+     *  fetch() throws "Too many subrequests". The per-path edge layer costs up to
+     *  two cache calls per path, so a plan must spend them only while every
+     *  path's TMDB fetch is still covered. */
+    console.log('\n12. cold 16- and 24-path plans stay inside the 50-subrequest limit');
+    for (const [label, plan] of [['16-path homepage plan', PLAN], ['24-path plan (MAX_BATCH_PATHS)', PLAN_24]]) {
+      const e = newEnv();
       cacheLayer.store.clear();
-      cacheLayer.counters.matches = 0;
-      cacheLayer.counters.puts = 0;
-      upstream = 0;
+      resetCounters();
       const c = makeCtx();
-      const res = await worker.routeApi(batchReq(PLAN), e, c.ctx,
-        new URL('https://moviezone.dev/api/tmdb/batch'));
-      await res.text();
+      const res = await worker.routeApi(batchReq(plan), e, c.ctx, BATCH_URL);
+      const body = await res.json();
       await c.settle();
-      const cacheCalls = cacheLayer.counters.matches + cacheLayer.counters.puts;
-      const subrequests = cacheCalls + upstream;
-      console.log('          cache calls ' + cacheCalls + ' + upstream fetches ' + upstream
-        + ' = ' + subrequests + ' subrequests for a cold ' + PLAN.length + '-path plan');
-      check('the per-path edge layer is not used inside a plan', cacheCalls <= 2,
-        cacheCalls + ' Cache API calls - two per path would be ' + (PLAN.length * 2 + 2));
-      check('a cold 24-path plan (MAX_BATCH_PATHS) would still fit in 50',
-        24 + cacheCalls <= 50, (24 + cacheCalls) + ' subrequests');
+      const total = subrequests();
+      console.log('          ' + label + ': cache ' + (cacheLayer.counters.matches + cacheLayer.counters.puts)
+        + ' + upstream ' + upstream + ' = ' + total + ' subrequests');
+      check('a cold ' + label + ' fits in 50 subrequests', total <= 50, total + ' subrequests');
+      check('and every path was still answered', body.results.every((r) => r.status === 'fulfilled'),
+        JSON.stringify(body.results.filter((r) => r.status !== 'fulfilled')).slice(0, 200));
+      equal('with no KV', kvOps(e.TMDB_CACHE), 0);
+    }
+    {
+      // A tiny limit proves the budget degrades gracefully instead of throwing.
+      const e = newEnv({ SUBREQUEST_LIMIT: '12' });
+      cacheLayer.store.clear();
+      resetCounters();
+      const c = makeCtx();
+      const res = await worker.routeApi(batchReq(PLAN), e, c.ctx, BATCH_URL);
+      const body = await res.json();
+      await c.settle();
+      check('an exhausted budget never exceeds its limit', subrequests() <= 12, subrequests() + ' used');
+      equal('it still answers 200', res.status, 200);
+      check('paths it could not cover are rejected, so the client fetches just those',
+        body.results.some((r) => r.status === 'rejected') && body.results.some((r) => r.status === 'fulfilled'));
+      equal('and a partial plan is not stored', res.headers.get('x-batch-stored'), 'no');
     }
 
-    // ── 13. PER-VISITOR PLANS STAY OUT OF KV; THEIR PARTS DO NOT ───────────
-    /*  A hero deck's release_dates or an OTT wave's watch/providers differ per
-     *  visitor, so a KV copy of the assembled plan is a write nobody else reads -
-     *  against 1,000 writes a day. The plan lives in the location cache; each
-     *  part goes to KV, so the next visitor's (different) plan over the same
-     *  titles is KV reads, not TMDB traffic. */
-    console.log('\n13. a per-title plan is kept at the edge, its parts shared through KV');
+    // ── 13. PER-TITLE PLANS SHARE THEIR PARTS THROUGH THE EDGE ─────────────
+    console.log('\n13. a per-title plan is kept at the edge, its parts too');
     {
-      const kvStore = countingKV();
-      const e = { TMDB_TOKEN: 'stub-token', TMDB_CACHE: kvStore };
+      const e = newEnv();
       cacheLayer.store.clear();
-      upstream = 0;
+      resetCounters();
       const subPlan = ['/movie/11/release_dates', '/movie/12/release_dates', '/movie/13/release_dates'];
       const c = makeCtx();
-      const res = await worker.routeApi(batchReq(subPlan), e, c.ctx,
-        new URL('https://moviezone.dev/api/tmdb/batch'));
+      const res = await worker.routeApi(batchReq(subPlan), e, c.ctx, BATCH_URL);
       await res.text();
       await c.settle();
-      const keys = [...kvStore.data.keys()];
-      check('the assembled plan is not written to KV', !keys.some((k) => k.startsWith('batch:')),
+      const keys = [...cacheLayer.store.keys()];
+      check('the plan is kept in the location cache', keys.some(isBatchKey));
+      check('each part is kept at the edge', subPlan.every((p) => keys.some((k) => k.endsWith('/api/tmdb' + p))),
         keys.join(', '));
-      check('each part is shared through KV', subPlan.every((p) => keys.includes('/api/tmdb' + p)),
-        keys.join(', '));
-      check('the plan is kept in the location cache',
-        [...cacheLayer.store.keys()].some((k) => k.includes('/api/tmdb/batch/')));
 
       // Another visitor, another isolate, the same titles in another order.
       const before = upstream;
-      const e2 = { TMDB_TOKEN: 'stub-token', TMDB_CACHE: kvStore };
+      const e2 = newEnv();
       const c2 = makeCtx();
-      const res2 = await worker.routeApi(batchReq(subPlan.slice().reverse()), e2, c2.ctx,
-        new URL('https://moviezone.dev/api/tmdb/batch'));
+      const res2 = await worker.routeApi(batchReq(subPlan.slice().reverse()), e2, c2.ctx, BATCH_URL);
       await res2.text();
       await c2.settle();
       equal('a different plan over the same titles fetches nothing from TMDB', upstream - before, 0);
+      equal('and nothing touched KV', kvOps(e.TMDB_CACHE) + kvOps(e2.TMDB_CACHE), 0);
+    }
 
-      // Search keys are never read from KV, not even on a cold location.
-      const e3 = { TMDB_TOKEN: 'stub-token', TMDB_CACHE: countingKV() };
+    // ── 14. OTT CHARTS ─────────────────────────────────────────────────────
+    /*  /api/ott/charts used to read KV on EVERY request, and a stale chart
+     *  re-hydrated 24 titles on every request with no cooldown. */
+    console.log('\n14. OTT charts: memory -> edge -> build, no KV, bounded refreshes');
+    {
+      const chartUrl = 'https://moviezone.dev/api/ott/charts?platform=netflix';
+      const get = async (e) => {
+        const c = makeCtx();
+        const res = await worker.routeApi(new Request(chartUrl), e, c.ctx, new URL(chartUrl));
+        const body = await res.json();
+        await c.settle();
+        return { res, body };
+      };
+
+      const e = newEnv();
       cacheLayer.store.clear();
-      const searchUrl = 'https://moviezone.dev/api/tmdb/search/multi?query=xyz&page=1';
-      const c3 = makeCtx();
-      await worker.routeApi(new Request(searchUrl), e3, c3.ctx, new URL(searchUrl));
-      await c3.settle();
-      equal('a cold search costs no KV read', e3.TMDB_CACHE.counters.reads, 0);
+      resetCounters();
+      const first = await get(e);
+      equal('a cold chart answers 200', first.res.status, 200);
+      equal('as a MISS', first.res.headers.get('x-cache'), 'MISS');
+      check('hydrated into renderable cards', first.body.items && first.body.items.length === 24,
+        'items: ' + (first.body.items && first.body.items.length));
+      equal('JustWatch was asked exactly twice (trending + newly)', jwCalls, 2);
+      check('a cold 24-title chart fits in 50 subrequests', subrequests() <= 50, subrequests() + '');
+      check('the chart is stored at the edge under a synthetic key',
+        [...cacheLayer.store.keys()].some((k) => k.includes('/__mz/ott-chart/netflix/IN')));
+      equal('and never in KV', kvOps(e.TMDB_CACHE), 0);
+
+      resetCounters();
+      const memoHit = await get(e);
+      equal('a repeat in the same isolate is a HIT', memoHit.res.headers.get('x-cache'), 'HIT');
+      equal('with no subrequest at all', subrequests(), 0);
+
+      resetCounters();
+      const e2 = newEnv();
+      const edgeHit = await get(e2);
+      equal('a fresh isolate in the same location is a HIT from the edge',
+        edgeHit.res.headers.get('x-cache'), 'HIT');
+      equal('with one cache read and nothing upstream', subrequests(), 1);
+
+      // Age the edge copy past its 2h window, then hit it twice from a new isolate.
+      const chartKey = [...cacheLayer.store.keys()].find((k) => k.includes('/__mz/ott-chart/netflix/IN'));
+      const chartBody = await cacheLayer.store.get(chartKey).text();
+      cacheLayer.store.set(chartKey, new Response(chartBody, {
+        status: 200,
+        headers: { 'content-type': 'application/json', 'x-mz-stored': String(Date.now() - 3 * 3600 * 1000) }
+      }));
+      resetCounters();
+      const e3 = newEnv();
+      const staleChart = await get(e3);
+      equal('a stale chart is served at once', staleChart.res.headers.get('x-cache'), 'STALE');
+      equal('and rebuilt once behind the response', jwCalls, 2);
+      check('the rebuilt copy replaced the stale one',
+        Number(cacheLayer.store.get(chartKey).headers.get('x-mz-stored')) > Date.now() - 60000);
+
+      const unknown = await worker.routeApi(new Request('https://moviezone.dev/api/ott/charts?platform=nope'),
+        e3, makeCtx().ctx, new URL('https://moviezone.dev/api/ott/charts?platform=nope'));
+      equal('an unknown platform is rejected, not proxied', unknown.status, 400);
+      equal('none of it touched KV', kvOps(e2.TMDB_CACHE) + kvOps(e3.TMDB_CACHE), 0);
     }
   } finally {
     global.fetch = realFetch;
@@ -632,9 +674,9 @@ const PLAN = [
   /*  ── THE UPSTREAM TIMEOUT MUST STAY INSIDE THE CLIENT'S OWN BUDGET ──
    *
    *  tmdbUpstream makes TWO attempts of TMDB_TIMEOUT_MS with no backoff, so the
-   *  Worker's own ceiling for /api/tmdb/* is 2x that value plus the KV read and
-   *  the JSON assembly. The browser aborts its attempt at MZ_FETCH_TIMEOUT_MS. If
-   *  the Worker's ceiling ever reaches the client's, the edge retry lands after
+   *  Worker's own ceiling for /api/tmdb/* is 2x that value plus the cache lookups
+   *  and the JSON assembly. The browser aborts its attempt at MZ_FETCH_TIMEOUT_MS.
+   *  If the Worker's ceiling ever reaches the client's, the edge retry lands after
    *  the client has already hung up - and a client hanging up is exactly what
    *  Cloudflare records as a 499. The comment above MZ_FETCH_TIMEOUT_MS in
    *  moviezone.js documents the incident: a 9000ms client timeout produced 511 of
@@ -658,16 +700,27 @@ const PLAN = [
     'the Worker can take ' + (upstreamMs * 2) + 'ms but the browser aborts at '
       + clientMs + 'ms, so the edge retry lands after the client gave up (499s)');
 
-  check('and with real slack left for the KV read and the JSON assembly',
+  check('and with real slack left for the cache lookups and the JSON assembly',
     clientMs - upstreamMs * 2 >= 4000,
     'only ' + (clientMs - upstreamMs * 2) + 'ms of headroom between the Worker '
-      + 'ceiling and the client abort; the cold path also has to do a KV read, a '
-      + 'JSON.parse per path and a re-serialise inside that margin');
+      + 'ceiling and the client abort');
 
-  console.log('\n' + '='.repeat(74));
+  /*  ── NO KV ON THE TMDB PATH, BY CONSTRUCTION ──
+   *  The behavioural checks above prove it for the paths they drive; this proves
+   *  nothing else in worker.js can reach TMDB_CACHE except the SEO catalogue and
+   *  sitemap shard reader (seoStore), which is data the nightly workflow uploads,
+   *  not a TMDB cache. */
+  const workerSrc = fs.readFileSync(WORKER_FILE, 'utf8');
+  const tmdbCacheUses = (workerSrc.match(/env\.TMDB_CACHE/g) || []).length;
+  check('worker.js touches TMDB_CACHE only through seoStore()', tmdbCacheUses === 1
+    && /function seoStore\(env\)[\s\S]{0,200}env\.TMDB_CACHE/.test(workerSrc),
+    tmdbCacheUses + ' references to env.TMDB_CACHE');
+  check('no getWithMetadata() call is left in worker.js', !/getWithMetadata\(/.test(workerSrc));
+
+  console.log('\n' + '='.repeat(78));
   console.log('  worker-perf-check: ' + pass + ' passed, ' + fail + ' failed');
-  if (fail) failures.forEach(f => console.log('   x ' + f));
-  console.log('='.repeat(74) + '\n');
+  if (fail) failures.forEach((f) => console.log('   x ' + f));
+  console.log('='.repeat(78) + '\n');
   process.exit(fail ? 1 : 0);
 })().catch((e) => {
   console.error('crashed:', e);

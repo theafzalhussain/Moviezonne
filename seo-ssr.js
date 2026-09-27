@@ -1125,7 +1125,7 @@ function renderShell(opts) {
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=2">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=2">
 <link rel="manifest" href="/manifest.json">
-<link rel="preconnect" href="https://image.tmdb.org" crossorigin>
+<link rel="preconnect" href="https://image.tmdb.org">
 <link rel="dns-prefetch" href="https://image.tmdb.org">
 <style>${BASE_CSS}</style>
 ${ads ? adLoaderScript() : ''}

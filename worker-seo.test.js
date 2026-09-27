@@ -54,20 +54,25 @@ function equal(label, actual, expected) {
 
 // ── fakes ────────────────────────────────────────────────────────────────────
 
-/** A KV namespace with just enough behaviour for the sitemap paths. */
+/** A KV namespace with just enough behaviour for the sitemap paths. Counts reads
+ *  and writes: every get() is a metered KV read, so "how many did that cost" is a
+ *  thing these tests have to be able to ask. */
 function fakeKV(seed = {}) {
   const data = new Map(Object.entries(seed));
   const meta = new Map();
+  const counters = { reads: 0, writes: 0 };
   return {
     data,
-    async get(key) { return data.has(key) ? data.get(key) : null; },
-    // Mirrors the real binding: the TMDB cache stores its write timestamp in
-    // metadata so a stale entry can be served and refreshed behind the response.
+    counters,
+    async get(key) { counters.reads++; return data.has(key) ? data.get(key) : null; },
+    // Mirrors the real binding: values may carry metadata.
     async getWithMetadata(key) {
+      counters.reads++;
       if (!data.has(key)) return { value: null, metadata: null };
       return { value: data.get(key), metadata: meta.has(key) ? meta.get(key) : null };
     },
     async put(key, value, options) {
+      counters.writes++;
       data.set(key, String(value));
       if (options && options.metadata) meta.set(key, options.metadata);
       return undefined;
@@ -224,6 +229,14 @@ const locs = (xml) => [...xml.matchAll(/<url><loc>([^<]+)<\/loc>/g)].map((m) => 
     movieShards.every(([, , b]) => locs(b).every((l) => l.includes('/movie/')))
     && tvShards.every(([, , b]) => locs(b).every((l) => l.includes('/tv/'))));
 
+  /*  The ~500 KB catalogue used to be read from KV on every sitemap and browse
+   *  edge miss - twice in parallel for the index alone. One isolate serving the
+   *  index and every shard must read it ONCE (the XML shard cache adds one read
+   *  per shard on a cold location, which is what it is for). */
+  const catalogReads = kv.counters.reads - (movieShards.length + tvShards.length);
+  equal('the whole index + every shard read the catalogue from KV exactly once',
+    catalogReads, 1);
+
   const TODAY = new Date().toISOString().slice(0, 10);
   const dates = [...fetched.map(([, , b]) => b).join('\n')
     .matchAll(/<lastmod>([^<]+)<\/lastmod>/g)].map((m) => m[1]);
@@ -350,8 +363,17 @@ const locs = (xml) => [...xml.matchAll(/<url><loc>([^<]+)<\/loc>/g)].map((m) => 
     check('it is non-empty', urlCount(liveXml) > 0, urlCount(liveXml) + ' urls');
     check('the franchise catalogue is folded in',
       liveXml.includes('/movie/1726-iron-man'), 'collections-catalog.json ids missing');
-    check('the live build is written to KV for the next request',
-      liveKv.data.has('sitemap:items:movie'));
+    const liveKvKeys = [...liveKv.data.keys()];
+    check('the live item list is NOT written to KV (a cache never spends KV quota)',
+      !liveKv.data.has('sitemap:items:movie')
+        && liveKvKeys.every((k) => k.startsWith('sitemap:xml:')),
+      'KV keys: ' + liveKvKeys.join(', '));
+    const callsAfterBuild = tmdbCalls;
+    const liveAgain = await worker.ssrResponse(req('https://moviezone.dev/sitemap-movies.xml'), liveEnv, ctx,
+      urlOf('https://moviezone.dev/sitemap-movies.xml'));
+    await liveAgain.text();
+    equal('a repeat is answered from the kept build, with no second TMDB fan-out',
+      tmdbCalls, callsAfterBuild);
 
     const liveIndex = await worker.ssrResponse(req('https://moviezone.dev/sitemap.xml'), liveEnv, ctx,
       urlOf('https://moviezone.dev/sitemap.xml'));

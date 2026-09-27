@@ -84,17 +84,18 @@ async function hkdfBytes(ikm, salt, info, length) {
 function fakeKV(seed = {}) {
   const data = new Map(Object.entries(seed));
   const meta = new Map();
-  const counters = { writes: 0 };
+  const counters = { writes: 0, reads: 0, lists: 0 };
   return {
     data,
     meta,
     counters,
-    async get(key) { return data.has(key) ? data.get(key) : null; },
+    async get(key) { counters.reads++; return data.has(key) ? data.get(key) : null; },
     /*  Real KV entries carry metadata, and the TMDB cache now keeps its write
      *  timestamp there so the stale-while-revalidate read can tell a fresh entry
      *  from one worth refreshing behind the response. A double without this
      *  method made every one of those reads throw. */
     async getWithMetadata(key) {
+      counters.reads++;
       if (!data.has(key)) return { value: null, metadata: null };
       return { value: data.get(key), metadata: meta.has(key) ? meta.get(key) : null };
     },
@@ -102,18 +103,41 @@ function fakeKV(seed = {}) {
       counters.writes++;
       data.set(key, String(value));
       if (options && options.metadata) meta.set(key, options.metadata);
+      else meta.delete(key);
     },
     async delete(key) { data.delete(key); meta.delete(key); },
+    /*  Like the real list(): metadata comes back WITH each key, for no read. */
     async list({ prefix = '', cursor } = {}) {
+      counters.lists++;
       const names = [...data.keys()].filter((k) => k.startsWith(prefix)).sort();
       const start = cursor ? Number(cursor) : 0;
       const page = names.slice(start, start + 1000);
       const end = start + page.length;
       return {
-        keys: page.map((name) => ({ name })),
+        keys: page.map((name) => (meta.has(name) ? { name, metadata: meta.get(name) } : { name })),
         list_complete: end >= names.length,
         cursor: String(end)
       };
+    }
+  };
+}
+
+/*  A Cache API double, keyed on the request URL exactly like caches.default keys
+ *  a GET. The batch's only shared layer is the location cache now, so the batch
+ *  sections install one; everything else runs with `caches` undefined, which is
+ *  how the module must also behave under plain Node. */
+function fakeCaches() {
+  const store = new Map();
+  return {
+    store,
+    default: {
+      async match(request) {
+        const hit = store.get(typeof request === 'string' ? request : request.url);
+        return hit ? hit.clone() : undefined;
+      },
+      async put(request, response) {
+        store.set(typeof request === 'string' ? request : request.url, response.clone());
+      }
     }
   };
 }
@@ -568,6 +592,60 @@ async function decryptAsUserAgent(subscriber, body) {
   const secondPass = await worker.processDueNotifications(dueEnv);
   equal('a second pass does not send the same notification again', secondPass.sent, 0);
 
+  /*  The cron runs every hour. It used to read EVERY notify:* row to find the
+   *  ones released today; the release date now rides in the key's metadata, so a
+   *  row that is not due costs nothing but its share of one list(). */
+  check('a saved reminder carries its release date in KV metadata',
+    (dueEnv.PUSH_SUBS.meta.get(`notify:${storedId}:200`) || {}).d === future,
+    JSON.stringify(dueEnv.PUSH_SUBS.meta.get(`notify:${storedId}:200`)));
+  const readsBeforeIdle = dueEnv.PUSH_SUBS.counters.reads;
+  const listsBeforeIdle = dueEnv.PUSH_SUBS.counters.lists;
+  const idlePass = await worker.processDueNotifications(dueEnv);
+  equal('a run with nothing due sends nothing', idlePass.sent, 0);
+  equal('and reads no row at all: not-yet-due rows are skipped from list metadata',
+    dueEnv.PUSH_SUBS.counters.reads - readsBeforeIdle, 0);
+  equal('the whole run is one list() call', dueEnv.PUSH_SUBS.counters.lists - listsBeforeIdle, 1);
+
+  // A row written before metadata existed is read once and then migrated.
+  const legacyKey = `notify:${storedId}:201`;
+  dueEnv.PUSH_SUBS.data.set(legacyKey, JSON.stringify({
+    endpoint: subscriber.subscription.endpoint, endpointId: storedId, movieId: 201,
+    title: 'Legacy Row', releaseDate: future, url: '/#upcoming', active: true, notifiedAt: null
+  }));
+  await worker.processDueNotifications(dueEnv);
+  check('a legacy row without metadata is migrated on its first read',
+    (dueEnv.PUSH_SUBS.meta.get(legacyKey) || {}).d === future);
+  const readsBeforeMigrated = dueEnv.PUSH_SUBS.counters.reads;
+  await worker.processDueNotifications(dueEnv);
+  equal('so the next run does not read it again',
+    dueEnv.PUSH_SUBS.counters.reads - readsBeforeMigrated, 0);
+
+  // A due reminder whose subscription is gone can never be delivered: reaped.
+  const orphanKey = 'notify:0000deadbeef0000:300';
+  dueEnv.PUSH_SUBS.data.set(orphanKey, JSON.stringify({
+    endpoint: 'https://fcm.googleapis.com/fcm/send/gone', endpointId: '0000deadbeef0000',
+    movieId: 300, title: 'Orphan', releaseDate: today, url: '/#upcoming', active: true, notifiedAt: null
+  }));
+  dueEnv.PUSH_SUBS.meta.set(orphanKey, { d: today, m: 300 });
+  const orphanPass = await worker.processDueNotifications(dueEnv);
+  equal('an orphaned due reminder counts as failed', orphanPass.failed, 1);
+  check('and is deleted instead of costing two reads every hour forever',
+    !dueEnv.PUSH_SUBS.data.has(orphanKey));
+
+  // The list endpoint answers from metadata too.
+  const readsBeforeList = dueEnv.PUSH_SUBS.counters.reads;
+  const metaList = await callApi(worker, dueEnv,
+    postJson('/api/notify-movies/list', { endpoint: subscriber.subscription.endpoint }));
+  const metaMovies = (await metaList.json()).movies;
+  check('the reminder list still returns every saved title',
+    metaMovies.some((m) => m.movieId === 200 && m.title === 'Out Later' && m.releaseDate === future),
+    JSON.stringify(metaMovies));
+  equal('and a row with complete metadata costs no read',
+    dueEnv.PUSH_SUBS.counters.reads - readsBeforeList,
+    // Only the migrated legacy row carries metadata written by notifyMeta() with
+    // display fields; it still needs no read. Nothing here should be read.
+    0);
+
   // A dead subscription must be reaped, not retried forever.
   const deadEnv = { ...baseEnv, PUSH_SUBS: fakeKV() };
   await callApi(worker, deadEnv, postJson('/api/push/subscribe', subscriber.subscription));
@@ -636,6 +714,10 @@ async function decryptAsUserAgent(subscriber, body) {
   // ── 10. edge batching ────────────────────────────────────────────────────
   console.log('\n10. /api/tmdb/batch — many paths, one round-trip');
 
+  // The location cache is the batch's only shared layer; installed for 10-13.
+  const batchCaches = fakeCaches();
+  globalThis.caches = batchCaches;
+
   const batchEnv = () => ({ ...baseEnv, TMDB_TOKEN: 'test-token', TMDB_CACHE: fakeKV() });
   // What the client sends: the plan in a POST body.
   const batchReq = (paths) => postJson('/api/tmdb/batch', { paths });
@@ -684,9 +766,12 @@ async function decryptAsUserAgent(subscriber, body) {
   stubTmdb(() => { throw new Error('upstream must not be touched on a cached batch'); });
   const cachedRes = await callApi(worker, bEnv, batchReq(HOME_PLAN));
   equal('an identical plan is served from cache -> 200', cachedRes.status, 200);
-  equal('a cached batch reports x-cache HIT', cachedRes.headers.get('x-cache'), 'HIT');
+  equal('a cached batch is answered by the location cache',
+    cachedRes.headers.get('x-cache'), 'EDGE-HIT');
   equal('a cached batch makes zero upstream calls', upstreamCalls.length, 0);
   equal('the cached body is identical', JSON.stringify(await cachedRes.json()), JSON.stringify(bBody));
+  equal('and no KV operation was involved at any point',
+    bEnv.TMDB_CACHE.counters.reads + bEnv.TMDB_CACHE.counters.writes, 0);
 
   // Per-endpoint entries are shared with /api/tmdb/*, so a single fetch of the
   // same path must not re-hit TMDB either.
@@ -701,7 +786,9 @@ async function decryptAsUserAgent(subscriber, body) {
   const otherPlan = await callApi(worker, bEnv, batchReq(['/movie/top_rated?page=1']));
   equal('a different plan is a cache miss', otherPlan.headers.get('x-cache'), 'MISS');
 
-  // One dead source must not empty the whole first screen.
+  // One dead source must not empty the whole first screen. A different location:
+  // nothing cached yet.
+  batchCaches.store.clear();
   stubTmdb((url) => url.includes('now_playing')
     ? new Response('upstream exploded', { status: 500 })
     : okPage('ok'));
@@ -713,8 +800,8 @@ async function decryptAsUserAgent(subscriber, body) {
   equal('the healthy sources still return data', partialBody.results[1].status, 'fulfilled');
   equal('a partial batch reports that it was not stored',
     partial.headers.get('x-batch-stored'), 'no');
-  equal('and nothing was written to KV, so one bad moment cannot persist',
-    [...partialEnv.TMDB_CACHE.data.keys()].filter((k) => k.startsWith('batch:')).length, 0);
+  equal('and nothing was stored, so one bad moment cannot persist',
+    [...batchCaches.store.keys()].filter((k) => k.includes('/api/tmdb/batch/')).length, 0);
 
   stubTmdb((url) => okPage('recovered ' + new URL(url).pathname));
   equal('the next request retries instead of serving the partial result',
@@ -838,6 +925,8 @@ async function decryptAsUserAgent(subscriber, body) {
     realPaths.length <= limits.MAX_BATCH_PATHS,
     realPaths.length + ' paths vs cap ' + limits.MAX_BATCH_PATHS);
 
+  // A cold location, so the count below is the full fan-out.
+  batchCaches.store.clear();
   stubTmdb((url) => okPage(new URL(url).pathname));
   const realEnv = batchEnv();
   const realRes = await callApi(worker, realEnv, batchReq(realPaths));
@@ -849,8 +938,10 @@ async function decryptAsUserAgent(subscriber, body) {
   equal('the whole first screen cost the client exactly one request', upstreamCalls.length, realPaths.length);
 
   stubTmdb(() => { throw new Error('the warmed plan must not re-hit TMDB'); });
-  equal('the next visitor is served entirely from KV',
-    (await callApi(worker, realEnv, batchReq(realPaths))).headers.get('x-cache'), 'HIT');
+  equal('the next visitor is served entirely from the location cache',
+    (await callApi(worker, realEnv, batchReq(realPaths))).headers.get('x-cache'), 'EDGE-HIT');
+  equal('and the real plan never touched KV',
+    realEnv.TMDB_CACHE.counters.reads + realEnv.TMDB_CACHE.counters.writes, 0);
 
   // ── 13. transport ─────────────────────────────────────────────────────────
   /*  The plan travels in a POST body because it does not fit in a URL. Measured
@@ -882,7 +973,7 @@ async function decryptAsUserAgent(subscriber, body) {
   // different cache entry than production uses.
   stubTmdb(() => { throw new Error('GET and POST disagreed on the cache key'); });
   equal('GET ?r= resolves to the identical cache entry',
-    (await callApi(worker, bodyEnv, batchGet(realPaths))).headers.get('x-cache'), 'HIT');
+    (await callApi(worker, bodyEnv, batchGet(realPaths))).headers.get('x-cache'), 'EDGE-HIT');
 
   equal('a POST without a paths array -> 400',
     (await callApi(worker, batchEnv(), postJson('/api/tmdb/batch', { nope: 1 }))).status, 400);
@@ -893,6 +984,7 @@ async function decryptAsUserAgent(subscriber, body) {
   equal('DELETE on the batch endpoint -> 405',
     (await callApi(worker, batchEnv(), req('/api/tmdb/batch', { method: 'DELETE' }))).status, 405);
 
+  delete globalThis.caches;
   globalThis.fetch = realFetch;
 
   console.log('\n' + '-'.repeat(74));

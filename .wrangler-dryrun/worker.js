@@ -1059,7 +1059,7 @@ footer.foot h3{font-size:.74rem;letter-spacing:1.4px;text-transform:uppercase;co
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=2">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=2">
 <link rel="manifest" href="/manifest.json">
-<link rel="preconnect" href="https://image.tmdb.org" crossorigin>
+<link rel="preconnect" href="https://image.tmdb.org">
 <link rel="dns-prefetch" href="https://image.tmdb.org">
 <style>${BASE_CSS}</style>
 ${ads ? adLoaderScript() : ""}
@@ -2391,28 +2391,6 @@ ${body}
     __name(injectHeroSlide, "injectHeroSlide");
     var PERF_HEAD_MARK = "<!--MZ_PERF_HEAD-->";
     var PERF_HEAD_RE = /<!--MZ_PERF_HEAD-->[\s\S]*?<!--\/MZ_PERF_HEAD-->\r?\n?/;
-    var WARM_ENDPOINTS = [
-      "/api/tmdb/movie/popular?language=en-US&page=1",
-      "/api/tmdb/trending/movie/week?language=en-US&page=1"
-    ];
-    var WARM_SKIP_MS = 108e5;
-    function warmUpScript() {
-      return `<script>
-/* Head start for the two paths the first screen cannot paint without, fired
-   while the parser is still in <head> so the round trip overlaps the stylesheet,
-   the fonts and the bundle's own download and parse instead of queueing behind
-   them. The payloads are kept, not discarded: _mzAdoptHeadStart in moviezone.js
-   primes tmdbCache from them, so /trending/movie/week - the hero's own source -
-   is resolved before the bundle has finished parsing. Skipped on localhost, and
-   skipped when mz_warm_ts says the app already holds a fresh cache. See
-   _mzFlushCacheWrites in moviezone.js for why that decision is made from a
-   13-byte marker. */
-(function(){try{
-  if(/^(localhost|127\\.0\\.0\\.1)$/.test(location.hostname))return;
-  try{var t=parseInt(localStorage.getItem("mz_warm_ts")||"0",10);
-      if(t&&Date.now()-t<` + WARM_SKIP_MS + ")return;}catch(e){}\n  var u=" + JSON.stringify(WARM_ENDPOINTS) + ';\n  var m=window.__mzHeadStart={};\n  for(var i=0;i<u.length;i++)m[u[i]]=fetch(u[i],{credentials:"same-origin"})\n    .then(function(r){return r.ok&&(r.headers.get("content-type")||"")\n      .indexOf("json")>-1?r.json():null;}).catch(function(){return null;});\n}catch(e){}})();\n<\/script>\n';
-    }
-    __name(warmUpScript, "warmUpScript");
     function optimizeHomeHead(shell, heroUrl) {
       if (!shell) return shell;
       const NL = /\r\n/.test(shell) ? "\r\n" : "\n";
@@ -2436,7 +2414,7 @@ ${body}
         /<link rel="stylesheet" href="(\/?tv-mode\.min\.css[^"]*)">/,
         `<link rel="stylesheet" href="$1" media="print" onload="this.media='all';this.onload=null">`
       );
-      const block = PERF_HEAD_MARK + "\n" + (heroUrl ? heroPreloadTag(heroUrl) : "") + warmUpScript() + "<!--/MZ_PERF_HEAD-->";
+      const block = PERF_HEAD_MARK + "\n" + (heroUrl ? heroPreloadTag(heroUrl) : "") + "<!--/MZ_PERF_HEAD-->";
       const blockNL = NL === "\n" ? block : block.replace(/\n/g, NL);
       return html.replace(cssLink[0], cssLink[0] + NL + blockNL);
     }
@@ -3073,20 +3051,40 @@ async function readJson(store, key) {
   }
 }
 __name(readJson, "readJson");
-async function listKeys(store, prefix, limit = Infinity) {
-  const keys = [];
+async function listEntries(store, prefix, limit = Infinity) {
+  const entries = [];
   let cursor;
   do {
     const page = await store.list({ prefix, cursor });
     for (const entry of page.keys) {
-      keys.push(entry.name);
-      if (keys.length >= limit) return keys;
+      entries.push(entry);
+      if (entries.length >= limit) return entries;
     }
     cursor = page.list_complete ? null : page.cursor;
   } while (cursor);
-  return keys;
+  return entries;
+}
+__name(listEntries, "listEntries");
+async function listKeys(store, prefix, limit = Infinity) {
+  return (await listEntries(store, prefix, limit)).map((entry) => entry.name);
 }
 __name(listKeys, "listKeys");
+var NOTIFY_META_MAX_BYTES = 1e3;
+function notifyMeta(record) {
+  const meta = { d: record.releaseDate, m: record.movieId };
+  const full = Object.assign({}, meta, {
+    t: String(record.title || "").slice(0, 200),
+    u: record.url,
+    c: record.createdAt
+  });
+  return TE.encode(JSON.stringify(full)).length <= NOTIFY_META_MAX_BYTES ? full : meta;
+}
+__name(notifyMeta, "notifyMeta");
+function notifyFromMeta(meta) {
+  if (!meta || !isCalendarDate(meta.d) || !Number.isInteger(meta.m) || typeof meta.t !== "string" || typeof meta.u !== "string") return null;
+  return { movieId: meta.m, title: meta.t, releaseDate: meta.d, url: meta.u, createdAt: meta.c };
+}
+__name(notifyFromMeta, "notifyFromMeta");
 async function loadActiveSubscription(store, id) {
   const record = await readJson(store, subKey(id));
   if (!record || record.active === false) return null;
@@ -3175,7 +3173,7 @@ async function handleNotifyMovieSave(request, env) {
     return json({ success: true, saved: true, confirmationSent: false, unchanged: true }, 200);
   }
   try {
-    await store.put(notifyKey(id, movieId), JSON.stringify({
+    const record = {
       endpoint: subscription.endpoint,
       endpointId: id,
       movieId,
@@ -3186,7 +3184,8 @@ async function handleNotifyMovieSave(request, env) {
       notifiedAt: null,
       createdAt: existing && existing.createdAt || now,
       updatedAt: now
-    }));
+    };
+    await store.put(notifyKey(id, movieId), JSON.stringify(record), { metadata: notifyMeta(record) });
   } catch (err) {
     console.error("[push] could not store movie notification:", err && err.message || err);
     return json({ error: "Could not save movie notification" }, 503);
@@ -3231,20 +3230,43 @@ async function handleNotifyMovieList(request, env) {
   if (error) return json({ error }, 400);
   if (!value.endpoint) return json({ error: "Endpoint is required" }, 400);
   const id = await endpointId(value.endpoint);
-  const keys = await listKeys(store, notifyPrefix(id));
-  const records = await Promise.all(keys.map((key) => readJson(store, key)));
+  const entries = await listEntries(store, notifyPrefix(id));
+  const records = await Promise.all(entries.map((entry) => {
+    const fromMeta = notifyFromMeta(entry.metadata);
+    return fromMeta ? Object.assign({ active: true }, fromMeta) : readJson(store, entry.name);
+  }));
   const movies = records.filter((record) => record && record.active !== false).map(({ movieId, title, releaseDate, url, createdAt }) => ({ movieId, title, releaseDate, url, createdAt })).sort((a, b) => String(a.releaseDate).localeCompare(String(b.releaseDate)));
   return json({ movies });
 }
 __name(handleNotifyMovieList, "handleNotifyMovieList");
 var PUSH_WAVE_SIZE = 10;
+var PUSH_SENDS_PER_RUN = 40;
+var NOTIFY_MIGRATE_PER_RUN = 25;
 async function processDueNotifications(env) {
   const store = subsStore(env);
   if (!store) return { checked: 0, sent: 0, failed: 0 };
   const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-  const keys = await listKeys(store, "notify:", MAX_DUE_PER_RUN);
-  const records = await Promise.all(keys.map(async (key) => ({ key, record: await readJson(store, key) })));
-  const due = records.filter(({ record }) => record && record.active !== false && !record.notifiedAt && isCalendarDate(record.releaseDate) && record.releaseDate <= today);
+  const entries = await listEntries(store, "notify:", MAX_DUE_PER_RUN);
+  const dueKeys = [];
+  const legacyKeys = [];
+  for (const entry of entries) {
+    const date = entry.metadata && entry.metadata.d;
+    if (isCalendarDate(date)) {
+      if (date <= today) dueKeys.push(entry.name);
+    } else if (legacyKeys.length < NOTIFY_MIGRATE_PER_RUN) {
+      legacyKeys.push(entry.name);
+    }
+  }
+  const legacy = new Set(legacyKeys);
+  const records = await Promise.all(dueKeys.concat(legacyKeys).map(async (key) => ({ key, record: await readJson(store, key), legacy: legacy.has(key) })));
+  await Promise.all(records.map(async ({ key, record, legacy: isLegacy }) => {
+    if (!isLegacy || !record || !isCalendarDate(record.releaseDate) || record.releaseDate <= today) return;
+    try {
+      await store.put(key, JSON.stringify(record), { metadata: notifyMeta(record) });
+    } catch (err) {
+    }
+  }));
+  const due = records.filter(({ record }) => record && record.active !== false && !record.notifiedAt && isCalendarDate(record.releaseDate) && record.releaseDate <= today).slice(0, envInt(env, "PUSH_SENDS_PER_RUN", PUSH_SENDS_PER_RUN, 1, 900));
   const checked = due.length;
   let sent = 0;
   let failed = 0;
@@ -3253,6 +3275,8 @@ async function processDueNotifications(env) {
     const subscription = await loadActiveSubscription(store, id);
     if (!subscription) {
       failed++;
+      await store.delete(key).catch(() => {
+      });
       return;
     }
     const result = await sendPushToSubscription(subscription, {
@@ -3289,36 +3313,67 @@ __name(cronAuthorised, "cronAuthorised");
 var TMDB_STALE_MULT = 8;
 var TMDB_MAX_RETENTION = 2592e3;
 var TMDB_UPSTREAM_TIMEOUT_MS = 6e3;
+var TMDB_RETRY_AFTER_TIMEOUT_MS = 3e3;
 var _tmdbInFlight = /* @__PURE__ */ new Map();
-async function tmdbUpstream(path, env) {
+function looksLikeJson(text) {
+  if (typeof text !== "string" || !text) return false;
+  let start = 0;
+  let end = text.length - 1;
+  while (start <= end && text.charCodeAt(start) <= 32) start++;
+  while (end >= start && text.charCodeAt(end) <= 32) end--;
+  if (start > end) return false;
+  const first = text.charCodeAt(start);
+  const last = text.charCodeAt(end);
+  return first === 123 && last === 125 || first === 91 && last === 93;
+}
+__name(looksLikeJson, "looksLikeJson");
+async function tmdbUpstream(path, env, budget) {
   const headers = new Headers();
   headers.set("Authorization", `Bearer ${env.TMDB_TOKEN}`);
   headers.set("accept", "application/json");
   const timeout = envInt(env, "TMDB_TIMEOUT_MS", TMDB_UPSTREAM_TIMEOUT_MS, 1e3, 2e4);
   let lastError = null;
+  let attemptTimeout = timeout;
   for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0 && !budgetOptional(budget)) break;
     try {
       const response = await fetch(`https://api.themoviedb.org/3${path}`, {
         headers,
-        signal: AbortSignal.timeout(timeout),
+        signal: AbortSignal.timeout(attemptTimeout),
         cf: { cacheEverything: true, cacheTtl: 300 }
       });
       if (attempt === 0 && response.status >= 500) {
         lastError = new Error("TMDB responded " + response.status);
+        try {
+          if (response.body) response.body.cancel().catch(() => {
+          });
+        } catch (e) {
+        }
         continue;
       }
-      return { status: response.status, text: await response.text() };
+      const text = await response.text();
+      if (response.status === 200 && !looksLikeJson(text)) {
+        return { status: 502, text: '{"error":"upstream returned a non-JSON body"}' };
+      }
+      return { status: response.status, text };
     } catch (err) {
       lastError = err;
+      if (err && (err.name === "TimeoutError" || err.name === "AbortError")) {
+        attemptTimeout = Math.min(timeout, TMDB_RETRY_AFTER_TIMEOUT_MS);
+      }
     }
   }
   throw lastError || new Error("TMDB request abandoned");
 }
 __name(tmdbUpstream, "tmdbUpstream");
-function tmdbOnce(path, env) {
+function tmdbOnce(path, env, budget) {
   const pending = _tmdbInFlight.get(path);
-  if (pending) return pending;
-  const started = tmdbUpstream(path, env);
+  if (pending) {
+    budgetRelease(budget);
+    return pending;
+  }
+  if (!budgetRequire(budget)) return Promise.reject(budgetError());
+  const started = tmdbUpstream(path, env, budget);
   _tmdbInFlight.set(path, started);
   started.then(() => {
   }, () => {
@@ -3328,41 +3383,192 @@ function tmdbOnce(path, env) {
   return started;
 }
 __name(tmdbOnce, "tmdbOnce");
-function putTmdb(cacheKey, text, softTtl, env) {
-  return env.TMDB_CACHE.put(cacheKey, text, {
-    expirationTtl: Math.min(softTtl * TMDB_STALE_MULT, TMDB_MAX_RETENTION),
-    metadata: { t: Date.now() }
+var TMDB_MEMO_MAX_CHARS = 262144;
+var TMDB_MEMO_MAX = 64;
+var TMDB_REFRESH_COOLDOWN_MS = 6e4;
+var TMDB_STORED_HEADER = "x-mz-stored";
+var TMDB_EDGE_ORIGIN = import_seo_ssr.default.SITE_URL;
+var SUBREQUEST_LIMIT_FREE = 50;
+var SUBREQUEST_HEADROOM = 5;
+function subrequestBudget(env, reserved) {
+  const limit = envInt(env, "SUBREQUEST_LIMIT", SUBREQUEST_LIMIT_FREE, 10, 1e4);
+  return { left: limit - SUBREQUEST_HEADROOM, reserve: Math.max(0, reserved || 0) };
+}
+__name(subrequestBudget, "subrequestBudget");
+function budgetRequire(budget) {
+  if (!budget) return true;
+  if (budget.left <= 0) return false;
+  budget.left--;
+  if (budget.reserve > 0) budget.reserve--;
+  return true;
+}
+__name(budgetRequire, "budgetRequire");
+function budgetOptional(budget) {
+  if (!budget) return true;
+  if (budget.left - 1 < budget.reserve) return false;
+  budget.left--;
+  return true;
+}
+__name(budgetOptional, "budgetOptional");
+function budgetRelease(budget) {
+  if (budget && budget.reserve > 0) budget.reserve--;
+}
+__name(budgetRelease, "budgetRelease");
+function budgetError() {
+  const err = new Error("edge subrequest budget spent for this request");
+  err.name = "SubrequestBudgetError";
+  return err;
+}
+__name(budgetError, "budgetError");
+function tmdbRetention(softTtl) {
+  return Math.min(softTtl * TMDB_STALE_MULT, TMDB_MAX_RETENTION);
+}
+__name(tmdbRetention, "tmdbRetention");
+var _tmdbStateByEnv = /* @__PURE__ */ new WeakMap();
+function tmdbState(env) {
+  if (!env || typeof env !== "object") return null;
+  let state = _tmdbStateByEnv.get(env);
+  if (!state) {
+    state = {
+      memo: /* @__PURE__ */ new Map(),
+      refreshedAt: /* @__PURE__ */ new Map(),
+      batchRefreshedAt: /* @__PURE__ */ new Map(),
+      ottFailedAt: /* @__PURE__ */ new Map(),
+      homeRefreshedAt: 0
+    };
+    _tmdbStateByEnv.set(env, state);
+  }
+  return state;
+}
+__name(tmdbState, "tmdbState");
+function memoGet(state, path) {
+  if (!state) return null;
+  const entry = state.memo.get(path);
+  if (!entry) return null;
+  state.memo.delete(path);
+  state.memo.set(path, entry);
+  return entry;
+}
+__name(memoGet, "memoGet");
+function memoPut(state, path, text, storedAt) {
+  if (!state || typeof text !== "string" || text.length > TMDB_MEMO_MAX_CHARS) return;
+  state.memo.delete(path);
+  state.memo.set(path, { text, t: storedAt });
+  while (state.memo.size > TMDB_MEMO_MAX) state.memo.delete(state.memo.keys().next().value);
+}
+__name(memoPut, "memoPut");
+function takeCooldown(map, key, windowMs) {
+  const now = Date.now();
+  if (now - (map.get(key) || 0) < windowMs) return false;
+  map.set(key, now);
+  if (map.size > 1024) map.delete(map.keys().next().value);
+  return true;
+}
+__name(takeCooldown, "takeCooldown");
+function waitFor(ctx, work) {
+  const guarded = Promise.resolve(work).catch((err) => {
+    console.log("[cache] background work failed: " + (err && err.message));
+  });
+  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(guarded);
+  return guarded;
+}
+__name(waitFor, "waitFor");
+function tmdbEdgeKey(path) {
+  return new Request(TMDB_EDGE_ORIGIN + "/api/tmdb" + path, { method: "GET" });
+}
+__name(tmdbEdgeKey, "tmdbEdgeKey");
+function tmdbEdgeEntry(text, storedAt, softTtl) {
+  return new Response(text, {
+    status: 200,
+    headers: {
+      "content-type": "application/json",
+      // Retention only; freshness is the stored-at stamp.
+      "cache-control": "public, s-maxage=" + tmdbRetention(softTtl),
+      [TMDB_STORED_HEADER]: String(storedAt)
+    }
   });
 }
-__name(putTmdb, "putTmdb");
-async function refreshTmdb(path, cacheKey, softTtl, env) {
-  try {
-    const res = await tmdbOnce(path, env);
-    if (res.status === 200) await putTmdb(cacheKey, res.text, softTtl, env);
-  } catch (err) {
-    console.log("[tmdb] background refresh failed for " + path + ": " + (err && err.message));
+__name(tmdbEdgeEntry, "tmdbEdgeEntry");
+function storeTmdb(path, text, softTtl, storedAt, env, ctx, budget) {
+  memoPut(tmdbState(env), path, text, storedAt);
+  const colo = coloCache();
+  if (colo && budgetOptional(budget)) {
+    waitFor(ctx, colo.put(tmdbEdgeKey(path), tmdbEdgeEntry(text, storedAt, softTtl)));
   }
 }
-__name(refreshTmdb, "refreshTmdb");
-async function fetchTmdbJson(path, env, ctx) {
-  const cacheKey = "/api/tmdb" + path;
+__name(storeTmdb, "storeTmdb");
+async function refreshTmdbNow(path, softTtl, env, ctx, budget) {
+  const res = await tmdbOnce(path, env, budget);
+  if (res.status !== 200) return null;
+  const storedAt = Date.now();
+  storeTmdb(path, res.text, softTtl, storedAt, env, ctx, budget);
+  return { status: 200, text: res.text, cache: "MISS", layer: "origin", storedAt };
+}
+__name(refreshTmdbNow, "refreshTmdbNow");
+function scheduleTmdbRefresh(path, softTtl, env, ctx, budget) {
+  const state = tmdbState(env);
+  if (state && !takeCooldown(state.refreshedAt, path, TMDB_REFRESH_COOLDOWN_MS)) {
+    budgetRelease(budget);
+    return;
+  }
+  waitFor(ctx, refreshTmdbNow(path, softTtl, env, ctx, budget).catch((err) => {
+    console.log("[tmdb] background refresh failed for " + path + ": " + (err && err.message));
+  }));
+}
+__name(scheduleTmdbRefresh, "scheduleTmdbRefresh");
+async function fetchTmdbJson(path, env, ctx, opts) {
+  const options = opts || {};
+  const budget = options.budget || null;
   const softTtl = tmdbCacheTtl(path, env);
-  if (env.TMDB_CACHE) {
-    const hit = await env.TMDB_CACHE.getWithMetadata(cacheKey, { type: "text", cacheTtl: 60 });
-    if (hit && hit.value) {
-      const storedAt = hit.metadata && hit.metadata.t;
-      if (!storedAt || Date.now() - storedAt < softTtl * 1e3) {
-        return { status: 200, text: hit.value, cache: "HIT" };
+  const freshMs = softTtl * 1e3;
+  const state = tmdbState(env);
+  const now = Date.now();
+  let stale = null;
+  const consider = /* @__PURE__ */ __name((text, t, layer) => {
+    if (!stale || t > stale.t) stale = { text, t, layer };
+  }, "consider");
+  const memo = memoGet(state, path);
+  if (memo) {
+    if (now - memo.t < freshMs) {
+      budgetRelease(budget);
+      return { status: 200, text: memo.text, cache: "HIT", layer: "memo", storedAt: memo.t };
+    }
+    consider(memo.text, memo.t, "memo");
+  }
+  const colo = options.edge === false ? null : coloCache();
+  if (colo && budgetOptional(budget)) {
+    try {
+      const hit = await colo.match(tmdbEdgeKey(path));
+      if (hit) {
+        const text = await hit.text();
+        const t = Number(hit.headers.get(TMDB_STORED_HEADER)) || 0;
+        if (looksLikeJson(text)) {
+          if (!t || now - t < freshMs) {
+            const storedAt2 = t || now;
+            memoPut(state, path, text, storedAt2);
+            budgetRelease(budget);
+            return { status: 200, text, cache: "HIT", layer: "edge", storedAt: storedAt2 };
+          }
+          consider(text, t, "edge");
+        }
       }
-      ctx.waitUntil(refreshTmdb(path, cacheKey, softTtl, env));
-      return { status: 200, text: hit.value, cache: "STALE" };
+    } catch (err) {
+      console.log("[tmdb] edge read failed for " + path + ": " + (err && err.message));
     }
   }
-  const res = await tmdbOnce(path, env);
-  if (env.TMDB_CACHE && res.status === 200) {
-    ctx.waitUntil(putTmdb(cacheKey, res.text, softTtl, env));
+  if (stale) {
+    if (options.revalidate) {
+      const fresh = await refreshTmdbNow(path, softTtl, env, ctx, budget).catch(() => null);
+      if (fresh) return fresh;
+    } else {
+      scheduleTmdbRefresh(path, softTtl, env, ctx, budget);
+    }
+    return { status: 200, text: stale.text, cache: "STALE", layer: stale.layer, storedAt: stale.t };
   }
-  return { status: res.status, text: res.text, cache: "MISS" };
+  const res = await tmdbOnce(path, env, budget);
+  const storedAt = Date.now();
+  if (res.status === 200) storeTmdb(path, res.text, softTtl, storedAt, env, ctx, budget);
+  return { status: res.status, text: res.text, cache: "MISS", layer: "origin", storedAt };
 }
 __name(fetchTmdbJson, "fetchTmdbJson");
 function tmdbCacheControl(path) {
@@ -3370,6 +3576,7 @@ function tmdbCacheControl(path) {
   return "public, max-age=" + (volatile ? 1800 : 21600) + ", s-maxage=" + (volatile ? 3600 : 86400) + ", stale-while-revalidate=" + (volatile ? 86400 : 604800) + ", stale-if-error=604800";
 }
 __name(tmdbCacheControl, "tmdbCacheControl");
+var TMDB_STALE_BROWSER_CACHE = "public, max-age=60, stale-if-error=604800";
 async function handleTmdbProxy(request, env, ctx, url) {
   const path = url.pathname.replace("/api/tmdb", "") + url.search;
   let result;
@@ -3378,12 +3585,14 @@ async function handleTmdbProxy(request, env, ctx, url) {
   } catch (err) {
     return json({ error: "upstream unavailable", detail: String(err && err.message).slice(0, 120) }, 503);
   }
+  const ok = result.status === 200;
   return new Response(result.text, {
     status: result.status,
     headers: {
       "content-type": "application/json",
       "x-cache": result.cache,
-      "cache-control": result.status === 200 ? tmdbCacheControl(path) : "no-store"
+      "x-cache-layer": result.layer || "origin",
+      "cache-control": !ok ? "no-store" : result.cache === "STALE" ? TMDB_STALE_BROWSER_CACHE : tmdbCacheControl(path)
     }
   });
 }
@@ -3420,38 +3629,50 @@ async function readBatchPlan(request, url) {
   return parsed;
 }
 __name(readBatchPlan, "readBatchPlan");
-function runBatchPlan(paths, env, ctx) {
-  return Promise.all(paths.map(async (path) => {
-    try {
-      const result = await fetchTmdbJson(path, env, ctx);
-      if (result.status !== 200) {
-        return { status: "rejected", reason: `TMDB responded ${result.status}` };
-      }
-      return { status: "fulfilled", value: JSON.parse(result.text) };
-    } catch (err) {
-      return { status: "rejected", reason: err.message };
-    }
-  }));
+async function batchPart(path, env, ctx, opts) {
+  try {
+    const result = await fetchTmdbJson(path, env, ctx, opts);
+    if (result.status !== 200) return { ok: false, reason: `TMDB responded ${result.status}` };
+    return { ok: true, text: result.text, stale: result.cache === "STALE" };
+  } catch (err) {
+    return { ok: false, reason: String(err && err.message || err || "unavailable") };
+  }
+}
+__name(batchPart, "batchPart");
+function batchBody(parts) {
+  let body = '{"results":[';
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (i) body += ",";
+    body += part && part.ok ? '{"status":"fulfilled","value":' + part.text + "}" : '{"status":"rejected","reason":' + JSON.stringify(String(part && part.reason || "unavailable")) + "}";
+  }
+  return body + "]}";
+}
+__name(batchBody, "batchBody");
+function runBatchPlan(paths, env, ctx, opts) {
+  const parts = new Array(paths.length).fill(null);
+  const all = Promise.all(paths.map((path, i) => batchPart(path, env, ctx, opts).then((part) => {
+    parts[i] = part;
+    return part;
+  })));
+  return { parts, all };
 }
 __name(runBatchPlan, "runBatchPlan");
-function putBatch(planKey, body, env) {
-  return env.TMDB_CACHE.put(planKey, body, {
-    // Kept well past its freshness window so the SWR read has something to
-    // answer with; the metadata timestamp, not the expiry, decides freshness.
-    expirationTtl: Math.min(BATCH_CACHE_TTL * TMDB_STALE_MULT, TMDB_MAX_RETENTION),
-    metadata: { t: Date.now() }
-  });
-}
-__name(putBatch, "putBatch");
-async function refreshBatch(paths, planKey, env, ctx, planCacheKey) {
+var BATCH_REFRESH_COOLDOWN_MS = 3e4;
+var BATCH_RETRY_AFTER_FAIL_MS = 3e5;
+async function refreshBatch(paths, planKey, env, ctx, planCacheKey, budget) {
   try {
-    const settled = await runBatchPlanOnce(planKey, paths, env, ctx);
-    if (settled.every((r) => r.status === "fulfilled")) {
-      const body = JSON.stringify({ results: settled });
-      if (planCacheKey) {
-        await putBatchEverywhere(planCacheKey, planKey, body, env, ctx);
-      } else if (env.TMDB_CACHE) {
-        await putBatch(planKey, body, env);
+    const run = runBatchPlanOnce(planKey, paths, env, ctx, { revalidate: true, budget });
+    const parts = await run.all;
+    if (parts.every((p) => p && p.ok && !p.stale)) {
+      await putBatchColo(planCacheKey, batchBody(parts), Date.now(), budget);
+    } else {
+      const state = tmdbState(env);
+      if (state) {
+        state.batchRefreshedAt.set(
+          planKey,
+          Date.now() + BATCH_RETRY_AFTER_FAIL_MS - BATCH_REFRESH_COOLDOWN_MS
+        );
       }
     }
   } catch (err) {
@@ -3459,6 +3680,12 @@ async function refreshBatch(paths, planKey, env, ctx, planCacheKey) {
   }
 }
 __name(refreshBatch, "refreshBatch");
+function scheduleBatchRefresh(paths, planKey, env, ctx, planCacheKey, budget) {
+  const state = tmdbState(env);
+  if (state && !takeCooldown(state.batchRefreshedAt, planKey, BATCH_REFRESH_COOLDOWN_MS)) return;
+  ctx.waitUntil(refreshBatch(paths, planKey, env, ctx, planCacheKey, budget));
+}
+__name(scheduleBatchRefresh, "scheduleBatchRefresh");
 var BATCH_STORED_HEADER = "x-mz-stored";
 function coloCache() {
   return typeof caches !== "undefined" && caches && caches.default ? caches.default : null;
@@ -3481,31 +3708,34 @@ function batchCacheEntry(body, storedAt) {
   });
 }
 __name(batchCacheEntry, "batchCacheEntry");
-function putBatchEverywhere(planCacheKey, planKey, body, env, ctx) {
-  const storedAt = Date.now();
+function putBatchColo(planCacheKey, body, storedAt, budget) {
   const colo = coloCache();
-  const work = [];
-  if (env.TMDB_CACHE) work.push(putBatch(planKey, body, env));
-  if (colo) work.push(colo.put(planCacheKey, batchCacheEntry(body, storedAt)));
-  return Promise.all(work.map((p) => p.catch((err) => {
+  if (!colo || !planCacheKey || !budgetRequire(budget)) return Promise.resolve();
+  return Promise.resolve().then(() => colo.put(planCacheKey, batchCacheEntry(body, storedAt))).catch((err) => {
     console.log("[batch] cache write failed: " + (err && err.message));
-  })));
+  });
 }
-__name(putBatchEverywhere, "putBatchEverywhere");
+__name(putBatchColo, "putBatchColo");
+function planStoredAt(parts) {
+  const now = Date.now();
+  return parts.some((part) => part && part.stale) ? now - BATCH_CACHE_TTL * 1e3 : now;
+}
+__name(planStoredAt, "planStoredAt");
 var _batchInFlight = /* @__PURE__ */ new Map();
-function runBatchPlanOnce(planKey, paths, env, ctx) {
+function runBatchPlanOnce(planKey, paths, env, ctx, opts) {
   const pending = _batchInFlight.get(planKey);
   if (pending) return pending;
-  const started = runBatchPlan(paths, env, ctx);
-  _batchInFlight.set(planKey, started);
-  started.then(() => {
+  const run = runBatchPlan(paths, env, ctx, opts);
+  _batchInFlight.set(planKey, run);
+  run.all.then(() => {
   }, () => {
   }).then(() => {
-    _batchInFlight.delete(planKey);
+    if (_batchInFlight.get(planKey) === run) _batchInFlight.delete(planKey);
   });
-  return started;
+  return run;
 }
 __name(runBatchPlanOnce, "runBatchPlanOnce");
+var BATCH_DEADLINE_MS = 7e3;
 async function handleTmdbBatch(request, env, ctx, url) {
   let paths;
   try {
@@ -3527,23 +3757,28 @@ async function handleTmdbBatch(request, env, ctx, url) {
     await crypto.subtle.digest("SHA-256", TE.encode(paths.join("\n")))
   ).slice(0, 32);
   const planCacheKey = batchCacheKey(url, planKey);
+  const budget = subrequestBudget(env, 0);
+  const reserveForAssemble = /* @__PURE__ */ __name(() => {
+    budget.reserve = paths.length + 1;
+  }, "reserveForAssemble");
   const batchHeaders = /* @__PURE__ */ __name((cacheState) => ({
     "content-type": "application/json",
     "x-cache": cacheState,
     "x-batch-size": String(paths.length),
-    // The assembled copy lives in the colo cache and KV under the plan hash;
+    // The assembled copy lives in the location cache under the plan hash;
     // nothing downstream of here should hold a per-visitor copy.
     "cache-control": "no-store"
   }), "batchHeaders");
   const colo = coloCache();
-  if (colo) {
+  if (colo && budgetRequire(budget)) {
     try {
       const cached = await colo.match(planCacheKey);
       if (cached) {
         const storedAt = Number(cached.headers.get(BATCH_STORED_HEADER)) || 0;
         const fresh = !storedAt || Date.now() - storedAt < BATCH_CACHE_TTL * 1e3;
         if (!fresh) {
-          ctx.waitUntil(refreshBatch(paths, planKey, env, ctx, planCacheKey));
+          reserveForAssemble();
+          scheduleBatchRefresh(paths, planKey, env, ctx, planCacheKey, budget);
         }
         return new Response(cached.body, {
           status: 200,
@@ -3554,34 +3789,25 @@ async function handleTmdbBatch(request, env, ctx, url) {
       console.log("[batch] colo lookup failed: " + (err && err.message));
     }
   }
-  if (env.TMDB_CACHE) {
-    try {
-      const hit = await env.TMDB_CACHE.getWithMetadata(planKey, { type: "text", cacheTtl: 60 });
-      if (hit && hit.value) {
-        const storedAt = hit.metadata && hit.metadata.t;
-        const fresh = !storedAt || Date.now() - storedAt < BATCH_CACHE_TTL * 1e3;
-        if (!fresh) ctx.waitUntil(refreshBatch(paths, planKey, env, ctx, planCacheKey));
-        if (fresh) {
-          const promote = coloCache();
-          if (promote) {
-            ctx.waitUntil(promote.put(planCacheKey, batchCacheEntry(hit.value, storedAt || Date.now())).catch(() => {
-            }));
-          }
-        }
-        return new Response(hit.value, {
-          status: 200,
-          headers: batchHeaders(fresh ? "HIT" : "STALE")
-        });
-      }
-    } catch (err) {
-      console.log("[batch] kv read failed: " + (err && err.message));
-    }
-  }
-  const settled = await runBatchPlanOnce(planKey, paths, env, ctx);
-  const body = JSON.stringify({ results: settled });
-  const allOk = settled.every((r) => r.status === "fulfilled");
+  reserveForAssemble();
+  const run = runBatchPlanOnce(planKey, paths, env, ctx, { budget });
+  waitFor(ctx, run.all);
+  let timer = null;
+  const deadlineMs = envInt(env, "BATCH_DEADLINE_MS", BATCH_DEADLINE_MS, 100, 9e3);
+  const finished = await Promise.race([
+    run.all.then(() => true),
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(false), deadlineMs);
+    })
+  ]);
+  if (timer !== null) clearTimeout(timer);
+  const parts = finished ? run.parts : run.parts.map((part) => part || { ok: false, reason: "still loading at the edge" });
+  const body = batchBody(parts);
+  const allOk = finished && parts.every((part) => part && part.ok);
   if (allOk) {
-    ctx.waitUntil(putBatchEverywhere(planCacheKey, planKey, body, env, ctx));
+    waitFor(ctx, putBatchColo(planCacheKey, body, planStoredAt(parts), budget));
+  } else if (!finished) {
+    waitFor(ctx, run.all.then((late) => late.every((part) => part && part.ok) ? putBatchColo(planCacheKey, batchBody(late), planStoredAt(late), budget) : null));
   }
   return new Response(body, {
     status: 200,
@@ -3617,12 +3843,13 @@ function slimChartCard(detail, mediaType) {
   };
 }
 __name(slimChartCard, "slimChartCard");
-async function hydrateOttChart(order, env, ctx) {
+async function hydrateOttChart(order, env, ctx, budget) {
   const settled = await Promise.allSettled(
     order.map((entry) => fetchTmdbJson(
       "/" + entry.media_type + "/" + entry.id + "?language=en-US",
       env,
-      ctx
+      ctx,
+      { budget }
     ))
   );
   const cards = [];
@@ -3643,10 +3870,14 @@ async function hydrateOttChart(order, env, ctx) {
   return cards;
 }
 __name(hydrateOttChart, "hydrateOttChart");
-async function buildOttChart(platform, region, env, ctx) {
+var OTT_CHART_UPSTREAM_CALLS = 2;
+async function buildOttChart(platform, region, env, ctx, budget) {
+  if (budget) budget.reserve += OTT_CHART_UPSTREAM_CALLS + 1;
+  for (let i = 0; i < OTT_CHART_UPSTREAM_CALLS; i++) budgetRequire(budget);
   const chart = await import_ott_charts.default.fetchPlatformChart(platform, { region });
   const order = import_ott_charts.default.mergeChartOrder(chart, OTT_CHART_HEAD);
-  const items = await hydrateOttChart(order, env, ctx);
+  if (budget) budget.reserve += order.length;
+  const items = await hydrateOttChart(order, env, ctx, budget);
   if (!items.length) throw new Error("chart hydrated to zero cards");
   return {
     platform,
@@ -3660,79 +3891,144 @@ async function buildOttChart(platform, region, env, ctx) {
   };
 }
 __name(buildOttChart, "buildOttChart");
-async function refreshOttChart(platform, region, cacheKey, store, env, ctx) {
-  try {
-    const payload = await buildOttChart(platform, region, env, ctx);
-    await store.put(cacheKey, JSON.stringify(payload), {
-      expirationTtl: OTT_CHART_TTL * OTT_CHART_STALE_MULT,
-      metadata: { t: Date.now() }
-    });
-  } catch (err) {
-    console.log("[ott-charts] refresh failed for " + platform + "/" + region + ": " + (err && err.message));
-  }
+var OTT_CHART_RETENTION = OTT_CHART_TTL * OTT_CHART_STALE_MULT;
+var OTT_CHART_REFRESH_COOLDOWN_MS = 6e4;
+var OTT_CHART_FAILURE_HOLD_MS = 6e4;
+var ottChartMemoKey = /* @__PURE__ */ __name((platform, region) => "ott-chart:" + platform + ":" + region, "ottChartMemoKey");
+function ottChartCacheKey(platform, region) {
+  return new Request(TMDB_EDGE_ORIGIN + "/__mz/ott-chart/" + encodeURIComponent(platform) + "/" + encodeURIComponent(region), { method: "GET" });
 }
-__name(refreshOttChart, "refreshOttChart");
+__name(ottChartCacheKey, "ottChartCacheKey");
+function ottChartEntry(body, storedAt) {
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "content-type": "application/json",
+      // Retention only; freshness is the stored-at stamp, as everywhere else.
+      "cache-control": "public, s-maxage=" + OTT_CHART_RETENTION,
+      [TMDB_STORED_HEADER]: String(storedAt)
+    }
+  });
+}
+__name(ottChartEntry, "ottChartEntry");
+function ottChartResponse(body, cacheState) {
+  const fresh = cacheState !== "STALE";
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "content-type": "application/json",
+      "x-cache": cacheState,
+      "cache-control": fresh ? "public, max-age=1800, s-maxage=7200, stale-while-revalidate=86400" : "public, max-age=60, must-revalidate"
+    }
+  });
+}
+__name(ottChartResponse, "ottChartResponse");
+var _ottChartInFlight = /* @__PURE__ */ new Map();
+function buildOttChartOnce(platform, region, env, ctx, budget) {
+  const memoKey = ottChartMemoKey(platform, region);
+  const pending = _ottChartInFlight.get(memoKey);
+  if (pending) return pending;
+  const started = (async () => {
+    const payload = await buildOttChart(platform, region, env, ctx, budget);
+    const body = JSON.stringify(payload);
+    const storedAt = Date.now();
+    memoPut(tmdbState(env), memoKey, body, storedAt);
+    const colo = coloCache();
+    if (colo && budgetRequire(budget)) {
+      waitFor(ctx, colo.put(ottChartCacheKey(platform, region), ottChartEntry(body, storedAt)));
+    }
+    return body;
+  })();
+  _ottChartInFlight.set(memoKey, started);
+  started.then(() => {
+  }, () => {
+  }).then(() => {
+    if (_ottChartInFlight.get(memoKey) === started) _ottChartInFlight.delete(memoKey);
+  });
+  return started;
+}
+__name(buildOttChartOnce, "buildOttChartOnce");
+function ottChartUnavailable(platform, region) {
+  return new Response(JSON.stringify({
+    platform,
+    region,
+    source: "justwatch",
+    fetchedAt: Date.now(),
+    unavailable: true,
+    counts: { trending: 0, newly: 0 },
+    items: []
+  }), {
+    status: 200,
+    headers: {
+      "content-type": "application/json",
+      "x-cache": "MISS",
+      "cache-control": "public, max-age=60, must-revalidate"
+    }
+  });
+}
+__name(ottChartUnavailable, "ottChartUnavailable");
 async function handleOttCharts(request, env, ctx, url) {
   const platform = String(url.searchParams.get("platform") || "").trim().toLowerCase();
   const region = String(url.searchParams.get("region") || "IN").trim().toUpperCase().slice(0, 2);
   if (!import_ott_charts.default.isKnownChartPlatform(platform)) {
     return json({ error: "Unknown platform", platforms: import_ott_charts.default.chartPlatforms() }, 400);
   }
-  const cacheKey = "ott-chart:" + platform + ":" + region;
-  const store = env.OTT_CHART_CACHE || env.TMDB_CACHE;
-  if (store) {
-    const hit = await store.getWithMetadata(cacheKey, { type: "text", cacheTtl: 60 });
-    if (hit && hit.value) {
-      const storedAt = hit.metadata && hit.metadata.t;
-      const fresh = !storedAt || Date.now() - storedAt < OTT_CHART_TTL * 1e3;
-      if (!fresh) ctx.waitUntil(refreshOttChart(platform, region, cacheKey, store, env, ctx));
-      return new Response(hit.value, {
-        status: 200,
-        headers: {
-          "content-type": "application/json",
-          "x-cache": fresh ? "HIT" : "STALE",
-          "cache-control": fresh ? "public, max-age=1800, s-maxage=7200, stale-while-revalidate=86400" : "public, max-age=60, must-revalidate"
+  if (!/^[A-Z]{2}$/.test(region)) {
+    return json({ error: "region must be a two-letter country code" }, 400);
+  }
+  const state = tmdbState(env);
+  const memoKey = ottChartMemoKey(platform, region);
+  const freshMs = OTT_CHART_TTL * 1e3;
+  const budget = subrequestBudget(env, 0);
+  const now = Date.now();
+  let stale = null;
+  const memo = memoGet(state, memoKey);
+  if (memo) {
+    if (now - memo.t < freshMs) return ottChartResponse(memo.text, "HIT");
+    stale = { text: memo.text, t: memo.t };
+  }
+  const colo = coloCache();
+  if (colo && budgetRequire(budget)) {
+    try {
+      const hit = await colo.match(ottChartCacheKey(platform, region));
+      if (hit) {
+        const text = await hit.text();
+        const t = Number(hit.headers.get(TMDB_STORED_HEADER)) || 0;
+        if (looksLikeJson(text) && (!stale || t > stale.t)) {
+          if (t && now - t < freshMs) {
+            memoPut(state, memoKey, text, t);
+            return ottChartResponse(text, "HIT");
+          }
+          stale = { text, t };
         }
-      });
+      }
+    } catch (err) {
+      console.log("[ott-charts] edge read failed for " + memoKey + ": " + (err && err.message));
     }
   }
-  let payload;
+  if (stale) {
+    if (!state || takeCooldown(state.refreshedAt, memoKey, OTT_CHART_REFRESH_COOLDOWN_MS)) {
+      waitFor(ctx, buildOttChartOnce(platform, region, env, ctx, budget).catch((err) => {
+        console.log("[ott-charts] refresh failed for " + platform + "/" + region + ": " + (err && err.message));
+      }));
+    }
+    return ottChartResponse(stale.text, "STALE");
+  }
+  if (state && now - (state.ottFailedAt.get(memoKey) || 0) < OTT_CHART_FAILURE_HOLD_MS) {
+    return ottChartUnavailable(platform, region);
+  }
+  let body;
   try {
-    payload = await buildOttChart(platform, region, env, ctx);
+    body = await buildOttChartOnce(platform, region, env, ctx, budget);
   } catch (err) {
     console.log("[ott-charts] " + platform + "/" + region + " unavailable: " + (err && err.message));
-    return new Response(JSON.stringify({
-      platform,
-      region,
-      source: "justwatch",
-      fetchedAt: Date.now(),
-      unavailable: true,
-      counts: { trending: 0, newly: 0 },
-      items: []
-    }), {
-      status: 200,
-      headers: {
-        "content-type": "application/json",
-        "x-cache": "MISS",
-        "cache-control": "public, max-age=60, must-revalidate"
-      }
-    });
-  }
-  const body = JSON.stringify(payload);
-  if (store) {
-    ctx.waitUntil(store.put(cacheKey, body, {
-      expirationTtl: OTT_CHART_TTL * OTT_CHART_STALE_MULT,
-      metadata: { t: Date.now() }
-    }));
-  }
-  return new Response(body, {
-    status: 200,
-    headers: {
-      "content-type": "application/json",
-      "x-cache": "MISS",
-      "cache-control": "public, max-age=1800, s-maxage=7200, stale-while-revalidate=86400"
+    if (state) {
+      state.ottFailedAt.set(memoKey, Date.now());
+      if (state.ottFailedAt.size > 256) state.ottFailedAt.delete(state.ottFailedAt.keys().next().value);
     }
-  });
+    return ottChartUnavailable(platform, region);
+  }
+  return ottChartResponse(body, "MISS");
 }
 __name(handleOttCharts, "handleOttCharts");
 async function routeApi(request, env, ctx, url) {
@@ -3782,10 +4078,10 @@ var SSR_DETAIL_CACHE = "public, max-age=1800, s-maxage=86400, stale-while-revali
 var SSR_CATEGORY_CACHE = "public, max-age=1800, s-maxage=86400, stale-while-revalidate=604800";
 var SSR_WATCH_CACHE = "public, max-age=300, s-maxage=900";
 var SSR_DETAIL_APPEND = "credits,similar,recommendations,videos,watch/providers";
-function ssrTmdb(env, ctx) {
+function ssrTmdb(env, ctx, opts) {
   return async (apiPath, params) => {
     const query = new URLSearchParams(params || {}).toString();
-    const result = await fetchTmdbJson(apiPath + (query ? "?" + query : ""), env, ctx);
+    const result = await fetchTmdbJson(apiPath + (query ? "?" + query : ""), env, ctx, opts);
     if (result.status !== 200) {
       const err = new Error("TMDB responded " + result.status);
       err.tmdbStatus = result.status;
@@ -3837,7 +4133,27 @@ function notModified(request, response) {
   return new Response(null, { status: 304, headers });
 }
 __name(notModified, "notModified");
-var SSR_EARLY_HINT_LINK = "<https://image.tmdb.org>; rel=preconnect; crossorigin";
+var SSR_EARLY_HINT_LINK = "<https://image.tmdb.org>; rel=preconnect";
+var BROWSER_CC_HEADER = "x-mz-cc";
+var LEGACY_EDGE_HTML_CC = "public, max-age=0, must-revalidate";
+function forEdgeStore(response) {
+  const copy = new Response(response.body, response);
+  copy.headers.set(BROWSER_CC_HEADER, response.headers.get("cache-control") || "");
+  return copy;
+}
+__name(forEdgeStore, "forEdgeStore");
+function fromEdgeStore(cached) {
+  if (!cached) return cached;
+  const stored = cached.headers.get(BROWSER_CC_HEADER);
+  const isHtml = /text\/html/i.test(cached.headers.get("content-type") || "");
+  const policy = stored || (isHtml ? LEGACY_EDGE_HTML_CC : "");
+  if (!policy && stored === null) return cached;
+  const res = new Response(cached.body, cached);
+  if (policy) res.headers.set("cache-control", policy);
+  res.headers.delete(BROWSER_CC_HEADER);
+  return res;
+}
+__name(fromEdgeStore, "fromEdgeStore");
 function ssrHtml(html, cacheControl, robots) {
   const headers = {
     "content-type": "text/html; charset=utf-8",
@@ -3944,7 +4260,6 @@ var SITEMAP_KV_CACHE_TTL = 3600;
 var SITEMAP_CHUNK = 2e3;
 var SITEMAP_LIVE_PAGES = 3;
 var SITEMAP_CATALOG_KV_KEY = "sitemap:catalog";
-var sitemapItemsKvKey = /* @__PURE__ */ __name((kind) => "sitemap:items:" + kind, "sitemapItemsKvKey");
 var SITEMAP_CACHE = "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800";
 var SSR_BROWSE_CACHE = "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800";
 var SITEMAP_MEMO_MS = 3e5;
@@ -4000,45 +4315,119 @@ async function collectionsCatalogItems(kind, env) {
   return out;
 }
 __name(collectionsCatalogItems, "collectionsCatalogItems");
-async function getSitemapItems(kind, env, ctx) {
+var SITEMAP_CATALOG_MEMO_KEY = "sitemap:catalog";
+var SITEMAP_CATALOG_MEMO_MS = 18e5;
+var SITEMAP_CATALOG_EDGE_RETENTION = 21600;
+var SITEMAP_CATALOG_MISS_MS = SITEMAP_MEMO_MS;
+function seoEdgeKey(name) {
+  return new Request(TMDB_EDGE_ORIGIN + "/__mz/seo/" + name, { method: "GET" });
+}
+__name(seoEdgeKey, "seoEdgeKey");
+var _catalogInFlight = /* @__PURE__ */ new WeakMap();
+function readSitemapCatalog(env, ctx) {
+  const memoStore = sitemapMemoFor(env);
+  const memo = memoStore && memoStore.get(SITEMAP_CATALOG_MEMO_KEY);
+  if (memo && memo.expires > Date.now()) return Promise.resolve(memo.value);
+  const inflightKey = env && typeof env === "object" ? env : null;
+  const pending = inflightKey && _catalogInFlight.get(inflightKey);
+  if (pending) return pending;
+  const work = (async () => {
+    const colo = coloCache();
+    const edgeKey = seoEdgeKey("catalog");
+    let raw = null;
+    let fromKv = false;
+    if (colo) {
+      try {
+        const hit = await colo.match(edgeKey);
+        if (hit) raw = await hit.text();
+      } catch (err) {
+        console.log("[ssr] catalogue edge read failed: " + (err && err.message));
+      }
+    }
+    if (!raw) {
+      const store = seoStore(env);
+      if (store) {
+        try {
+          raw = await store.get(SITEMAP_CATALOG_KV_KEY, { cacheTtl: SITEMAP_KV_CACHE_TTL });
+          fromKv = Boolean(raw);
+        } catch (err) {
+          console.warn("[ssr] sitemap catalogue unreadable:", err && err.message);
+        }
+      }
+    }
+    let parsed = null;
+    if (raw) {
+      try {
+        parsed = JSON.parse(raw);
+      } catch (err) {
+        console.warn("[ssr] sitemap catalogue is not valid JSON:", err && err.message);
+      }
+    }
+    if (parsed && typeof parsed !== "object") parsed = null;
+    if (parsed && fromKv && colo) {
+      waitFor(ctx, colo.put(edgeKey, new Response(raw, {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "cache-control": "public, s-maxage=" + SITEMAP_CATALOG_EDGE_RETENTION
+        }
+      })));
+    }
+    if (memoStore) {
+      memoStore.set(SITEMAP_CATALOG_MEMO_KEY, {
+        expires: Date.now() + (parsed ? SITEMAP_CATALOG_MEMO_MS : SITEMAP_CATALOG_MISS_MS),
+        value: parsed
+      });
+    }
+    return parsed;
+  })();
+  if (inflightKey) {
+    _catalogInFlight.set(inflightKey, work);
+    work.then(() => {
+    }, () => {
+    }).then(() => {
+      if (_catalogInFlight.get(inflightKey) === work) _catalogInFlight.delete(inflightKey);
+    });
+  }
+  return work;
+}
+__name(readSitemapCatalog, "readSitemapCatalog");
+var SITEMAP_LIVE_ENDPOINTS = { movie: 4, tv: 3 };
+async function getSitemapItems(kind, env, ctx, budget) {
   const wanted = kind === "tv" ? "tv" : "movie";
   const memoStore = sitemapMemoFor(env);
   const memo = memoStore && memoStore.get(wanted);
   if (memo && memo.expires > Date.now()) return memo.value;
-  const store = seoStore(env);
   let result = null;
-  if (store) {
-    try {
-      const raw = await store.get(SITEMAP_CATALOG_KV_KEY, { cacheTtl: SITEMAP_KV_CACHE_TTL });
-      const parsed = raw ? JSON.parse(raw) : null;
-      const items = parsed && Array.isArray(parsed[wanted]) ? parsed[wanted] : null;
-      if (items && items.length) {
-        const generated = String(parsed && parsed.generated || "").slice(0, 10);
-        result = {
-          items,
-          generated: /^\d{4}-\d{2}-\d{2}$/.test(generated) ? generated : import_seo_ssr.default.SITEMAP_FALLBACK_DATE,
-          source: "kv-catalog"
-        };
-      }
-    } catch (err) {
-      console.warn("[ssr] sitemap catalogue unreadable:", err && err.message);
-    }
+  const parsed = await readSitemapCatalog(env, ctx);
+  const catalogItems = parsed && Array.isArray(parsed[wanted]) ? parsed[wanted] : null;
+  if (catalogItems && catalogItems.length) {
+    const generated = String(parsed && parsed.generated || "").slice(0, 10);
+    result = {
+      items: catalogItems,
+      generated: /^\d{4}-\d{2}-\d{2}$/.test(generated) ? generated : import_seo_ssr.default.SITEMAP_FALLBACK_DATE,
+      source: "kv-catalog"
+    };
   }
-  if (!result && store) {
+  const colo = coloCache();
+  const liveKey = seoEdgeKey("items-" + wanted);
+  if (!result && colo) {
     try {
-      const raw = await store.get(sitemapItemsKvKey(wanted), { cacheTtl: SITEMAP_KV_CACHE_TTL });
-      const items = raw ? JSON.parse(raw) : null;
+      const hit = await colo.match(liveKey);
+      const items = hit ? JSON.parse(await hit.text()) : null;
       if (Array.isArray(items) && items.length) {
-        result = { items, generated: import_seo_ssr.default.SITEMAP_FALLBACK_DATE, source: "kv-live" };
+        result = { items, generated: import_seo_ssr.default.SITEMAP_FALLBACK_DATE, source: "edge-live" };
       }
     } catch (err) {
       console.warn("[ssr] sitemap live cache unreadable:", err && err.message);
     }
   }
   if (!result) {
+    const liveBudget = budget || subrequestBudget(env, 0);
+    liveBudget.reserve += SITEMAP_LIVE_PAGES * SITEMAP_LIVE_ENDPOINTS[wanted];
     let items = [];
     try {
-      items = await import_seo_ssr.default.collectSitemapItems(ssrTmdb(env, ctx), wanted, SITEMAP_LIVE_PAGES);
+      items = await import_seo_ssr.default.collectSitemapItems(ssrTmdb(env, ctx, { budget: liveBudget }), wanted, SITEMAP_LIVE_PAGES);
     } catch (err) {
       console.warn("[ssr] sitemap " + wanted + " live build failed:", err && err.message);
     }
@@ -4050,12 +4439,11 @@ async function getSitemapItems(kind, env, ctx) {
       }
     }
     result = { items, generated: import_seo_ssr.default.SITEMAP_FALLBACK_DATE, source: "live" };
-    if (store && items.length && ctx && typeof ctx.waitUntil === "function") {
-      ctx.waitUntil(store.put(
-        sitemapItemsKvKey(wanted),
-        JSON.stringify(items),
-        { expirationTtl: SITEMAP_KV_TTL }
-      ));
+    if (colo && items.length && budgetOptional(liveBudget)) {
+      waitFor(ctx, colo.put(liveKey, new Response(JSON.stringify(items), {
+        status: 200,
+        headers: { "content-type": "application/json", "cache-control": "public, s-maxage=" + SITEMAP_KV_TTL }
+      })));
     }
   }
   if (memoStore) {
@@ -4075,9 +4463,10 @@ function sitemapShardPaths(kind, count) {
 }
 __name(sitemapShardPaths, "sitemapShardPaths");
 async function buildSitemapIndexXml(env, ctx) {
+  const budget = subrequestBudget(env, 0);
   const [movie, tv] = await Promise.all([
-    getSitemapItems("movie", env, ctx),
-    getSitemapItems("tv", env, ctx)
+    getSitemapItems("movie", env, ctx, budget),
+    getSitemapItems("tv", env, ctx, budget)
   ]);
   const lastmod = movie.generated || tv.generated || import_seo_ssr.default.SITEMAP_FALLBACK_DATE;
   const children = ["/sitemap-static.xml", "/sitemap-browse.xml"].concat(sitemapShardPaths("movie", movie.items.length)).concat(sitemapShardPaths("tv", tv.items.length));
@@ -4110,33 +4499,27 @@ async function serveMediaSitemap(kind, chunkStr, env, ctx) {
   }
   const slice = shards > 1 ? items.slice((index - 1) * SITEMAP_CHUNK, index * SITEMAP_CHUNK) : items;
   const xml = import_seo_ssr.default.buildMediaSitemap(slice, kind);
-  if (store) ctx.waitUntil(store.put(xmlKey, xml, { expirationTtl: SITEMAP_XML_KV_TTL }));
+  if (store) waitFor(ctx, store.put(xmlKey, xml, { expirationTtl: SITEMAP_XML_KV_TTL }));
   return xmlResponse(xml);
 }
 __name(serveMediaSitemap, "serveMediaSitemap");
 async function browseEntries(env, ctx) {
-  const store = seoStore(env);
-  if (store) {
-    try {
-      const raw = await store.get(SITEMAP_CATALOG_KV_KEY, { cacheTtl: SITEMAP_KV_CACHE_TTL });
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        const movies = Array.isArray(parsed.movie) ? parsed.movie : [];
-        const tv2 = Array.isArray(parsed.tv) ? parsed.tv : [];
-        return movies.map((m) => Object.assign({ media_type: "movie" }, m)).concat(tv2.map((t) => Object.assign({ media_type: "tv" }, t)));
-      }
-    } catch (err) {
-      console.warn("[ssr] browseEntries catalog fallback:", err && err.message);
-    }
+  const parsed = await readSitemapCatalog(env, ctx);
+  if (parsed) {
+    const movies = Array.isArray(parsed.movie) ? parsed.movie : [];
+    const tv2 = Array.isArray(parsed.tv) ? parsed.tv : [];
+    return movies.map((m) => Object.assign({ media_type: "movie" }, m)).concat(tv2.map((t) => Object.assign({ media_type: "tv" }, t)));
   }
+  const budget = subrequestBudget(env, 0);
   const [movie, tv] = await Promise.all([
-    getSitemapItems("movie", env, ctx),
-    getSitemapItems("tv", env, ctx)
+    getSitemapItems("movie", env, ctx, budget),
+    getSitemapItems("tv", env, ctx, budget)
   ]);
   return movie.items.map((m) => Object.assign({ media_type: "movie" }, m)).concat(tv.items.map((t) => Object.assign({ media_type: "tv" }, t)));
 }
 __name(browseEntries, "browseEntries");
 var BROWSE_MEMO_KEY = "browse:index";
+var BROWSE_COLLATOR = typeof Intl !== "undefined" && Intl.Collator ? new Intl.Collator("en") : null;
 function browseIndexFrom(entries) {
   const counts = {};
   const byLetter = /* @__PURE__ */ new Map();
@@ -4150,8 +4533,11 @@ function browseIndexFrom(entries) {
     }
     bucket.push(entry);
   }
-  for (const bucket of byLetter.values()) {
-    bucket.sort((a, b) => ssrTitleOf(a).localeCompare(ssrTitleOf(b), "en"));
+  const compare = BROWSE_COLLATOR ? BROWSE_COLLATOR.compare : (a, b) => a.localeCompare(b, "en");
+  for (const [letter, bucket] of byLetter) {
+    const keyed = bucket.map((entry) => [ssrTitleOf(entry), entry]);
+    keyed.sort((a, b) => compare(a[0], b[0]));
+    byLetter.set(letter, keyed.map((pair) => pair[1]));
   }
   return { total: entries.length, counts, byLetter };
 }
@@ -4304,27 +4690,136 @@ function heroEarlyHints(backdropPath) {
   ];
 }
 __name(heroEarlyHints, "heroEarlyHints");
+var HOME_FRESH_MS = 5 * 60 * 1e3;
+var HOME_EDGE_RETENTION = 86400;
+var HOME_STORED_HEADER = "x-mz-stored";
+var HOME_CACHE_CONTROL = "public, max-age=0, must-revalidate, s-maxage=" + HOME_EDGE_RETENTION;
+var HOME_REFRESH_COOLDOWN_MS = 6e4;
+function isHomePath(pathname) {
+  return pathname === "/";
+}
+__name(isHomePath, "isHomePath");
+function deployVersion(env) {
+  const meta = env && env.CF_VERSION_METADATA;
+  return String(meta && (meta.id || meta.tag) || "");
+}
+__name(deployVersion, "deployVersion");
+function homeEdgeKey(url, env) {
+  const version = deployVersion(env);
+  return new Request(url.origin + "/__mz/home" + (version ? "?v=" + encodeURIComponent(version) : ""), { method: "GET" });
+}
+__name(homeEdgeKey, "homeEdgeKey");
+async function renderHome(request, env, ctx) {
+  const assetResponse = await env.ASSETS.fetch(new Request(request.url, { method: "GET" }));
+  const headers = new Headers(assetResponse.headers);
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("X-Frame-Options", "SAMEORIGIN");
+  headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  headers.set("Cache-Control", HOME_CACHE_CONTROL);
+  headers.append("Link", "<https://image.tmdb.org>; rel=preconnect");
+  if (assetResponse.status !== 200) {
+    return {
+      response: new Response(assetResponse.body, {
+        status: assetResponse.status,
+        statusText: assetResponse.statusText,
+        headers
+      }),
+      cacheable: false
+    };
+  }
+  const heroWork = heroBackdropPath(env, ctx);
+  ctx.waitUntil(heroWork.catch(() => {
+  }));
+  let timer = null;
+  const heroPath = await Promise.race([
+    heroWork,
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(""), HERO_RESOLVE_BUDGET_MS);
+    })
+  ]);
+  if (timer !== null) clearTimeout(timer);
+  if (heroPath) {
+    for (const hint of heroEarlyHints(heroPath)) headers.append("Link", hint);
+    const assetTag = assetResponse.headers.get("ETag") || "";
+    headers.delete("ETag");
+    headers.delete("Last-Modified");
+    if (assetTag) {
+      headers.set("ETag", weakEtag(bareEtag(assetTag) + "|" + heroPath + "|" + deployVersion(env)));
+    }
+    headers.set(HOME_STORED_HEADER, String(Date.now()));
+  }
+  let response = new Response(assetResponse.body, {
+    status: assetResponse.status,
+    statusText: assetResponse.statusText,
+    headers
+  });
+  if (heroPath) response = rewriteHeroPreload(response, heroPath);
+  return { response, cacheable: Boolean(heroPath) };
+}
+__name(renderHome, "renderHome");
+async function refreshHome(request, env, ctx, colo, key) {
+  try {
+    const { response, cacheable } = await renderHome(request, env, ctx);
+    if (cacheable) {
+      await colo.put(key, forEdgeStore(response));
+    } else if (response.body) {
+      await response.body.cancel();
+    }
+  } catch (err) {
+    console.log("[home] background rebuild failed: " + (err && err.message));
+  }
+}
+__name(refreshHome, "refreshHome");
+async function serveHome(request, env, ctx, url) {
+  const colo = coloCache();
+  const key = homeEdgeKey(url, env);
+  if (colo) {
+    try {
+      const cached = await colo.match(key);
+      if (cached) {
+        const storedAt = Number(cached.headers.get(HOME_STORED_HEADER)) || 0;
+        const state = tmdbState(env);
+        if (Date.now() - storedAt > HOME_FRESH_MS && (!state || Date.now() - state.homeRefreshedAt > HOME_REFRESH_COOLDOWN_MS)) {
+          if (state) state.homeRefreshedAt = Date.now();
+          ctx.waitUntil(refreshHome(request, env, ctx, colo, key));
+        }
+        const hit = fromEdgeStore(cached);
+        return notModified(request, hit) || hit;
+      }
+    } catch (err) {
+      console.log("[home] edge lookup failed: " + (err && err.message));
+    }
+  }
+  const { response, cacheable } = await renderHome(request, env, ctx);
+  if (colo && cacheable) waitFor(ctx, colo.put(key, forEdgeStore(response.clone())));
+  return notModified(request, response) || response;
+}
+__name(serveHome, "serveHome");
 var worker_default = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.hostname === "www.moviezone.dev") {
       return Response.redirect(`https://moviezone.dev${url.pathname}${url.search}`, 301);
     }
-    const edgeCache = caches.default;
-    const cacheKey = request.method === "GET" ? edgeCacheKey(request, url) : request;
-    if (request.method === "GET") {
-      const cached = await edgeCache.match(cacheKey);
-      if (cached) {
-        const fresh = notModified(request, cached);
-        return fresh || cached;
-      }
+    if (url.pathname.startsWith("/api/")) {
+      return routeApi(request, env, ctx, url);
     }
-    const apiResponse = await routeApi(request, env, ctx, url);
-    if (apiResponse) {
-      if (request.method === "GET" && apiResponse.status === 200 && url.pathname.startsWith("/api/tmdb/") && !url.pathname.includes("/batch") && apiResponse.headers.get("x-cache") !== "STALE") {
-        ctx.waitUntil(edgeCache.put(cacheKey, apiResponse.clone()));
+    if (request.method === "GET" && isHomePath(url.pathname)) {
+      return serveHome(request, env, ctx, url);
+    }
+    const edgeCache = coloCache();
+    const cacheKey = request.method === "GET" ? edgeCacheKey(request, url) : request;
+    if (edgeCache && request.method === "GET") {
+      let cached = null;
+      try {
+        cached = await edgeCache.match(cacheKey);
+      } catch (err) {
+        console.log("[edge] lookup failed for " + url.pathname + ": " + (err && err.message));
       }
-      return apiResponse;
+      if (cached) {
+        const hit = fromEdgeStore(cached);
+        return notModified(request, hit) || hit;
+      }
     }
     let ssr = null;
     try {
@@ -4333,8 +4828,8 @@ var worker_default = {
       console.error("[ssr] " + url.pathname + " failed:", err && err.stack);
     }
     if (ssr) {
-      if (ssr.status === 200 && request.method === "GET") {
-        ctx.waitUntil(edgeCache.put(cacheKey, ssr.clone()));
+      if (edgeCache && ssr.status === 200 && request.method === "GET") {
+        waitFor(ctx, edgeCache.put(cacheKey, forEdgeStore(ssr.clone())));
       }
       const ssrFresh = notModified(request, ssr);
       return ssrFresh || ssr;
@@ -4345,7 +4840,6 @@ var worker_default = {
     newHeaders.set("X-Frame-Options", "SAMEORIGIN");
     newHeaders.set("Referrer-Policy", "strict-origin-when-cross-origin");
     const path = url.pathname;
-    let isHomeDocument = false;
     if (path === "/sw.js") {
       newHeaders.set("Cache-Control", "no-cache, no-store, must-revalidate");
       newHeaders.set("Service-Worker-Allowed", "/");
@@ -4355,33 +4849,16 @@ var worker_default = {
       const stable = url.searchParams.has("v") || path.startsWith("/fonts/");
       newHeaders.set("Cache-Control", stable ? "public, max-age=31536000, immutable" : "public, max-age=2592000, immutable");
     } else if (path.endsWith(".html") || path === "/") {
-      newHeaders.set("Cache-Control", "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400");
+      newHeaders.set("Cache-Control", HOME_CACHE_CONTROL);
       newHeaders.append("Link", "<https://image.tmdb.org>; rel=preconnect");
-      isHomeDocument = path === "/" || path === "/index.html";
     }
-    let heroPath = "";
-    if (isHomeDocument && request.method === "GET") {
-      const heroWork = heroBackdropPath(env, ctx);
-      ctx.waitUntil(heroWork.catch(() => {
-      }));
-      heroPath = await Promise.race([
-        heroWork,
-        new Promise((resolve) => setTimeout(() => resolve(""), HERO_RESOLVE_BUDGET_MS))
-      ]);
-      if (heroPath) {
-        for (const hint of heroEarlyHints(heroPath)) newHeaders.append("Link", hint);
-        newHeaders.delete("ETag");
-        newHeaders.delete("Last-Modified");
-      }
-    }
-    let finalResponse = new Response(assetResponse.body, {
+    const finalResponse = new Response(assetResponse.body, {
       status: assetResponse.status,
       statusText: assetResponse.statusText,
       headers: newHeaders
     });
-    if (heroPath) finalResponse = rewriteHeroPreload(finalResponse, heroPath);
-    if (request.method === "GET" && finalResponse.status === 200 && path !== "/sw.js" && (!isHomeDocument || heroPath)) {
-      ctx.waitUntil(edgeCache.put(cacheKey, finalResponse.clone()));
+    if (edgeCache && request.method === "GET" && finalResponse.status === 200 && path !== "/sw.js") {
+      waitFor(ctx, edgeCache.put(cacheKey, forEdgeStore(finalResponse.clone())));
     }
     return finalResponse;
   },

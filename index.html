@@ -10,7 +10,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="color-scheme" content="dark">
-<link rel="preconnect" href="https://image.tmdb.org" crossorigin>
+<link rel="preconnect" href="https://image.tmdb.org">
 
 <link rel="stylesheet" href="/moviezone.min.css?v=9.17">
 <!--MZ_PERF_HEAD-->
@@ -25,7 +25,7 @@
 <link rel="preload" href="/fonts/outfit-latin-var.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/bebas-neue-latin-400.woff2" as="font" type="font/woff2" crossorigin>
 
-<link rel="preload" href="/moviezone.min.js?v=15.4" as="script">
+<link rel="preload" href="/moviezone.min.js?v=15.5" as="script">
 
 <style id="mz-fonts">
 @font-face{font-family:'Outfit';font-style:normal;font-weight:300 900;font-display:swap;src:url(/fonts/outfit-latin-var.woff2) format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
@@ -390,14 +390,15 @@
    */
   window.__mzServiceWorkerReady = new Promise(function (resolve) {
     function go() {
+      // No update(): every navigation already re-checks /sw.js.
       resolve(navigator.serviceWorker
         .register('/sw.js', { updateViaCache: 'none' })
-        .then(function (registration) {
-          registration.update().catch(function () {});
+        .then(function () {
           return navigator.serviceWorker.ready;
         })
         .catch(function (err) {
-          console.error('[MovieZone PWA] service-worker registration failed:', err);
+          // Private mode / blocked storage: expected, not an app error.
+          console.warn('[MovieZone PWA] service-worker registration unavailable:', err && err.message);
           return null;
         }));
     }
@@ -1026,13 +1027,19 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
     watchSlots();
   }
 
-  /*  First interaction wins — an engaged visitor gets the unit at once.
+  /*  First interaction arms the unit after the burst settles (injecting on the
+   *  tap itself - usually the search box - hurt INP on #searchInput).
    *  Otherwise 10s after `load`: the old flat 3s landed inside the window Datadog
    *  RUM counts as view loading time and inflated it for every visit. */
   var EVENTS = ['pointerdown', 'keydown', 'touchstart'];
+  var SETTLE_MS = 4000;
+  function whenIdle(fn) {
+    if ('requestIdleCallback' in window) requestIdleCallback(fn, { timeout: 3000 });
+    else fn();
+  }
   function onFirstInteraction() {
     EVENTS.forEach(function (t) { window.removeEventListener(t, onFirstInteraction, true); });
-    load();
+    setTimeout(function () { whenIdle(load); }, SETTLE_MS);
   }
   EVENTS.forEach(function (t) {
     window.addEventListener(t, onFirstInteraction, { capture: true, passive: true, once: true });
@@ -1877,7 +1884,7 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
 <!-- Root-absolute bundle URLs support nested detail routes. -->
 <script src="/tv-mode.min.js?v=1.8" defer></script>
 <script src="/search-engine.min.js?v=2.1" defer></script>
-<script src="/moviezone.min.js?v=15.4" defer></script>
+<script src="/moviezone.min.js?v=15.5" defer></script>
 <script>
 /*  ── pwa-install.min.js is NOT loaded with the others ─────────────────────────
  *  It was a fourth `defer` script, so its 30 KB was parsed and executed inside
@@ -1944,12 +1951,22 @@ window.addEventListener('beforeinstallprompt', function () { window.__mzLoadPwaI
     if (fired) return;
     fired = true;
     ['pointerdown', 'keydown', 'touchstart'].forEach(function (t) {
-      window.removeEventListener(t, pull, true);
+      window.removeEventListener(t, onInteraction, true);
     });
     window.__mzLoadPwaInstall();
   }
+  // Runs after the first interaction settles (INP); installPWA() is immediate.
+  function onInteraction() {
+    ['pointerdown', 'keydown', 'touchstart'].forEach(function (t) {
+      window.removeEventListener(t, onInteraction, true);
+    });
+    setTimeout(function () {
+      if ('requestIdleCallback' in window) requestIdleCallback(pull, { timeout: 3000 });
+      else pull();
+    }, 3000);
+  }
   ['pointerdown', 'keydown', 'touchstart'].forEach(function (t) {
-    window.addEventListener(t, pull, { capture: true, passive: true, once: true });
+    window.addEventListener(t, onInteraction, { capture: true, passive: true, once: true });
   });
   window.addEventListener('load', function () {
     setTimeout(function () {

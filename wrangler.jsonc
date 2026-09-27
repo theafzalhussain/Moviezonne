@@ -73,6 +73,15 @@
    *  those do not change. Lowering it to 86400 would re-fetch every one of those
    *  records SEVEN TIMES more often: more upstream calls, more KV writes, and more
    *  cold reads. It would worsen the exact number it is meant to improve.
+   *
+   *  ── SEP 2026: KV IS NO LONGER A TMDB CACHE ──
+   *  The layers are now isolate memory -> caches.default -> TMDB (see "NO KV ON
+   *  THE TMDB PATH" in worker.js). The freshness windows above still apply, but
+   *  they are judged against the x-mz-stored stamp on the edge copy, not KV
+   *  metadata. TMDB_CACHE is kept ONLY for the nightly SEO catalogue and the
+   *  sitemap shards; PUSH_SUBS for push subscriptions. Optional var:
+   *  SUBREQUEST_LIMIT (default 50 = Workers Free) - raise it on Workers Paid so
+   *  fan-outs can use the edge cache for every path.
    */
   "vars": {
     "TMDB_TIMEOUT_MS": "5000",
@@ -140,11 +149,11 @@
   },
   "kv_namespaces": [
     {
-      // TMDB responses (/api/tmdb/<path>), assembled batch plans (batch:<hash>),
-      // OTT charts and the sitemap catalogue. Since the free plan allows 1,000
-      // KV writes a day account-wide, worker.js writes here only what every
-      // location shares - the home-feed lists, title records, plans - and keeps
-      // long-tail paths (search, per-title sub-resources) in caches.default.
+      // SEO data only (Sep 2026): the nightly sitemap:catalog upload from
+      // .github/workflows/seo-refresh.yml and the built sitemap shards, both read
+      // behind the edge cache (a few dozen reads a day). TMDB responses, batch
+      // plans and OTT charts are NOT stored here any more - they live in
+      // caches.default, which has no daily quota.
       "binding": "TMDB_CACHE",
       "id": "7afa38a8eae1409285fbbd368e6d0063"
     },
