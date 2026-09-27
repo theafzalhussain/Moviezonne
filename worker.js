@@ -843,10 +843,10 @@ function cronAuthorised(request, env) {
  *     path in a location, no visitor there is blocked on TMDB again. Freshness is
  *     unchanged: the same 3h/7d windows decide when a refresh is triggered.
  *
- *  2. SINGLE-FLIGHT. A cold plan fans out 16-24 paths and popular paths repeat
- *     across concurrent visitors; each miss used to open its own upstream
- *     connection because the cache write lands asynchronously and cannot dedupe
- *     them. One in-flight promise per path per isolate now serves every caller.
+ *  2. SINGLE-FLIGHT, WITHIN ONE REQUEST. A cold plan fans out 16-24 paths, and
+ *     callers inside one invocation share one upstream call per path. It used to
+ *     be one promise per path per ISOLATE, shared across visitors - and that is
+ *     what hung the site; see IN-FLIGHT WORK IS SHARED INSIDE ONE REQUEST below.
  *
  *  3. A HARD TIMEOUT, so a stalled upstream fails in 8s instead of hanging.
  */
@@ -871,10 +871,61 @@ const TMDB_UPSTREAM_TIMEOUT_MS = 6000;
  *  gets this much instead, so the worst case is 5 s + 3 s. */
 const TMDB_RETRY_AFTER_TIMEOUT_MS = 3000;
 
-/*  Per-isolate, per-path in-flight map. Deliberately not persisted anywhere:
- *  it exists to collapse a burst, and a burst is by definition inside one
- *  isolate's lifetime. */
-const _tmdbInFlight = new Map();
+/*  ══════════════════════════════════════════════════════════════════════════
+ *  IN-FLIGHT WORK IS SHARED INSIDE ONE REQUEST, NEVER ACROSS REQUESTS
+ *  ══════════════════════════════════════════════════════════════════════════
+ *  Upstream calls used to be collapsed through MODULE-LEVEL maps: one pending
+ *  promise per TMDB path (and per batch plan, OTT chart and SEO catalogue) per
+ *  isolate, joined by every request that asked for the same key. On Workers that
+ *  is not a cache, it is a trap. A promise belongs to the I/O context of the
+ *  request that created it. When that request's client disconnects - a tab
+ *  closed mid-load, a reload, the browser aborting a fetch - workerd cancels its
+ *  pending I/O, AbortSignal timer included, and the promise never settles. The
+ *  map entry was only deleted on settle, so it stayed, and every later request
+ *  for that key in that isolate awaited it forever: no answer, no error, no
+ *  timeout, until Cloudflare recycled the isolate.
+ *
+ *  Measured on production, 27 Sep 2026: /api/tmdb/trending/movie/day?language=
+ *  en-US&page=2 (the Top 10 rail's second page) never answered from the DEL
+ *  location - curl gave up at 90 s - while the same query with its parameters
+ *  swapped answered in ~1 s. Every homepage load waited out the browser's 15 s
+ *  per-attempt timeout on it, the rail sat on its skeleton, and Datadog RUM,
+ *  which counts an in-flight fetch as "still loading", booked those views at
+ *  15-21 s (the 21157 ms P50/P95). A deploy recycles the isolate, which is why
+ *  each fix looked like it worked until the next abandoned cold fetch.
+ *
+ *  So the maps are keyed on the invocation's `ctx` now. Callers inside one
+ *  request (the paths of one batch plan, one SSR page, the two catalogue reads of
+ *  a sitemap index) still share one upstream call, and no request can wait on I/O
+ *  another request owns. Two visitors on the same cold path at the same moment
+ *  each make their own bounded fetch; the location cache absorbs every one after
+ *  that. No ctx - a caller outside any request - means no sharing, the safe
+ *  default.
+ */
+const _inFlightByRequest = new WeakMap();
+
+/** The `kind` in-flight map private to the request that owns `ctx`, or null. */
+function requestInFlight(ctx, kind) {
+  if (!ctx || typeof ctx !== 'object') return null;
+  let kinds = _inFlightByRequest.get(ctx);
+  if (!kinds) {
+    kinds = new Map();
+    _inFlightByRequest.set(ctx, kinds);
+  }
+  let map = kinds.get(kind);
+  if (!map) {
+    map = new Map();
+    kinds.set(kind, map);
+  }
+  return map;
+}
+
+/** Drops `key` from `map` once `settled` does, unless `entry` was replaced. */
+function clearWhenSettled(map, key, entry, settled) {
+  (settled || entry).then(() => {}, () => {}).then(() => {
+    if (map.get(key) === entry) map.delete(key);
+  });
+}
 
 /*  A 200 is only cacheable if the body is JSON.
  *
@@ -945,21 +996,24 @@ async function tmdbUpstream(path, env, budget) {
   throw lastError || new Error('TMDB request abandoned');
 }
 
-/** One upstream request per path, however many callers ask for it at once.
- *  Only the caller that actually starts the request pays for it; a caller that
- *  joins one already in flight hands its reservation back. */
-function tmdbOnce(path, env, budget) {
-  const pending = _tmdbInFlight.get(path);
+/** One upstream request per path per REQUEST (see IN-FLIGHT WORK above).
+ *  Only the caller that actually starts the request pays for it; a caller in
+ *  the same request that joins one already in flight hands its reservation back. */
+function tmdbOnce(path, env, ctx, budget) {
+  const inFlight = requestInFlight(ctx, 'tmdb');
+  const pending = inFlight && inFlight.get(path);
   if (pending) {
     budgetRelease(budget);
     return pending;
   }
   if (!budgetRequire(budget)) return Promise.reject(budgetError());
   const started = tmdbUpstream(path, env, budget);
-  _tmdbInFlight.set(path, started);
-  // Cleared on both outcomes: a failure must not pin a rejected promise as the
-  // answer for every later caller.
-  started.then(() => {}, () => {}).then(() => { _tmdbInFlight.delete(path); });
+  if (inFlight) {
+    inFlight.set(path, started);
+    // Cleared on both outcomes: a failure must not pin a rejected promise as the
+    // answer for a later caller in this request.
+    clearWhenSettled(inFlight, path, started);
+  }
   return started;
 }
 
@@ -1133,8 +1187,35 @@ function waitFor(ctx, work) {
   return guarded;
 }
 
+/** `work`'s outcome, or `fallback` if it has not settled within `ms`. Timed in
+ *  the CALLER's request, so it fires even when the work is stuck on I/O that
+ *  belongs to nobody any more. */
+function settleWithin(work, ms, fallback) {
+  let timer = null;
+  return Promise.race([
+    work,
+    new Promise((resolve) => { timer = setTimeout(() => resolve(fallback), ms); })
+  ]).finally(() => { if (timer !== null) clearTimeout(timer); });
+}
+
 function tmdbEdgeKey(path) {
   return new Request(TMDB_EDGE_ORIGIN + '/api/tmdb' + path, { method: 'GET' });
+}
+
+/*  A location-cache read is a local lookup that answers in a few milliseconds.
+ *  It is bounded anyway, because it sits in front of every TMDB path: if a read
+ *  ever stopped answering, the path would stop answering with it. Past this the
+ *  read is abandoned and the path is treated as a miss, whose fresh answer then
+ *  rewrites the entry. */
+const TMDB_EDGE_READ_TIMEOUT_MS = 1500;
+const EDGE_READ_TIMED_OUT = Symbol('edge read timed out');
+
+/** The location copy of one path as { text, t } (t = stored-at, 0 if unstamped), or null. */
+async function readTmdbEdge(colo, path) {
+  const hit = await colo.match(tmdbEdgeKey(path));
+  if (!hit) return null;
+  const text = await hit.text();
+  return { text, t: Number(hit.headers.get(TMDB_STORED_HEADER)) || 0 };
 }
 
 function tmdbEdgeEntry(text, storedAt, softTtl) {
@@ -1160,7 +1241,7 @@ function storeTmdb(path, text, softTtl, storedAt, env, ctx, budget) {
 
 /** Fetches a fresh copy and stores it. Resolves null on a non-200 answer. */
 async function refreshTmdbNow(path, softTtl, env, ctx, budget) {
-  const res = await tmdbOnce(path, env, budget);
+  const res = await tmdbOnce(path, env, ctx, budget);
   if (res.status !== 200) return null;
   const storedAt = Date.now();
   storeTmdb(path, res.text, softTtl, storedAt, env, ctx, budget);
@@ -1223,10 +1304,11 @@ async function fetchTmdbJson(path, env, ctx, opts) {
   const colo = options.edge === false ? null : coloCache();
   if (colo && budgetOptional(budget)) {
     try {
-      const hit = await colo.match(tmdbEdgeKey(path));
-      if (hit) {
-        const text = await hit.text();
-        const t = Number(hit.headers.get(TMDB_STORED_HEADER)) || 0;
+      const hit = await settleWithin(readTmdbEdge(colo, path), TMDB_EDGE_READ_TIMEOUT_MS, EDGE_READ_TIMED_OUT);
+      if (hit === EDGE_READ_TIMED_OUT) {
+        console.log(JSON.stringify({ message: 'tmdb edge read timed out', path, ms: TMDB_EDGE_READ_TIMEOUT_MS }));
+      } else if (hit) {
+        const { text, t } = hit;
         if (looksLikeJson(text)) {
           /*  An entry without a stamp predates this layer: the old generic edge
            *  put stored only non-stale proxy answers, for at most s-maxage, so it
@@ -1256,8 +1338,8 @@ async function fetchTmdbJson(path, env, ctx, opts) {
     return { status: 200, text: stale.text, cache: 'STALE', layer: stale.layer, storedAt: stale.t };
   }
 
-  // L3 — TMDB, collapsed to one request per path per isolate.
-  const res = await tmdbOnce(path, env, budget);
+  // L3 — TMDB, collapsed to one request per path within this request.
+  const res = await tmdbOnce(path, env, ctx, budget);
   const storedAt = Date.now();
   if (res.status === 200) storeTmdb(path, res.text, softTtl, storedAt, env, ctx, budget);
   return { status: res.status, text: res.text, cache: 'MISS', layer: 'origin', storedAt };
@@ -1282,17 +1364,40 @@ function tmdbCacheControl(path) {
  *  is told to come back in a minute rather than pin the old body for 30. */
 const TMDB_STALE_BROWSER_CACHE = 'public, max-age=60, stale-if-error=604800';
 
+/*  ── THE PROXY ALWAYS ANSWERS ──
+ *  Every upstream call below is bounded (TMDB_TIMEOUT_MS, then the shorter
+ *  retry), and that was also true of the request that hung for 90 s: the bound
+ *  lived inside I/O that had been cancelled along with another visitor's request
+ *  (see IN-FLIGHT WORK IS SHARED INSIDE ONE REQUEST). So the handler keeps its
+ *  own clock, in its own request. Whatever the layers below are doing, the
+ *  browser gets an answer by this deadline - a 503 it already knows how to
+ *  retry, never cached - instead of sitting out its own 15 s abort, which
+ *  Datadog RUM books as page load time. The work itself carries on under
+ *  waitUntil and still fills the caches if it lands. 9 s clears the default
+ *  upstream worst case (5 s + 3 s) and stays under the browser's 15 s
+ *  per-attempt timeout; TMDB_PROXY_DEADLINE_MS overrides it. */
+const TMDB_PROXY_DEADLINE_MS = 9000;
+
 async function handleTmdbProxy(request, env, ctx, url) {
   const path = url.pathname.replace('/api/tmdb', '') + url.search;
+  const deadlineMs = envInt(env, 'TMDB_PROXY_DEADLINE_MS', TMDB_PROXY_DEADLINE_MS, 100, 14000);
+
+  const work = fetchTmdbJson(path, env, ctx);
+  // Rejections are answered below; this only keeps a late answer's cache writes alive.
+  waitFor(ctx, work.catch(() => null));
 
   let result;
   try {
-    result = await fetchTmdbJson(path, env, ctx);
+    result = await settleWithin(work, deadlineMs, null);
   } catch (err) {
     /*  Reachable now that the upstream fetch has a timeout. Answered explicitly
      *  rather than left to become a 500, and never cached, so the retry the
      *  client makes a moment later is not served this same body. */
     return json({ error: 'upstream unavailable', detail: String(err && err.message).slice(0, 120) }, 503);
+  }
+  if (!result) {
+    console.log(JSON.stringify({ message: 'tmdb proxy deadline', path, deadlineMs }));
+    return json({ error: 'upstream unavailable', detail: 'no answer within ' + deadlineMs + 'ms' }, 503);
   }
 
   const ok = result.status === 200;
@@ -1651,29 +1756,25 @@ function planStoredAt(parts) {
   return parts.some((part) => part && part.stale) ? now - BATCH_CACHE_TTL * 1000 : now;
 }
 
-/*  Per-isolate, per-PLAN in-flight map.
- *
- *  `_tmdbInFlight` already collapses concurrent requests for the same PATH, but
- *  nothing collapsed them at the plan level — so N visitors arriving together on
- *  a cold plan each ran their own `runBatchPlan`: N x the assemble, the
- *  per-path cache reads, the serialise and the cache write, to produce N
- *  identical bodies. The per-path map meant they at least shared the upstream
- *  fetches, which is why this was invisible in TMDB request counts while still
- *  burning CPU time and subrequests on every cold start.
+/*  Per-PLAN in-flight map, scoped to the request (see IN-FLIGHT WORK IS SHARED
+ *  INSIDE ONE REQUEST). This one was per isolate too, so visitors arriving
+ *  together on a cold plan shared one assemble - and a plan whose assemble had
+ *  joined a dead per-path promise never settled, which made every later request
+ *  for that plan wait out BATCH_DEADLINE_MS and answer with those paths
+ *  rejected. Concurrent cold visitors now each assemble; the first plan that
+ *  lands in the location cache answers everyone after it.
  */
-const _batchInFlight = new Map();
-
-/** One assemble per plan per isolate, however many callers ask for it at once. */
 function runBatchPlanOnce(planKey, paths, env, ctx, opts) {
-  const pending = _batchInFlight.get(planKey);
+  const inFlight = requestInFlight(ctx, 'batch');
+  const pending = inFlight && inFlight.get(planKey);
   if (pending) return pending;
   const run = runBatchPlan(paths, env, ctx, opts);
-  _batchInFlight.set(planKey, run);
-  // Cleared once settled, so a finished run can never become the permanent
-  // answer for this plan.
-  run.all.then(() => {}, () => {}).then(() => {
-    if (_batchInFlight.get(planKey) === run) _batchInFlight.delete(planKey);
-  });
+  if (inFlight) {
+    inFlight.set(planKey, run);
+    // Cleared once settled, so a finished run is never the answer for a later
+    // caller in this request.
+    clearWhenSettled(inFlight, planKey, run, run.all);
+  }
   return run;
 }
 
@@ -1961,13 +2062,13 @@ function ottChartResponse(body, cacheState) {
   });
 }
 
-/*  One build per platform/region per isolate, however many callers ask at once.
+/*  One build per platform/region per REQUEST (see IN-FLIGHT WORK IS SHARED INSIDE
+ *  ONE REQUEST - this map was per isolate and could be poisoned the same way).
  *  The finished chart goes to memory and the location cache - never KV. */
-const _ottChartInFlight = new Map();
-
 function buildOttChartOnce(platform, region, env, ctx, budget) {
   const memoKey = ottChartMemoKey(platform, region);
-  const pending = _ottChartInFlight.get(memoKey);
+  const inFlight = requestInFlight(ctx, 'ott-chart');
+  const pending = inFlight && inFlight.get(memoKey);
   if (pending) return pending;
   const started = (async () => {
     const payload = await buildOttChart(platform, region, env, ctx, budget);
@@ -1980,11 +2081,11 @@ function buildOttChartOnce(platform, region, env, ctx, budget) {
     }
     return body;
   })();
-  _ottChartInFlight.set(memoKey, started);
-  // Cleared on both outcomes, so a failure never becomes the pinned answer.
-  started.then(() => {}, () => {}).then(() => {
-    if (_ottChartInFlight.get(memoKey) === started) _ottChartInFlight.delete(memoKey);
-  });
+  if (inFlight) {
+    inFlight.set(memoKey, started);
+    // Cleared on both outcomes, so a failure never becomes the pinned answer.
+    clearWhenSettled(inFlight, memoKey, started);
+  }
   return started;
 }
 
@@ -2560,7 +2661,7 @@ async function collectionsCatalogItems(kind, env) {
  *  metered read of a ~500 KB value.
  *
  *  Now the raw value sits in the location cache for six hours and the parsed one
- *  in isolate memory for thirty minutes, with one in-flight read per isolate, so
+ *  in isolate memory for thirty minutes, with one in-flight read per request, so
  *  KV is asked roughly four times a day per Cloudflare location that sees a
  *  crawler - a few dozen reads a day in total. A catalogue uploaded tonight
  *  reaches every location within six hours, which is well inside the sitemap's
@@ -2577,16 +2678,18 @@ function seoEdgeKey(name) {
   return new Request(TMDB_EDGE_ORIGIN + '/__mz/seo/' + name, { method: 'GET' });
 }
 
-const _catalogInFlight = new WeakMap();
-
-/** The parsed nightly catalogue ({ movie:[], tv:[], generated }), or null. Never throws. */
+/** The parsed nightly catalogue ({ movie:[], tv:[], generated }), or null. Never throws.
+ *  One read per REQUEST, not per isolate: a crawler that hung up mid-read used to
+ *  leave a dead promise here that every later SSR page and sitemap awaited forever
+ *  (see IN-FLIGHT WORK IS SHARED INSIDE ONE REQUEST). The parsed memo below is
+ *  what spares KV across requests. */
 function readSitemapCatalog(env, ctx) {
   const memoStore = sitemapMemoFor(env);
   const memo = memoStore && memoStore.get(SITEMAP_CATALOG_MEMO_KEY);
   if (memo && memo.expires > Date.now()) return Promise.resolve(memo.value);
 
-  const inflightKey = env && typeof env === 'object' ? env : null;
-  const pending = inflightKey && _catalogInFlight.get(inflightKey);
+  const inFlight = requestInFlight(ctx, 'seo-catalog');
+  const pending = inFlight && inFlight.get(SITEMAP_CATALOG_MEMO_KEY);
   if (pending) return pending;
 
   const work = (async () => {
@@ -2645,11 +2748,9 @@ function readSitemapCatalog(env, ctx) {
     return parsed;
   })();
 
-  if (inflightKey) {
-    _catalogInFlight.set(inflightKey, work);
-    work.then(() => {}, () => {}).then(() => {
-      if (_catalogInFlight.get(inflightKey) === work) _catalogInFlight.delete(inflightKey);
-    });
+  if (inFlight) {
+    inFlight.set(SITEMAP_CATALOG_MEMO_KEY, work);
+    clearWhenSettled(inFlight, SITEMAP_CATALOG_MEMO_KEY, work);
   }
   return work;
 }

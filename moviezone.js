@@ -1050,7 +1050,9 @@ const MZ_FETCH_BACKOFF_MS = 500;    // doubled per attempt, plus jitter
  *  poor odds: an upstream that has already burned 20s on this URL is not usually
  *  one attempt away from answering. 20s allows attempt 0 its full 15s plus a real
  *  second try, and is checked before each attempt AND before each backoff sleep,
- *  so the chain cannot start work it has no budget to finish. Exceeding it throws
+ *  so the chain cannot start work it has no budget to finish. A retry's own
+ *  timeout is capped at whatever the budget has left (see _mzFetchAttempt), so
+ *  the chain really does end here. Exceeding it throws
  *  the last real error, which tmdb() already handles by serving the stale
  *  localStorage copy - yesterday's posters instead of a 47-second skeleton. */
 const MZ_FETCH_TOTAL_BUDGET_MS = 20000;
@@ -1508,16 +1510,28 @@ function _mzReportFetchError(err, meta) {
 /*  One attempt, with a hard timeout, cancellable from the caller's controller.
  *  A fresh controller per attempt is required because an AbortController is
  *  single-use — reusing the outer one would make attempt 2 abort instantly.
+ *
+ *  `notAfter` is a retry's chain deadline (see MZ_FETCH_TOTAL_BUDGET_MS): the
+ *  timeout is capped at what is left of it once a lane is held, because the wait
+ *  at the gate spends that budget too. Attempt 0 passes 0 and keeps the full
+ *  per-attempt window.
  */
-async function _mzFetchAttempt(urlStr, outerSignal) {
+async function _mzFetchAttempt(urlStr, outerSignal, notAfter) {
   // Gate is acquired per attempt, so a retry queues behind current traffic
   // instead of jumping it.
   await _mzAcquireSlot();
 
+  const timeoutMs = notAfter ? Math.min(MZ_FETCH_TIMEOUT_MS, notAfter - Date.now()) : MZ_FETCH_TIMEOUT_MS;
+  /*  A retry that queued until under a second of its budget was left is not
+   *  sent: it could only be aborted at birth. null tells the caller to stop. */
+  if (timeoutMs < 1000) {
+    _mzReleaseSlot();
+    return null;
+  }
   const attemptController = new AbortController();
   let timedOut = false;
 
-  const timer = setTimeout(() => { timedOut = true; attemptController.abort(); }, MZ_FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => { timedOut = true; attemptController.abort(); }, timeoutMs);
   const relayAbort = () => attemptController.abort();
   if (outerSignal.aborted) relayAbort();
   else outerSignal.addEventListener('abort', relayAbort, { once: true });
@@ -1527,7 +1541,7 @@ async function _mzFetchAttempt(urlStr, outerSignal) {
     return r;
   } catch (err) {
     if (timedOut) {
-      const e = new Error('TMDB request timed out after ' + MZ_FETCH_TIMEOUT_MS + 'ms');
+      const e = new Error('TMDB request timed out after ' + timeoutMs + 'ms');
       e.name = 'TimeoutError';
       throw e;
     }
@@ -1564,7 +1578,14 @@ async function _mzFetchWithRetry(urlStr, outerSignal, meta) {
     if (navigator.onLine === false && attempt > 0) break;
 
     try {
-      const r = await _mzFetchAttempt(urlStr, outerSignal);
+      /*  A retry gets only what is left of the budget. It used to get a fresh
+       *  MZ_FETCH_TIMEOUT_MS of its own, so a URL that never answered ran 15 s +
+       *  backoff + 15 s: 31 s measured on production (Sep 2026) against the 20 s
+       *  documented above, and Datadog RUM counts every second a fetch is pending
+       *  as page load time. Attempt 0 passes 0 and keeps its full window; null
+       *  means the budget ran out while this retry queued for a lane. */
+      const r = await _mzFetchAttempt(urlStr, outerSignal, attempt && deadline);
+      if (!r) break;
       if (r.ok) return await r.json();
 
       if (!_mzShouldRetryStatus(r.status, attempt) || attempt === MZ_FETCH_MAX_RETRIES) {

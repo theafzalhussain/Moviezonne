@@ -1,6 +1,6 @@
 
 /*  Measures and guards the WORKER-SIDE TMDB path — the batch endpoint's cache
- *  layers, its single-flight, the subrequest budget, the OTT charts, and the cost
+ *  layers, abandon-safety, the subrequest budget, the OTT charts, and the cost
  *  of a warm request.
  *
  *  ── why this file exists ──
@@ -28,8 +28,10 @@
  *                 per-path edge entries instead of going back to TMDB for them.
  *    4. STALENESS a stale plan is served immediately and rebuilt behind the
  *                 response, and the location copy is rewritten.
- *    5. SINGLE-   N concurrent cold requests for the same plan assemble ONCE.
- *       FLIGHT
+ *    5. ABANDON-  a request whose upstream I/O died with its client can stall
+ *       SAFE      nobody: it answers 503 by the proxy deadline, and the next
+ *                 visitor or batch on the same path gets its own answer. N
+ *                 concurrent cold visitors are each answered in full.
  *    6. POISONING a GET to the synthetic plan key must 404.
  *    7. FAILURE   a plan with a failing path is not stored.
  *    8.           the cost of one homepage plan, by cache state, printed.
@@ -182,7 +184,7 @@ const isBatchKey = (k) => k.includes('/api/tmdb/batch/');
 const isPathKey = (k) => k.includes('/api/tmdb/') && !isBatchKey(k);
 
 (async () => {
-  console.log('\nWorker TMDB path — cache layers, subrequest budget, single-flight, OTT charts');
+  console.log('\nWorker TMDB path — cache layers, subrequest budget, abandon-safety, OTT charts');
   console.log('-'.repeat(78));
 
   /*  Same data:-URL import the other worker suites use, with relative specifiers
@@ -195,13 +197,17 @@ const isPathKey = (k) => k.includes('/api/tmdb/') && !isBatchKey(k);
   );
 
   /*  TMDB and JustWatch are stubbed at global fetch. `upstream` counts TMDB
-   *  fetches, `jwCalls` JustWatch ones, which is what proves single-flight and
-   *  the budget rather than merely suggesting them. */
+   *  fetches, `jwCalls` JustWatch ones, which is what proves the per-request
+   *  sharing and the budget rather than merely suggesting them. */
   const realFetch = global.fetch;
   let upstream = 0;
   let jwCalls = 0;
   let failPath = null;
   let slowPath = null;
+  /*  The next upstream call for this path belongs to a request whose client went
+   *  away: workerd drops that request's I/O, AbortSignal timer included, so the
+   *  call never settles. One call only - whoever asks next gets a real answer. */
+  let hangPath = null;
   const STUB_LIST = JSON.stringify({
     page: 1,
     results: [{ id: 1, title: 'Stub', poster_path: '/p.jpg' }]
@@ -225,6 +231,10 @@ const isPathKey = (k) => k.includes('/api/tmdb/') && !isBatchKey(k);
     }
     if (!/api\.themoviedb\.org/.test(target)) return realFetch(input, init);
     upstream++;
+    if (hangPath && target.includes(hangPath)) {
+      hangPath = null;
+      return new Promise(() => {});
+    }
     if (failPath && target.includes(failPath)) {
       return new Response('{"status_message":"nope"}', { status: 500 });
     }
@@ -343,8 +353,93 @@ const isPathKey = (k) => k.includes('/api/tmdb/') && !isBatchKey(k);
     await c4b.settle();
     equal('the next request sees a fresh copy', afterRefresh.headers.get('x-cache'), 'EDGE-HIT');
 
-    // ── 5. PLAN-LEVEL SINGLE-FLIGHT ────────────────────────────────────────
-    console.log('\n5. concurrent cold visitors assemble the plan once, not N times');
+    // ── 5. NO REQUEST WAITS ON ANOTHER REQUEST'S I/O ───────────────────────
+    /*  In-flight work used to be shared across requests through module-level
+     *  maps (one promise per path, plan, chart). On Workers a promise belongs to
+     *  the request that created it: when that request's client disconnects, its
+     *  I/O - AbortSignal timer included - is dropped and the promise never
+     *  settles, so every later request that joined it hung for good. That is what
+     *  production did on 27 Sep 2026: the Top 10 rail's page-2 path never
+     *  answered, and Datadog RUM booked 15-21 s page loads. The stub below models
+     *  the abandoned request exactly - its upstream call never settles and
+     *  ignores its signal - so these checks hang-and-fail on the old design. */
+    console.log('\n5. an abandoned request cannot stall anyone after it');
+    const within = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(() => r(null), ms))]);
+    {
+      const HANG = '/trending/movie/day?language=en-US&page=2';
+      const proxyUrl = new URL('https://moviezone.dev/api/tmdb' + HANG);
+      const proxyReq = () => new Request(proxyUrl.href);
+      const hungEnv = newEnv({ TMDB_PROXY_DEADLINE_MS: '300' });
+      cacheLayer.store.clear();
+      resetCounters();
+
+      hangPath = HANG;
+      const t0 = Date.now();
+      // Its ctx is never settled on purpose: the I/O behind it is dead by construction.
+      const owner = await within(worker.routeApi(proxyReq(), hungEnv, makeCtx().ctx, proxyUrl), 3000);
+      const took = Date.now() - t0;
+      check('the abandoned request itself answers by the proxy deadline',
+        owner !== null && took < 1500, owner === null ? 'no answer within 3s' : 'took ' + took + 'ms');
+      equal('that answer is a retryable 503', owner && owner.status, 503);
+      equal('which no shared cache may keep', owner && owner.headers.get('cache-control'), 'no-store');
+
+      const cNext = makeCtx();
+      const next = await within(worker.routeApi(proxyReq(), hungEnv, cNext.ctx, proxyUrl), 3000);
+      check('the next visitor on the same path is answered', next !== null, 'still waiting after 3s');
+      equal('with a 200', next && next.status, 200);
+      equal('from its own upstream call, not the dead one', upstream, 2);
+      await within(cNext.settle(), 2000);
+
+      /*  A batch holding that path must not inherit the dead promise either -
+       *  that is how one poisoned path became a first screen answered at
+       *  BATCH_DEADLINE_MS with a hole in it. Fresh envs and an empty location
+       *  cache, so neither memory nor the edge can answer for it. */
+      cacheLayer.store.clear();
+      hangPath = HANG;
+      const abandoned = worker.routeApi(proxyReq(), newEnv({ TMDB_PROXY_DEADLINE_MS: '300' }),
+        makeCtx().ctx, proxyUrl);
+      await new Promise((r) => setTimeout(r, 20));   // its upstream call is now in flight
+      const cBatch = makeCtx();
+      const t1 = Date.now();
+      const batchRes = await within(worker.routeApi(
+        batchReq(['/trending/movie/day?language=en-US&page=1', HANG]),
+        newEnv({ BATCH_DEADLINE_MS: '2000' }), cBatch.ctx, BATCH_URL), 4000);
+      const batchTook = Date.now() - t1;
+      const batchJson = batchRes ? await batchRes.json() : null;
+      check('a batch holding that path is answered whole',
+        !!batchJson && batchJson.results.every((r) => r.status === 'fulfilled'),
+        batchJson ? JSON.stringify(batchJson.results.map((r) => r.status)) : 'no answer within 4s');
+      check('without sitting out its deadline', batchRes !== null && batchTook < 1000,
+        'took ' + batchTook + 'ms against a 2000ms deadline');
+      await within(cBatch.settle(), 2000);
+      await within(abandoned, 1000);
+
+      /*  The location cache is a local read, but it sits in front of every
+       *  path, so a read that never answers must degrade to a miss, not a hang. */
+      const realMatch = cacheLayer.default.match;
+      cacheLayer.default.match = (request) => (String(request.url || request).endsWith('/api/tmdb' + HANG)
+        ? new Promise(() => {})
+        : realMatch.call(cacheLayer.default, request));
+      cacheLayer.store.clear();
+      const cEdge = makeCtx();
+      const t2 = Date.now();
+      const viaTmdb = await within(worker.routeApi(proxyReq(), newEnv(), cEdge.ctx, proxyUrl), 5000);
+      const edgeTook = Date.now() - t2;
+      cacheLayer.default.match = realMatch;
+      equal('a location-cache read that never answers falls through to TMDB',
+        viaTmdb && viaTmdb.status, 200);
+      check('within the edge read timeout, well inside the proxy deadline', viaTmdb !== null && edgeTook < 3000,
+        'took ' + edgeTook + 'ms');
+      equal('and says where the answer came from', viaTmdb && viaTmdb.headers.get('x-cache-layer'), 'origin');
+      await within(cEdge.settle(), 2000);
+    }
+
+    // ── 5b. CONCURRENT COLD VISITORS ───────────────────────────────────────
+    /*  The price of never sharing across requests: visitors who arrive on the
+     *  same cold plan at the same moment each assemble it. Bounded - at most one
+     *  upstream call per path per request - and gone once the first plan lands in
+     *  the location cache. What must not change is the answer. */
+    console.log('\n5b. concurrent cold visitors are each answered in full');
     const coldEnv = newEnv();
     cacheLayer.store.clear();
     resetCounters();
@@ -355,8 +450,9 @@ const isPathKey = (k) => k.includes('/api/tmdb/') && !isBatchKey(k);
     await Promise.all(ctxs.map((c) => c.settle()));
 
     check('every concurrent caller got a 200', responses.every((r) => r.status === 200));
-    equal('the plan was fetched upstream exactly once, not ' + CONCURRENT + ' times',
-      upstream, PLAN.length);
+    check('no request fetched any path upstream more than once',
+      upstream <= CONCURRENT * PLAN.length,
+      upstream + ' upstream calls for ' + CONCURRENT + ' requests x ' + PLAN.length + ' paths');
     const bodies = await Promise.all(responses.map((r) => r.json()));
     check('every caller got the same assembled result',
       bodies.every((b) => JSON.stringify(b) === JSON.stringify(bodies[0])));

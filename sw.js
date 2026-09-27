@@ -155,7 +155,10 @@
 // links wait for the network instead of being shown the homepage), and every
 // branch falls back to the network when Cache Storage itself fails.
 // moviezone.min.js 15.5 lands with it (crash guards, RUM noise, search INP).
-const CACHE_NAME = 'moviezone-v156';
+// v157: moviezone.min.js 15.6 - a TMDB retry is held to what is left of its 20 s
+// budget instead of starting a fresh 15 s window, so a URL that never answers
+// gives up at 20 s, not 31 s.
+const CACHE_NAME = 'moviezone-v157';
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
  *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream
@@ -326,7 +329,7 @@ const STATIC_ASSETS = [
   '/moviezone.min.css?v=9.17',
   '/tv-mode.min.js?v=1.8',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=15.5',
+  '/moviezone.min.js?v=15.6',
   '/manifest.json',
   '/icon-192.png?v=2',
   '/favicon-32.png?v=2',
