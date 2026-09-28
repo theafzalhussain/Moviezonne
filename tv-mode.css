@@ -282,6 +282,10 @@ html[data-mz-tv="true"] .site-footer[data-mztv-idle] {
 html[data-mz-tv="true"] .movie-card:not(:hover):not(:focus),
 html[data-mz-tv="true"] .upcoming-card:not(:hover):not(:focus) {
   transform: none !important;
+  /* Same reasoning for the tile's own backface-visibility:hidden: it is a
+     compositing reason too, and a resting tile never shows its back. */
+  backface-visibility: visible !important;
+  -webkit-backface-visibility: visible !important;
 }
 
 html[data-mz-tv="true"] .movie-card:not(:hover):not(:focus) img,
@@ -289,6 +293,36 @@ html[data-mz-tv="true"] .upcoming-card:not(:hover):not(:focus) img {
   transform: none !important;
   backface-visibility: visible !important;
   -webkit-backface-visibility: visible !important;
+}
+
+/*  ── ...and the badges inside them ─────────────────────────────────────────
+ *  The two rules above were not enough. A tile's info block and badges carry
+ *  3D transforms of their own (.card-info translateZ(30px); .card-quality,
+ *  .card-fresh, .card-hot, .card-dubbed, .card-anime-tag and .upcoming-info
+ *  translateZ(25px)), and a 3D transform is a compositing reason by itself.
+ *  Content-visibility keeps far tiles unrendered, so this only shows up once
+ *  tiles have been on screen: measured on the real page (Tizen UA, 1920x1080),
+ *  59 composited layers after load and 163 after walking the D-pad 14 rows down
+ *  the grid, and the main-thread "Layerize" pass that places those layers cost
+ *  more per frame than layout did.
+ *
+ *  The depth itself is never visible: .movie-card and .upcoming-card have
+ *  overflow:hidden and contain:paint, which flatten their 3D context, so each
+ *  translateZ() child is projected straight back onto the card. No hover/focus
+ *  exemption is needed for that reason, and without one a press does not build
+ *  and tear down half a dozen layers on the two cards it touches. Checked by
+ *  screenshotting the grid and the upcoming grid with and without the old
+ *  transforms on the same page: every badge and line of text sits on the same
+ *  pixels; the only differences are glyph anti-aliasing edges, because the text
+ *  now rasterizes with its card instead of on a layer of its own. */
+html[data-mz-tv="true"] .movie-card .card-info,
+html[data-mz-tv="true"] .movie-card .card-quality,
+html[data-mz-tv="true"] .movie-card .card-fresh,
+html[data-mz-tv="true"] .movie-card .card-hot,
+html[data-mz-tv="true"] .movie-card .card-dubbed,
+html[data-mz-tv="true"] .movie-card .card-anime-tag,
+html[data-mz-tv="true"] .upcoming-card .upcoming-info {
+  transform: none !important;
 }
 
 /* Isolate the big overlays so opening the modal cannot relayout the page under

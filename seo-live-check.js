@@ -1,4 +1,3 @@
-'use strict';
 
 /*  Live smoke check: boots the real server.js (real TMDB credentials, real
  *  cache, real express.static ordering) and asserts the SSR pages render

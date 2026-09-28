@@ -67,7 +67,13 @@
 .providers-subtitle { margin: .45rem 0 0 calc(4px + .8rem); font-size: 14px; line-height: 1.5; color: var(--text2); }
 
 .providers-controls { display: flex; flex: none; gap: .5rem; }
-.providers-controls[hidden] { display: none; }
+/*  Hidden = invisible, not removed. The arrows are taller than the heading on
+ *  phones (header 30.6px without them, 38px with), and this rail sits inside the
+ *  first phone screen, so revealing them after the first paint would shift
+ *  everything below. moviezone.js now reveals them one frame after the first
+ *  layout instead of forcing a layout mid-script to decide earlier; keeping the
+ *  row in the layout is what makes that free. */
+.providers-controls[hidden] { visibility: hidden; }
 .providers-arrow {
   display: grid; place-items: center;
   width: 42px; height: 42px; padding: 0;

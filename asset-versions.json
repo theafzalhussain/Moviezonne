@@ -1,19 +1,19 @@
 {
   "moviezone.min.js": {
-    "version": "15.7",
-    "sha256": "6247446ac6972773"
+    "version": "15.8",
+    "sha256": "1291f16735fbcf12"
   },
   "moviezone.min.css": {
-    "version": "9.17",
-    "sha256": "b0a362a5ef82a21e"
+    "version": "9.18",
+    "sha256": "9ef6bf233d6f49c2"
   },
   "tv-mode.min.js": {
-    "version": "1.8",
-    "sha256": "cbeb520ed08f8082"
+    "version": "1.9",
+    "sha256": "c5f2124759755a70"
   },
   "tv-mode.min.css": {
-    "version": "1.5",
-    "sha256": "88b712c05a87f341"
+    "version": "1.6",
+    "sha256": "9946c70e65e8d3fe"
   },
   "search-engine.min.js": {
     "version": "2.1",
@@ -28,12 +28,12 @@
     "sha256": "9694fd8dde60e4be"
   },
   "providers.css": {
-    "version": "9",
-    "sha256": "af9cf0a4003cd644"
+    "version": "10",
+    "sha256": "5a5423ccecef8e83"
   },
   "universes.css": {
-    "version": "4",
-    "sha256": "5b726ca98e8df6b0"
+    "version": "5",
+    "sha256": "a5a72ea208c14fcb"
   },
   "universes-rail.js": {
     "version": "5",

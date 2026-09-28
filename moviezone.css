@@ -2811,24 +2811,6 @@ body {
   box-shadow: 0 2px 12px rgba(245, 197, 24, 0.35);
 }
 
-/* Autoplay progress indicator — premium "now playing" feel */
-.carousel-progress-track {
-  width: 130px;
-  height: 3px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
-  overflow: hidden;
-}
-
-.carousel-progress-fill {
-  display: block;
-  height: 100%;
-  width: 0%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, var(--gold), var(--red));
-  box-shadow: 0 0 10px rgba(245, 197, 24, 0.5);
-}
-
 /* Prev / Next arrow controls — glassmorphism, premium */
 .carousel-arrow {
   position: absolute;

@@ -565,6 +565,55 @@
      these are read at most once per key event and reused. */
   var scrollSnapshot = { x: 0, y: 0, valid: false };
 
+  /*  ── HORIZONTAL RAILS SCROLL ON THEIR OWN ─────────────────────────────────
+   *  Document-space rects survive WINDOW scrolling, which is the case the cache
+   *  was built for. They do not survive a rail scrolling sideways, and
+   *  scrollIntoView moves the rails (Top 10, providers, universes, related...)
+   *  on almost every press along them. Nothing invalidated the cache for that,
+   *  so every rect inside a scrolled rail was off by the rail's scroll distance:
+   *
+   *    - moving along the rail still looked right (all its items shift together)
+   *      but the focused card's own rect was stale, so scrollFocusIntoView
+   *      believed it was off screen and ran scrollIntoView on every press
+   *    - Up/Down out of a scrolled rail picked the column the card USED to sit in
+   *
+   *  Each entry remembers its rail and the rail's scrollLeft at measurement time,
+   *  and entryRect() applies the difference. Each rail's scrollLeft is read once
+   *  per key event; at keydown layout is normally clean, so that is a field read,
+   *  not a flush. Invalidating the cache instead would have cost a full rebuild
+   *  (one getBoundingClientRect per focusable) on the press after every scroll. */
+  var RAIL_SELECTOR = '.top10-rail,.providers-rail,.uv-rail,.related-slider,.cat-tabs,.continue-watching-grid,' +
+    '.modal-cast-row,.ud-cast-grid,.cat-group-menu,.anime-filter-bar,.ch-detail-tabs';
+  /*  The navbar is position:fixed, so the same flaw hit it from the other axis: its
+   *  document-space rect was only true for the scroll position of the last rebuild.
+   *  A rebuild at scrollY 2239 parked a phantom search box 225px lower in document
+   *  space, and Down from a card at the top of the viewport picked it — straight
+   *  into a text field that keeps the arrow keys. Fixed entries are now pinned to
+   *  the top of the document, which is where a rebuild at scrollY 0 (the usual
+   *  first press) always put them: Up from the top of the page reaches the bar,
+   *  and the bar is never "below" anything. Tracking its live position instead
+   *  was tried and is worse: Up from the first visible row then jumped into the
+   *  bar rather than scrolling to the section above. */
+  var FIXED_SELECTOR = '#navbar';
+  var railSnapshot = [];
+
+  function railScrollLeft(rail) {
+    for (var i = 0; i < railSnapshot.length; i += 2) {
+      if (railSnapshot[i] === rail) return railSnapshot[i + 1];
+    }
+    var value = rail.scrollLeft || 0;
+    railSnapshot.push(rail, value);
+    return value;
+  }
+
+  function entryRect(entry) {
+    var r = entry.rect;
+    if (!entry.rail || !r) return r;
+    var shift = railScrollLeft(entry.rail) - entry.railLeft;
+    if (!shift) return r;
+    return { left: r.left - shift, right: r.right - shift, top: r.top, bottom: r.bottom, width: r.width, height: r.height };
+  }
+
   function refreshScrollSnapshot() {
     scrollSnapshot.x = window.pageXOffset || document.documentElement.scrollLeft || 0;
     scrollSnapshot.y = window.pageYOffset || document.documentElement.scrollTop || 0;
@@ -579,7 +628,7 @@
     if (!scrollSnapshot.valid) refreshScrollSnapshot();
     return scrollSnapshot.y;
   }
-  function invalidateScrollSnapshot() { scrollSnapshot.valid = false; }
+  function invalidateScrollSnapshot() { scrollSnapshot.valid = false; railSnapshot.length = 0; }
 
   function toDocRect(rect, offsetX, offsetY) {
     return {
@@ -601,10 +650,31 @@
       var el = nodes[i];
       if (el.hasAttribute('disabled') || el.getAttribute('aria-hidden') === 'true') continue;
       if (el.tabIndex < 0) continue;
-      if (el.closest('[hidden]')) continue;
+      /*  [data-mztv-idle] as well as [hidden]: an idle section is either
+       *  content-visibility:hidden (hero, upcoming, footer — not focusable at
+       *  all) or a far-off SEO block (see watchIdleSections). Measuring its
+       *  links was the bulk of every rebuild: ~190 of the ~350 candidates on the
+       *  homepage live in the SEO blocks and footer at the bottom, and a
+       *  getBoundingClientRect inside a skipped content-visibility subtree makes
+       *  Chromium lay that subtree out just to answer. The section's IO flip
+       *  invalidates this cache, so its links come back before the D-pad can
+       *  reach them. */
+      if (el.closest('[hidden],[data-mztv-idle]')) continue;
       var rect = el.getBoundingClientRect();
       if (!isVisibleRect(rect)) continue; // display:none / collapsed / closed overlay
-      out.push({ el: el, rect: toDocRect(rect, offsetX, offsetY) });
+      /*  visibility:hidden keeps its box, so the rect test passes it, and focus()
+       *  then silently refuses it. The closed upcoming-detail overlay is hidden
+       *  that way and its buttons sit over the grid's last row: Right from the
+       *  last card picked "Watch Trailer" every time and the press was swallowed
+       *  (the D-pad looked stuck). The rect reads above already flushed style and
+       *  this loop writes nothing, so this is a lookup, not a recalc. */
+      if (getComputedStyle(el).visibility !== 'visible') continue;
+      if (el.closest(FIXED_SELECTOR)) {
+        out.push({ el: el, rect: toDocRect(rect, 0, 0) }); // pinned to the document top
+        continue;
+      }
+      var rail = el.parentElement ? el.parentElement.closest(RAIL_SELECTOR) : null;
+      out.push({ el: el, rect: toDocRect(rect, offsetX, offsetY), rail: rail, railLeft: rail ? rail.scrollLeft || 0 : 0 });
     }
     return out;
   }
@@ -688,7 +758,7 @@
     if (!entry || !entry.el) return false;
     var el = entry.el;
     try { el.focus({ preventScroll: true }); } catch (err) { el.focus(); }
-    scrollFocusIntoView(el, direction, entry.rect);
+    scrollFocusIntoView(el, direction, entryRect(entry));
     schedulePrefetch(el);
     return true;
   }
@@ -775,7 +845,7 @@
     if (!el || el === document.body || el === document.documentElement) return null;
 
     var cached = cachedEntryFor(el);
-    if (cached) return cached;
+    if (cached) return cached.rail ? { el: cached.el, rect: entryRect(cached) } : cached;
 
     var rect = el.getBoundingClientRect();
     if (!isVisibleRect(rect)) return null;
@@ -791,7 +861,7 @@
     var best = null;
     var bestScore = Infinity;
     for (var i = 0; i < entries.length; i++) {
-      var r = entries[i].rect;
+      var r = entryRect(entries[i]);
       var viewTop = r.top - offsetY;
       if (viewTop + r.height < 0 || viewTop > viewportH) continue;
       var score = viewTop * 2 + r.left;
@@ -811,7 +881,7 @@
     var selfIndex = -1;
     for (var i = 0; i < entries.length; i++) {
       if (entries[i].el === current.el) { selfIndex = i; rects.push(null); }
-      else rects.push(entries[i].rect);
+      else rects.push(entryRect(entries[i]));
     }
 
     var pick = pickNextFocus(direction, current.rect, rects);
@@ -1390,7 +1460,12 @@
 
   // Sections are skipped only while completely off screen, so nothing visible changes.
   var IDLE_SECTION_IDS = ['hero', 'continue-watching', 'upcoming'];
-  var IDLE_SECTION_SELECTORS = ['.site-footer'];
+  /*  .mz-seo and .mz-ssr-index are the crawlable link blocks above the footer
+   *  (~150 links between them). They are NOT hidden when idle — tv-mode.css has
+   *  no rule for them, they keep their own content-visibility:auto — the flag only
+   *  takes their links out of the focus cache while they are far away (see
+   *  buildFocusables). Every selector match is observed; there are two .mz-seo. */
+  var IDLE_SECTION_SELECTORS = ['.site-footer', '.mz-seo', '.mz-ssr-index'];
 
   function watchIdleSections() {
     if (typeof IntersectionObserver !== 'function') return;
@@ -1414,14 +1489,18 @@
       for (var i = 0; i < entries.length; i++) {
         var el = entries[i].target;
         var wasIdle = el.getAttribute('data-mztv-idle') === '1';
-        if (entries[i].isIntersecting) {
+        /*  intersectionRatio covers Chromium 51-57 (Tizen 4, webOS 4), whose
+         *  entries have no isIntersecting: reading it alone marked every section
+         *  idle forever there — harmless while idle only meant a CSS hint those
+         *  engines ignore, not now that buildFocusables drops idle focusables. */
+        if (entries[i].isIntersecting || entries[i].intersectionRatio > 0) {
           if (wasIdle) { el.removeAttribute('data-mztv-idle'); changed = true; }
         } else if (!wasIdle) {
           el.setAttribute('data-mztv-idle', '1');
           changed = true;
         }
       }
-      if (changed) invalidateFocusCache(); // a skipped section removes its focusables
+      if (changed) invalidateFocusCache(); // buildFocusables skips idle sections' focusables
     }, { rootMargin: '25% 0px' });
 
     IDLE_SECTION_IDS.forEach(function (id) {
@@ -1429,8 +1508,8 @@
       if (el) observer.observe(el);
     });
     IDLE_SECTION_SELECTORS.forEach(function (selector) {
-      var el = document.querySelector(selector);
-      if (el) observer.observe(el);
+      var list = document.querySelectorAll(selector);
+      for (var i = 0; i < list.length; i++) observer.observe(list[i]);
     });
   }
 

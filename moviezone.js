@@ -5820,10 +5820,14 @@ function renderTop10(list) {
 
   rail.innerHTML = html;
   section.removeAttribute('hidden');
-  _mzUpdateTop10Arrows();
-  /*  The pill can only be measured now: until this line the section is
-   *  [hidden], i.e. display:none, and every offsetWidth inside it reads 0. */
-  _mzSyncTop10Ind();
+  /*  Arrows and pill are measured NEXT FRAME, not here. Measuring straight after
+   *  the innerHTML swap forced a full synchronous layout inside this task (the
+   *  section going from display:none to visible moves everything below it):
+   *  3 forced layouts / 310 ms in a 6x-throttled TV load trace, the largest in this
+   *  file. rAF still runs before that frame paints, so the arrows and the pill are
+   *  right the first time the section is seen. The ResizeObserver cannot stand in
+   *  for this: swapping the cards changes scrollWidth, not the rail's own box. */
+  _mzTop10Resync();
 }
 
 /*  Sizes and positions the toggle's gold indicator from the ACTIVE button's own
@@ -5846,8 +5850,12 @@ function _mzSyncTop10Ind() {
   const ind = toggle.querySelector('.top10-toggle-ind');
   const active = toggle.querySelector('.top10-toggle-btn.is-active');
   if (!ind || !active || !active.offsetWidth) return;   // 0 while the section is hidden
-  ind.style.width = active.offsetWidth + 'px';
-  ind.style.transform = 'translateX(' + (active.offsetLeft - ind.offsetLeft) + 'px)';
+  // Both reads before either write: writing the width first made the offsetLeft
+  // reads flush layout a second time. (The pill is absolute at left:4px, so its
+  // own width never moves its offsetLeft.)
+  const w = active.offsetWidth, x = active.offsetLeft - ind.offsetLeft;
+  ind.style.width = w + 'px';
+  ind.style.transform = 'translateX(' + x + 'px)';
 }
 
 /*  Delegated wiring — set up once. Clicks/keys open the detail modal, the
@@ -5872,6 +5880,10 @@ function _mzUpdateTop10Arrows() {
 
 /** The scroll/resize-facing wrapper: at most one run per frame. */
 const _mzUpdateTop10ArrowsThrottled = mzRafThrottle(_mzUpdateTop10Arrows);
+/*  Arrows AND the toggle pill, one run per frame. Shared by the resize paths, the
+ *  font swap, the Today/This Week toggle and renderTop10, so a click that re-renders
+ *  a cached window measures once instead of flushing layout at every step. */
+const _mzTop10Resync = mzRafThrottle(() => { _mzUpdateTop10Arrows(); _mzSyncTop10Ind(); });
 
 function initTop10() {
   const section = document.getElementById('top10-trending');
@@ -5923,15 +5935,16 @@ function initTop10() {
      *  them; the window listener is the fallback for engines without it. */
     /*  ResizeObserver can fire several times for one gesture and `resize` fires
      *  continuously while a window is dragged; both callbacks read layout and then
-     *  write inline styles. rAF-throttled so a drag costs one measure per frame
-     *  instead of one per event. */
-    const resync = mzRafThrottle(() => { _mzUpdateTop10Arrows(); _mzSyncTop10Ind(); });
-    if (typeof ResizeObserver === 'function') new ResizeObserver(resync).observe(rail);
-    window.addEventListener('resize', resync, { passive: true });
-    window.addEventListener('orientationchange', () => setTimeout(resync, 150));
+     *  write inline styles. rAF-throttled (_mzTop10Resync) so a drag costs one
+     *  measure per frame instead of one per event. */
+    if (typeof ResizeObserver === 'function') new ResizeObserver(_mzTop10Resync).observe(rail);
+    window.addEventListener('resize', _mzTop10Resync, { passive: true });
+    window.addEventListener('orientationchange', () => setTimeout(_mzTop10Resync, 150));
     /*  Outfit replacing the fallback face reflows both labels, which moves the
-     *  box the indicator was measured against. */
-    if (document.fonts) document.fonts.ready.then(_mzSyncTop10Ind).catch(() => {});
+     *  box the indicator was measured against. `loadingdone` rather than
+     *  document.fonts.ready, whose getter forces a style+layout flush once it has
+     *  settled (see initNavIndicator). */
+    if (document.fonts) document.fonts.addEventListener('loadingdone', _mzTop10Resync);
   }
 
   /*  Today / This Week toggle. One delegated handler on the pill: identify the
@@ -5952,8 +5965,10 @@ function initTop10() {
       });
       // Slides the gold indicator: default (left) = Today, .is-week (right) = This Week.
       toggle.classList.toggle('is-week', win === 'week');
-      // Re-measure against the button that just became active (see _mzSyncTop10Ind).
-      _mzSyncTop10Ind();
+      // Re-measure against the button that just became active (see _mzSyncTop10Ind),
+      // next frame, so the render below (cached windows render synchronously) and
+      // this measure share one layout.
+      _mzTop10Resync();
       /*  Only the screen-reader-only tail of the h2 changes, so the visible
        *  "Top 10 Trending Movies" markup is left intact — rewriting the whole
        *  heading would delete the styled <span> with it. */
@@ -6420,7 +6435,6 @@ function autoSlideHeld() {
 function startAutoSlide() {
   if (autoSlideTimer) { clearInterval(autoSlideTimer); autoSlideTimer = null; }
   if (autoSlideHeld()) return;
-  restartProgressBar();
   autoSlideTimer = setInterval(_mzAutoSlideTick, CAROUSEL_AUTOPLAY_MS);
 }
 
@@ -6440,29 +6454,22 @@ function _mzAutoSlideTick() {
 }
 function resetAutoSlide() { startAutoSlide(); }
  
-// -- PREMIUM AUTOPLAY PROGRESS BAR --
-function restartProgressBar() {
-  const bar = document.getElementById('carouselProgress');
-  if (!bar) return;
-  bar.style.animation = 'none';
-  bar.style.animationPlayState = 'running';
-  // Force reflow so the animation restarts cleanly from 0%
-  void bar.offsetWidth;
-  bar.style.animation = 'carouselProgressFill ' + (CAROUSEL_AUTOPLAY_MS / 1000) + 's linear forwards';
-}
+/*  The autoplay progress bar that used to be driven from here is gone: no
+ *  #carouselProgress element exists in index.html or in any markup this file
+ *  builds, and no stylesheet defines its carouselProgressFill keyframes, so
+ *  restartProgressBar() and the animationPlayState writes in pause/resume were a
+ *  getElementById on every slide change for nothing. Removed with its unused
+ *  .carousel-progress-* rules, which is what paid for this round's rail fixes
+ *  inside asset-perf-check's byte budget. */
 // reason: 'pointer' | 'hidden' | 'offscreen' — each holds independently, so
 // releasing one does not restart the timer while another still holds it.
 function pauseAutoSlide(reason) {
   autoSlideHolds[reason || 'pointer'] = true;
   if (autoSlideTimer) { clearInterval(autoSlideTimer); autoSlideTimer = null; }
-  const bar = document.getElementById('carouselProgress');
-  if (bar) bar.style.animationPlayState = 'paused';
 }
 function resumeAutoSlide(reason) {
   autoSlideHolds[reason || 'pointer'] = false;
   if (autoSlideTimer || autoSlideHeld()) return;
-  const bar = document.getElementById('carouselProgress');
-  if (bar) bar.style.animationPlayState = 'running';
   autoSlideTimer = setInterval(_mzAutoSlideTick, CAROUSEL_AUTOPLAY_MS);
 }
  
@@ -9829,10 +9836,8 @@ document.addEventListener('keydown', (e) => {
     const next = section.querySelector('[data-provider-scroll="1"]');
     const cards = Array.from(rail.querySelectorAll('.provider-card'));
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-    let scrollFrame = 0;
 
     function updateControls() {
-      scrollFrame = 0;
       /*  Reads first, writes after. `controls.hidden` used to be written between
        *  the scrollWidth read and the two scrollLeft reads, which forced a layout
        *  flush in the middle of the measurement. */
@@ -9849,6 +9854,11 @@ document.addEventListener('keydown', (e) => {
       //  attribute: providers.css maps it to a mask-image on the rail.
       rail.dataset.edge = !overflows ? 'none' : atStart ? 'end' : atEnd ? 'start' : 'both';
     }
+    /*  ONE coalescing flag for every caller. Scroll used its own requestAnimationFrame
+     *  handle and resize used mzRafThrottle, so a scroll and a ResizeObserver
+     *  callback in the same frame measured twice, the second time straight after
+     *  the first one's writes. */
+    const updateControlsThrottled = mzRafThrottle(updateControls);
 
     section.addEventListener('click', function (event) {
       const scrollButton = event.target.closest('[data-provider-scroll]');
@@ -9885,9 +9895,7 @@ document.addEventListener('keydown', (e) => {
       cards[target].scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: reducedMotion.matches ? 'instant' : 'smooth' });
     });
 
-    rail.addEventListener('scroll', function () {
-      if (!scrollFrame) scrollFrame = requestAnimationFrame(updateControls);
-    }, { passive: true });
+    rail.addEventListener('scroll', updateControlsThrottled, { passive: true });
 
     /*  There was a hover warm-up here that called prefetchMoviesPage(cat, 1) after a
      *  180ms dwell. It has been removed on purpose. It existed to hide a cold click
@@ -9899,12 +9907,17 @@ document.addEventListener('keydown', (e) => {
 
     /*  Resize path is rAF-throttled: a ResizeObserver can fire several times for
      *  one gesture and `resize` fires continuously while a window is dragged, and
-     *  updateControls both reads layout and writes to the DOM. The scroll path
-     *  above already coalesces through `scrollFrame`. */
-    const updateControlsThrottled = mzRafThrottle(updateControls);
+     *  updateControls both reads layout and writes to the DOM.
+     *
+     *  No synchronous first measurement when ResizeObserver exists: observe()
+     *  delivers one after the browser's own first layout, and the throttle runs it
+     *  before that frame paints. The synchronous call ran while this script was
+     *  still evaluating, so its scrollWidth read laid out the whole document mid-
+     *  script (62 ms of forced layout + 84 ms of style in a 4x-throttled phone load
+     *  trace). Revealing the controls later cannot shift the page: providers.css
+     *  keeps a [hidden] control row in the layout, only invisible. */
     if (typeof ResizeObserver === 'function') new ResizeObserver(updateControlsThrottled).observe(rail);
-    else window.addEventListener('resize', updateControlsThrottled, { passive: true });
-    updateControls();
+    else { window.addEventListener('resize', updateControlsThrottled, { passive: true }); updateControls(); }
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true });
   else mount();
@@ -12398,8 +12411,15 @@ async function loadRelatedMovies(id, type) {
       if (prevBtn) prevBtn.onclick = () => { grid.scrollBy({ left: -scrollAmount, behavior: isMzTVMode() ? 'auto' : 'smooth' }); };
       if (nextBtn) nextBtn.onclick = () => { grid.scrollBy({ left: scrollAmount, behavior: isMzTVMode() ? 'auto' : 'smooth' }); };
 
-      grid.addEventListener('scroll', mzRafThrottle(updateArrowState), { passive: true });
-      updateArrowState();
+      /*  onscroll, not addEventListener: this runs on every modal open against the
+       *  same #relatedMoviesGrid, and each open used to stack one more listener
+       *  (after N opens, N measurements per scroll frame, each reading straight
+       *  after the previous one's writes). Assigning replaces it. The first
+       *  measurement also moves to the next frame, so the 20 cards appended above
+       *  are laid out once, by the browser, instead of inside this task. */
+      const syncArrows = mzRafThrottle(updateArrowState);
+      grid.onscroll = syncArrows;
+      syncArrows();
 
     } else {
       section.style.display = 'none';
@@ -14229,16 +14249,39 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
  
-let _scrollTicking = false;
-window.addEventListener('scroll', () => {
-  if (_scrollTicking) return;
-  _scrollTicking = true;
-  requestAnimationFrame(() => {
-    const nb = document.getElementById('navbar');
-    if (nb) nb.classList.toggle('scrolled', window.scrollY > 60);
-    _scrollTicking = false;
-  });
-}, { passive: true });
+/*  ── NAVBAR "scrolled" STATE: AN IntersectionObserver, NOT A SCROLL LISTENER ──
+ *  This was a window scroll listener that, once per frame while scrolling, looked
+ *  the navbar up and read window.scrollY — a layout read on a page that is still
+ *  laying out rails and posters, so it forced that layout early: 27 ms in one
+ *  6x-throttled TV D-pad trace, and it ran on every scroll frame of every device.
+ *  The class only ever changes when the page crosses 60px, and a 60px-tall
+ *  sentinel at the top of the document stops intersecting the viewport at that
+ *  point. The browser reports the crossing from its own post-layout pass: no
+ *  listener, no read, nothing per frame. (Checked against the old listener at
+ *  0/59/60/61/400/2000px: same state at every stop.) The initial callback also
+ *  sets the right state on a page restored mid-scroll, which the listener only
+ *  did after the next scroll event. Engines without IntersectionObserver keep the
+ *  old scroll path; intersectionRatio covers Chromium 51-57, whose entries have
+ *  no isIntersecting. */
+(function initNavbarScrolled() {
+  const nb = document.getElementById('navbar');
+  if (!nb) return;
+  const set = (on) => nb.classList.toggle('scrolled', on);
+  if (!window.IntersectionObserver) {
+    window.addEventListener('scroll', mzRafThrottle(() => set(window.scrollY > 60)), { passive: true });
+    return;
+  }
+  // Absolute against the initial containing block, so appending it anywhere in
+  // <body> puts it at the document's top-left; visibility:hidden also keeps it
+  // out of hit-testing and the accessibility tree.
+  const sentinel = document.createElement('div');
+  sentinel.style.cssText = 'position:absolute;top:0;width:1px;height:60px;visibility:hidden';
+  document.body.appendChild(sentinel);
+  new IntersectionObserver((entries) => {
+    const e = entries.pop();   // the newest state, if a fast scroll queued several
+    set(!(e.isIntersecting || e.intersectionRatio > 0));
+  }).observe(sentinel);
+})();
 
 // ═══ PREMIUM MOBILE NAV PANEL ═══
 // Creates a separate full-screen panel outside navbar to avoid backdrop-filter stacking issues
@@ -14496,8 +14539,14 @@ window.addEventListener('scroll', () => {
 
   /*  Re-measure once Outfit has loaded. It is wider than the sans-serif fallback,
       so a pill sized during the fallback paint ends up a few px short on every
-      link and never corrects itself. */
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(sync).catch(() => {});
+      link and never corrects itself.
+      `loadingdone`, not `document.fonts.ready`: Blink's ready getter synchronously
+      updates style AND layout whenever the promise has already settled, so merely
+      touching it here flushed the whole document mid-script (51-74 ms of forced
+      style in throttled TV/phone load traces). The event fires at the same moment
+      ready would settle for a pending font; when Outfit was already in, the
+      sync() below measures with it anyway. */
+  if (document.fonts) document.fonts.addEventListener('loadingdone', sync);
   sync();
 })();
 

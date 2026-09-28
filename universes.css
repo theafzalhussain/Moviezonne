@@ -101,7 +101,10 @@
 .uv-subtitle { margin: .45rem 0 0 calc(4px + .8rem); font-size: 14px; line-height: 1.5; color: var(--text2); }
 
 .uv-controls { display: flex; flex: none; gap: .5rem; }
-.uv-controls[hidden] { display: none; }
+/*  Hidden = invisible, not removed (same as .providers-controls): the arrows are
+ *  revealed a frame after the tiles land, and taking the row out of the layout
+ *  made that reveal grow the header 5-7px and push the rest of the page down. */
+.uv-controls[hidden] { visibility: hidden; }
 .uv-arrow {
   display: grid; place-items: center;
   width: 42px; height: 42px; padding: 0;

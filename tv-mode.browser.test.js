@@ -23,6 +23,28 @@ const http = require('http');
 const os = require('os');
 const path = require('path');
 
+/*  kill() only asks Chrome to quit. On Windows its profile stays locked until
+ *  every Chrome process has exited, so the rmSync that used to follow kill()
+ *  straight away failed - silently, inside a try/catch - and every run left its
+ *  whole profile behind in %TEMP% (56 of them, 1.9 GB, had piled up). Wait for
+ *  the exit, then let rmSync retry for the GPU/utility processes that outlive
+ *  the browser by a moment. Never rejects: cleanup must not fail a test. */
+function closeBrowserAndRemoveProfile(proc, dir) {
+  return new Promise((resolve) => {
+    let removed = false;
+    const remove = () => {
+      if (removed) return;
+      removed = true;
+      try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch (e) {}
+      resolve();
+    };
+    if (!proc || proc.exitCode !== null || proc.signalCode !== null) { remove(); return; }
+    proc.once('exit', remove);
+    setTimeout(remove, 5000).unref();
+    try { proc.kill(); } catch (e) { remove(); }
+  });
+}
+
 const HARNESS_PAGES = [
   { file: 'tv-mode.browser.test.html', label: 'TV (spoofed Tizen user agent)' },
   { file: 'tv-mode.browser.nontv.test.html', label: 'desktop regression (no TV signal)' }
@@ -104,9 +126,7 @@ function runPage(browser, port, page) {
       settled = true;
       clearTimeout(timer);
       pending = null;
-      if (child) { try { child.kill(); } catch (e) {} }
-      try { fs.rmSync(profileDir, { recursive: true, force: true }); } catch (e) {}
-      if (err) reject(err); else resolve(value);
+      closeBrowserAndRemoveProfile(child, profileDir).then(() => { if (err) reject(err); else resolve(value); });
     }
 
     pending = (body) => {

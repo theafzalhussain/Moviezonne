@@ -163,7 +163,14 @@
 // animation frame, TV card heights no longer restyle the whole page, the unused
 // --page-loaded root variable is gone, and the universe rail no longer forces a
 // layout straight after inserting its tiles.
-const CACHE_NAME = 'moviezone-v158';
+// v159: moviezone.min.js 15.8, moviezone.min.css 9.18, tv-mode.min.js 1.9,
+// tv-mode.min.css 1.6, providers.css 10, universes.css 5 - the TV D-pad no longer
+// measures (or gets stuck on) focusables inside idle sections and hidden overlays,
+// rail rects follow the rails' own scrolling, resting cards no longer carry a
+// composited layer per badge, the Top 10 / provider / related rails measure in
+// the next frame instead of mid-task, and the navbar's "scrolled" state comes from
+// an IntersectionObserver instead of a scroll listener.
+const CACHE_NAME = 'moviezone-v159';
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
  *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream
@@ -330,11 +337,11 @@ const STATIC_ASSETS = [
    *  every slow-network or offline fallback turned into a browser error page
    *  instead of the shell. '/' is the same document, answered 200 directly. */
   '/',
-  '/tv-mode.min.css?v=1.5',
-  '/moviezone.min.css?v=9.17',
-  '/tv-mode.min.js?v=1.8',
+  '/tv-mode.min.css?v=1.6',
+  '/moviezone.min.css?v=9.18',
+  '/tv-mode.min.js?v=1.9',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=15.7',
+  '/moviezone.min.js?v=15.8',
   '/manifest.json',
   '/icon-192.png?v=2',
   '/favicon-32.png?v=2',
@@ -353,7 +360,7 @@ const OPTIONAL_ASSETS = [
   // to sit in front of a first paint. 275 KB between them.
   '/icon-512.png?v=2',
   '/apple-touch-icon.png?v=2',
-  '/providers.css?v=9',
+  '/providers.css?v=10',
   '/provider-netflix.svg',
   '/provider-prime.svg',
   '/provider-jiohotstar.png',
@@ -372,7 +379,7 @@ const OPTIONAL_ASSETS = [
   // The Cinematic Universe rail on the homepage. Both are optional for the same
   // reason the catalogue above is: the row is below the fold and built lazily, so
   // a 404 on either must not be able to fail the whole service-worker install.
-  '/universes.css?v=4',
+  '/universes.css?v=5',
   '/universes-rail.js?v=5',
   // pwa-install.min.js moved off the critical path: index.html no longer ships a
   // <script> tag for it, it is injected on idle / on demand. Still worth having

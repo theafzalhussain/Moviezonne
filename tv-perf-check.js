@@ -29,6 +29,28 @@ const http = require('http');
 const os = require('os');
 const path = require('path');
 
+/*  kill() only asks Chrome to quit. On Windows its profile stays locked until
+ *  every Chrome process has exited, so the rmSync that used to follow kill()
+ *  straight away failed - silently, inside a try/catch - and every run left its
+ *  whole profile behind in %TEMP% (56 of them, 1.9 GB, had piled up). Wait for
+ *  the exit, then let rmSync retry for the GPU/utility processes that outlive
+ *  the browser by a moment. Never rejects: cleanup must not fail a test. */
+function closeBrowserAndRemoveProfile(proc, dir) {
+  return new Promise((resolve) => {
+    let removed = false;
+    const remove = () => {
+      if (removed) return;
+      removed = true;
+      try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch (e) {}
+      resolve();
+    };
+    if (!proc || proc.exitCode !== null || proc.signalCode !== null) { remove(); return; }
+    proc.once('exit', remove);
+    setTimeout(remove, 5000).unref();
+    try { proc.kill(); } catch (e) { remove(); }
+  });
+}
+
 const args = process.argv.slice(2);
 const flag = (name, fallback) => {
   const at = args.indexOf('--' + name);
@@ -125,6 +147,17 @@ function connect(wsUrl) {
 
 /* Installed before navigation so it observes the whole load. */
 const INSTRUMENT = `(function () {
+  /*  A fresh profile is a first-ever visit, and on a first visit pwa-install.js
+   *  opens the TV install overlay 3 s after load and moves focus into it. The
+   *  D-pad walk below then ran entirely inside that modal (the D-pad cannot leave
+   *  an open overlay), so SCROLL / D-PAD measured key presses on a dialog, not
+   *  navigation of the grid. Mark the prompt as already seen, like a returning
+   *  viewer; the install flow itself is not what this check measures. */
+  try {
+    ['mz_pwa_tv_prompt_dismissed_at', 'mz_pwa_prompt_dismissed_at'].forEach(function (k) {
+      if (localStorage.getItem(k) === null) localStorage.setItem(k, String(Date.now()));
+    });
+  } catch (e) {}
   window.__mzPerf = { longTasks: [], frames: [], marks: {}, cvSkipped: 0, cvShown: 0 };
   try {
     new PerformanceObserver(function (list) {
@@ -473,8 +506,7 @@ function metricMap(list) {
     console.error('\nFAILED: ' + err.message);
   } finally {
     if (cdp) cdp.close();
-    try { chrome.kill(); } catch (e) {}
-    try { fs.rmSync(profile, { recursive: true, force: true }); } catch (e) {}
+    await closeBrowserAndRemoveProfile(chrome, profile);
     server.close();
   }
 
