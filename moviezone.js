@@ -19,8 +19,10 @@ const mzLowTier =
   (/2g/i.test(((navigator.connection || {}).effectiveType) || ''));
 
 // -- ULTRA PERFORMANCE BOOST (Instant Load) --
-// 1. Mark document as loading for instant visual feedback
-document.documentElement.style.setProperty('--page-loaded', '0');
+// (A `--page-loaded` custom property used to be written on <html> here and again
+// at DOMContentLoaded. No stylesheet ever read it, and a custom property on the
+// root is inherited by every element, so each write was a whole-page style
+// recalculation in the middle of loading. Removed.)
 
 /*  ══════════════════════════════════════════════════════════════════════
  *  HOW FAR AHEAD TO PREFETCH — counted from the VIEWPORT, not from zero
@@ -14440,7 +14442,13 @@ window.addEventListener('scroll', () => {
     const border = parseFloat(getComputedStyle(ul).borderLeftWidth) || 0;
     ul.style.setProperty('--nav-ind-x', (r.left - box.left - border) + 'px');
     ul.style.setProperty('--nav-ind-w', r.width + 'px');
-    ul.classList.add('mz-ind-on');
+    /*  Guarded because classList.add() rewrites the class attribute even when the
+     *  class is already there, and the observer below hears that write. Unguarded,
+     *  the pill re-measured itself on EVERY animation frame for the life of the
+     *  page: one mutation per frame on an idle homepage, each forcing a layout -
+     *  measured at a third to all of a TV's main thread, which is what made the
+     *  D-pad and the first taps feel stuck (Sep 2026). */
+    if (!ul.classList.contains('mz-ind-on')) ul.classList.add('mz-ind-on');
   }
 
   const rest = () => place(ul.querySelector('a.active'));
@@ -14479,7 +14487,8 @@ window.addEventListener('scroll', () => {
 
   /*  goHome / filterCat / showWatchlist move .active around and know nothing
       about this pill. Watching the class attribute is what keeps them decoupled.
-      Only 'class' is observed, so the style writes above cannot feed back in. */
+      place() only writes the <ul>'s own class when it is missing - that write is
+      what used to feed straight back in here, once per frame. */
   new MutationObserver(sync).observe(ul, { subtree: true, attributes: true, attributeFilter: ['class'] });
 
   if (typeof ResizeObserver === 'function') new ResizeObserver(sync).observe(ul);
@@ -16338,14 +16347,14 @@ window.handleNotifyMe = async function(btn) {
     style.textContent = `
 /* ── FIX A (asli scrolling bug): content-visibility ke saath intrinsic size ──
    Bina iske offscreen card ki height 0 ho jaati hai aur grid ki height scroll
-   ke dauraan badalti rehti hai. --mz-card-h runtime pe measure hoti hai. */
+   ke dauraan badalti rehti hai. Asli height runtime pe measure hoti hai. */
 html[data-mz-tv="true"].large-screen-mode .movie-card,
 html[data-mz-tv="true"] .movie-card {
-  contain-intrinsic-size: auto var(--mz-card-h, 340px);
+  contain-intrinsic-size: auto 340px;
 }
 html[data-mz-tv="true"].large-screen-mode .upcoming-card,
 html[data-mz-tv="true"] .upcoming-card {
-  contain-intrinsic-size: auto var(--mz-upcoming-h, 300px);
+  contain-intrinsic-size: auto 300px;
 }
 
 /* ── FIX B: smooth scrolling TV pe hamesha laggy hoti hai (JS already
@@ -16475,15 +16484,29 @@ html[data-mz-tv="true"] #navbar { transform: translateZ(0); }
   function measureCards() {
     measureQueued = false;
     const h = sampleMax('.movie-card', 12);
-    if (h > 40 && h > seenCardH) {
-      seenCardH = h;
-      root.style.setProperty('--mz-card-h', h + 'px');
-    }
     const u = sampleMax('.upcoming-card', 8);
-    if (u > 40 && u > seenUpcomingH) {
-      seenUpcomingH = u;
-      root.style.setProperty('--mz-upcoming-h', u + 'px');
+    let grew = false;
+    if (h > 40 && h > seenCardH) { seenCardH = h; grew = true; }
+    if (u > 40 && u > seenUpcomingH) { seenUpcomingH = u; grew = true; }
+    if (grew) writeCardSizes();
+  }
+
+  /*  The measured heights reach the cards through a rule on the cards, not a
+   *  custom property on <html>. Custom properties inherit, so each write on the
+   *  root made every element on the page recompute its style - ~0.65 s per write
+   *  on a TV-class CPU (6x throttle), and the sticky max is raised several times
+   *  per load. A rule keyed on the card classes restyles the cards and nothing
+   *  else. It uses FIX A's most specific selector (start() always adds
+   *  .large-screen-mode first) and comes later in the cascade, so it wins. */
+  let sizeSheet = null;
+  function writeCardSizes() {
+    if (!sizeSheet) {
+      sizeSheet = document.createElement('style');
+      sizeSheet.id = 'mz-tv-card-size';
+      document.head.appendChild(sizeSheet);
     }
+    const rule = (cls, px) => (px ? 'html[data-mz-tv="true"].large-screen-mode .' + cls + '{contain-intrinsic-size:auto ' + px + 'px}' : '');
+    sizeSheet.textContent = rule('movie-card', seenCardH) + rule('upcoming-card', seenUpcomingH);
   }
   function scheduleMeasure() {
     if (measureQueued) return;

@@ -222,10 +222,11 @@
       var overflows = maximum > 2;
       var atStart = rail.scrollLeft <= 2;
       var atEnd = rail.scrollLeft >= maximum - 2;
+      var edge = !overflows ? 'none' : atStart ? 'end' : atEnd ? 'start' : 'both';
       if (controls) controls.hidden = !overflows;
       if (previous) previous.disabled = atStart;
       if (next) next.disabled = atEnd;
-      rail.dataset.edge = !overflows ? 'none' : atStart ? 'end' : atEnd ? 'start' : 'both';
+      if (rail.dataset.edge !== edge) rail.dataset.edge = edge;
     }
 
     section.addEventListener('click', function (event) {
@@ -272,13 +273,24 @@
       cards[target].scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: reducedMotion ? 'instant' : 'smooth' });
     });
 
-    rail.addEventListener('scroll', function () {
+    function schedule() {
       if (!frame) frame = requestAnimationFrame(update);
-    }, { passive: true });
+    }
+    rail.addEventListener('scroll', schedule, { passive: true });
 
-    if (typeof ResizeObserver === 'function') new ResizeObserver(update).observe(rail);
-    else window.addEventListener('resize', update, { passive: true });
-    update();
+    /*  No synchronous update() here when ResizeObserver exists: observe() already
+     *  delivers a first callback, AFTER the browser's own layout. Calling it
+     *  straight after the tiles were inserted read scrollWidth on a dirty tree,
+     *  forcing a full style + layout pass mid-task - the single largest JS cost
+     *  of a TV homepage load in a 6x-throttled trace (Sep 2026).
+     *  The callback only schedules update() for the next frame and never runs it
+     *  itself. The first update() shows the arrows, which makes the header 5-7px
+     *  taller, and so the whole document. <html> has its own observer (the RUM
+     *  agent watches it), so a size change made from inside this callback raised
+     *  "ResizeObserver loop completed with undelivered notifications" on window
+     *  once per page load. The browser tests fail on any uncaught error. */
+    if (typeof ResizeObserver === 'function') new ResizeObserver(schedule).observe(rail);
+    else { window.addEventListener('resize', update, { passive: true }); update(); }
   }
 
   whenReady(function (api) {

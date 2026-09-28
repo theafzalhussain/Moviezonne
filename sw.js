@@ -158,7 +158,12 @@
 // v157: moviezone.min.js 15.6 - a TMDB retry is held to what is left of its 20 s
 // budget instead of starting a fresh 15 s window, so a URL that never answers
 // gives up at 20 s, not 31 s.
-const CACHE_NAME = 'moviezone-v157';
+// v158: moviezone.min.js 15.7 + universes-rail.js v5 - main-thread fixes found in
+// a 6x-throttled TV trace: the navbar pill no longer re-measures itself on every
+// animation frame, TV card heights no longer restyle the whole page, the unused
+// --page-loaded root variable is gone, and the universe rail no longer forces a
+// layout straight after inserting its tiles.
+const CACHE_NAME = 'moviezone-v158';
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
  *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream
@@ -329,7 +334,7 @@ const STATIC_ASSETS = [
   '/moviezone.min.css?v=9.17',
   '/tv-mode.min.js?v=1.8',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=15.6',
+  '/moviezone.min.js?v=15.7',
   '/manifest.json',
   '/icon-192.png?v=2',
   '/favicon-32.png?v=2',
@@ -368,7 +373,7 @@ const OPTIONAL_ASSETS = [
   // reason the catalogue above is: the row is below the fold and built lazily, so
   // a 404 on either must not be able to fail the whole service-worker install.
   '/universes.css?v=4',
-  '/universes-rail.js?v=4',
+  '/universes-rail.js?v=5',
   // pwa-install.min.js moved off the critical path: index.html no longer ships a
   // <script> tag for it, it is injected on idle / on demand. Still worth having
   // offline so the install popup works, but it must not be able to fail a
