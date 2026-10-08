@@ -12,7 +12,7 @@
 <meta name="color-scheme" content="dark">
 <link rel="preconnect" href="https://image.tmdb.org">
 
-<link rel="stylesheet" href="/moviezone.min.css?v=9.18">
+<link rel="stylesheet" href="/moviezone.min.css?v=9.19">
 <!--MZ_PERF_HEAD-->
 <link rel="preload" as="image" media="(max-width: 1024px)" href="https://image.tmdb.org/t/p/w780/1CIaRYKf3zg2Xyce1CSfCMg2Vfw.jpg" fetchpriority="high">
 <link rel="preload" as="image" media="(min-width: 1025px)" href="https://image.tmdb.org/t/p/w1280/1CIaRYKf3zg2Xyce1CSfCMg2Vfw.jpg" fetchpriority="high">
@@ -691,16 +691,9 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
     env: isLocal ? 'development' : 'production',
     sessionSampleRate: isLocal ? 0 : 100,
     sessionReplaySampleRate: isWeak ? 0 : 10,
-    /*  Resource collection is the one RUM feature whose cost scales with the
-     *  page rather than with the session, and this page is the bad case: a cold
-     *  homepage produces ~90 entries (the batch plus up to 60 posters), each of
-     *  which becomes a RUM event to serialise and beacon. On a 2-core phone that
-     *  is main-thread time spent measuring instead of rendering. Tied to the same
-     *  weak-device verdict as replay, so the devices that can afford the
-     *  instrumentation still report it and the ones that cannot are left alone -
-     *  they still send views, errors and long tasks, which is what the TV and
-     *  low-end work is actually driven from. */
-    trackResources: !isWeak,
+    /*  Keep resource timing coverage for TVs and low-end devices too.
+     *  Resource tracking works with the slim agent; replay stays gated below. */
+    trackResources: true,
     weakDevice: !!isWeak
   };
   if (isCrawler) return;

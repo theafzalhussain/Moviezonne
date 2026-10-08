@@ -170,7 +170,7 @@
 // composited layer per badge, the Top 10 / provider / related rails measure in
 // the next frame instead of mid-task, and the navbar's "scrolled" state comes from
 // an IntersectionObserver instead of a scroll listener.
-const CACHE_NAME = 'moviezone-v160';
+const CACHE_NAME = 'moviezone-v161';
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
  *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream
@@ -338,7 +338,7 @@ const STATIC_ASSETS = [
    *  instead of the shell. '/' is the same document, answered 200 directly. */
   '/',
   '/tv-mode.min.css?v=1.6',
-  '/moviezone.min.css?v=9.18',
+  '/moviezone.min.css?v=9.19',
   '/tv-mode.min.js?v=1.9',
   '/search-engine.min.js?v=2.1',
   '/moviezone.min.js?v=15.9',
