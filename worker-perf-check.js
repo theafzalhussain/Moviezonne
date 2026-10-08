@@ -229,7 +229,7 @@ const isPathKey = (k) => k.includes('/api/tmdb/') && !isBatchKey(k);
         ? { popularTitles: { edges } }
         : { newTitles: { edges } } }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
-    if (!/api\.themoviedb\.org/.test(target)) return realFetch(input, init);
+    if (new URL(target).hostname !== 'api.themoviedb.org') throw new Error('Unexpected offline fetch: ' + target);
     upstream++;
     if (hangPath && target.includes(hangPath)) {
       hangPath = null;

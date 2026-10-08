@@ -1595,7 +1595,7 @@ async function batchPart(path, env, ctx, opts) {
   try {
     const result = await fetchTmdbJson(path, env, ctx, opts);
     if (result.status !== 200) return { ok: false, reason: `TMDB responded ${result.status}` };
-    return { ok: true, text: result.text, stale: result.cache === 'STALE' };
+    return { ok: true, text: result.text, stale: result.cache === 'STALE', storedAt: result.storedAt };
   } catch (err) {
     return { ok: false, reason: String((err && err.message) || err || 'unavailable') };
   }
@@ -1625,8 +1625,13 @@ function batchBody(parts) {
  */
 function runBatchPlan(paths, env, ctx, opts) {
   const parts = new Array(paths.length).fill(null);
-  const all = Promise.all(paths.map((path, i) => batchPart(path, env, ctx, opts)
-    .then((part) => { parts[i] = part; return part; })));
+  // Share the complete cache operation only within this assemble. Sharing just
+  // upstream fetches still repeats edge reads, writes and budget accounting.
+  const byPath = new Map();
+  const all = Promise.all(paths.map((path, i) => {
+    if (!byPath.has(path)) byPath.set(path, batchPart(path, env, ctx, opts));
+    return byPath.get(path).then((part) => { parts[i] = part; return part; });
+  }));
   return { parts, all };
 }
 
@@ -1654,7 +1659,7 @@ async function refreshBatch(paths, planKey, env, ctx, planCacheKey, budget) {
     const run = runBatchPlanOnce(planKey, paths, env, ctx, { revalidate: true, budget });
     const parts = await run.all;
     if (parts.every((p) => p && p.ok && !p.stale)) {
-      await putBatchColo(planCacheKey, batchBody(parts), Date.now(), budget);
+      await putBatchColo(planCacheKey, batchBody(parts), planStoredAt(parts), budget);
     } else {
       /*  TMDB could not refresh part of the plan. Storing it anyway would stamp
        *  the old bodies as fresh for another BATCH_CACHE_TTL (pre-outage data
@@ -1753,7 +1758,12 @@ function putBatchColo(planCacheKey, body, storedAt, budget) {
  *  for a whole BATCH_CACHE_TTL. */
 function planStoredAt(parts) {
   const now = Date.now();
-  return parts.some((part) => part && part.stale) ? now - BATCH_CACHE_TTL * 1000 : now;
+  // Reassembly must not renew a still-fresh part's original freshness window.
+  const oldest = parts.reduce((t, part) => Math.min(t,
+    part && Number.isFinite(part.storedAt) && part.storedAt > 0
+      ? part.storedAt : now - BATCH_CACHE_TTL * 1000), now);
+  return parts.some((part) => part && part.stale)
+    ? Math.min(oldest, now - BATCH_CACHE_TTL * 1000) : oldest;
 }
 
 /*  Per-PLAN in-flight map, scoped to the request (see IN-FLIGHT WORK IS SHARED
@@ -1820,7 +1830,9 @@ async function handleTmdbBatch(request, env, ctx, url) {
    *  or a miss then reserves one TMDB fetch per path plus the plan's own write
    *  before anything optional (per-path edge lookups/writes, retries) runs. */
   const budget = subrequestBudget(env, 0);
-  const reserveForAssemble = () => { budget.reserve = paths.length + 1; };
+  const reserveForAssemble = () => { budget.reserve = new Set(paths).size + 1; };
+  // Include the assembled-cache lookup in the foreground work deadline.
+  const deadlineAt = Date.now() + envInt(env, 'BATCH_DEADLINE_MS', BATCH_DEADLINE_MS, 100, 9000);
 
   const batchHeaders = (cacheState) => ({
     'content-type': 'application/json',
@@ -1837,7 +1849,8 @@ async function handleTmdbBatch(request, env, ctx, url) {
   const colo = coloCache();
   if (colo && budgetRequire(budget)) {
     try {
-      const cached = await colo.match(planCacheKey);
+      const cached = await settleWithin(colo.match(planCacheKey),
+        Math.min(TMDB_EDGE_READ_TIMEOUT_MS, Math.max(0, deadlineAt - Date.now())), null);
       if (cached) {
         const storedAt = Number(cached.headers.get(BATCH_STORED_HEADER)) || 0;
         const fresh = !storedAt || Date.now() - storedAt < BATCH_CACHE_TTL * 1000;
@@ -1856,7 +1869,7 @@ async function handleTmdbBatch(request, env, ctx, url) {
     }
   }
 
-  // LAYER 2 — assemble, collapsed to one run per plan per isolate, bounded by
+  // LAYER 2 — assemble, collapsed to one run per plan per request, bounded by
   // BATCH_DEADLINE_MS. Parts come from memory, the location cache or TMDB.
   reserveForAssemble();
   const run = runBatchPlanOnce(planKey, paths, env, ctx, { budget });
@@ -1865,7 +1878,7 @@ async function handleTmdbBatch(request, env, ctx, url) {
 
   let timer = null;
   // Overridable like the other tunables (and so the deadline is testable).
-  const deadlineMs = envInt(env, 'BATCH_DEADLINE_MS', BATCH_DEADLINE_MS, 100, 9000);
+  const deadlineMs = Math.max(0, deadlineAt - Date.now());
   const finished = await Promise.race([
     run.all.then(() => true),
     new Promise((resolve) => { timer = setTimeout(() => resolve(false), deadlineMs); })

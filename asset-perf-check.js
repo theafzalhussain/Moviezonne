@@ -853,20 +853,13 @@ check('errors and metrics still reach Datadog on every device', () => {
     'long-task collection was turned off — the TV data we act on comes from it');
   assert.ok(/trackUserInteractions:\s*true/.test(htmlCode),
     'interaction tracking was turned off');
-  /*  Resource collection is now weak-device-gated rather than unconditional. It
-   *  is the one RUM feature whose cost scales with the page: a cold homepage
-   *  produces ~90 resource entries, each an event to serialise and beacon, and on
-   *  a 2-core phone that is main-thread time spent measuring instead of
-   *  rendering. What must not happen is it being switched off outright - a
-   *  capable device has to keep reporting it or the resource panels go dark and
-   *  nobody can tell a regression from a quiet day. So this asserts the gate, not
-   *  a constant, and it asserts the gate is the WEAK one: tying it to anything
-   *  broader (isMobile, say) would blind the majority of real traffic. */
+  /* Resource percentiles must include TV and low-end cohorts. Replay remains
+   * weak-device-gated; runtime cohort coverage is checked separately by
+   * rum-device-coverage.test.js. Track instrumentation overhead on real devices. */
   assert.ok(/trackResources:\s*window\.__mzRumProfile\.trackResources/.test(htmlCode),
     'trackResources is not read from the device profile');
-  assert.ok(/trackResources:\s*!isWeak/.test(htmlCode),
-    'trackResources is not gated on the weak-device verdict, so either every '
-      + 'device pays for it or no device reports it');
+  assert.ok(/trackResources:\s*true/.test(htmlCode) && !/trackResources:\s*!isWeak/.test(htmlCode),
+    'resource tracking must not exclude TV or low-end device cohorts');
 });
 
 check('the RUM noise filter drops only third-party, non-actionable errors', () => {
