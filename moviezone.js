@@ -861,7 +861,11 @@ let _mzCacheDirty = true;
 
 const _mzOnIdle = (typeof requestIdleCallback === 'function')
   ? (fn) => requestIdleCallback(fn, { timeout: 2000 })
-  : (fn) => setTimeout(fn, 300);
+  : (fn) => setTimeout(() => {
+    // Legacy TV/mobile browsers need the same bounded write batches as an
+    // expired idle callback. Lifecycle flushes still bypass this scheduler.
+    fn({ didTimeout: true, timeRemaining: () => 0 });
+  }, 300);
 
 /*  Quota is ~5 MB and this cache has no natural bound, so a long-lived
  *  session will eventually fill it. On overflow we drop a batch of entries and
