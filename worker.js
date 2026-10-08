@@ -1330,8 +1330,14 @@ async function fetchTmdbJson(path, env, ctx, opts) {
 
   if (stale) {
     if (options.revalidate) {
-      const fresh = await refreshTmdbNow(path, softTtl, env, ctx, budget).catch(() => null);
-      if (fresh) return fresh;
+      // Share the background path's isolate-only cooldown, not its promise.
+      // A denied rebuild must retain STALE and its original stored-at stamp.
+      if (state && !takeCooldown(state.refreshedAt, path, TMDB_REFRESH_COOLDOWN_MS)) {
+        budgetRelease(budget);
+      } else {
+        const fresh = await refreshTmdbNow(path, softTtl, env, ctx, budget).catch(() => null);
+        if (fresh) return fresh;
+      }
     } else {
       scheduleTmdbRefresh(path, softTtl, env, ctx, budget);
     }

@@ -11,7 +11,7 @@
     "test:trailers": "node trailer-langs-check.js",
     "test:pager": "node feed-pager-check.js && node feed-pager.browser.test.js",
     "test:push": "node worker-push.test.js",
-    "test:perf": "node asset-seal.js && node asset-perf-check.js && node player-health.test.js && node worker-perf-check.js && node worker-hero-check.js && node ranking-parity-check.js && node cache-idle-fallback.test.js && node rum-device-coverage.test.js && node worker-cache-followup.test.js",
+    "test:perf": "node asset-seal.js && node asset-perf-check.js && node player-health.test.js && node worker-perf-check.js && node worker-hero-check.js && node ranking-parity-check.js && node cache-idle-fallback.test.js && node rum-device-coverage.test.js && node worker-cache-followup.test.js && node fetch-body-lifetime.test.js && node worker-refresh-cooldown.test.js",
     "test:cwv": "node cwv-check.js",
     "test:resilience": "node tmdb-resilience-check.js",
     "assets:seal": "node asset-seal.js --write",

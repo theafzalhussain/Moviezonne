@@ -1544,7 +1544,9 @@ async function _mzFetchAttempt(urlStr, outerSignal, notAfter) {
 
   try {
     const r = await fetch(urlStr, { signal: attemptController.signal });
-    return r;
+    // Keep the timer, cancellation relay and lane until the body is consumed.
+    // Error responses retain their status/headers for the retry policy below.
+    return r.ok ? { ok: true, data: await r.json() } : r;
   } catch (err) {
     if (timedOut) {
       const e = new Error('TMDB request timed out after ' + timeoutMs + 'ms');
@@ -1592,7 +1594,7 @@ async function _mzFetchWithRetry(urlStr, outerSignal, meta) {
        *  means the budget ran out while this retry queued for a lane. */
       const r = await _mzFetchAttempt(urlStr, outerSignal, attempt && deadline);
       if (!r) break;
-      if (r.ok) return await r.json();
+      if (r.ok) return r.data;
 
       if (!_mzShouldRetryStatus(r.status, attempt) || attempt === MZ_FETCH_MAX_RETRIES) {
         const e = new Error('TMDB responded ' + r.status);
