@@ -839,8 +839,9 @@ check('audits are never gated out — Lighthouse must see what users see', () =>
 });
 
 check('Session Replay is switched off on weak devices only', () => {
-  assert.ok(/sessionReplaySampleRate:\s*isWeak\s*\?\s*0\s*:\s*10/.test(htmlCode),
-    'the replay budget is not tied to the weak-device verdict');
+  assert.ok(/var noReplay = isWeak \|\| isMobileUA;/.test(htmlCode)
+    && /sessionReplaySampleRate:\s*noReplay\s*\?\s*0\s*:\s*10/.test(htmlCode),
+    'the replay budget is not tied to the weak-device and phone verdicts');
   assert.ok(/navigator\.hardwareConcurrency\s*<\s*4/.test(htmlCode)
     && /navigator\.deviceMemory\s*<\s*4/.test(htmlCode),
     'the weak-device thresholds no longer match isLowEnd in moviezone.js');

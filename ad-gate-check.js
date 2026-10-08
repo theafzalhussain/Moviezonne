@@ -541,8 +541,10 @@ check('the crawler and TV regexes have not drifted from the RUM gate', () => {
   equal(crawler[0], crawler[1], 'the ad gate and the RUM gate no longer agree on what a crawler is');
 
   const tv = [...html.matchAll(/\/\\b\(\?:smart-\?tv\|[^\n]*?\/i/g)].map((m) => m[0]);
-  assert(tv.length === 2, 'expected the TV regex twice (RUM + ads), found ' + tv.length);
-  equal(tv[0], tv[1], 'the ad gate and the RUM gate no longer agree on what a TV is');
+  // Three copies: early perf mode (head), RUM gate, ad gate. All must agree.
+  assert(tv.length === 3, 'expected the TV regex three times (perf mode + RUM + ads), found ' + tv.length);
+  equal(tv[0], tv[1], 'the early perf-mode gate and the RUM gate no longer agree on what a TV is');
+  equal(tv[1], tv[2], 'the ad gate and the RUM gate no longer agree on what a TV is');
 });
 
 /*  ── the popunder cap: the one thing standing between "monetised" and "hostile" ── */

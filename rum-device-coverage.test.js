@@ -39,9 +39,11 @@ function boot(nav = {}, hostname = 'moviezonne.example') {
   return { profile: window.__mzRumProfile, inserted, configs };
 }
 
+// Fourth field: replay off (and slim agent) even though the device is not weak.
 const cohorts = [
   ['desktop', { deviceMemory: 8, hardwareConcurrency: 8 }, false],
-  ['capable phone', { userAgent: 'Mozilla/5.0 Android Mobile', deviceMemory: 8, hardwareConcurrency: 8 }, false],
+  ['capable phone', { userAgent: 'Mozilla/5.0 Android Mobile', deviceMemory: 8, hardwareConcurrency: 8 }, false, true],
+  ['capable iPhone', { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Mobile/15E148', deviceMemory: 8, hardwareConcurrency: 8 }, false, true],
   ['threshold hardware', { deviceMemory: 4, hardwareConcurrency: 4 }, false],
   ['missing hardware hints', {}, false],
   ['zero hardware hints', { deviceMemory: 0, hardwareConcurrency: 0 }, false],
@@ -52,8 +54,9 @@ const cohorts = [
     [`TV ${ua}`, { userAgent: ua, deviceMemory: 8, hardwareConcurrency: 8 }, true])
 ];
 
-for (const [name, nav, weak] of cohorts) {
-  test(`${name}: resource coverage, unchanged replay/privacy/sampling`, () => {
+for (const [name, nav, weak, phone = false] of cohorts) {
+  const noReplay = weak || phone;
+  test(`${name}: resource coverage, replay policy, unchanged privacy/sampling`, () => {
     const { profile, inserted, configs } = boot(nav);
     assert.equal(profile.weakDevice, weak);
     assert.equal(profile.skipped, false);
@@ -61,7 +64,7 @@ for (const [name, nav, weak] of cohorts) {
     assert.equal(configs.length, 1);
     const config = configs[0];
     assert.equal(config.trackResources, true);
-    assert.equal(config.sessionReplaySampleRate, weak ? 0 : 10);
+    assert.equal(config.sessionReplaySampleRate, noReplay ? 0 : 10);
     assert.equal(config.sessionSampleRate, 100);
     assert.equal(config.env, 'production');
     assert.equal(config.defaultPrivacyLevel, 'mask-user-input');
@@ -69,7 +72,7 @@ for (const [name, nav, weak] of cohorts) {
     assert.equal(config.trackUserInteractions, true);
     assert.equal(inserted.length, 1);
     assert.equal(inserted[0].async, 1);
-    assert.equal(inserted[0].src.split('/').pop(), weak ? 'datadog-rum-slim.js' : 'datadog-rum.js');
+    assert.equal(inserted[0].src.split('/').pop(), noReplay ? 'datadog-rum-slim.js' : 'datadog-rum.js');
     // Resource events are not dropped, while existing error filtering stays active.
     assert.equal(config.beforeSend({ type: 'resource', resource: { type: 'fetch' } }), true);
     assert.equal(config.beforeSend({ type: 'error', error: { message: 'ResizeObserver loop completed with undelivered notifications' } }), false);
@@ -106,4 +109,36 @@ for (const userAgent of ['Chrome-Lighthouse', 'Google Page Speed Insights']) {
     assert.equal(configs[0].trackResources, true);
     assert.equal(configs[0].sessionReplaySampleRate, 0);
   });
+}
+
+// The perf-mode decision must run in <head>, before the stylesheet, so phones
+// never paint the full effect set and then restyle the whole document.
+const perfScripts = [...html.replace(/<!--[\s\S]*?-->/g, '').matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)]
+  .filter(m => m[1].includes("classList.add('low-end-mode')") && !m[1].includes('__mzRumProfile'));
+test('early perf mode script sits before the main stylesheet', () => {
+  assert.equal(perfScripts.length, 1);
+  const scriptAt = html.indexOf(perfScripts[0][0]);
+  const cssAt = html.indexOf('<link rel="stylesheet" href="/moviezone.min.css');
+  assert.ok(scriptAt > 0 && cssAt > scriptAt, 'perf mode must be decided before the stylesheet applies');
+});
+function perfMode(nav, reduceMotion = false) {
+  const classes = new Set();
+  vm.runInNewContext(perfScripts[0][1], {
+    navigator: { userAgent: 'Mozilla/5.0 Chrome/120.0', ...nav },
+    document: { documentElement: { classList: { add: c => classes.add(c) } } },
+    window: { matchMedia: () => ({ matches: reduceMotion }) }
+  }, { timeout: 1000 });
+  return classes.has('low-end-mode');
+}
+for (const [name, nav, rm, expected] of [
+  ['capable desktop', { deviceMemory: 8, hardwareConcurrency: 8 }, false, false],
+  ['Android phone', { userAgent: 'Mozilla/5.0 (Linux; Android 14) Mobile', deviceMemory: 8, hardwareConcurrency: 8 }, false, true],
+  ['iPhone', { userAgent: 'Mozilla/5.0 (iPhone) Mobile' }, false, true],
+  ['iPad', { userAgent: 'Mozilla/5.0 (iPad)' }, false, true],
+  ['weak laptop', { deviceMemory: 2, hardwareConcurrency: 8 }, false, true],
+  ['reduced motion desktop', { deviceMemory: 8, hardwareConcurrency: 8 }, true, true],
+  ['capable Android TV left to tv-mode', { userAgent: 'Mozilla/5.0 (Linux; Android 12; BRAVIA 4K) Android TV', deviceMemory: 8, hardwareConcurrency: 8 }, false, false],
+  ['weak Tizen TV still lightweight', { userAgent: 'SMART-TV Tizen', deviceMemory: 2, hardwareConcurrency: 2 }, false, true]
+]) {
+  test(`early perf mode: ${name}`, () => assert.equal(perfMode(nav, rm), expected));
 }

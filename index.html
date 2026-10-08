@@ -10,6 +10,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="color-scheme" content="dark">
+<script>(function(){try{var n=navigator,u=n.userAgent||'',t=/\b(?:smart-?tv|smarttv|googletv|android\s*tv|appletv|tvos|crkey|roku|web0?s|tizen|vidaa|hbbtv|netcast|viera|bravia|aquos)\b|\bAFT[A-Z0-9]/i.test(u),m=!t&&/Mobi|Android|iPhone|iPad/i.test(u),l=(n.deviceMemory&&n.deviceMemory<4)||(n.hardwareConcurrency&&n.hardwareConcurrency<4),r=false;try{r=window.matchMedia('(prefers-reduced-motion: reduce)').matches}catch(e){}if(m||l||r)document.documentElement.classList.add('low-end-mode')}catch(e){}})();</script>
 <link rel="preconnect" href="https://image.tmdb.org">
 
 <link rel="stylesheet" href="/moviezone.min.css?v=9.19">
@@ -686,11 +687,15 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
     || (navigator.deviceMemory && navigator.deviceMemory < 4)
     || (navigator.hardwareConcurrency && navigator.hardwareConcurrency < 4);
 
+  /*  Phones skip replay too: slim agent, no DOM recording on weak CPUs. */
+  var isMobileUA = !isTvUA && /Mobi|Android|iPhone|iPad/i.test(ua);
+  var noReplay = isWeak || isMobileUA;
+
   window.__mzRumProfile = {
     skipped: isCrawler,
     env: isLocal ? 'development' : 'production',
     sessionSampleRate: isLocal ? 0 : 100,
-    sessionReplaySampleRate: isWeak ? 0 : 10,
+    sessionReplaySampleRate: noReplay ? 0 : 10,
     /*  Keep resource timing coverage for TVs and low-end devices too.
      *  Resource tracking works with the slim agent; replay stays gated below. */
     trackResources: true,
@@ -1045,10 +1050,6 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
 </head>
 <body>
 
-<!-- The custom cursor layers (#cursor-glow / #cursor-ring / #cursor-dot) used to
-     sit here. Removed for performance: they were drawn by a per-frame JS loop and
-     required `cursor: none` sitewide, so the pointer lagged behind the hand
-     whenever the main thread was busy. The native pointer is drawn by the OS. -->
 
 <!-- ── CINEMATIC LOADER ── -->
 <div id="mz-loader">
