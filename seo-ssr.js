@@ -2981,9 +2981,16 @@ function registerSeoRoutes(app, deps) {
  *  the preload stops matching the request and the hero is downloaded twice. */
 const WIDE_MQ = '(min-width: 1025px)';
 const MOBILE_MQ = '(max-width: 1024px)';
+/*  Upright phones get the poster (HERO_PORTRAIT_MQ in moviezone.js). The backdrop
+ *  preload is then narrowed to NARROW_MQ so the two preloads never overlap. */
+const PORTRAIT_MQ = '(max-width: 767px) and (orientation: portrait)';
+const NARROW_MQ = '(max-width: 1024px) and (min-width: 768px), (max-width: 1024px) and (orientation: landscape)';
+const POSTER_PATH_RE = /^\/[A-Za-z0-9_-]+\.(?:jpg|jpeg|png|webp)$/;
+const posterUrl = (p) => 'https://image.tmdb.org/t/p/w780' + p;
 
-function heroPreloadTag(heroUrl) {
+function heroPreloadTag(heroUrl, posterPath) {
   const m = /^(https:\/\/image\.tmdb\.org\/t\/p\/)w\d+(\/.+)$/.exec(heroUrl);
+  const poster = POSTER_PATH_RE.test(posterPath || '') ? posterPath : '';
   if (!m) {
     return '<link rel="preload" as="image" href="' + escAttr(heroUrl) + '" fetchpriority="high">\n';
   }
@@ -2996,11 +3003,16 @@ function heroPreloadTag(heroUrl) {
    *  CSS pixels, which is the same axis the client branches on, so the two
    *  always agree.
    */
-  return '<link rel="preload" as="image" media="' + MOBILE_MQ + '"'
+  return (poster
+         ? '<link rel="preload" as="image" media="' + PORTRAIT_MQ + '"'
+           + ' href="' + escAttr(posterUrl(poster)) + '" fetchpriority="high">\n'
+         : '')
+       + '<link rel="preload" as="image" media="' + (poster ? NARROW_MQ : MOBILE_MQ) + '"'
        + ' href="' + escAttr(base + 'w780' + path) + '" fetchpriority="high">\n'
        + '<link rel="preload" as="image" media="' + WIDE_MQ + '"'
        + ' href="' + escAttr(base + 'w1280' + path) + '" fetchpriority="high">\n'
-       + '<meta name="mz-hero-backdrop" content="' + escAttr(path) + '">\n';
+       + '<meta name="mz-hero-backdrop" content="' + escAttr(path) + '">\n'
+       + (poster ? '<meta name="mz-hero-poster" content="' + escAttr(poster) + '">\n' : '');
 }
 
 /* ── The hero slide, server-rendered ─────────────────────────────────────────
@@ -3042,13 +3054,15 @@ const HERO_SLIDE_END = '<!--/MZ_HERO_SLIDE-->';
 const HERO_SLIDE_RE = /<!--MZ_HERO_SLIDE-->[\s\S]*?<!--\/MZ_HERO_SLIDE-->/;
 const TRACK_OPEN = '<div class="carousel-track" id="carouselTrack">';
 
-function heroSlideMarkup(heroUrl) {
+function heroSlideMarkup(heroUrl, posterPath) {
+  const poster = POSTER_PATH_RE.test(posterPath || '') ? posterPath : '';
   const m = /^(https:\/\/image\.tmdb\.org\/t\/p\/)w\d+(\/.+)$/.exec(heroUrl);
   const img = (url) => '<img class="slide-bg-img" src="' + escAttr(url) + '" alt=""'
     + ' width="1280" height="720" fetchpriority="high" decoding="async" draggable="false">';
 
   const picture = !m ? img(heroUrl)
     : '<picture>'
+      + (poster ? '<source media="' + PORTRAIT_MQ + '" srcset="' + escAttr(posterUrl(poster)) + '">' : '')
       + '<source media="' + MOBILE_MQ + '" srcset="' + escAttr(m[1] + 'w780' + m[2]) + '">'
       + '<source media="' + WIDE_MQ + '" srcset="' + escAttr(m[1] + 'w1280' + m[2]) + '">'
       + img(m[1] + 'w1280' + m[2])
@@ -3077,7 +3091,7 @@ function heroSlideMarkup(heroUrl) {
  *                           to optimizeHomeHead
  * @returns {string} rewritten HTML
  */
-function injectHeroSlide(shell, heroUrl) {
+function injectHeroSlide(shell, heroUrl, posterPath) {
   if (!shell) return shell;
   const html = shell.replace(HERO_SLIDE_RE, '');
   if (!heroUrl) return html;
@@ -3087,7 +3101,7 @@ function injectHeroSlide(shell, heroUrl) {
 
   const cut = at + TRACK_OPEN.length;
   return html.slice(0, cut)
-    + HERO_SLIDE_MARK + heroSlideMarkup(heroUrl) + HERO_SLIDE_END
+    + HERO_SLIDE_MARK + heroSlideMarkup(heroUrl, posterPath) + HERO_SLIDE_END
     + html.slice(cut);
 }
 
@@ -3127,7 +3141,7 @@ const PERF_HEAD_RE = /<!--MZ_PERF_HEAD-->[\s\S]*?<!--\/MZ_PERF_HEAD-->\r?\n?/;
  * @param {string} [heroUrl] absolute URL of the hero backdrop to preload
  * @returns {string} rewritten HTML (unchanged if the expected head is absent)
  */
-function optimizeHomeHead(shell, heroUrl) {
+function optimizeHomeHead(shell, heroUrl, posterPath) {
   if (!shell) return shell;
 
   /*  The host file's line ending, not this process's. index.html is CRLF on a
@@ -3186,7 +3200,7 @@ function optimizeHomeHead(shell, heroUrl) {
    *  on the next build: the template is the source of truth, and index.html has
    *  to stay a byte-identical product of it. */
   const block = PERF_HEAD_MARK + '\n'
-    + (heroUrl ? heroPreloadTag(heroUrl) : '')
+    + (heroUrl ? heroPreloadTag(heroUrl, posterPath) : '')
     + '<!--/MZ_PERF_HEAD-->';
 
   /*  Built with '\n' throughout for readability, then normalised to the host

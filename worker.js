@@ -3268,6 +3268,11 @@ const TMDB_IMG_PREFIX = 'https://image.tmdb.org/t/p/';
  *  is a double download rather than a cache hit. */
 const HERO_WIDE_MQ = '(min-width: 1025px)';
 const HERO_MOBILE_MQ = '(max-width: 1024px)';
+/*  Portrait phones get the poster; the backdrop preload narrows to the rest.
+ *  Byte-identical to PORTRAIT_MQ / NARROW_MQ in seo-ssr.js. */
+const HERO_PORTRAIT_MQ = '(max-width: 767px) and (orientation: portrait)';
+const HERO_NARROW_MQ = '(max-width: 1024px) and (min-width: 768px), (max-width: 1024px) and (orientation: landscape)';
+const HERO_IMG_PATH_RE = /^\/[A-Za-z0-9_-]+\.(?:jpg|jpeg|png|webp)$/;
 
 /*  How long the homepage will wait for the hero before shipping without it.
  *
@@ -3279,22 +3284,22 @@ const HERO_MOBILE_MQ = '(max-width: 1024px)';
  *  thing. */
 const HERO_RESOLVE_BUDGET_MS = 400;
 
-/** The current hero backdrop path, or '' if it cannot be resolved cheaply. */
+/** The current hero {backdrop, poster} paths, or null if they cannot be resolved cheaply. */
 async function heroBackdropPath(env, ctx) {
   try {
     const result = await fetchTmdbJson(HERO_TRENDING_PATH, env, ctx);
-    if (result.status !== 200) return '';
+    if (result.status !== 200) return null;
     const first = (JSON.parse(result.text).results || [])[0];
     const path = first && first.backdrop_path;
+    const poster = first && first.poster_path;
     /*  Validated, not trusted. This value is interpolated into a URL in a
      *  response header and into an attribute in the document, so it is held to
      *  the shape TMDB actually returns rather than to "it is a string". */
-    return (typeof path === 'string' && /^\/[A-Za-z0-9_-]+\.(?:jpg|jpeg|png|webp)$/.test(path))
-      ? path
-      : '';
+    if (!(typeof path === 'string' && HERO_IMG_PATH_RE.test(path))) return null;
+    return { backdrop: path, poster: (typeof poster === 'string' && HERO_IMG_PATH_RE.test(poster)) ? poster : '' };
   } catch (err) {
     console.log('[hero] resolve failed: ' + (err && err.message));
-    return '';
+    return null;
   }
 }
 
@@ -3315,11 +3320,12 @@ async function heroBackdropPath(env, ctx) {
  *  either template is touched. Streaming, so the 128 KB document is never
  *  buffered.
  */
-function rewriteHeroPreload(response, backdropPath) {
+function rewriteHeroPreload(response, backdropPath, posterPath) {
   const mobile = TMDB_IMG_PREFIX + 'w780' + backdropPath;
   const wide = TMDB_IMG_PREFIX + 'w1280' + backdropPath;
-  /** w1280 for the wide branch, w780 for everything else - see heroPreloadTag(). */
-  const forMedia = (media) => (media === HERO_WIDE_MQ ? wide : mobile);
+  const poster = posterPath ? TMDB_IMG_PREFIX + 'w780' + posterPath : mobile;
+  /** Poster for upright phones, w1280 for wide, w780 backdrop for the rest. */
+  const forMedia = (media) => (media === HERO_WIDE_MQ ? wide : media === HERO_PORTRAIT_MQ ? poster : mobile);
 
   return new HTMLRewriter()
     .on('link[rel="preload"][as="image"]', {
@@ -3334,6 +3340,9 @@ function rewriteHeroPreload(response, backdropPath) {
     })
     .on('meta[name="mz-hero-backdrop"]', {
       element(el) { el.setAttribute('content', backdropPath); }
+    })
+    .on('meta[name="mz-hero-poster"]', {
+      element(el) { el.setAttribute('content', posterPath || ''); }
     })
     /*  Slide 0, emitted statically by injectHeroSlide() so the parser has an LCP
      *  element to consume immediately. Scoped to [data-mz-hero-ssr] so no other
@@ -3358,18 +3367,21 @@ function rewriteHeroPreload(response, backdropPath) {
 }
 
 /** The media-scoped Early Hint pair for a resolved hero, in <link> header form. */
-function heroEarlyHints(backdropPath) {
+function heroEarlyHints(backdropPath, posterPath) {
   /*  Media-scoped exactly like the tags, for the reason documented on
    *  heroPreloadTag(): `sizes` resolves against device pixels, so a DPR2 phone
    *  asks for ~820px and gets upgraded to the 116 KB w1280 copy where the app
    *  intends the 45 KB one. A media query is evaluated on CSS pixels, the same
    *  axis the client branches on, so the two cannot disagree. */
-  return [
+  return (posterPath
+    ? ['<' + TMDB_IMG_PREFIX + 'w780' + posterPath + '>; rel=preload; as=image; '
+      + 'media="' + HERO_PORTRAIT_MQ + '"; fetchpriority=high']
+    : []).concat([
     '<' + TMDB_IMG_PREFIX + 'w780' + backdropPath + '>; rel=preload; as=image; '
-      + 'media="' + HERO_MOBILE_MQ + '"; fetchpriority=high',
+      + 'media="' + (posterPath ? HERO_NARROW_MQ : HERO_MOBILE_MQ) + '"; fetchpriority=high',
     '<' + TMDB_IMG_PREFIX + 'w1280' + backdropPath + '>; rel=preload; as=image; '
       + 'media="' + HERO_WIDE_MQ + '"; fetchpriority=high'
-  ];
+  ]);
 }
 
 /*  ══════════════════════════════════════════════════════════════════════════
@@ -3471,14 +3483,16 @@ async function renderHome(request, env, ctx) {
   const heroWork = heroBackdropPath(env, ctx);
   ctx.waitUntil(heroWork.catch(() => {}));
   let timer = null;
-  const heroPath = await Promise.race([
+  const hero = await Promise.race([
     heroWork,
-    new Promise((resolve) => { timer = setTimeout(() => resolve(''), HERO_RESOLVE_BUDGET_MS); })
+    new Promise((resolve) => { timer = setTimeout(() => resolve(null), HERO_RESOLVE_BUDGET_MS); })
   ]);
   if (timer !== null) clearTimeout(timer);
+  const heroPath = hero ? hero.backdrop : '';
+  const heroPoster = hero ? hero.poster : '';
 
   if (heroPath) {
-    for (const hint of heroEarlyHints(heroPath)) headers.append('Link', hint);
+    for (const hint of heroEarlyHints(heroPath, heroPoster)) headers.append('Link', hint);
     // The asset's validator describes bytes that are no longer being sent.
     const assetTag = assetResponse.headers.get('ETag') || '';
     headers.delete('ETag');
@@ -3486,7 +3500,7 @@ async function renderHome(request, env, ctx) {
     // The deploy is part of the validator too: a Worker-only change to the
     // rewritten bytes must not revalidate into a 304 for the old ones.
     if (assetTag) {
-      headers.set('ETag', weakEtag(bareEtag(assetTag) + '|' + heroPath + '|' + deployVersion(env)));
+      headers.set('ETag', weakEtag(bareEtag(assetTag) + '|' + heroPath + '|' + heroPoster + '|' + deployVersion(env)));
     }
     headers.set(HOME_STORED_HEADER, String(Date.now()));
   }
@@ -3496,7 +3510,7 @@ async function renderHome(request, env, ctx) {
     statusText: assetResponse.statusText,
     headers
   });
-  if (heroPath) response = rewriteHeroPreload(response, heroPath);
+  if (heroPath) response = rewriteHeroPreload(response, heroPath, heroPoster);
   return { response, cacheable: Boolean(heroPath) };
 }
 

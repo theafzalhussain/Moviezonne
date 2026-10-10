@@ -280,17 +280,18 @@ const shippedHero = (indexHtml.match(/<meta name="mz-hero-backdrop" content="([^
 check('index.html still carries a hero backdrop meta to read', !!shippedHero);
 
 const shippedHeroUrl = 'https://image.tmdb.org/t/p/w780' + (shippedHero || '');
-const reoptimised = seo.optimizeHomeHead(indexHtml, shippedHeroUrl);
+const shippedPoster = (indexHtml.match(/<meta name="mz-hero-poster" content="([^"]+)"/) || [])[1] || '';
+const reoptimised = seo.optimizeHomeHead(indexHtml, shippedHeroUrl, shippedPoster);
 check('optimizeHomeHead is a no-op on the index.html it generated',
   reoptimised === indexHtml,
   'the nightly seo:refresh would rewrite <head> — run it and read the diff');
 check('and running it twice changes nothing further',
-  seo.optimizeHomeHead(reoptimised, shippedHeroUrl) === reoptimised,
+  seo.optimizeHomeHead(reoptimised, shippedHeroUrl, shippedPoster) === reoptimised,
   'not idempotent: each build would drift the head again');
 
 // Regexes still match — proven by removing the block and watching it return.
 const stripped = indexHtml.replace(/<!--MZ_PERF_HEAD-->[\s\S]*?<!--\/MZ_PERF_HEAD-->\r?\n?/, '');
-const rebuilt = seo.optimizeHomeHead(stripped, shippedHeroUrl);
+const rebuilt = seo.optimizeHomeHead(stripped, shippedHeroUrl, shippedPoster);
 check('optimizeHomeHead can still find its anchors in the real index.html',
   stripped !== indexHtml && rebuilt.includes('<!--MZ_PERF_HEAD-->'),
   'its regexes stopped matching, so the nightly run became a silent no-op');
