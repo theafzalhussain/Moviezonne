@@ -143,6 +143,9 @@ async function tmdb(endpoint, page, extra) {
   // rather than dropping the preload and regressing LCP.
   const existingHero = (shell.match(/as="image" href="(https:\/\/image\.tmdb\.org[^"]+)"/) || [])[1];
   const heroUrl = freshHero || existingHero || null;
+  // Portrait-phone poster travels with the backdrop it belongs to.
+  const existingPoster = (shell.match(/<meta name="mz-hero-poster" content="([^"]+)"/) || [])[1] || '';
+  const heroPoster = freshHero ? ((heroItem && heroItem.poster_path) || '') : (existingHero ? existingPoster : '');
   if (!freshHero && existingHero) {
     console.warn('  ! No hero from TMDB — keeping the existing preload.');
   }
@@ -196,7 +199,7 @@ async function tmdb(endpoint, page, extra) {
   // generated file. The hero slide MUST be written from the same heroUrl as the
   // preload: if the two ever disagree the preload goes unused again, which is
   // the warning this pairing exists to remove.
-  const tuned = injectHeroSlide(optimizeHomeHead(shell, heroUrl), heroUrl);
+  const tuned = injectHeroSlide(optimizeHomeHead(shell, heroUrl, heroPoster), heroUrl, heroPoster);
   const block = renderHomeLinkBlock(groups);
   const out = injectHomeLinks(tuned, block);
 
