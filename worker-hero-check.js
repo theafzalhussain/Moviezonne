@@ -67,6 +67,9 @@ function check(label, fn) {
  *  index.html: the whole point is that the file is stale, so a test that used the
  *  shipped value could pass while the rewrite did nothing at all. */
 const LIVE_BACKDROP = '/zzTestLiveBackdrop123.jpg';
+// The live title's poster: upright phones get this instead of a cropped backdrop.
+const LIVE_POSTER = '/zzTestLivePoster456.jpg';
+const PORTRAIT_MQ = '(max-width: 767px) and (orientation: portrait)';
 const SHIPPED_BACKDROP =
   (fs.readFileSync(HOME_FILE, 'utf8')
     .match(/<meta name="mz-hero-backdrop" content="([^"]+)"/) || [])[1];
@@ -255,7 +258,7 @@ function fakeKv() {
         if (options.tmdbFails) return new Response('upstream down', { status: 503 });
         if (options.tmdbHangs) { await new Promise((r) => setTimeout(r, 3000)); }
         return new Response(
-          JSON.stringify({ results: [{ id: 1, title: 'Live Pick', backdrop_path: LIVE_BACKDROP }] }),
+          JSON.stringify({ results: [{ id: 1, title: 'Live Pick', backdrop_path: LIVE_BACKDROP, poster_path: LIVE_POSTER }] }),
           { status: 200, headers: { 'content-type': 'application/json' } }
         );
       }
@@ -314,8 +317,11 @@ function fakeKv() {
     const hints = [...live.body.matchAll(/<link[^>]*rel="preload"[^>]*as="image"[^>]*>/g)]
       .map((m) => m[0])
       .filter((t) => t.includes('image.tmdb.org'));
-    assert.strictEqual(hints.length, 2, 'expected exactly 2 TMDB image preloads, got ' + hints.length);
-    const mobile = hints.find((t) => t.includes('max-width: 1024px'));
+    assert.strictEqual(hints.length, 3, 'expected 3 TMDB image preloads (portrait poster, small, wide), got ' + hints.length);
+    const portrait = hints.find((t) => t.includes('media="' + PORTRAIT_MQ + '"'));
+    assert.ok(portrait && portrait.includes('/t/p/w780' + LIVE_POSTER),
+      'upright phones do not preload the live poster: ' + portrait);
+    const mobile = hints.find((t) => t.includes('max-width: 1024px') && t.includes('min-width: 768px'));
     const wide = hints.find((t) => t.includes('min-width: 1025px'));
     assert.ok(mobile && mobile.includes('/t/p/w780' + LIVE_BACKDROP),
       'the phone branch is not w780 of the live backdrop: ' + mobile);
@@ -344,7 +350,9 @@ function fakeKv() {
       'slide 0 still renders the stale backdrop, so the LCP element and the '
         + 'preload disagree');
     const sources = [...slide.matchAll(/<source[^>]*>/g)].map((m) => m[0]);
-    assert.strictEqual(sources.length, 2, 'expected 2 <source> branches in the hero <picture>');
+    assert.strictEqual(sources.length, 3, 'expected 3 <source> branches in the hero <picture>');
+    assert.ok(sources[0].includes(PORTRAIT_MQ) && sources[0].includes('w780' + LIVE_POSTER),
+      'the first <source> is not the portrait-phone poster: ' + sources[0]);
     assert.ok(sources.some((s) => s.includes('max-width: 1024px') && s.includes('w780' + LIVE_BACKDROP)),
       'the phone <source> is not w780 of the live backdrop');
     assert.ok(sources.some((s) => s.includes('min-width: 1025px') && s.includes('w1280' + LIVE_BACKDROP)),
@@ -359,15 +367,17 @@ function fakeKv() {
       [...live.body.matchAll(/https:\/\/image\.tmdb\.org\/t\/p\/(w780|w1280)(\/[\w.-]+)/g)]
         .map((m) => m[2])
     );
-    assert.deepStrictEqual([...urls], [LIVE_BACKDROP],
-      'more than one backdrop path is referenced: ' + [...urls].join(', '));
+    assert.deepStrictEqual([...urls].sort(), [LIVE_BACKDROP, LIVE_POSTER].sort(),
+      'only the live backdrop and its poster may be referenced: ' + [...urls].join(', '));
   });
 
   check('the hero goes out as media-scoped Early Hints too', () => {
     const link = live.response.headers.get('Link') || '';
     assert.ok(link.includes('rel=preconnect'), 'the image.tmdb.org preconnect hint was lost');
-    assert.ok(link.includes('w780' + LIVE_BACKDROP) && link.includes('media="(max-width: 1024px)"'),
+    assert.ok(link.includes('w780' + LIVE_BACKDROP) && link.includes('media="(max-width: 1024px) and (min-width: 768px), (max-width: 1024px) and (orientation: landscape)"'),
       'no media-scoped w780 preload hint: ' + link);
+    assert.ok(link.includes('w780' + LIVE_POSTER) && link.includes('media="' + PORTRAIT_MQ + '"'),
+      'no portrait poster preload hint: ' + link);
     assert.ok(link.includes('w1280' + LIVE_BACKDROP) && link.includes('media="(min-width: 1025px)"'),
       'no media-scoped w1280 preload hint: ' + link);
   });
@@ -471,7 +481,7 @@ function fakeKv() {
       if (href.indexOf('api.themoviedb.org') !== -1) {
         tmdbCalls++;
         return new Response(
-          JSON.stringify({ results: [{ id: 1, title: 'Live Pick', backdrop_path: LIVE_BACKDROP }] }),
+          JSON.stringify({ results: [{ id: 1, title: 'Live Pick', backdrop_path: LIVE_BACKDROP, poster_path: LIVE_POSTER }] }),
           { status: 200, headers: { 'content-type': 'application/json' } }
         );
       }

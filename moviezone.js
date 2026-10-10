@@ -145,6 +145,17 @@ const HERO_WIDE_MQ = '(min-width: 1025px)';
  *  hero preload links in index.html. */
 const HERO_MOBILE_MQ = '(max-width: 1024px)';
 
+/*  Phones held upright get the 2:3 TMDB poster instead of a centre-cropped
+ *  16:9 backdrop. First <source> in the picture, so it wins on those screens
+ *  only; tablets, laptops, TVs and landscape phones keep the backdrop. Must stay
+ *  identical to HERO_PORTRAIT_MQ in seo-ssr.js, worker.js and the <head> hint. */
+const HERO_PORTRAIT_MQ = '(max-width: 767px) and (orientation: portrait)';
+
+/** Poster URL for the portrait branch; w500 when the backdrop is on its data-saver ceiling. */
+function heroPosterUrl(posterPath, lowData) {
+  return posterPath ? 'https://image.tmdb.org/t/p/' + (lowData ? 'w500' : 'w780') + posterPath : '';
+}
+
 /*  Size for slide 0 only.
  *
  *  getResponsiveBackdrop() branches on a UA test (isMobile), which a
@@ -6076,14 +6087,15 @@ function buildCarousel() {
      *  is on the critical path. See slideBackdropMarkup() for why the size
      *  branch is a <picture media> and not srcset + sizes.
      */
-    const heroImg = i === 0 ? slideBackdropMarkup(bgUrl, true, isBackdrop) : '';
+    const heroPoster = isBackdrop ? (m.poster_path || '') : '';
+    const heroImg = i === 0 ? slideBackdropMarkup(bgUrl, true, isBackdrop, heroPoster) : '';
 
     if (i === 0) {
       // Remember the URL so the NEXT visit can start this exact request from the
       // pre-paint hint in <head>, before this bundle has even been parsed.
       // Read back by the mz_hero_lcp block in index.html (6 h TTL enforced there).
       try {
-        localStorage.setItem('mz_hero_lcp', JSON.stringify({ u: bgUrl, t: Date.now() }));
+        localStorage.setItem('mz_hero_lcp', JSON.stringify({ u: bgUrl, p: heroPosterUrl(heroPoster, /\/w500\//.test(bgUrl)), t: Date.now() }));
       } catch (e) { /* quota / private mode - the hint is optional */ }
     }
 
@@ -6135,7 +6147,8 @@ function buildCarousel() {
         // ensureSlideBg() does not offer it the backdrop width ladder: posters
         // are 2:3, so the same w1280 that is 98 KB of backdrop is 257 KB of
         // poster for a box that shows 780px of it.
-        + (isBackdrop ? '' : ' data-bg-fixed="1"')) + '>' + heroImg + '</div>' +
+        + (isBackdrop ? '' : ' data-bg-fixed="1"')
+        + (i !== 0 && heroPoster ? ' data-poster="' + heroPoster + '"' : '')) + '>' + heroImg + '</div>' +
       '<div class="slide-gradient"></div>' +
       '<div class="slide-content">' +
         '<div class="slide-badge"><svg class="slide-badge-mark" viewBox="0 0 24 24" width="9" height="9" fill="currentColor" aria-hidden="true"><path d="M12 2l2.6 7.4L22 12l-7.4 2.6L12 22l-2.6-7.4L2 12l7.4-2.6z"/></svg>'+escapeHTML(badgeText)+'</div>' +
@@ -6314,10 +6327,13 @@ function slideBgImg(url, isHero) {
       + '" alt="" width="1280" height="720" style="aspect-ratio:16/9;object-fit:cover;" decoding="async" draggable="false">';
 }
 
-function slideBackdropMarkup(bgUrl, isHero, resizable) {
+function slideBackdropMarkup(bgUrl, isHero, resizable, posterPath) {
   if (!bgUrl) return '';
 
   const m = /^(https:\/\/image\.tmdb\.org\/t\/p\/)w(\d+)(\/.+)$/.exec(bgUrl);
+  const portrait = resizable !== false && posterPath
+    ? '<source media="' + HERO_PORTRAIT_MQ + '" srcset="' + heroPosterUrl(posterPath, m && m[2] === '500') + '">'
+    : '';
 
   /*  Three cases stay a plain <img>:
    *    - `resizable` false: a poster standing in for a missing backdrop. TMDB
@@ -6330,10 +6346,13 @@ function slideBackdropMarkup(bgUrl, isHero, resizable) {
    *      save-data and 2G/3G. Honouring an explicit request to spend less data
    *      outranks the sharper asset, so <source> must not upgrade it.
    */
-  if (resizable === false || !m || m[2] === '500') return slideBgImg(bgUrl, isHero);
+  if (resizable === false || !m || m[2] === '500') {
+    return portrait ? '<picture>' + portrait + slideBgImg(bgUrl, isHero) + '</picture>' : slideBgImg(bgUrl, isHero);
+  }
 
   const base = m[1], path = m[3];
   return '<picture>'
+    + portrait
     + '<source media="' + HERO_MOBILE_MQ + '" srcset="' + base + 'w780' + path + '">'
     + '<source media="' + HERO_WIDE_MQ + '" srcset="' + base + 'w1280' + path + '">'
     // Fallback for browsers with no <picture>: the desktop asset, which is the
@@ -6359,7 +6378,7 @@ function ensureSlideBg(idx) {
   const bg = slide.querySelector('.slide-bg');
   if (!bg || !bg.dataset.bg) return;
   if (bg.querySelector('.slide-bg-img')) return;   // already materialised
-  const markup = slideBackdropMarkup(bg.dataset.bg, false, !bg.dataset.bgFixed);
+  const markup = slideBackdropMarkup(bg.dataset.bg, false, !bg.dataset.bgFixed, bg.dataset.poster || '');
   if (markup) bg.insertAdjacentHTML('afterbegin', markup);
 }
  
