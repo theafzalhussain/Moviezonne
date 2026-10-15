@@ -106,7 +106,18 @@ const brotliOf = (p) => zlib.brotliCompressSync(fs.readFileSync(p), {
   params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 }
 }).length;
 
-const CRITICAL_WIRE_BUDGET = 122 * 1024;
+const CRITICAL_WIRE_BUDGET = 124 * 1024;
+
+/*  Raised 122 -> 124 KB, and the parse ceiling 456 -> 461 (Oct 2026), for the
+ *  player servers, posters on networks that block image.tmdb.org, and weak phones.
+ *
+ *  Measured against the previous commit through the same build: +1.13 KB brotli
+ *  JS, +0.11 CSS, +0.03 index.html — 123.1 KB, which is over 122 by 1.1 KB. See
+ *  the parse-budget note of the same date for what the bytes buy and what was
+ *  deleted first; the short version is that every byte answers a reported
+ *  failure (a dead main server, posters that never arrived, a laggy old phone).
+ *  Two KB restores roughly the alarm headroom the previous raises left.
+ */
 
 /*  Raised 121 -> 122 KB (Sep 2026) for _mzAdoptHeadStart() in moviezone.js.
  *  (Both it and the <head> warm-up it adopted were deleted later the same month;
@@ -597,7 +608,43 @@ const CRITICAL_WIRE_BUDGET = 122 * 1024;
  *  diagnostics nothing consumed (the ad-blocker probe and the keyword extractor).
  *  index.html is ~1.3 KB smaller for it.
  */
-const CRITICAL_PARSE_BUDGET = 456 * 1024;
+/*  Raised 456 -> 461 KB for the player servers, the TMDB image fallback and the
+ *  weak-phone pass (Oct 2026).
+ *
+ *  +3.9 KB JS and +1.0 KB CSS minified, against the previous commit (459.9 KB).
+ *  All three were reported failures, not polish:
+ *
+ *    - THE MAIN SERVER WAS DEAD. OmniPlay's engine (Videasy) answers 502 on every
+ *      source call, and its frame still fired `load`, so nothing ever failed over.
+ *      The engine moved to VidRift, and a handshake watchdog (~0.9 KB) moves the
+ *      viewer on when a provider frame loads but never boots a player (HTTP 451
+ *      "not available"), without overwriting their saved server.
+ *    - POSTERS NEVER ARRIVED on networks that block or reset image.tmdb.org while
+ *      /api/tmdb (same-origin) works: titles and ratings rendered over empty
+ *      placeholders. A failed poster is retried through /api/img, and a page whose
+ *      failures outnumber its successes switches over entirely (~2.8 KB; sw.js does
+ *      the same for controlled pages, at no parse cost here).
+ *    - OLD PHONES LAGGED AND BLANKED POSTERS. Light posters (~0.4 KB) stop low-RAM
+ *      devices at w342: 56 -> 29 MB of decoded bitmaps on a 412px DPR 2.6 phone.
+ *
+ *  The CSS is almost all work REMOVED, behind a phone-width query and the
+ *  low-end-mode class, so a desktop fails the gate once and never matches the
+ *  bodies: transform:none / will-change:auto on cards, badges and hero slides
+ *  (136 -> 44 composited layers at 360px, 0 changed pixels), cards no longer
+ *  content-visibility-skipped on phones (the first poster row used to be requested
+ *  50px from the viewport; now ~1000px), and a 16:9 phone player with dvh units.
+ *
+ *  Deleted first: the lazy image observer (nothing emitted data-src for it and
+ *  nothing called observe()), the dead ≤380px player height (a later rule always
+ *  won), an empty `_removedRenderLanguageButtons_unused()` stub and the three
+ *  language lists only the commented-out language buttons used (moved into that
+ *  comment, so restoring the feature still has them), VidSrc HD's in-app-browser
+ *  probe, Videasy's AniList branch and peachify's resume plumbing. A
+ *  comment-aware sweep of moviezone.js now finds one top-level name with no
+ *  reader — `searchTimer`, 20 bytes, deliberately kept by its own comment.
+ *  Headroom left: 1.1 KB.
+ */
+const CRITICAL_PARSE_BUDGET = 461 * 1024;
 
 check('the first-paint transfer stays inside its brotli budget', () => {
   const parts = ['index.html', 'moviezone.min.css', 'moviezone.min.js'];
@@ -1092,10 +1139,21 @@ check('every TMDB image ships intrinsic dimensions', () => {
 });
 
 check('grid posters ship a srcset so the browser can pick a size', () => {
-  assert.ok(/srcset="https:\/\/image\.tmdb\.org\/t\/p\/w185/.test(js),
+  assert.ok(/srcset="\$\{mzPosterSrcset\(m\.poster_path\)\}"/.test(js),
     'no srcset on the grid poster - every device downloads the same w342');
   assert.ok(/sizes="\(max-width: 600px\)/.test(js),
     'srcset present but no sizes attribute to go with it');
+  //  The candidates come from one helper, run here both ways: weak devices
+  //  (MZ_LIGHT_POSTERS) stop at w342, everyone else may still pick w500.
+  const fn = /function mzPosterSrcset\(path\) \{[\s\S]*?\n\}/.exec(js);
+  assert.ok(fn, 'mzPosterSrcset() not found in moviezone.js');
+  const run = (light) => require('vm').runInNewContext(
+    'const MZ_LIGHT_POSTERS = ' + light + ';\n' + fn[0] + '\nmzPosterSrcset("/p.jpg")');
+  const T = 'https://image.tmdb.org/t/p/';
+  assert.strictEqual(run(false), T + 'w185/p.jpg 185w, ' + T + 'w342/p.jpg 342w, ' + T + 'w500/p.jpg 500w',
+    'the full poster srcset changed shape');
+  assert.strictEqual(run(true), T + 'w185/p.jpg 185w, ' + T + 'w342/p.jpg 342w',
+    'weak devices are offered w500 again: on a DPR 2.6 phone that doubles the decoded memory of every poster');
 });
 
 console.log('\n-- main-thread cost of the data cache ' + '-'.repeat(24));

@@ -170,6 +170,23 @@
 // composited layer per badge, the Top 10 / provider / related rails measure in
 // the next frame instead of mid-task, and the navbar's "scrolled" state comes from
 // an IntersectionObserver instead of a scroll listener.
+// v160: moviezone.min.js 15.9, moviezone.min.css 9.19 - OmniPlay plays again on a
+// new engine (VidRift) with a handshake watchdog that fails over when a provider
+// frame loads but never boots a player; MultiLang HD plays films; Hindi Dub HD
+// replaces VidSrc HD. Posters retry through the same-origin /api/img when
+// image.tmdb.org is blocked on the viewer's network (this worker does the same
+// below, and IMAGE_CACHE v2 replaces the opaque-response v1 cache). Weak phones get
+// w342 posters and no per-card GPU layers, and the phone player is 16:9.
+// v161: moviezone.min.js 16.0, moviezone.min.css 9.20 - OmniPlay sends its parent
+// origin (VidRift's popup probe stops tripping on a click/seek), and the watch page
+// is restyled: poster frame before Play, a "now playing" toolbar, and the servers
+// as one panel with an even card grid. ~7.9 KB of dead player CSS removed.
+// v162: moviezone.min.js 16.1, moviezone.min.css 9.21 - watch page "More Like
+// This" tiles are poster-first (rating + quality on the poster, one meta line),
+// with viewport-relative widths on phones.
+// v163: moviezone.min.js 16.2, moviezone.min.css 9.22 - the same poster-first tile
+// on the home grid (cardInfoHTML is shared), and the watch page's meta block no
+// longer reserves a fixed 450px, so the overview follows the studio logos.
 const CACHE_NAME = 'moviezone-v163';
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
@@ -277,7 +294,11 @@ const CACHE_NAME = 'moviezone-v163';
 // Separate cache for TMDB posters/backdrops. Kept apart from the shell so the
 // activate handler can wipe an old shell without throwing away hundreds of
 // images the next visit would otherwise re-download.
-const IMAGE_CACHE = 'moviezone-tmdb-images-v1';
+// v2 (Oct 2026): v1 was filled through no-cors fetches, so every entry is an
+// opaque response — unreadable status, ~7 MB of quota padding each in Chrome,
+// and possibly a cached TMDB error standing in for a poster. Renaming is what
+// lets activate() delete it; entries now go in only as readable 200s.
+const IMAGE_CACHE = 'moviezone-tmdb-images-v2';
 
 // Hard ceiling on the image cache. Roughly 50 MB at TMDB w342/w780 sizes.
 const IMAGE_CACHE_MAX_ENTRIES = 400;
@@ -338,10 +359,10 @@ const STATIC_ASSETS = [
    *  instead of the shell. '/' is the same document, answered 200 directly. */
   '/',
   '/tv-mode.min.css?v=1.6',
-  '/moviezone.min.css?v=9.19',
+  '/moviezone.min.css?v=9.22',
   '/tv-mode.min.js?v=1.9',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=15.11',
+  '/moviezone.min.js?v=16.2',
   '/manifest.json',
   '/icon-192.png?v=2',
   '/favicon-32.png?v=2',
@@ -484,7 +505,59 @@ function trimImageCacheSoon() {
 }
 
 const isTmdbImage = url =>
-  url.hostname === 'image.tmdb.org' || url.pathname.startsWith('/tmdb-image/');
+  url.hostname === 'image.tmdb.org' || url.pathname.startsWith('/tmdb-image/')
+  || (url.origin === self.location.origin && url.pathname.startsWith('/api/img/'));
+
+/*  ── BLOCKED-HOST FALLBACK FOR TMDB IMAGES ─────────────────────────────────
+ *  Several Indian ISPs block or reset image.tmdb.org while our own origin (and so
+ *  /api/tmdb) works: titles render, posters never arrive. A direct image that
+ *  fails — network error, timeout, or a non-404 error status — is fetched again
+ *  through the same-origin /api/img/<size>/<file> route (worker.js / server.js).
+ *  Two failures in a row mean the host is blocked for this viewer rather than one
+ *  request being unlucky, and the direct attempt is then skipped for 10 minutes so
+ *  later posters do not each wait out a failure first; any direct success resets
+ *  the count. This covers every image the page asks for, CSS backgrounds
+ *  included, without the page having to know. */
+const TMDB_DIRECT_TIMEOUT_MS = 9000;
+const TMDB_DIRECT_PENALTY_MS = 10 * 60 * 1000;
+let tmdbDirectSkipUntil = 0;
+let tmdbDirectFailures = 0;
+
+function tmdbFallbackUrl(url) {
+  const m = /^\/t\/p\/(w\d+|h\d+|original)\/([A-Za-z0-9_-]+\.(?:jpe?g|png|webp|svg))$/.exec(url.pathname);
+  return (url.hostname === 'image.tmdb.org' && m) ? '/api/img/' + m[1] + '/' + m[2] : null;
+}
+
+function noteTmdbDirect(ok) {
+  if (ok) { tmdbDirectFailures = 0; return; }
+  if (++tmdbDirectFailures >= 2) {
+    tmdbDirectFailures = 0;
+    tmdbDirectSkipUntil = Date.now() + TMDB_DIRECT_PENALTY_MS;
+  }
+}
+
+/*  Direct fetch in CORS mode (TMDB sends Access-Control-Allow-Origin: *), so the
+ *  status is READABLE. The no-cors fetch this replaced gave an opaque response:
+ *  a TMDB 404/5xx was cached as if it were a poster and served forever, and Chrome
+ *  books every opaque entry at ~7 MB of storage quota — 400 of them is gigabytes
+ *  on paper, which a low-storage phone answers by refusing writes or evicting the
+ *  origin. Built FROM the page's request, so its Accept header (which keeps TMDB
+ *  answering WebP) and its fetch priority (posters stay below the hero) carry
+ *  over. The timer stops once headers arrive: a slow body on a slow link is never
+ *  cut off. */
+async function fetchTmdbDirect(request) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TMDB_DIRECT_TIMEOUT_MS);
+  try {
+    return await fetch(new Request(request, {
+      mode: 'cors',
+      credentials: 'omit',
+      signal: controller.signal
+    }));
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /*  A cached response that may be handed to a NAVIGATION. A response whose
  *  `redirected` flag is set is a network error for a navigation in Chromium, so
@@ -522,7 +595,8 @@ self.addEventListener('fetch', event => {
 
   // TMDB data proxy — never cached here. Freshness is owned by the in-page SWR
   // layer in moviezone.js, which has the domain knowledge to decide TTLs.
-  if (url.pathname.startsWith('/api/')) return;
+  // (/api/img/ is the exception: content-addressed images, handled just below.)
+  if (url.pathname.startsWith('/api/') && !url.pathname.startsWith('/api/img/')) return;
 
   /*  ── TMDB IMAGES: cache-first, immutable ────────────────────────────────
    *  These were previously not cached at all. The generic branch below only
@@ -559,16 +633,46 @@ self.addEventListener('fetch', event => {
         cache = null;
       }
 
-      const response = await fetch(request);
-      // Opaque (no-cors) responses have status 0; they are still storable and
-      // still render, so accept them rather than skipping the cache entirely.
-      if (cache && response && (response.ok || response.type === 'opaque')) {
-        const copy = response.clone();
-        event.waitUntil(
-          cache.put(request, copy).then(trimImageCacheSoon).catch(() => {})
-        );
+      const store = (response) => {
+        if (!cache) return;
+        event.waitUntil(cache.put(request, response).then(trimImageCacheSoon).catch(() => {}));
+      };
+
+      // Same-origin image routes (/api/img/, Netlify's /tmdb-image/): readable
+      // responses, so only a real 200 is ever stored.
+      if (url.hostname !== 'image.tmdb.org') {
+        const response = await fetch(request);
+        if (response.ok) store(response.clone());
+        return response;
       }
-      return response;
+
+      const fallback = tmdbFallbackUrl(url);
+      if (!fallback || Date.now() >= tmdbDirectSkipUntil) {
+        try {
+          const response = await fetchTmdbDirect(request);
+          /*  A 404 is a real answer about one file (no such poster), not a sign
+           *  that the host is blocked — returned as-is, no detour, no penalty. */
+          if (response.ok || response.status === 404 || !fallback) {
+            if (fallback) noteTmdbDirect(true);
+            if (response.ok) store(response.clone());
+            return response;
+          }
+        } catch (e) {
+          // Not a shape /api/img can carry: let the browser make (and report)
+          // the original request itself.
+          if (!fallback) return fetch(request);
+        }
+        noteTmdbDirect(false);
+      }
+
+      try {
+        const proxied = await fetch(fallback, { credentials: 'omit' });
+        if (proxied.ok) store(proxied.clone());
+        return proxied;
+      } catch (e) {
+        // Last resort: let the browser make (and report) the original request.
+        return fetch(request);
+      }
     })());
     return;
   }

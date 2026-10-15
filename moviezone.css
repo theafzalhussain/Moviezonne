@@ -3969,18 +3969,20 @@ html[data-mz-tv="true"] .cat-group-menu {
 }
 
 
+/*  ── POSTER-FIRST TILE (home grid + watch page "More Like This") ─────────────
+ *  The poster is the card: it carries the rounded frame, the depth and every
+ *  badge. Underneath sit a title (up to two lines), one "★ rating · year  [LANG]"
+ *  line and a quiet genre line. The old box
+ *  around the whole tile, its full-card vignette and the three rows of
+ *  RATING / YEAR / LANG / genre chips are gone — at 160-230px they read as noise
+ *  and pushed the poster, which is what people actually pick by, to second place. */
 .movie-card {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01)),
-    rgba(13, 13, 26, 0.94);
-  border-radius: 20px;
+  background: none;
+  border-radius: 16px;
   overflow: hidden;
   cursor: pointer;
-  border: 1px solid rgba(255, 255, 255, 0.065);
-  /* Only border-color changes on hover now, so that is all this transitions.
-     It used to list transform and box-shadow as well, both of which no longer
-     have a hover state to animate. */
-  transition: border-color 0.25s var(--ease-smooth);
+  border: 0;
+  transition: transform 0.25s var(--ease-smooth);
   transform-style: preserve-3d;
   position: relative;
   content-visibility: auto;
@@ -3990,34 +3992,18 @@ html[data-mz-tv="true"] .cat-group-menu {
   transform: perspective(1000px) translateZ(0);
   /* Hardware Acceleration / GPU Layer */
   backface-visibility: hidden;
-  box-shadow:
-    0 16px 48px rgba(0, 0, 0, 0.38),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
   margin-top: 22px;
 }
 
-/*  .movie-card::before was a gold/purple wash that only ever became visible on
- *  hover (opacity 0 -> 1). With the hover state gone it was a full-card extra
- *  layer that could never be seen, so the rule is deleted rather than left at
- *  opacity 0. The ::after vignette below IS visible at rest, so it stays. */
-
-.movie-card::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(180deg,
-      rgba(255, 255, 255, 0.05) 0%,
-      transparent 20%,
-      transparent 70%,
-      rgba(0, 0, 0, 0.2) 100%);
-  opacity: 0.8;
-  pointer-events: none;
-  z-index: 1;
+/* Keyboard focus: an inset gold ring on the poster (an outline on the card
+   itself would be clipped by the grid's paint containment at the edges). */
+.movie-card:focus-visible {
+  outline: none;
 }
 
-.movie-card:hover,
-.movie-card:focus-visible {
-  border-color: rgba(245, 197, 24, 0.3);
+.movie-card:focus-visible .card-poster {
+  outline: 2px solid var(--gold);
+  outline-offset: -2px;
 }
 
 /*  The premium hover lift lived here (and, before that, a 3D mouse-position tilt
@@ -4030,7 +4016,10 @@ html[data-mz-tv="true"] .cat-group-menu {
   position: relative;
   aspect-ratio: 2/3;
   overflow: hidden;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
+  transition: border-color 0.25s ease;
   /*  Zero-request placeholder.
    *
    *  Every poster is lazy and TMDB's measured first-byte is ~3.2s, so a card can
@@ -4087,72 +4076,86 @@ html[data-mz-tv="true"] .cat-group-menu {
   html:not([data-mz-tv="true"]) .movie-card:hover .card-poster img {
     transform: scale(1.045);
   }
+
+  /* The tile lifts as one composited layer (the card already has its own), so
+     nothing is re-rasterised; the poster edge turns gold and the title follows. */
+  html:not([data-mz-tv="true"]) .movie-card:hover {
+    transform: perspective(1000px) translateY(-4px);
+  }
 }
 
+.movie-card:hover .card-poster {
+  border-color: rgba(255, 193, 7, 0.6);
+}
+
+.movie-card:hover .card-title,
+.movie-card:focus-visible .card-title {
+  color: var(--gold3);
+}
+
+/* A short dark floor on the poster, so the bottom badges read on any artwork. */
+.card-poster::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 34%;
+  background: linear-gradient(to top, rgba(3, 3, 10, 0.62), transparent);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/*  Badges: one size, one shape. Neutral glass for HD, a green edge for FHD, gold
+ *  for 4K; CAM / TS / HDTS stay solid warm colours because they are a warning. */
 .card-quality {
   position: absolute;
-  top: 9px;
-  left: 9px;
-  background: rgba(8, 8, 16, 0.8);
-  border: 1px solid rgba(245, 197, 24, 0.22);
-  padding: 0.24rem 0.58rem;
+  top: 8px;
+  left: 8px;
+  background: rgba(6, 6, 14, 0.74);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  padding: 0.22rem 0.5rem;
   border-radius: 999px;
   transform: translateZ(25px);
-  font-size: 0.67rem;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  color: var(--gold);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 4px 12px rgba(0, 0, 0, 0.3);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  line-height: 1.2;
+  color: #fff;
   z-index: 3;
 }
 
 /* ── PROFESSIONAL QUALITY BADGE COLORS ── */
 .card-quality.qual-cam {
-  background: rgba(220, 53, 69, 0.85);
-  border-color: rgba(220, 53, 69, 0.5);
-  color: #fff;
-  box-shadow: 0 2px 10px rgba(220, 53, 69, 0.4);
+  background: rgba(220, 53, 69, 0.9);
+  border-color: transparent;
 }
 
 .card-quality.qual-ts {
-  background: rgba(255, 107, 53, 0.85);
-  border-color: rgba(255, 107, 53, 0.5);
-  color: #fff;
-  box-shadow: 0 2px 10px rgba(255, 107, 53, 0.4);
+  background: rgba(255, 107, 53, 0.9);
+  border-color: transparent;
 }
 
 .card-quality.qual-hdts {
-  background: rgba(255, 159, 28, 0.85);
-  border-color: rgba(255, 159, 28, 0.5);
-  color: #fff;
-  box-shadow: 0 2px 10px rgba(255, 159, 28, 0.3);
-}
-
-.card-quality.qual-hd {
-  background: rgba(8, 8, 16, 0.8);
-  border-color: rgba(245, 197, 24, 0.22);
-  color: var(--gold);
+  background: rgba(255, 159, 28, 0.9);
+  border-color: transparent;
+  color: #1a0d00;
 }
 
 .card-quality.qual-fhd {
-  background: rgba(16, 185, 129, 0.85);
-  border-color: rgba(16, 185, 129, 0.5);
-  color: #fff;
-  box-shadow: 0 2px 10px rgba(16, 185, 129, 0.3);
+  border-color: rgba(52, 211, 153, 0.55);
+  color: #6ee7b7;
 }
 
 .card-quality.qual-4k {
-  background: linear-gradient(135deg, #7c3aed, #a855f7);
-  border-color: rgba(124, 58, 237, 0.5);
-  color: #fff;
-  box-shadow: 0 2px 12px rgba(124, 58, 237, 0.4);
+  background: linear-gradient(135deg, #ffd750, #ffb300);
+  border-color: transparent;
+  color: #1a1200;
 }
 
 .card-quality.qual-new {
   background: linear-gradient(135deg, #06b6d4, #0ea5e9);
-  border-color: rgba(6, 182, 212, 0.5);
-  color: #fff;
-  box-shadow: 0 2px 12px rgba(6, 182, 212, 0.4);
+  border-color: transparent;
   /* 3 cycles, not infinite (same for the FRESH/DUBBED/anime/4K pulses below):
      box-shadow is not composited, so a loop that never stops repaints every
      card it is on for as long as the tab stays open. */
@@ -4162,13 +4165,14 @@ html[data-mz-tv="true"] .cat-group-menu {
 /* ── FRESHNESS BADGE (Release Recency) ── */
 .card-fresh {
   position: absolute;
-  top: 9px;
-  right: 9px;
-  padding: 0.22rem 0.52rem;
+  top: 8px;
+  right: 8px;
+  padding: 0.22rem 0.5rem;
   border-radius: 999px;
   font-size: 0.58rem;
   font-weight: 800;
-  letter-spacing: 0.8px;
+  letter-spacing: 0.7px;
+  line-height: 1.2;
   color: #fff;
   text-transform: uppercase;
   z-index: 3;
@@ -4178,24 +4182,20 @@ html[data-mz-tv="true"] .cat-group-menu {
 
 .card-fresh-today {
   background: linear-gradient(135deg, #ef4444, #dc2626);
-  box-shadow: 0 4px 14px rgba(239, 68, 68, 0.5);
 }
 
 .card-fresh-new {
   background: linear-gradient(135deg, #f59e0b, #d97706);
-  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.5);
 }
 
 .card-fresh-recent {
   background: linear-gradient(135deg, #06b6d4, #0891b2);
-  box-shadow: 0 4px 12px rgba(6, 182, 212, 0.4);
 }
 
 /* Print upgraded — "NEW HD" / "NEW FHD" / "NEW 4K". Green so it reads as
    "better copy available now" rather than "just released". */
 .card-fresh-upgrade {
   background: linear-gradient(135deg, #22c55e, #15803d);
-  box-shadow: 0 4px 14px rgba(34, 197, 94, 0.45);
 }
 
 @keyframes freshPulse {
@@ -4214,59 +4214,66 @@ html[data-mz-tv="true"] .cat-group-menu {
 
   0%,
   100% {
-    box-shadow: 0 2px 12px rgba(6, 182, 212, 0.4);
+    box-shadow: 0 0 0 0 rgba(6, 182, 212, 0);
   }
 
   50% {
-    box-shadow: 0 4px 20px rgba(6, 182, 212, 0.7);
+    box-shadow: 0 0 0 4px rgba(6, 182, 212, 0.35);
   }
 }
 
 .card-hot {
   position: absolute;
-  bottom: 9px;
-  right: 9px;
+  bottom: 8px;
+  right: 8px;
   background: linear-gradient(135deg, #ff4d5e, #e63946);
-  padding: 0.24rem 0.58rem;
+  padding: 0.2rem 0.48rem;
   border-radius: 999px;
-  font-size: 0.66rem;
+  font-size: 0.56rem;
+  line-height: 1.2;
   transform: translateZ(25px);
   font-weight: 800;
-  letter-spacing: 1px;
+  letter-spacing: 0.8px;
   color: #fff;
   text-transform: uppercase;
-  box-shadow: 0 6px 18px rgba(230, 57, 70, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2);
   z-index: 3;
 }
 
-/* ── HINDI DUBBED BADGE ── */
+/* ── HINDI DUBBED BADGE (and FRANCHISE on the watch page, .rel-fr) ── */
 .card-dubbed {
   position: absolute;
-  bottom: 9px;
-  left: 9px;
+  bottom: 8px;
+  left: 8px;
   background: linear-gradient(135deg, #ff9800, #f57c00);
-  padding: 0.22rem 0.55rem;
+  padding: 0.2rem 0.48rem;
   border-radius: 999px;
-  font-size: 0.6rem;
+  font-size: 0.56rem;
+  line-height: 1.2;
   font-weight: 800;
-  letter-spacing: 0.5px;
-  color: #fff;
+  letter-spacing: 0.6px;
+  color: #1a0800;
   text-transform: uppercase;
-  box-shadow: 0 4px 12px rgba(255, 152, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2);
   z-index: 3;
   transform: translateZ(25px);
   animation: dubbedPulse 2.5s ease-in-out 3;
+}
+
+.card-dubbed.rel-fr {
+  background: rgba(6, 6, 14, 0.8);
+  border: 1px solid rgba(255, 193, 7, 0.5);
+  color: var(--gold3);
+  animation: none;
 }
 
 @keyframes dubbedPulse {
 
   0%,
   100% {
-    box-shadow: 0 4px 12px rgba(255, 152, 0, 0.4);
+    box-shadow: 0 0 0 0 rgba(255, 152, 0, 0);
   }
 
   50% {
-    box-shadow: 0 4px 18px rgba(255, 152, 0, 0.7), 0 0 8px rgba(255, 152, 0, 0.3);
+    box-shadow: 0 0 0 4px rgba(255, 152, 0, 0.3);
   }
 }
 
@@ -4282,14 +4289,10 @@ html[data-mz-tv="true"] .cat-group-menu {
 .card-overlay {
   position: absolute;
   inset: 0;
-  background: linear-gradient(to top,
-      rgba(3, 3, 10, 0.97) 0%,
-      rgba(3, 3, 10, 0.45) 42%,
-      transparent 75%);
+  background: radial-gradient(circle, rgba(3, 3, 10, 0.2), rgba(3, 3, 10, 0.72));
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0.75rem;
   opacity: 0;
   transition: opacity 0.22s ease;
   z-index: 2;
@@ -4303,100 +4306,87 @@ html[data-mz-tv="true"] .cat-group-menu {
 /*  The button is static now — it used to fly in with
  *  `translateY(30px) scale(0.6) rotate(-15deg)` -> identity on a 0.5s spring, and
  *  `transition: all` meant that spring also re-animated its three box-shadows.
- *  It now simply fades in with the overlay it sits in. */
+ *  It now simply fades in with the overlay it sits in, centred on the poster. */
 .card-play-btn {
-  width: 52px;
-  height: 52px;
+  width: 50px;
+  height: 50px;
+  padding-left: 3px;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--gold), var(--red));
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  color: #fff;
-  font-size: 1.1rem;
+  background: var(--gold);
+  border: 0;
+  color: #141000;
+  font-size: 1rem;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 0 auto;
-  box-shadow:
-    0 12px 32px rgba(230, 57, 70, 0.38),
-    0 0 0 8px rgba(245, 197, 24, 0.08);
-  position: absolute;
-  bottom: 1.2rem;
+  box-shadow: 0 0 0 6px rgba(255, 193, 7, 0.18), 0 10px 26px rgba(0, 0, 0, 0.5);
 }
 
 .card-info {
-  padding: 0.95rem 0.95rem 1rem;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0));
+  padding: 0.75rem 0.15rem 0.2rem;
   position: relative;
-  transform: translateZ(30px);
   z-index: 2;
 }
 
+/* Up to two lines; the meta line follows the title directly (no reserved empty
+   line under one-line titles — the tile has no box, so ragged ends are invisible). */
 .card-title {
-  font-size: 0.94rem;
-  font-weight: 800;
+  font-size: 0.92rem;
+  font-weight: 700;
   color: var(--text);
-  margin-bottom: 0.65rem;
+  margin-bottom: 0.3rem;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  line-height: 1.35;
+  line-height: 1.3;
   letter-spacing: 0.1px;
+  transition: color 0.2s ease;
 }
 
-.card-meta {
+/* "★ 7.2 · 2026" on the left, the language as a small tag on the right. */
+.card-sub {
   display: flex;
   align-items: center;
-  gap: 0.42rem;
-  margin-bottom: 0.5rem;
-  flex-wrap: wrap;
+  min-width: 0;
+  font-size: 0.74rem;
+  line-height: 1.5;
+  color: var(--text2);
+  white-space: nowrap;
 }
 
-.card-rating {
-  display: flex;
-  align-items: center;
-  gap: 0.32rem;
-  background: linear-gradient(135deg, rgba(245, 197, 24, 0.15), rgba(245, 197, 24, 0.07));
-  border: 1px solid rgba(245, 197, 24, 0.18);
-  padding: 0.26rem 0.6rem;
-  border-radius: 999px;
-  font-size: 0.73rem;
+.card-sub>span+span::before {
+  content: '·';
+  margin: 0 0.4em;
+  color: var(--text3);
+}
+
+.card-star {
+  color: var(--gold3);
   font-weight: 700;
-  color: var(--gold);
 }
 
-.card-year {
-  background: linear-gradient(135deg, rgba(230, 57, 70, 0.15), rgba(230, 57, 70, 0.07));
-  border: 1px solid rgba(230, 57, 70, 0.15);
-  padding: 0.26rem 0.6rem;
-  border-radius: 999px;
-  font-size: 0.71rem;
-  font-weight: 600;
-  color: var(--red2);
-}
-
-.card-runtime {
-  display: flex;
-  align-items: center;
-  gap: 0.28rem;
-  font-size: 0.72rem;
+.card-lang {
+  margin-left: auto;
+  padding: 0 0.32rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  line-height: 1.5;
   color: var(--text2);
 }
 
-.card-genres {
-  display: flex;
-  gap: 0.38rem;
-  flex-wrap: wrap;
-}
-
-.card-genre {
-  padding: 0.19rem 0.56rem;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 999px;
-  font-size: 0.67rem;
-  color: var(--text2);
-  background: rgba(255, 255, 255, 0.028);
+.card-gen {
+  margin-top: 0.1rem;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: var(--text3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ═══ Skeleton loader ═══ */
@@ -5461,22 +5451,26 @@ html[data-mz-tv="true"] .cat-group-menu {
   /*  THE modal CLS source. This block is empty while /movie/{id} is in flight
    *  and then fills with badges + genres + tagline + crew + an 8-face cast row
    *  — roughly 300px arriving in one paint, which used to push the overview,
-   *  the action buttons and the whole video block down the page. A floor that
-   *  matches the loaded height (and the skeleton openModal paints into it)
-   *  keeps the box the same size before and after, and anything taller than
-   *  the 380px cap scrolls here rather than re-flowing the modal.
+   *  the action buttons and the whole video block down the page.
    *
-   *  The floor is the cap on purpose: a released title always comes back with
-   *  rating, year, runtime, genres, a tagline and a cast row, which overflows
-   *  the cap on every viewport measured — so "reserve the cap" is the same thing
-   *  as "reserve what it will actually be", and it is the only value that is
-   *  exact rather than approximate. Floor and cap must move together or the
-   *  reservation stops being exact.
-   *
-   *  450 rather than 380 because the crew / cast / production panels have their
-   *  own padding again (they used to be flattened by the .modal-meta>div reset);
-   *  at 380 the production row was sliced in half by the scroll cap. */
-  min-height: 450px;
+   *  The reservation now lives on the LOADING state only (.modal-meta-skeleton,
+   *  below), not on the box. A permanent 450px floor was "exact" only for titles
+   *  that fill it; measured across films, series and anime the loaded block is
+   *  332-400px on a desktop and 266-394px on a phone, so every one of them showed
+   *  50-180px of dead space between the studio logos and the overview. The
+   *  skeleton reserves the measured median instead, so the fill moves the text
+   *  below by tens of pixels at most, and the loaded box is exactly its content.
+   *  The 450px cap stays: anything taller still scrolls here. */
+}
+
+.modal-meta-skeleton {
+  min-height: 396px;
+}
+
+@media (max-width: 768px) {
+  .modal-meta-skeleton {
+    min-height: 336px;
+  }
 }
 
 .modal-meta.meta-hidden {
@@ -5876,6 +5870,20 @@ html[data-mz-tv="true"] .cat-group-menu {
   opacity: 1;
 }
 
+/*  Two things kept this from ever showing on most devices:
+ *   - index.html's CLS net (`.modal-prod-chip img{aspect-ratio:3/2;height:auto}`)
+ *     comes later and won, so every logo rendered 92x61 in a 120x77 box;
+ *   - low-end-mode (every phone) strips `filter`, so the white flattening above
+ *     never ran and black logos sat invisible on the dark panel.
+ *  One small filtered 92x24 image is not the per-frame cost that purge exists for. */
+.modal-production-row .modal-prod-chip img {
+  height: 24px;
+}
+
+.low-end-mode .modal-prod-chip img {
+  filter: brightness(0) invert(1) !important;
+}
+
 .modal-prod-text {
   font-size: 0.7rem;
   font-weight: 600;
@@ -6175,11 +6183,20 @@ html[data-mz-tv="true"] .cat-group-menu {
 
 .external-sources {
   display: flex;
-  gap: 0.85rem;
-  flex-wrap: wrap;
-  justify-content: center;
-  margin-top: 12px;
-  align-items: center;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px 24px 24px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background:
+    radial-gradient(ellipse at top left, rgba(255, 193, 7, 0.06), transparent 55%),
+    linear-gradient(180deg, rgba(22, 20, 36, 0.92), rgba(11, 11, 20, 0.96));
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* The panel is built by renderExternalSources(); never show an empty frame. */
+.external-sources:empty {
+  display: none;
 }
 
 /* Related Section */
@@ -6261,10 +6278,15 @@ html[data-mz-tv="true"] .cat-group-menu {
   display: none;
 }
 
+/*  ── WATCH PAGE "MORE LIKE THIS" ROW ──────────────────────────────────────
+ *  The tiles are the home grid's .movie-card (poster-first, see MOVIE GRID &
+ *  CARDS); this row only sizes them for a horizontal scroller. Widths follow
+ *  the viewport on phones so a partial next tile always shows it scrolls. */
 .related-slider .movie-card {
   flex-shrink: 0;
   width: 170px;
   scroll-snap-align: start;
+  margin-top: 0;
 }
 
 /* ── Related-row placeholder ──────────────────────────────────────────────
@@ -6277,10 +6299,11 @@ html[data-mz-tv="true"] .cat-group-menu {
 }
 
 /* The placeholder is the real card with its text greyed out, not a set of
-   stand-in boxes. Titles clamp at two lines, the rating/year chips wrap to a
-   second row inside a 170px card, and every one of those boxes is formed by
-   the element's own font metrics — restating them as pixel heights was off by
-   40-50px at desktop widths and needed a new number at every breakpoint. */
+   stand-in boxes. The title reserves two lines and the meta line is one, and
+   every one of those boxes is formed by the element's own font metrics —
+   restating them as pixel heights was off by 40-50px at desktop widths and
+   needed a new number at every breakpoint. border:0 because the real text
+   boxes have none; .skeleton's 1px ring made each placeholder 2px taller. */
 .related-slider .mz-related-skel .mz-skel-text {
   color: transparent !important;
   background: linear-gradient(90deg,
@@ -6288,7 +6311,8 @@ html[data-mz-tv="true"] .cat-group-menu {
     rgba(255, 255, 255, 0.085) 50%,
     rgba(255, 255, 255, 0.045) 75%) !important;
   background-size: 250% 100% !important;
-  border-color: transparent !important;
+  border: 0 !important;
+  box-shadow: none;
   border-radius: 6px;
   user-select: none;
 }
@@ -6297,7 +6321,8 @@ html[data-mz-tv="true"] .cat-group-menu {
   display: block;
   width: 100%;
   aspect-ratio: 170 / 255;
-  border-radius: 12px;
+  border: 0;
+  border-radius: 0;
   background: linear-gradient(90deg,
     rgba(255, 255, 255, 0.045) 25%,
     rgba(255, 255, 255, 0.085) 50%,
@@ -6313,20 +6338,32 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 }
 
+/* The poster box is 2:3 (.card-poster aspect-ratio); the image just fills it.
+   It used to be pinned to a pixel size per breakpoint, which could never follow
+   the viewport-relative tile widths below. */
 .related-slider .movie-card .card-poster img {
-  width: 170px;
-  height: 255px;
+  width: 100%;
+  height: 100%;
 }
 
 @media (max-width: 768px) {
+  /* ~2.5 tiles on a phone, ~4.5 on a small tablet: always a visible next one. */
   .related-slider .movie-card {
-    width: 140px;
+    width: clamp(118px, 34vw, 150px);
   }
 
-  .related-slider .movie-card .card-poster img {
-    width: 140px;
-    height: 210px;
+  .related-slider .card-title {
+    font-size: 0.8rem;
   }
+
+  .related-slider .card-sub {
+    font-size: 0.66rem;
+  }
+
+  .related-slider .card-gen {
+    font-size: 0.62rem;
+  }
+
 
   .related-arrow {
     width: 34px;
@@ -6342,38 +6379,49 @@ html[data-mz-tv="true"] .cat-group-menu {
    PLAYER CONTROLS & CHIPS
    ═══════════════════════════════════════════════════════════════ */
 
+/*  Player toolbar, directly under the frame: what is playing on the left, the
+ *  actions on the right — the same row a viewer reads on any premium player. */
 .player-controls {
   position: relative;
   display: flex;
-  gap: 8px;
+  gap: 10px;
   z-index: 10;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
   flex-wrap: wrap;
-  margin-top: 10px;
-  padding: 6px 8px;
-  border-radius: 14px;
-  background: transparent;
+  margin-top: -6px;
   width: 100%;
 }
 
-.video-embed>.player-controls {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 10px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(4, 4, 12, 0.45);
-  backdrop-filter: blur(8px) saturate(150%);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
-  transition: opacity 0.25s ease, transform 0.25s ease;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(6px);
+.player-now {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: auto;
+  min-width: 0;
+  font-size: 0.82rem;
+  color: var(--text2);
+}
+
+.player-now i {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+}
+
+.player-now b {
+  color: #fff;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .player-chip {
+  color: #fff;
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 999px;
   padding: 8px 14px;
@@ -6427,141 +6475,28 @@ html[data-mz-tv="true"] .cat-group-menu {
   box-shadow: 0 12px 30px rgba(230, 57, 70, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
 
-/* ── DUBBED SERVER INDICATOR ── */
-.player-chip--dubbed {
-  border-color: rgba(255, 152, 0, 0.35) !important;
-  position: relative;
-}
-
-.player-chip--dubbed:not(.active) {
-  background: linear-gradient(135deg, rgba(18, 18, 30, 0.94), rgba(40, 25, 0, 0.4));
-}
-
-.dubbed-dot {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  background: #ff9800;
-  border-radius: 50%;
-  margin-left: 3px;
-  flex-shrink: 0;
-  box-shadow: 0 0 6px rgba(255, 152, 0, 0.6);
-  animation: dubbedDotPulse 2s ease-in-out 3;
-}
-
-@keyframes dubbedDotPulse {
-
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-
-  50% {
-    opacity: 0.7;
-    transform: scale(1.3);
-  }
-}
-
-/* ── ALL-ROUNDER / ANIME SERVER BADGE ── */
-.player-chip--anime {
-  border-color: rgba(236, 72, 153, 0.45) !important;
-  position: relative;
-}
-
-.player-chip--anime:not(.active) {
-  background: linear-gradient(135deg, rgba(18, 18, 30, 0.94), rgba(60, 0, 45, 0.45));
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3), 0 0 14px rgba(236, 72, 153, 0.14);
-}
-
-.anime-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #ec4899, #a855f7);
-  color: #fff;
-  font-size: 0.55rem;
-  font-weight: 900;
-  padding: 2px 6px;
-  border-radius: 4px;
-  margin-left: 5px;
-  letter-spacing: 0.6px;
-  box-shadow: 0 2px 8px rgba(236, 72, 153, 0.45);
-  animation: animeBadgeGlow 2.6s ease-in-out 3;
-}
-
-@keyframes animeBadgeGlow {
-
-  0%,
-  100% {
-    box-shadow: 0 2px 8px rgba(236, 72, 153, 0.45);
-  }
-
-  50% {
-    box-shadow: 0 2px 16px rgba(236, 72, 153, 0.85), 0 0 6px rgba(168, 85, 247, 0.5);
-  }
-}
-
-/* ── 4K SERVER BADGE ── */
-.player-chip--4k {
-  border-color: rgba(0, 229, 255, 0.4) !important;
-  position: relative;
-}
-
-.player-chip--4k:not(.active) {
-  background: linear-gradient(135deg, rgba(18, 18, 30, 0.94), rgba(0, 40, 60, 0.5));
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3), 0 0 12px rgba(0, 229, 255, 0.1);
-}
-
-.fourk-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #00e5ff, #00b8d4);
-  color: #000;
-  font-size: 0.6rem;
-  font-weight: 900;
-  padding: 2px 6px;
-  border-radius: 4px;
-  margin-left: 5px;
-  letter-spacing: 0.5px;
-  box-shadow: 0 2px 8px rgba(0, 229, 255, 0.5);
-  animation: fourkGlow 2.5s ease-in-out 3;
-}
-
-@keyframes fourkGlow {
-
-  0%,
-  100% {
-    box-shadow: 0 2px 8px rgba(0, 229, 255, 0.5);
-  }
-
-  50% {
-    box-shadow: 0 2px 16px rgba(0, 229, 255, 0.9), 0 0 6px rgba(0, 229, 255, 0.4);
-  }
-}
-
-.player-chip--lang {
-  background: linear-gradient(135deg, rgba(245, 197, 24, 0.97), rgba(255, 175, 64, 0.93));
-  color: #151515;
-}
-
-.player-chip--quality {
-  background: linear-gradient(135deg, rgba(168, 85, 247, 0.97), rgba(124, 58, 237, 0.93));
-  color: #fff;
-  box-shadow: 0 10px 24px rgba(124, 58, 237, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.12);
-}
+/* The dubbed / anime / 4K / lang / quality / zoom chip variants and their
+   badge keyframes were deleted: no markup has carried those classes since the
+   server cards (.srv-card) replaced the chip row. */
 
 .player-chip--fs {
   display: inline-flex;
-  background: rgba(18, 18, 30, 0.94);
-  color: #fff;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.14);
 }
 
-.player-chip--zoom {
-  padding: 6px 10px;
-  font-size: 14px;
+.player-chip--try {
+  background: linear-gradient(135deg, rgba(255, 193, 7, 0.16), rgba(230, 57, 70, 0.08));
+  border-color: rgba(255, 193, 7, 0.38);
+  color: var(--gold3);
+}
+
+.player-controls .premium-play-btn {
+  width: auto;
+  padding: 0 16px;
+  border: none;
+  border-radius: 999px;
+  min-height: 42px;
 }
 
 .player-chip--source,
@@ -6594,90 +6529,57 @@ html[data-mz-tv="true"] .cat-group-menu {
   z-index: 10;
 }
 
-/* External source chips (legacy - overridden by .srv-card in new layout) */
-.external-sources .player-chip--source {
-  min-width: auto;
-  justify-content: center;
-  text-align: center;
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-.external-sources .srv-card.player-chip--source {
-  /* Reset flex properties that conflict with grid */
-  flex: unset;
-  min-width: unset;
-}
-
-.external-sources .player-chip--source.active {
-  transform: translateY(-2px);
-}
-
 /* ═══════════════════════════════════════════════════════════════════════════
-   PREMIUM PLAYBACK SERVER UI - Glassmorphism + Categorized Layout
+   PLAYBACK SERVERS — one panel: header row, hint, then an even card grid.
+   #externalSources is the panel itself, so header, hint and cards read as one
+   surface instead of three loose boxes of different widths.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Master Header ── */
 .srv-master-header {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
-  text-align: center;
-  row-gap: 12px;
-  margin: 0 auto 16px;
-  max-width: 720px;
-  padding: 18px 26px;
-  background: linear-gradient(135deg, rgba(18, 18, 30, 0.92), rgba(28, 22, 44, 0.82));
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 18px;
-  backdrop-filter: blur(22px) saturate(180%);
-  -webkit-backdrop-filter: blur(22px) saturate(180%);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  justify-content: space-between;
+  gap: 10px 16px;
 }
 
 .srv-master-header__hint {
-  width: 100%;
-  max-width: 560px;
-  margin: 0 auto;
-  padding-top: 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 1.05rem;
-  font-weight: 600;
-  line-height: 1.6;
-  letter-spacing: 0.2px;
-  text-align: center;
-  color: rgba(255, 255, 255, 0.82);
+  margin: -6px 0 0;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  font-size: 0.88rem;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--text2);
 }
 
 .srv-master-header__hint strong {
-  display: inline-block;
-  font-size: 1.22rem;
-  font-weight: 800;
-  color: #ffd750;
-  text-shadow: 0 0 18px rgba(245, 197, 24, 0.35);
+  font-weight: 700;
+  color: var(--gold3);
 }
 
 .srv-master-header__left {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 12px;
 }
 
 .srv-master-header__icon {
-  color: #ffc107;
-  filter: drop-shadow(0 0 8px rgba(255, 193, 7, 0.55));
+  box-sizing: content-box;
+  padding: 8px;
+  border-radius: 11px;
+  color: var(--gold);
+  background: rgba(255, 193, 7, 0.1);
+  border: 1px solid rgba(255, 193, 7, 0.22);
 }
 
 .srv-master-header__title {
-  font-size: 1.05rem;
+  font-size: 1rem;
   font-weight: 800;
-  letter-spacing: 3px;
+  letter-spacing: 2.5px;
   text-transform: uppercase;
-  background: linear-gradient(135deg, #fff, rgba(255, 255, 255, 0.7));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #fff;
 }
 
 .srv-master-header__live {
@@ -6719,89 +6621,13 @@ html[data-mz-tv="true"] .cat-group-menu {
 
 /* ── Container ── */
 .srv-container {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 12px;
-  justify-content: center;
+  display: block;
 }
 
-/* ── Section Layout ── */
+/* ── Section: no surface of its own any more — it sits inside the panel ── */
 .srv-section {
-  padding: 12px 14px;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(16px) saturate(160%);
-  -webkit-backdrop-filter: blur(16px) saturate(160%);
   position: relative;
-  overflow: hidden;
-  transition: border-color 0.3s ease;
-  flex: 0 1 auto;
-}
-
-.srv-section::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 18px;
-  pointer-events: none;
-  opacity: 0.4;
-  transition: opacity 0.3s ease;
-}
-
-.srv-section:hover::before {
-  opacity: 0.6;
-}
-
-/* Premium 4K Section */
-.srv-section--premium {
-  background: linear-gradient(145deg, rgba(15, 10, 30, 0.92), rgba(30, 15, 5, 0.85));
-  border-color: rgba(255, 175, 64, 0.2);
-}
-
-.srv-section--premium::before {
-  background: radial-gradient(ellipse at top left, rgba(255, 175, 64, 0.08), transparent 60%);
-}
-
-/* Anime Section */
-.srv-section--anime {
-  background: linear-gradient(145deg, rgba(15, 10, 30, 0.92), rgba(40, 5, 35, 0.85));
-  border-color: rgba(236, 72, 153, 0.2);
-}
-
-.srv-section--anime::before {
-  background: radial-gradient(ellipse at top left, rgba(236, 72, 153, 0.08), transparent 60%);
-}
-
-
-
-
-
-/* Hindi Dubbed Section */
-.srv-section--hindi {
-  background: linear-gradient(145deg, rgba(15, 12, 22, 0.92), rgba(10, 30, 15, 0.85));
-  border-color: rgba(16, 185, 129, 0.25);
-}
-
-.srv-section--hindi::before {
-  background: radial-gradient(ellipse at top left, rgba(16, 185, 129, 0.08), transparent 60%);
-}
-
-.srv-section--hindi .srv-section__icon {
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.15));
-  color: #10b981;
-  box-shadow: 0 0 12px rgba(16, 185, 129, 0.2);
-}
-
-.srv-section--hindi .srv-card:hover {
-  border-color: rgba(16, 185, 129, 0.35);
-  box-shadow: 0 8px 32px rgba(16, 185, 129, 0.1), 0 12px 40px rgba(0, 0, 0, 0.3);
-}
-
-.srv-section--hindi .srv-card.active {
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(5, 150, 105, 0.1));
-  border-color: rgba(16, 185, 129, 0.5) !important;
-  box-shadow: 0 0 24px rgba(16, 185, 129, 0.2), 0 8px 32px rgba(0, 0, 0, 0.3);
+  min-width: 0;
 }
 
 /* ── Section Header ── */
@@ -6809,9 +6635,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 10px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 12px;
 }
 
 .srv-section__icon {
@@ -6827,16 +6651,7 @@ html[data-mz-tv="true"] .cat-group-menu {
 .srv-section--premium .srv-section__icon {
   background: linear-gradient(135deg, rgba(255, 175, 64, 0.2), rgba(255, 107, 0, 0.15));
   color: #ffaf40;
-  box-shadow: 0 0 12px rgba(255, 175, 64, 0.2);
 }
-
-.srv-section--anime .srv-section__icon {
-  background: linear-gradient(135deg, rgba(236, 72, 153, 0.2), rgba(168, 85, 247, 0.15));
-  color: #ec4899;
-  box-shadow: 0 0 12px rgba(236, 72, 153, 0.2);
-}
-
-
 
 .srv-section__title {
   font-size: 0.75rem;
@@ -6857,12 +6672,11 @@ html[data-mz-tv="true"] .cat-group-menu {
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-/* ── Section Grid ── */
+/* ── Section Grid: a real grid, so every card in a row has the same width ── */
 .srv-section__grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
+  gap: 10px;
 }
 
 /* ── Server Card ── */
@@ -6870,61 +6684,42 @@ html[data-mz-tv="true"] .cat-group-menu {
   position: relative;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
-  gap: 6px;
-  padding: 10px 14px;
-  border-radius: 12px;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(18, 18, 30, 0.8);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02));
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.25s var(--ease-smooth), border-color 0.25s ease, background 0.25s ease;
   overflow: hidden;
-  min-height: 50px;
+  min-height: 64px;
   font-family: 'Outfit', sans-serif;
-  flex: 0 0 auto;
+  text-align: left;
 }
 
 .srv-card:hover {
-  transform: translateY(-3px) scale(1.02);
-  border-color: rgba(255, 255, 255, 0.15);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  transform: translateY(-2px);
+  border-color: rgba(255, 193, 7, 0.32);
+  background: rgba(255, 255, 255, 0.07);
 }
 
+/* The server that is playing: gold edge, gold name, gold status light. */
 .srv-card.active {
-  border-color: rgba(255, 193, 7, 0.5) !important;
-  box-shadow: 0 0 20px rgba(255, 193, 7, 0.15), 0 8px 32px rgba(0, 0, 0, 0.3);
+  background: linear-gradient(135deg, rgba(255, 193, 7, 0.18), rgba(255, 122, 0, 0.07));
+  border-color: rgba(255, 193, 7, 0.65);
+  box-shadow: 0 10px 30px rgba(255, 170, 0, 0.14);
 }
 
-/* Active state per section */
-.srv-section--premium .srv-card.active {
-  background: linear-gradient(135deg, rgba(255, 175, 64, 0.15), rgba(255, 107, 0, 0.1));
-  border-color: rgba(255, 175, 64, 0.5) !important;
-  box-shadow: 0 0 24px rgba(255, 175, 64, 0.2), 0 8px 32px rgba(0, 0, 0, 0.3);
+.srv-card.active .srv-card__name {
+  color: var(--gold3);
 }
 
-.srv-section--anime .srv-card.active {
-  background: linear-gradient(135deg, rgba(236, 72, 153, 0.15), rgba(168, 85, 247, 0.1));
-  border-color: rgba(236, 72, 153, 0.5) !important;
-  box-shadow: 0 0 24px rgba(236, 72, 153, 0.2), 0 8px 32px rgba(0, 0, 0, 0.3);
+.srv-card.active .srv-card__status {
+  background: var(--gold);
+  box-shadow: 0 0 8px rgba(255, 193, 7, 0.8);
 }
-
-
-
-/* Premium 4K card hover */
-.srv-section--premium .srv-card:hover {
-  border-color: rgba(255, 175, 64, 0.35);
-  box-shadow: 0 8px 32px rgba(255, 175, 64, 0.1), 0 12px 40px rgba(0, 0, 0, 0.3);
-}
-
-.srv-section--anime .srv-card:hover {
-  border-color: rgba(236, 72, 153, 0.35);
-  box-shadow: 0 8px 32px rgba(236, 72, 153, 0.1), 0 12px 40px rgba(0, 0, 0, 0.3);
-}
-
-
 
 /* ── Card Inner ── */
 .srv-card__inner {
@@ -6932,14 +6727,14 @@ html[data-mz-tv="true"] .cat-group-menu {
   align-items: center;
   gap: 8px;
   width: 100%;
-  justify-content: center;
+  justify-content: space-between;
 }
 
 .srv-card__name {
-  font-size: 0.82rem;
+  font-size: 0.86rem;
   font-weight: 700;
   color: #fff;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.2px;
   white-space: nowrap;
 }
 
@@ -6965,13 +6760,13 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 }
 
-/* ── Badges ── */
+/* ── Badges: tinted labels, not solid stickers ── */
 .srv-card__badges {
   display: flex;
   align-items: center;
   gap: 5px;
   flex-wrap: wrap;
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .srv-badge {
@@ -6980,28 +6775,29 @@ html[data-mz-tv="true"] .cat-group-menu {
   gap: 3px;
   font-size: 0.58rem;
   font-weight: 800;
-  padding: 3px 8px;
+  padding: 3px 7px;
   border-radius: 6px;
+  border: 1px solid;
   letter-spacing: 0.6px;
   line-height: 1;
 }
 
 .srv-badge--4k {
-  background: linear-gradient(135deg, #00e5ff, #00b8d4);
-  color: #001f28;
-  box-shadow: 0 2px 10px rgba(0, 229, 255, 0.35);
+  background: rgba(34, 211, 238, 0.12);
+  border-color: rgba(34, 211, 238, 0.32);
+  color: #67e8f9;
 }
 
 .srv-badge--anime {
-  background: linear-gradient(135deg, #ec4899, #a855f7);
-  color: #fff;
-  box-shadow: 0 2px 10px rgba(236, 72, 153, 0.35);
+  background: rgba(236, 72, 153, 0.12);
+  border-color: rgba(236, 72, 153, 0.32);
+  color: #f9a8d4;
 }
 
 .srv-badge--dub {
-  background: linear-gradient(135deg, #ff9800, #f57c00);
-  color: #1a0800;
-  box-shadow: 0 2px 10px rgba(255, 152, 0, 0.35);
+  background: rgba(255, 152, 0, 0.12);
+  border-color: rgba(255, 152, 0, 0.32);
+  color: #fdba74;
 }
 
 /* ── Glow Effect (hover animated) ── */
@@ -7017,12 +6813,6 @@ html[data-mz-tv="true"] .cat-group-menu {
 .srv-section--premium .srv-card__glow {
   background: radial-gradient(circle at 50% 50%, rgba(255, 175, 64, 0.12), transparent 70%);
 }
-
-.srv-section--anime .srv-card__glow {
-  background: radial-gradient(circle at 50% 50%, rgba(236, 72, 153, 0.12), transparent 70%);
-}
-
-
 
 .srv-card:hover .srv-card__glow {
   opacity: 1;
@@ -7044,39 +6834,22 @@ html[data-mz-tv="true"] .cat-group-menu {
   z-index: 10;
 }
 
-/* Cinema & fullscreen */
-.video-embed.cinema-mode {
-  position: fixed !important;
-  inset: 0 !important;
-  width: 100vw !important;
-  height: 100vh !important;
-  max-height: 100vh !important;
-  z-index: 99998 !important;
-  border-radius: 0 !important;
-  margin: 0 !important;
-  border-color: transparent !important;
-}
+/* Fullscreen. 100vh on a phone is the viewport with the URL bar retracted, so a
+   fixed 100vh player ran under the bar and hid its own bottom controls; 100dvh
+   (after the vh fallback) is the height actually visible.
+   (.cinema-mode and the in-frame .player-controls overlay were deleted: nothing
+   adds that class, and #playerControls is a sibling of the frame, never inside.)
 
-.video-embed.cinema-mode .player-controls {
-  left: 12px;
-  right: 12px;
-  bottom: 12px;
-  justify-content: center;
-}
-
-.video-embed:hover>.player-controls,
-.video-embed.cinema-mode>.player-controls,
-.video-embed.fullscreen-mode>.player-controls {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateY(0);
-}
-
+   max-height: none — this class IS fullscreen on an iPhone (no element
+   requestFullscreen there, see togglePlayerFS), and the phone rule caps the
+   inline player at 100dvh - 24px. */
 .video-embed.fullscreen-mode {
   position: fixed !important;
   inset: 0 !important;
   width: 100vw !important;
   height: 100vh !important;
+  height: 100dvh !important;
+  max-height: none !important;
   z-index: 99999 !important;
   border-radius: 0 !important;
   margin: 0 !important;
@@ -7093,18 +6866,42 @@ html[data-mz-tv="true"] .cat-group-menu {
   padding: 2rem;
 }
 
+/*  Poster frame: before Play, the empty black box shows the title's own backdrop
+ *  (the same URL the header already loaded, so no extra download) under a dark
+ *  scrim, with the play button centred on it. */
+.video-placeholder.has-poster {
+  position: absolute;
+  inset: 0;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.82);
+  font-weight: 600;
+  background: center / cover no-repeat;
+}
+
+.video-placeholder.has-poster::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgba(3, 3, 10, 0.35), rgba(3, 3, 10, 0.88));
+}
+
+.video-placeholder.has-poster > * {
+  position: relative;
+}
+
 .video-placeholder .play-big {
   width: 84px;
   height: 84px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--red), var(--accent));
+  border: 2px solid rgba(255, 255, 255, 0.85);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 2rem;
   cursor: pointer;
   transition: transform 0.35s var(--ease-spring), box-shadow 0.3s ease;
-  box-shadow: 0 0 0 0 rgba(230, 57, 70, 0.4);
+  box-shadow: 0 0 0 8px rgba(255, 255, 255, 0.08);
 }
 
 .video-placeholder .play-big:hover {
@@ -7137,33 +6934,6 @@ html[data-mz-tv="true"] .cat-group-menu {
   border: 3px solid rgba(255, 255, 255, 0.08);
   border-left-color: var(--gold);
   border-radius: 50%;
-}
-
-/* Subtitle button */
-.video-embed .player-subtitle {
-  position: absolute;
-  left: 12px;
-  bottom: 12px;
-  z-index: 30;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 8px 12px;
-  border-radius: 12px;
-  background: rgba(0, 0, 0, 0.48);
-  color: #fff;
-  font-weight: 700;
-  font-size: 0.9rem;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  cursor: pointer;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
-  font-family: 'Outfit', sans-serif;
-}
-
-.video-embed .player-subtitle.active {
-  background: linear-gradient(135deg, rgba(230, 57, 70, 0.98), rgba(168, 85, 247, 0.93));
-  color: #fff;
-  box-shadow: 0 14px 36px rgba(124, 58, 237, 0.2);
 }
 
 .video-embed iframe {
@@ -7817,39 +7587,18 @@ html[data-mz-tv="true"] .cat-group-menu {
   .search-results-dropdown {
     max-height: 300px;
   }
-
-  .player-controls {
-    left: 10px;
-    right: 10px;
-    bottom: 10px;
-    justify-content: center;
-  }
-
-  .external-sources .player-chip--source {
-    min-width: auto;
-    flex: unset;
-  }
 }
 
 @media (max-width: 640px) {
   .player-controls {
-    position: static;
-    opacity: 1 !important;
-    pointer-events: auto !important;
-    transform: none !important;
-    background: transparent !important;
-    box-shadow: none !important;
-    padding: 6px 0 0 0;
-    margin-top: 8px;
     justify-content: flex-start;
     gap: 8px;
-    flex-wrap: wrap;
-    display: flex;
-    align-items: center;
+    margin-top: -4px;
   }
 
-  .player-controls::-webkit-scrollbar {
-    display: none;
+  .player-now {
+    flex: 1 1 100%;
+    font-size: 0.78rem;
   }
 
   .player-chip {
@@ -7862,12 +7611,13 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 
   .external-sources {
-    gap: 8px;
+    padding: 16px 14px 18px;
+    border-radius: 16px;
+    gap: 12px;
   }
 
-  .external-sources .player-chip--source {
-    min-width: 0;
-    flex: unset;
+  .srv-master-header__hint {
+    font-size: 0.8rem;
   }
 
   .footer-pills {
@@ -7958,18 +7708,19 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 
   .card-info {
-    padding: 0.6rem;
+    padding: 0.6rem 0.1rem 0.1rem;
   }
 
   .card-title {
     font-size: 0.86rem;
   }
 
-  .card-rating,
-  .card-year,
-  .card-runtime,
-  .card-genre {
-    font-size: 0.67rem;
+  .card-sub {
+    font-size: 0.7rem;
+  }
+
+  .card-gen {
+    font-size: 0.66rem;
   }
 
   .cat-tabs {
@@ -8014,9 +7765,13 @@ html[data-mz-tv="true"] .cat-group-menu {
     min-height: 36px;
   }
 
-  .external-sources .player-chip--source {
-    flex: unset;
-    justify-content: center;
+  /* Next Ep + Try All + Fullscreen on one row down to a 360px phone. */
+  .player-chip span {
+    font-size: 12px;
+  }
+
+  .player-controls .premium-play-btn {
+    padding: 0 12px;
     min-height: 38px;
   }
 
@@ -8084,15 +7839,6 @@ html[data-mz-tv="true"] .cat-group-menu {
   .related-slider {
     gap: 10px;
     padding: 4px 2px 12px;
-  }
-
-  .related-slider .movie-card {
-    width: 130px;
-  }
-
-  .related-slider .movie-card .card-poster img {
-    width: 130px;
-    height: 195px;
   }
 
   .related-nav {
@@ -8190,7 +7936,7 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 
   .card-info {
-    padding: 0.45rem;
+    padding: 0.5rem 0.1rem 0.1rem;
   }
 
   .card-title {
@@ -8198,11 +7944,12 @@ html[data-mz-tv="true"] .cat-group-menu {
     line-height: 1.25;
   }
 
-  .card-rating,
-  .card-year,
-  .card-runtime {
+  .card-sub {
+    font-size: 0.66rem;
+  }
+
+  .card-gen {
     font-size: 0.62rem;
-    padding: 0.2rem 0.4rem;
   }
 
   .modal-info {
@@ -8276,15 +8023,6 @@ html[data-mz-tv="true"] .cat-group-menu {
     font-size: 0.62rem;
   }
 
-  .related-slider .movie-card {
-    width: 110px;
-  }
-
-  .related-slider .movie-card .card-poster img {
-    width: 110px;
-    height: 165px;
-  }
-
   .related-title {
     font-size: 1.2rem;
   }
@@ -8294,9 +8032,8 @@ html[data-mz-tv="true"] .cat-group-menu {
     height: 28px;
   }
 
-  .video-embed {
-    height: 200px;
-  }
+  /* (.video-embed's small-phone height lives in the ≤768px block below, as its
+     200px floor: a rule here never applied, because that later block wins.) */
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -8367,11 +8104,22 @@ html[data-mz-tv="true"] .cat-group-menu {
     gap: 1rem;
   }
 
+  /*  Full-bleed at the video's own 16:9. It used to be a fixed 260px, which is
+      16:9 only on a ~460px-wide screen — 1.38:1 at 360px and nearly square
+      (1.08:1) at 280px, i.e. 60-100px of black bars inside the frame. The 200px
+      floor is what the ≤380px block used to ask for (its rule never applied: this
+      later one overrode it) and keeps room for the providers' control bars on the
+      narrowest phones. The ceiling keeps a landscape phone's player on screen: a
+      740x360 viewport at 16:9 would be 416px tall. dvh after vh, so the URL bar is
+      accounted for where the browser knows that unit. */
   .video-embed {
     width: calc(100% + 2rem);
     margin-left: -1rem;
-    height: 260px;
-    aspect-ratio: auto;
+    height: auto;
+    aspect-ratio: 16 / 9;
+    min-height: 200px;
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
     border-radius: 0;
     border-left: none;
     border-right: none;
@@ -8420,75 +8168,9 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   SERVER SECTIONS — SMALL SCREEN CENTERING
-   ════════════════════��══════════════════════════════════════════ */
-
-@media (max-width: 768px) {
-  .srv-container {
-    justify-content: center;
-    gap: 10px;
-  }
-
-  .srv-section {
-    width: auto;
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-
-  .srv-section__grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    justify-content: center;
-  }
-
-  .srv-section__header {
-    justify-content: center;
-    text-align: center;
-  }
-
-  .srv-master-header {
-    justify-content: center;
-    text-align: center;
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-
-  .external-sources {
-    justify-content: center;
-    align-items: center;
-  }
-}
-
-@media (max-width: 480px) {
-  .srv-section__grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    justify-content: center;
-  }
-
-  .srv-card {
-    flex: 0 1 auto;
-    min-width: 120px;
-    max-width: 160px;
-    padding: 8px 10px;
-    min-height: 44px;
-  }
-
-  .srv-card__name {
-    font-size: 0.72rem;
-  }
-
-  .srv-section {
-    padding: 10px 10px;
-  }
-
-  .srv-master-header {
-    padding: 10px 14px;
-  }
-}
+/* (The ≤768 / ≤480 "server sections — small screen centering" block was removed:
+   it centred a flex row that is a left-aligned grid now, and its card sizes were
+   already restated by the later per-breakpoint server block.) */
 
 /* ═══════════════════════════════════════════════════════════════
    LARGE DESKTOP — Side layout
@@ -8506,17 +8188,11 @@ html[data-mz-tv="true"] .cat-group-menu {
     width: 100%;
   }
 
-  .external-sources {
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-start;
-    margin-top: 0;
-    width: 100%;
-  }
-
-  .external-sources .player-chip--source {
-    width: auto;
-    justify-content: center;
+  /* The trailer affordance sat over the badges and crew row; on a wide screen
+     the right side of the backdrop is empty picture, so it lives there. */
+  .modal-trailer-indicator {
+    left: 82%;
+    top: 22%;
   }
 
   .related-section {
@@ -8551,11 +8227,6 @@ html[data-mz-tv="true"] .cat-group-menu {
 
   .related-slider .movie-card {
     width: 185px;
-  }
-
-  .related-slider .movie-card .card-poster img {
-    width: 185px;
-    height: 278px;
   }
 
   .related-slider {
@@ -8601,8 +8272,9 @@ html[data-mz-tv="true"] .cat-group-menu {
     gap: 1.8rem;
   }
 
-  .movie-card {
-    border-radius: 24px;
+  .movie-card,
+  .card-poster {
+    border-radius: 18px;
   }
 
   .upcoming-grid {
@@ -8810,6 +8482,63 @@ html[data-mz-tv="true"] .cat-group-menu {
 .low-end-mode .movie-card .card-poster img,
 .low-end-mode .upcoming-card .upcoming-poster img {
   transform: none !important;
+}
+
+/*  ── ONE GPU LAYER PER CARD, AND ONE PER BADGE — not on weak phones ───────
+ *  .movie-card / .upcoming-card carry `perspective(1000px) translateZ(0)` and
+ *  their badges and info block translateZ(25-30px). All of it is visually
+ *  identity (tv-mode.css explains why: overflow:hidden and contain:paint flatten
+ *  the 3D context), but every one is a compositing reason. Measured on the real
+ *  page at 360x740 with an Android UA (so this class is on) and the grid on
+ *  screen: 136 composited layers, 62 of them cards and badges. A phone GPU shares
+ *  a small memory budget with everything else; past it, tiles go unrasterised and
+ *  posters show as empty boxes while scrolling. Same de-promotion tv-mode.css
+ *  makes for TVs. Measured with this block: 136 -> 44 layers, and a pixel diff of
+ *  the same grid and hero screenshots found 0 changed pixels.
+ *
+ *  ≤1024px only, because low-end-mode also switches on for weak laptops, reduced
+ *  motion and the FPS probe on a loaded desktop — and on a desktop GPU the layers
+ *  are the FAST path (measured at 3840×2160: removing them took scroll p95 from
+ *  23 to 200 ms; see the large-screen notes in this file and tv-mode.css).
+ *  :not(:focus) keeps tv-mode.css's focus lift on a focused tile.
+ *  The poster's own backface-visibility:hidden is a compositing reason by itself:
+ *  with only the card de-promoted, 23 posters stayed on layers of their own and
+ *  dragged the 23 quality badges painted over them along (93 layers, measured). */
+@media (max-width: 1024px) {
+  .low-end-mode .movie-card:not(:focus),
+  .low-end-mode .upcoming-card:not(:focus) {
+    transform: none !important;
+    transform-style: flat !important;
+    backface-visibility: visible !important;
+    -webkit-backface-visibility: visible !important;
+  }
+
+  .low-end-mode .movie-card img,
+  .low-end-mode .upcoming-card img {
+    backface-visibility: visible !important;
+    -webkit-backface-visibility: visible !important;
+  }
+
+  .low-end-mode .movie-card .card-info,
+  .low-end-mode .movie-card .card-quality,
+  .low-end-mode .movie-card .card-fresh,
+  .low-end-mode .movie-card .card-hot,
+  .low-end-mode .movie-card .card-dubbed,
+  .low-end-mode .movie-card .card-anime-tag,
+  .low-end-mode .upcoming-card .upcoming-info {
+    transform: none !important;
+  }
+
+  /*  The hero: will-change on .slide-bg pins a layer per materialised slide, each
+   *  ~110% of the hero (inset:-5%), and the scrim and vignette above each are
+   *  promoted too because they overlap it — 30 layers for one visible slide. They
+   *  exist for the Ken-Burns zoom and the filter tween, which this mode freezes
+   *  (scale(1) above, filter:none further down). The track keeps its own
+   *  will-change, so a slide change is still one composited move. */
+  .low-end-mode .slide-bg,
+  .low-end-mode .carousel-slide {
+    will-change: auto !important;
+  }
 }
 
 /* Skip staggered entrance animations — render instantly */
@@ -11332,18 +11061,12 @@ html[data-mz-tv="true"] .cat-group-menu {
     font-size: 0.88rem;
   }
 
-  .srv-master-header {
-    padding: 16px 24px;
-  }
 
   .srv-master-header__title {
     font-size: 0.88rem;
     letter-spacing: 2.5px;
   }
 
-  .srv-section {
-    padding: 20px 22px;
-  }
 
   .srv-section__title {
     font-size: 0.8rem;
@@ -11374,15 +11097,7 @@ html[data-mz-tv="true"] .cat-group-menu {
     font-size: 0.78rem;
   }
 
-  .srv-section {
-    padding: 14px 16px;
-    border-radius: 16px;
-  }
 
-  .srv-master-header {
-    padding: 12px 16px;
-    margin-bottom: 16px;
-  }
 
   .srv-master-header__title {
     font-size: 0.76rem;
@@ -11415,10 +11130,6 @@ html[data-mz-tv="true"] .cat-group-menu {
     padding: 2px 6px;
   }
 
-  .srv-section {
-    padding: 12px 14px;
-    border-radius: 14px;
-  }
 
   .srv-section__header {
     margin-bottom: 12px;
@@ -11441,11 +11152,6 @@ html[data-mz-tv="true"] .cat-group-menu {
     padding: 2px 8px;
   }
 
-  .srv-master-header {
-    padding: 10px 14px;
-    margin-bottom: 14px;
-    border-radius: 14px;
-  }
 
   .srv-master-header__title {
     font-size: 0.72rem;
@@ -11505,10 +11211,6 @@ html[data-mz-tv="true"] .cat-group-menu {
     gap: 4px;
   }
 
-  .srv-section {
-    padding: 11px 12px;
-    border-radius: 12px;
-  }
 
   .srv-section__header {
     margin-bottom: 10px;
@@ -11535,11 +11237,6 @@ html[data-mz-tv="true"] .cat-group-menu {
     font-size: 0.55rem;
   }
 
-  .srv-master-header {
-    padding: 9px 12px;
-    margin-bottom: 12px;
-    border-radius: 12px;
-  }
 
   .srv-master-header__left {
     gap: 8px;
@@ -11610,10 +11307,6 @@ html[data-mz-tv="true"] .cat-group-menu {
     gap: 3px;
   }
 
-  .srv-section {
-    padding: 10px;
-    border-radius: 11px;
-  }
 
   .srv-section__header {
     margin-bottom: 8px;
@@ -11641,11 +11334,6 @@ html[data-mz-tv="true"] .cat-group-menu {
     padding: 2px 6px;
   }
 
-  .srv-master-header {
-    padding: 8px 10px;
-    margin-bottom: 10px;
-    border-radius: 11px;
-  }
 
   .srv-master-header__title {
     font-size: 0.64rem;
@@ -11699,10 +11387,6 @@ html[data-mz-tv="true"] .cat-group-menu {
     padding: 1.5px 3.5px;
   }
 
-  .srv-section {
-    padding: 8px 9px;
-    border-radius: 10px;
-  }
 
   .srv-section__header {
     margin-bottom: 7px;
@@ -11728,10 +11412,6 @@ html[data-mz-tv="true"] .cat-group-menu {
     font-size: 0.48rem;
   }
 
-  .srv-master-header {
-    padding: 7px 9px;
-    margin-bottom: 8px;
-  }
 
   .srv-master-header__title {
     font-size: 0.6rem;
@@ -11784,11 +11464,6 @@ html[data-mz-tv="true"] .cat-group-menu {
     flex-basis: 100%;
   }
 
-  .srv-master-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-  }
 }
 
 /* ── Reduced Motion ── */
@@ -11811,9 +11486,6 @@ html[data-mz-tv="true"] .cat-group-menu {
     display: none;
   }
 
-  .srv-section::before {
-    transition: none !important;
-  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -11905,9 +11577,11 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 }
 
-/* ── 3. ≤400px — 1 column + row layout.
-       Naam bayein, badges dayein. 320px pe bhi pura naam readable rehta hai. ── */
-@media (max-width: 400px) {
+/* ── 3. ≤359px — 1 column + row layout.
+       Naam bayein, badges dayein. 320px pe bhi pura naam readable rehta hai.
+       (Was ≤400px. The cards stack name-over-badges now, so two columns fit
+       down to 360px — every current phone — instead of an 11-row list.) ── */
+@media (max-width: 359px) {
   .srv-section__grid {
     grid-template-columns: minmax(0, 1fr);
     gap: 6px;
@@ -12027,6 +11701,28 @@ html[data-mz-tv="true"] .cat-group-menu {
 
 /* GPU-accelerated cards for all devices */
 .movie-card, .upcoming-card { content-visibility: auto; contain-intrinsic-size: 180px 320px; contain: layout style paint; }
+
+/*  ── PHONES: CARDS ARE NOT SKIPPED ──────────────────────────────────────────
+ *  A content-visibility-skipped card is not laid out, so the browser's lazy-load
+ *  observer cannot see the poster inside it until the card is un-skipped — and the
+ *  card is un-skipped only as it is about to reach the screen. Measured on the real
+ *  page at 360x740: with the grid 1010px below the fold, NO poster had been
+ *  requested, and the first row was requested when its cards were 50px from the
+ *  viewport (rows 2 and 3 at 404 and 758px). That is a blank first screen of grid
+ *  on any slow link — exactly where Chrome would otherwise start 2500px ahead.
+ *  Unskipped: posters already on their way at the top of the page, the first row
+ *  requested 646px out and every later row at ~1260px, Chrome's own 4G distance.
+ *  What the skip saved is small here — the phone grid is paged (30 cards on the
+ *  first page, measured) and low-end-mode strips the per-card effects — and the
+ *  card keeps its `contain`. Big screens and TVs keep the skip: that is where
+ *  hundreds of tiles live.
+ *  Gated on .low-end-mode (on for every phone) because it must land TOGETHER
+ *  with that mode's layer de-promotion: unskipped cards that still carry their
+ *  per-card 3D transforms measured 173 composited layers on this page, against
+ *  136 skipped and 44 de-promoted. */
+@media (max-width: 768px) {
+  .low-end-mode .movie-card, .low-end-mode .upcoming-card { content-visibility: visible; }
+}
 .carousel-slide { will-change: transform, opacity; }
 img { content-visibility: auto; }
 
@@ -12092,7 +11788,7 @@ img { content-visibility: auto; }
       42px-tall element, which costs nothing measurable, and they are the entire
       reason the bar reads as glass rather than as a grey rectangle. What IS
       dropped is the backdrop-filter, which was the actual cost. */
-  .movie-card, .upcoming-card, .player-chip, .player-chip--source, .cat-tab {
+  .upcoming-card, .player-chip, .player-chip--source, .cat-tab {
     box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
   }
   #navbar {
@@ -12236,7 +11932,7 @@ img { content-visibility: auto; }
                 inset 0 1px 0 rgba(255, 255, 255, 0.06),
                 inset 0 -1px 0 rgba(0, 0, 0, 0.1) !important;
   }
-  .movie-card, .upcoming-card {
+  .upcoming-card {
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.38),
                 inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
   }

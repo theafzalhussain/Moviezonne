@@ -13,6 +13,14 @@
   status = 200
   force = true
 
+# Same-origin TMDB image fallback used by moviezone.js when image.tmdb.org is
+# blocked on the visitor's network (server.js and worker.js serve the same path).
+[[redirects]]
+  from = "/api/img/*"
+  to = "https://image.tmdb.org/t/p/:splat"
+  status = 200
+  force = true
+
 # Self-hosted fonts replaced the Google Fonts stylesheet. Google served these
 # with a one-year immutable policy; matching that here is what makes the swap a
 # net win on repeat visits instead of a new same-origin request every time.

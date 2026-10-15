@@ -798,12 +798,29 @@ function categoryPath(slug) {
 //  Styles are inlined deliberately: these pages are landing surfaces that
 //  must paint fast on a cold cache, and the SPA stylesheet is ~230 KB of
 //  rules built for a completely different DOM.
+//
+//  Small screens (the rules at the end of the block; explained here because
+//  this CSS ships inline in every page, comments included):
+//   • .hero-copy min-width:0 ≤640px — its 280px minimum is wider than the hero
+//     leaves under ~360px (320 - 2x20 wrap - 2x20 hero padding = 240), and .hero
+//     clips, so the right 20-40px of the title, tagline and synopsis were cut off.
+//   • .player-shell full-bleed ≤640px — 40px more picture on a phone.
+//   • Landscape phones: 16:9 at full width is taller than the screen under the
+//     sticky 62px bar, so .player-frame narrows until it fits, centred on black.
+//   • ≤400px: the 158px / 122px track minimums allowed ONE column, i.e.
+//     full-width posters; two columns instead.
+//   • (pointer:coarse): server pills and the episode form at a 44px target.
+//   • overflow-wrap on body: an overlong word wraps instead of widening the page.
+//   • ≤960px header: the six browse links wrapped onto a second line inside the
+//     fixed 62px bar on landscape phones (667x375 measured), spilling over the
+//     breadcrumb. They stay on one row and scroll sideways instead, with 44px-tall
+//     tap targets; under 640px nav.top is hidden as before.
 // ══════════════════════════════════════════════════════════════════════
 
 const BASE_CSS = `
 *,*::before,*::after{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
-body{margin:0;background:#03030a;color:#f2f2f5;font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;line-height:1.6}
+body{margin:0;background:#03030a;color:#f2f2f5;font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;line-height:1.6;overflow-wrap:break-word}
 a{color:#f5c518;text-decoration:none}
 a:hover,a:focus-visible{text-decoration:underline}
 img{max-width:100%;display:block}
@@ -817,6 +834,12 @@ header.bar .wrap{display:flex;align-items:center;gap:16px;height:62px}
 nav.top{margin-left:auto;display:flex;gap:18px;flex-wrap:wrap}
 nav.top a{color:rgba(255,255,255,.72);font-size:.9rem;font-weight:600}
 nav.top a:hover{color:#f5c518}
+@media (max-width:960px){
+  .brand{flex-shrink:0}
+  nav.top{flex-wrap:nowrap;min-width:0;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  nav.top::-webkit-scrollbar{display:none}
+  nav.top a{white-space:nowrap;padding:10px 0}
+}
 .crumbs{font-size:.82rem;color:rgba(255,255,255,.5);padding:18px 0 0}
 .crumbs ol{list-style:none;display:flex;flex-wrap:wrap;gap:8px;margin:0;padding:0}
 .crumbs li::after{content:'/';margin-left:8px;color:rgba(255,255,255,.25)}
@@ -941,6 +964,18 @@ footer.foot h3{font-size:.74rem;letter-spacing:1.4px;text-transform:uppercase;co
   .poster{width:132px;flex:0 0 132px}
   .facts-table th{width:120px}
   nav.top{display:none}
+  .hero-copy{min-width:0}
+  .player-shell{margin-left:-20px;margin-right:-20px;border-radius:0}
+}
+@media (orientation:landscape) and (max-height:540px){
+  .player-frame{width:min(100%,calc((100vh - 74px) * 16 / 9));margin:0 auto}
+}
+@media (max-width:400px){
+  .grid,.cast{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+}
+@media (pointer:coarse){
+  .srv a,.srv span{padding:11px 16px}
+  .ep-form input,.ep-form button{min-height:44px}
 }
 `.replace(/\n\s*/g, '');
 
@@ -2527,31 +2562,27 @@ const WATCH_SOURCES = [
     }
   },
   {
-    /*  The app calls this its all-rounder: 4K, multi-audio, movies and series.
-     *  The anime branch in moviezone.js needs an AniList id looked up at runtime,
-     *  which this page has no JavaScript to do, so only the TMDB form is mirrored
-     *  here — that is the branch the app itself uses for everything non-anime. */
+    /*  The app's all-rounder: movies, series and anime, with real multi-audio
+     *  tracks (Hindi, Telugu, Tamil, Kannada, English measured on a series). Its
+     *  engine moved from Videasy (backend down: 502 on every source call) to
+     *  VidRift — same chip name as in moviezone.js. */
     name: 'OmniPlay 4K',
     build: (id, type, s, e) => {
-      const opts = 'color=ffc107&autoplay=true&nextEpisode=true&episodeSelector=true'
-        + '&autoplayNextEpisode=true';
+      const opts = 'autoplay=1&brandColor=ffc107';
       return type === 'tv'
-        ? 'https://player.videasy.to/tv/' + id + '/' + s + '/' + e + '?' + opts
-        : 'https://player.videasy.to/movie/' + id + '?' + opts;
+        ? 'https://embed.vidrift.net/embed/tv/' + id + '/' + s + '/' + e + '?' + opts
+        : 'https://embed.vidrift.net/embed/movie/' + id + '?' + opts;
     }
   },
   {
-    /*  Replaces the old VidRock entry: vidrock.net still answers 200 but its
-     *  resolver returns every upstream with a null url, so the player renders
-     *  "Content unavailable" for every title. This host is verified to decode real
-     *  frames for both movies and episodes. The in-app-browser limitation the SPA
-     *  guards against does not apply here — this page is a link target, not an
-     *  embed inside another app's WebView, and there is no scripted fallback
-     *  chain on it to confuse either way. */
-    name: 'VidSrc HD',
+    /*  Replaces VidSrc HD (removed from the app). OllyEmbed's dedicated Dual
+     *  Audio / Hindi server; the app routes anime to VidNest's Hindi route, which
+     *  needs an AniList id this script-free page cannot look up, so only the
+     *  film/series form is mirrored here. */
+    name: 'Hindi Dub HD',
     build: (id, type, s, e) => (type === 'tv'
-      ? 'https://vidsrc.su/embed/tv/' + id + '/' + s + '/' + e + '?autoplay=true&autonext=true'
-      : 'https://vidsrc.su/embed/movie/' + id + '?autoplay=true')
+      ? 'https://ollyembed.pages.dev/tv/' + id + '/' + s + '/' + e + '?server=Hindi'
+      : 'https://ollyembed.pages.dev/movie/' + id + '?server=Hindi')
   },
   {
     /*  Best for older / long-running anime and cartoons in the app. The alfa and

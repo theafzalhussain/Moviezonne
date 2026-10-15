@@ -2207,6 +2207,53 @@ async function handleOttCharts(request, env, ctx, url) {
   return ottChartResponse(body, 'MISS');
 }
 
+/*  ── TMDB IMAGE FALLBACK — /api/img/<size>/<file> ───────────────────────────
+ *  Posters normally load straight from image.tmdb.org, and several Indian ISPs
+ *  (Jio and Airtel most often, per TMDB's own forum) block or reset that host. The
+ *  symptom is the reported one: titles and ratings arrive — they come through
+ *  /api/tmdb, same-origin — while every poster stays an empty placeholder.
+ *  moviezone.js retries a failed TMDB image through this route (and sw.js does
+ *  the same for cached navigations), so only visitors who need it pay for it.
+ *
+ *  Not an open proxy: the upstream host is fixed and only TMDB's size tokens plus
+ *  a hash-style file name are accepted. Edge-cached for a month per format: TMDB
+ *  answers WebP to browsers that ask for it, so the format is part of the URL the
+ *  edge caches under instead of being lost to a single cache entry. */
+const TMDB_IMG_ROUTE = /^\/api\/img\/(w45|w92|w154|w185|w300|w342|w500|w780|w1280|h632|original)\/([A-Za-z0-9_-]{6,64}\.(?:jpg|jpeg|png|webp|svg))$/;
+
+async function handleTmdbImage(request, url) {
+  const m = TMDB_IMG_ROUTE.exec(url.pathname);
+  if (!m) return new Response('Not found', { status: 404 });
+  const webp = /image\/webp/i.test(request.headers.get('Accept') || '');
+  const upstream = 'https://image.tmdb.org/t/p/' + m[1] + '/' + m[2] + (webp ? '?mzfmt=webp' : '');
+  try {
+    const res = await fetch(upstream, {
+      headers: { Accept: webp ? 'image/webp,image/*;q=0.8' : 'image/jpeg,image/png,image/*;q=0.8' },
+      cf: { cacheEverything: true, cacheTtl: 2592000 },
+      signal: AbortSignal.timeout(15000)
+    });
+    const type = res.headers.get('Content-Type') || '';
+    // Only an image body is ever relayed from our origin (TMDB's own 404 is HTML).
+    if (!res.ok || !/^image\//i.test(type)) {
+      try { if (res.body) res.body.cancel().catch(() => {}); } catch (e) { /* consumed */ }
+      return new Response(null, { status: res.status === 404 ? 404 : 502 });
+    }
+    const headers = new Headers();
+    headers.set('Content-Type', type);
+    headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+    headers.set('Vary', 'Accept');
+    headers.set('Access-Control-Allow-Origin', '*');
+    headers.set('X-Content-Type-Options', 'nosniff');
+    /*  TMDB also serves SVG (logos). Relayed from OUR origin, an SVG opened as a
+     *  document could run script here; a sandboxed, script-free CSP means it
+     *  renders as an image and nothing else. <img> use ignores this header. */
+    headers.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+    return new Response(request.method === 'HEAD' ? null : res.body, { status: 200, headers });
+  } catch (err) {
+    return new Response(null, { status: 504 });
+  }
+}
+
 /*  Dispatch for /api/*.
  *
  *  Returns null when the path is not an API route so the caller can fall through
@@ -2240,6 +2287,12 @@ async function routeApi(request, env, ctx, url) {
    */
   if (pathname.startsWith('/api/tmdb/batch/')) {
     return json({ error: 'Not an endpoint' }, 404);
+  }
+
+  /*  Same-origin fallback for TMDB images — see handleTmdbImage. */
+  if (pathname.startsWith('/api/img/')) {
+    if (request.method !== 'GET' && request.method !== 'HEAD') return json({ error: 'Method not allowed' }, 405);
+    return handleTmdbImage(request, url);
   }
 
   if (pathname.startsWith('/api/tmdb/')) {

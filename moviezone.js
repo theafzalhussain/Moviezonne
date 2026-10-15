@@ -88,16 +88,9 @@ function mzRafThrottle(fn) {
   };
 }
 
-// 2. Lazy Image Observer (loads images only when near viewport - saves bandwidth + speed)
-const lazyImageObserver = ('IntersectionObserver' in window) ? new IntersectionObserver((entries) => {
-  entries.forEach(entry => {
-    if (entry.isIntersecting) {
-      const img = entry.target;
-      if (img.dataset.src) { img.src = img.dataset.src; img.removeAttribute('data-src'); }
-      lazyImageObserver.unobserve(img);
-    }
-  });
-}, { rootMargin: mzPrefetchRootMargin(300) }) : null;
+// 2. (The lazy image observer that lived here was dead code — nothing emitted a
+//    data-src for it to swap and nothing called observe(). Every poster uses native
+//    loading="lazy"; see mzRerouteImg below for what replaced its intent.)
 
 // 3. Passive event listeners globally (smoother scroll)
 if (typeof EventTarget !== 'undefined') {
@@ -119,6 +112,188 @@ document.documentElement.style.colorScheme = 'dark';
 const LIVE_BACKEND_URL = '/api/tmdb';
 const BASE = isLocalhost ? 'http://localhost:3001/api/tmdb' : LIVE_BACKEND_URL;
 const IMG = 'https://image.tmdb.org/t/p/w342'; // Optimized: w500 is too heavy for thumbnails
+
+/*  ── TMDB IMAGE FALLBACK (same-origin /api/img) ────────────────────────────
+ *  Data comes through our own /api/tmdb, images straight from image.tmdb.org —
+ *  and several Indian ISPs (Jio/Airtel most often) block or reset that host. The
+ *  result is the reported one: titles and ratings render, every poster stays an
+ *  empty placeholder. Nothing used to retry.
+ *
+ *  A failed TMDB <img> is now retried ONCE through /api/img/<size>/<file>
+ *  (worker.js, server.js and netlify.toml all serve it). When failures outnumber
+ *  successes (two at least) the host is blocked here rather than one file
+ *  missing, so every image still pending — and every one rendered afterwards —
+ *  goes through the fallback straight away; once the fallback has delivered, that
+ *  is remembered for 6 hours so the next visit does not wait for failures first.
+ *  sw.js does the same for controlled pages, invisibly. Viewers whose network is
+ *  fine pay for two capture-phase listeners and one timer. */
+const MZ_TMDB_IMG_RE = /^https:\/\/image\.tmdb\.org\/t\/p\/(w\d+|h\d+|original)\/([A-Za-z0-9_-]+\.(?:jpe?g|png|webp|svg))(?:[?#]|$)/;
+const MZ_IMG_PROXY_KEY = 'mz_img_proxy_until';
+let _mzImgFails = 0, _mzImgOk = 0, _mzImgViaProxy = 0, _mzImgProxyOn = false, _mzImgRemember = 0, _mzImgJudge = 0;
+
+function mzProxyImgUrl(u) {
+  const m = MZ_TMDB_IMG_RE.exec(u || '');
+  return m ? '/api/img/' + m[1] + '/' + m[2] : null;
+}
+
+/** Every candidate of a srcset, descriptors kept: a small phone still picks w185. */
+function mzProxySrcset(set) {
+  return set && set.indexOf('https://image.tmdb.org/') !== -1
+    ? set.split(',').map((c) => {
+      const bits = c.trim().split(/\s+/);
+      bits[0] = mzProxyImgUrl(bits[0]) || bits[0];
+      return bits.join(' ');
+    }).join(', ')
+    : null;
+}
+
+/** Points one <img> (and a wrapping <picture>'s sources) at the fallback. */
+function mzRerouteImg(img) {
+  if (!img || img.tagName !== 'IMG' || img.getAttribute('data-mz-img') === 'proxy') return;
+  const next = mzProxyImgUrl(img.getAttribute('src')) || mzProxyImgUrl(img.currentSrc);
+  if (!next) return;
+  img.setAttribute('data-mz-img', 'proxy');
+  const pic = img.parentElement;
+  const els = (pic && pic.tagName === 'PICTURE') ? Array.prototype.slice.call(pic.getElementsByTagName('source')) : [];
+  els.push(img);
+  els.forEach((el) => {
+    const set = mzProxySrcset(el.getAttribute('srcset'));
+    if (set) el.setAttribute('srcset', set);
+  });
+  img.src = next;
+}
+
+const mzIsTmdbImg = (img) => img.getAttribute('data-mz-img') !== 'proxy'
+  && (img.currentSrc || img.getAttribute('src') || '').indexOf('https://image.tmdb.org/') === 0;
+
+// `|| []`: the vm-based checks evaluate this file against a minimal document.
+const mzAllImages = () => document.images || [];
+
+function mzRememberImgProxy() {
+  _mzImgRemember = 2;
+  try { localStorage.setItem(MZ_IMG_PROXY_KEY, String(Date.now() + 6 * 3600e3)); } catch (e) {}
+}
+
+function mzEnableImgProxy(remember) {
+  /*  Remembered only once the fallback has actually delivered: offline or
+   *  "lie-fi", where both routes fail, must not pin six hours of proxying. */
+  if (remember && !_mzImgRemember) {
+    _mzImgRemember = 1;
+    if (_mzImgViaProxy) mzRememberImgProxy();
+  }
+  if (_mzImgProxyOn) return;
+  _mzImgProxyOn = true;
+  Array.prototype.forEach.call(mzAllImages(), (img) => {
+    if (!(img.complete && img.naturalWidth > 0)) mzRerouteImg(img);
+  });
+  if (typeof MutationObserver !== 'function') return;
+  new MutationObserver((records) => {
+    for (let i = 0; i < records.length; i++) {
+      const added = records[i].addedNodes;
+      for (let j = 0; j < added.length; j++) {
+        const n = added[j];
+        if (n.nodeType !== 1) continue;
+        if (n.tagName === 'IMG') mzRerouteImg(n);
+        else if (n.getElementsByTagName) Array.prototype.forEach.call(n.getElementsByTagName('img'), mzRerouteImg);
+      }
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true });
+}
+
+function mzOnImg(img, ok) {
+  if (img.getAttribute('data-mz-img') === 'proxy') {
+    if (ok) {
+      _mzImgViaProxy++;
+      if (_mzImgRemember === 1) mzRememberImgProxy();
+    }
+    return;
+  }
+  if (!mzIsTmdbImg(img)) return;
+  if (ok) { _mzImgOk++; return; }
+  if (navigator.onLine === false) return;
+  mzRerouteImg(img);
+  /*  Success-aware: two missing posters on a page that otherwise loads fine must
+   *  not send a healthy viewer through our origin. Judged 1.5 s later, because an
+   *  error settles before a success that still has to decode — counted at the
+   *  instant of the second error, two early 404s would outvote a full grid. */
+  if (++_mzImgFails >= 2 && !_mzImgJudge) {
+    _mzImgJudge = setTimeout(() => {
+      _mzImgJudge = 0;
+      if (_mzImgFails > _mzImgOk) mzEnableImgProxy(true);
+    }, 1500);
+  }
+}
+
+['load', 'error'].forEach((type) => {
+  document.addEventListener(type, (ev) => {
+    const t = ev.target;
+    if (t && t.tagName === 'IMG') mzOnImg(t, type === 'load');
+  }, true);
+});
+
+try {
+  if (Number(localStorage.getItem(MZ_IMG_PROXY_KEY)) > Date.now()) mzEnableImgProxy(false);
+} catch (e) {}
+
+// Images that settled before this deferred bundle ran (the SSR hero is parsed
+// long before it), so a hero that already failed is not missed.
+Array.prototype.forEach.call(mzAllImages(), (img) => {
+  if (img.complete && (img.currentSrc || img.getAttribute('src'))) mzOnImg(img, img.naturalWidth > 0);
+});
+
+/*  A blackholed host never errors in useful time — TCP connect timeouts run from
+ *  20 s to two minutes — so a blocked first-time visitor would stare at
+ *  placeholders. If nothing from TMDB has loaded 12 s in while an eager request to
+ *  it is still open, this page switches over (not remembered: it may just be a
+ *  slow link). Skipped on 2G / Save-Data, where slow is normal and restarting a
+ *  download would throw away bytes already paid for. */
+setTimeout(() => {
+  const c = navigator.connection;
+  if (_mzImgProxyOn || _mzImgOk || navigator.onLine === false
+      || (c && (c.saveData || /2g/.test(c.effectiveType || '')))) return;
+  if (Array.prototype.some.call(mzAllImages(), (img) => img.loading !== 'lazy' && !img.complete && mzIsTmdbImg(img))) {
+    mzEnableImgProxy(false);
+  }
+}, 12000);
+
+/*  ── LIGHT POSTERS ON WEAK DEVICES ─────────────────────────────────────────
+ *  Poster srcsets offer w185 / w342 / w500 and the browser picks by pixel
+ *  density alone, so a 412px phone at DPR 2.625 takes w500 for every card.
+ *  Decoded bitmaps are what a low-RAM phone runs out of first — past its budget
+ *  Chrome discards them, and posters blank out and re-decode while the grid
+ *  scrolls. A device reporting ≤2 GB (deviceMemory) or ≤2 cores, or on
+ *  Save-Data / a 2G-3G link, stops at w342: ~1.85 image px per CSS px in a
+ *  185px card, still sharp at arm's length. Measured over the home page's first
+ *  eight screens at 412px @2.625: decoded bitmaps 56 -> 29 MB, posters on the
+ *  wire 2.4 -> 1.4 MB (at 360px @2: 33 -> 29 MB). TVs are tv-mode.js's. */
+const MZ_LIGHT_POSTERS = !isMzTV() && (() => {
+  const c = navigator.connection;
+  return !!((navigator.deviceMemory && navigator.deviceMemory <= 2)
+    || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 2)
+    || (c && (c.saveData || /^(slow-2g|2g|3g)$/.test(c.effectiveType || ''))));
+})();
+
+/** A poster's srcset: w185 and w342, plus w500 unless MZ_LIGHT_POSTERS. */
+function mzPosterSrcset(path) {
+  const b = 'https://image.tmdb.org/t/p/';
+  return b + 'w185' + path + ' 185w, ' + b + 'w342' + path + ' 342w'
+    + (MZ_LIGHT_POSTERS ? '' : ', ' + b + 'w500' + path + ' 500w');
+}
+
+/** The text under a poster tile — shared by the home grid and the watch page's
+ *  "More Like This" row so the two can never drift apart:
+ *    title (up to two lines) / "★ 7.2 · 2026 ... [EN]" / "Action · Drama" */
+function cardInfoHTML(title, vote, year, lang, genres) {
+  return '<div class="card-info">' +
+    '<div class="card-title">' + escapeHTML(title || '') + '</div>' +
+    '<div class="card-sub">' +
+      (vote > 0 ? '<span class="card-star">&#9733; ' + (+vote).toFixed(1) + '</span>' : '') +
+      (year ? '<span>' + year + '</span>' : '') +
+      '<b class="card-lang">' + escapeHTML((lang || 'en').toUpperCase()) + '</b>' +
+    '</div>' +
+    '<div class="card-gen">' + (genres.length ? genres.map(escapeHTML).join(' · ') : '&nbsp;') + '</div>' +
+  '</div>';
+}
 
 // NETWORK-AWARE IMAGE LOADING
 // Serves high-quality images on fast networks and lighter ones on slow links.
@@ -441,7 +616,7 @@ if (!isMzTV() && !isTouchOnly && !isMobile) {
 })();
 
 // -- SCROLL REVEAL ANIMATIONS (Intersection Observer) --
-// Guarded like lazyImageObserver above: on an engine without IntersectionObserver
+// Guarded: on an engine without IntersectionObserver
 // (older Smart-TV WebKits) an unguarded `new` here threw at load and took the
 // whole script - init() included - down with it. Such engines just reveal at once.
 const scrollObserver = ('IntersectionObserver' in window) ? new IntersectionObserver((entries, observer) => {
@@ -5796,8 +5971,6 @@ function renderTop10(list) {
     }
 
     const p342 = 'https://image.tmdb.org/t/p/w342' + m.poster_path;
-    const p500 = 'https://image.tmdb.org/t/p/w500' + m.poster_path;
-    const p185 = 'https://image.tmdb.org/t/p/w185' + m.poster_path;
 
     const metaBits = [];
     if (year) metaBits.push('<span>' + year + '</span>');
@@ -5818,7 +5991,7 @@ function renderTop10(list) {
         '<span class="top10-rank' + (rank > 3 ? ' top10-rank--outline' : '') + '" aria-hidden="true">' + rank + '</span>' +
         '<div class="top10-poster">' +
           '<img src="' + p342 + '"' +
-            ' srcset="' + p185 + ' 185w, ' + p342 + ' 342w, ' + p500 + ' 500w"' +
+            ' srcset="' + mzPosterSrcset(m.poster_path) + '"' +
             ' sizes="(max-width: 420px) 50vw, (max-width: 768px) 43vw, (max-width: 1024px) 212px, 250px"' +
             ' alt="' + title + '" width="250" height="375" loading="lazy" decoding="async" fetchpriority="low" draggable="false">' +
           '<div class="top10-badges">' +
@@ -9486,7 +9659,6 @@ function renderMovies(movies, append = false) {
 
   function createMovieCardHTML(m, i) {
     const type   = m.media_type || (m.name && !m.title ? 'tv' : 'movie');
-    const rating = m.vote_average ? m.vote_average.toFixed(1) : 'N/A';
     const year   = (m.release_date || m.first_air_date || '').slice(0, 4);
     const genres = (m.genre_ids||[]).slice(0,2).map(id => GENRE_MAP[id]).filter(Boolean);
     const rDateStr = m.release_date || m.first_air_date;
@@ -9548,9 +9720,7 @@ function renderMovies(movies, append = false) {
           // pixels a 1x desktop card displays, and slightly soft on a 3x phone.
           // The srcset lets the browser pick; sizes tells it the real slot width.
           `<img src="${IMG}${m.poster_path}"` +
-            ` srcset="https://image.tmdb.org/t/p/w185${m.poster_path} 185w,` +
-            ` https://image.tmdb.org/t/p/w342${m.poster_path} 342w,` +
-            ` https://image.tmdb.org/t/p/w500${m.poster_path} 500w"` +
+            ` srcset="${mzPosterSrcset(m.poster_path)}"` +
             ` sizes="(max-width: 600px) 45vw, (max-width: 1200px) 200px, 230px"` +
             ` alt="${escapeHTML(m.title||'')}" width="171" height="256"` +
             /*  Every grid poster is lazy now, including the first row.
@@ -9569,18 +9739,10 @@ function renderMovies(movies, append = false) {
           `<div class="card-quality ${qualClass||''}">${qual}</div>` +
           (isHot ? '<div class="card-hot">HOT</div>' : '') +
           freshBadge +
-          (isDubbedLikely ? '<div class="card-dubbed"> HINDI</div>' : '') +
+          (isDubbedLikely ? '<div class="card-dubbed">HINDI</div>' : '') +
           '<div class="card-overlay"><button class="card-play-btn" tabindex="-1" aria-hidden="true">&#9654;</button></div>' +
         '</div>' +
-        '<div class="card-info">' +
-          `<div class="card-title">${escapeHTML(m.title||m.name||'')}</div>` +
-          '<div class="card-meta">' +
-            `<div class="card-rating">RATING ${rating}</div>` +
-            `<div class="card-year">YEAR ${year}</div>` +
-          '</div>' +
-          `<div class="card-meta"><div class="card-runtime">LANG ${(m.original_language||'EN').toUpperCase()}</div></div>` +
-          `<div class="card-genres">${genres.map(g => '<span class="card-genre">'+escapeHTML(g)+'</span>').join('')}</div>` +
-        '</div>' +
+        cardInfoHTML(m.title || m.name, m.vote_average, year, m.original_language, genres) +
       '</div>'
       );
   }
@@ -11836,8 +11998,8 @@ async function openModal(id, type = 'movie', activationEvent) {
     const tmdbLangs = (details.spoken_languages || []).map(l => l.iso_639_1);
     const hasDubbed = ['hi', 'ta', 'te', 'ml', 'kn', 'mr', 'bn'].some(lang => tmdbLangs.includes(lang));
     const audioBadge = hasDubbed 
-      ? '<div class="card-year" style="font-size:0.85rem; background: linear-gradient(135deg, rgba(16,185,129,0.2), rgba(16,185,129,0.05)); border-color: rgba(16,185,129,0.3); color: #10b981;" title="Available in Hindi/Regional Languages"> DUBBED AVAILABLE</div>'
-      : '<div class="card-year" style="font-size:0.85rem; background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.02)); border-color: rgba(255,255,255,0.15); color: #bbb;" title="Only Original Audio Available"> ORIGINAL AUDIO</div>';
+      ? '<div class="modal-badge" style="background: linear-gradient(135deg, rgba(16,185,129,0.2), rgba(16,185,129,0.05)); border-color: rgba(16,185,129,0.3); color: #10b981;" title="Available in Hindi/Regional Languages"> DUBBED AVAILABLE</div>'
+      : '<div class="modal-badge" style="background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.02)); border-color: rgba(255,255,255,0.15); color: #bbb;" title="Only Original Audio Available"> ORIGINAL AUDIO</div>';
 
     const metaEl  = document.getElementById('modalMeta');
     if (metaEl) {
@@ -11904,14 +12066,16 @@ async function openModal(id, type = 'movie', activationEvent) {
       metaEl.innerHTML = metaHTML;
     }
     const embedEl = document.getElementById('videoEmbed');
+    // Poster frame: the backdrop the header just loaded (same URL, cache hit).
+    const posterSrc = bgEl && imgPath ? escapeHTML(bgEl.getAttribute('src') || '') : '';
     if (embedEl) embedEl.innerHTML =
-      '<div class="video-placeholder">' +
+      '<div class="video-placeholder' + (posterSrc ? ' has-poster" style="background-image:url(&quot;' + posterSrc + '&quot;)' : '') + '">' +
         '<button class="play-big" id="playBigBtn" aria-label="Play" title="Play">' +
           '<svg viewBox="0 0 24 24" width="44" height="44" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
             '<path d="M5 3v18l15-9L5 3z" fill="white" />' +
           '</svg>' +
         '</button>' +
-        '<p>Select language & quality, then press play</p>' +
+        '<p>Press play to start watching</p>' +
       '</div>';
     const pb = document.getElementById('playBigBtn');
     if (pb) pb.addEventListener('click', playMovie);
@@ -12100,6 +12264,7 @@ function closeModal(fromPopstate) {
   const embedEl = document.getElementById('videoEmbed');
   if (embedEl) {
     destroyPrewarm();
+    clearSignalWatch();
     embedEl.innerHTML = '';
     embedEl.classList.remove('fullscreen-mode');
   }
@@ -12198,7 +12363,7 @@ document.addEventListener('keydown', (e) => {
  *
  *  The previous skeleton was a flat 170x255 box, but a populated
  *  .related-slider .movie-card measures 307-443px depending on breakpoint —
- *  poster plus title, rating/year and genre chips. Filling the row therefore
+ *  poster plus title and the meta line. Filling the row therefore
  *  grew it by 75-210px every time. Reusing the card's markup means the box is
  *  correct at every width by construction, with no numbers to keep in sync.
  */
@@ -12207,14 +12372,8 @@ const RELATED_SKELETON = Array(6).fill(
     '<div class="card-poster"><span class="skeleton mz-skel-poster"></span></div>' +
     '<div class="card-info">' +
       '<div class="card-title skeleton mz-skel-text">Placeholder<br>title</div>' +
-      '<div class="card-meta">' +
-        '<div class="card-rating skeleton mz-skel-text">RATING 0.0</div>' +
-        '<div class="card-year skeleton mz-skel-text">YEAR 0000</div>' +
-      '</div>' +
-      '<div class="card-genres">' +
-        '<span class="card-genre skeleton mz-skel-text">Genre</span>' +
-        '<span class="card-genre skeleton mz-skel-text">Genre</span>' +
-      '</div>' +
+      '<div class="card-sub skeleton mz-skel-text">0.0 0000</div>' +
+      '<div class="card-gen skeleton mz-skel-text">Genre</div>' +
     '</div>' +
   '</div>'
 ).join('');
@@ -12386,6 +12545,7 @@ async function loadRelatedMovies(id, type) {
         card.className = 'movie-card reveal-up';
         card.tabIndex = 0;
         card.style.animationDelay = ((i % 12) * 0.04) + 's';
+        // Same tile as the home grid (cardInfoHTML); FRANCHISE replaces HINDI.
         card.innerHTML =
           '<div class="card-poster">' +
             '<img src="'+IMG+m.poster_path+'"' +
@@ -12394,22 +12554,16 @@ async function loadRelatedMovies(id, type) {
               // src made a 1x desktop download ~2.6x the pixels it displays and
               // left a 3x phone slightly soft. Letting the browser choose fixes
               // both directions from one markup change.
-              ' srcset="https://image.tmdb.org/t/p/w185'+m.poster_path+' 185w,' +
-              ' https://image.tmdb.org/t/p/w342'+m.poster_path+' 342w,' +
-              ' https://image.tmdb.org/t/p/w500'+m.poster_path+' 500w"' +
+              ' srcset="' + mzPosterSrcset(m.poster_path) + '"' +
               ' sizes="(max-width: 600px) 45vw, (max-width: 1200px) 200px, 230px"' +
               ' alt="'+escapeHTML(m.title||m.name||'')+'" width="170" height="255"' +
               ' loading="lazy" decoding="async">' +
-            '<div class="card-quality">'+qual+'</div>' +
+            '<div class="card-quality qual-' + qual.toLowerCase() + '">'+qual+'</div>' +
             (isHot ? '<div class="card-hot">HOT</div>' : '') +
-            (m._isCollection ? '<div class="card-dubbed" style="background:rgba(245,197,24,0.2);color:var(--gold);border:1px solid rgba(245,197,24,0.4);">FRANCHISE</div>' : '') +
-            '<div class="card-overlay"><button class="card-play-btn">&#9654;</button></div>' +
+            (m._isCollection ? '<div class="card-dubbed rel-fr">FRANCHISE</div>' : '') +
+            '<div class="card-overlay"><button class="card-play-btn" aria-label="Play">&#9654;</button></div>' +
           '</div>' +
-          '<div class="card-info">' +
-            '<div class="card-title">'+escapeHTML(m.title||m.name||'')+'</div>' +
-            '<div class="card-meta"><div class="card-rating">RATING '+rating+'</div><div class="card-year">YEAR '+year+'</div></div>' +
-            '<div class="card-genres">'+genres.map(g => '<span class="card-genre">'+escapeHTML(g)+'</span>').join('')+'</div>' +
-          '</div>';
+          cardInfoHTML(m.title || m.name, m.vote_average, year, m.original_language, genres);
         card.addEventListener('click', (event) => { openModal(m.id, rType, event); });
         fragment.appendChild(card);
         // PERF (TV): reveal observer skip — TV CSS me .reveal-up ka opacity force hai.
@@ -12605,36 +12759,49 @@ function ensureAnilistThenReload(m, season, srcIdx, lang, quality, type) {
   }).catch(() => { anilistLookupInFlight = false; });
 }
 
-// -- PLAYER SOURCES — FINAL (July 2026) --
-// All tested & working. Includes 2 PREMIUM all-in-one servers.
+// -- PLAYER SOURCES (Oct 2026) --
+// Every entry was re-measured in real Chrome inside a real iframe (this app's
+// own frame attributes: no sandbox, referrerpolicy=no-referrer — origin for
+// OmniPlay/VidRift only, see frameReferrerPolicy()).
 const playerSources = [
-  // ⚡ #0 ALL-ROUNDER: Anime + Cartoons + Movies + Web Series, with real Hindi dub tracks.
-  // Anime ke liye AniList route (hindi/dub/sub), baaki sab ke liye TMDB route.
-  // ⚡ #1 ALL-ROUNDER 4K: Videasy — anime + movies + series, high bitrate, multi-audio
-  //    Host is player.videasy.to, not .net. The .net address still works but only as
-  //    a 301 to .to (the .to page's own <link rel=canonical> points at .to, so that
-  //    is the origin the provider treats as home). Riding that redirect cost this
-  //    server — the app's first pick — a cold DNS + TLS handshake on the critical
-  //    path, because playerHostOrigins() was preconnecting the host that merely
-  //    bounces us. Measured: ~3.2s to first byte through .net, ~0.69s straight to
-  //    .to. Same reasoning already applied to Flicky further down.
-  { name: 'OmniPlay 4K', dubbed: true, is4K: true, anime: true, url: (id, lang, type, s, e) => {
-    const m = currentModalMovie;
-    const wantDub = (lang === 'hi' || lang === 'en');
-    const common = `color=ffc107&autoplay=true&nextEpisode=true&episodeSelector=true&autoplayNextEpisode=true`;
-    if (isAnimeContent(m)) {
-      const anilistId = getAnilistIdSync(m, s);
-      if (anilistId) {
-        const ep = String(parseInt(e, 10) || 1);
-        return `https://player.videasy.to/anime/${anilistId}/${ep}?dub=${wantDub}&${common}`;
-      }
-    }
-    return type === 'tv'
-      ? `https://player.videasy.to/tv/${id}/${s}/${e}?${common}&lang=${lang}`
-      : `https://player.videasy.to/movie/${id}?${common}&lang=${lang}`;
-  }},
+  /*  #0 OmniPlay 4K — same chip, same slot, same badges; the engine changed.
+   *
+   *  OmniPlay ran on Videasy, and Videasy's backend is down for everyone, not just
+   *  one network: api.speedracelight.com (its source API) answers Cloudflare 502
+   *  to every seed/sources call, and www/backend/users.videasy.to are NXDOMAIN on
+   *  public DoH. The player shell still loads — which is why the iframe looked
+   *  fine — then searches its providers and paints "We couldn't find that" for
+   *  every title. No URL parameter can fix that, so the engine moved to VidRift.
+   *
+   *  Measured playing (real decoded frames):
+   *    Avengers: Endgame 2579x1080 · 3 Idiots 1080p · RRR 1080p
+   *    Game of Thrones S1E1 720p, audio tracks: Hindi, Telugu, English, Tamil, Kannada
+   *    Jujutsu Kaisen S1E1 1080p (anime plays on the plain TMDB route)
+   *
+   *  TMDB routes only, anime included: VidRift serves anime as TV, so no AniList
+   *  lookup (and no reload when it resolves) is needed. `autoplay=1` is ignored by
+   *  the player (its default is muted autoplay) and exists so warmUrlVariant can
+   *  flip it to `autoplay=0` for a hidden warm-up frame.
+   *
+   *  `signal`: a working VidRift player posts vidrift:* messages within ~1s of
+   *  booting; a title it cannot serve (e.g. HTTP 451 "This title is not
+   *  available.") posts nothing. armSignalWatch() uses that to fail over on its own
+   *  instead of leaving the viewer on an error card. */
+  { name: 'OmniPlay 4K', dubbed: true, is4K: true, anime: true,
+    signal: { origin: 'https://embed.vidrift.net', prefix: 'vidrift:' },
+    // Continue Watching resume, sent once the frame has loaded (see loadPlayer).
+    resume: (at) => ({ type: 'vidrift:resume', currentTime: at }),
+    url: (id, lang, type, s, e) => {
+      const opts = 'autoplay=1&brandColor=ffc107';
+      return type === 'tv'
+        ? `https://embed.vidrift.net/embed/tv/${id}/${s}/${e}?${opts}`
+        : `https://embed.vidrift.net/embed/movie/${id}?${opts}`;
+    }},
   // 🌸 ANIME SPECIALIST: AnimePahe mirror — purane/long-running anime & cartoons ke liye best
-  { name: 'AnimePahe HD', dubbed: true, is4K: true, anime: true, url: (id, lang, type, s, e) => {
+  //    `anilist: true` = its anime URL is keyed on an AniList id, so loadPlayer may
+  //    reload it once that id resolves (ensureAnilistThenReload). TMDB-only servers
+  //    do not set it, so they are never reloaded for nothing.
+  { name: 'AnimePahe HD', dubbed: true, is4K: true, anime: true, anilist: true, url: (id, lang, type, s, e) => {
     const m = currentModalMovie;
     const track = animeAudioTrack(lang) === 'hindi' ? 'dub' : animeAudioTrack(lang); // animepahe: sub/dub
     if (isAnimeContent(m)) {
@@ -12745,72 +12912,53 @@ const playerSources = [
    *  per-server history off the name, and 'VidCore HD' has been recording load
    *  successes for a Cloudflare block page. A new key lets this compete on its real
    *  3.7s from the first visit instead of inheriting that false-positive history.
+   *
+   *  ── Oct 2026: films moved off peachify.top ──
+   *  peachify.top's origin is gone: Cloudflare answers 523 "origin unreachable" on
+   *  every path, which is exactly the reported "web series play, movies don't" —
+   *  episodes were already on moviesapi.vip. Its /movie route was re-measured and
+   *  now plays: Endgame 1920x800, 3 Idiots 1920x816, RRR 1920x1012, with Hindi
+   *  sources in its server menu. Both types now share one provider and one host.
    */
   { name: 'MultiLang HD', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
-    if (type === 'tv') {
-      return `https://moviesapi.vip/tv/${id}/${s}/${e}`;
-    }
-    /*  peachify takes no language query parameter — the audio track is chosen in
-     *  its own Audio menu and remembered per viewer, which is why it is here. The
-     *  resume position is shared with Pro Stream and VidSrc HD through
-     *  mzResumeSec, so switching to this server mid-film continues instead of
-     *  restarting. */
-    const at = (typeof mzResumeSec === 'function') ? mzResumeSec(id, type, s, e) : 0;
-    return `https://peachify.top/embed/movie/${id}` + (at ? `?startAt=${at}` : '');
+    return type === 'tv'
+      ? `https://moviesapi.vip/tv/${id}/${s}/${e}`
+      : `https://moviesapi.vip/movie/${id}`;
   }},
 
-  /*  Replaces VidRock, which is dead in a way no status code reveals — and this is
-   *  exactly the "Content unavailable / please try again later" screen that was
-   *  reported. vidrock.net still answers 200 with a normal SPA shell, so every
-   *  reachability check passes; the failure is one level down, in the provider's
-   *  own resolver:
+  /*  Hindi Dub HD — replaces VidSrc HD (vidsrc.su), removed by request: it was the
+   *  weakest chip in the list for this audience (no Hindi, and it refused to run
+   *  inside Android in-app browsers).
    *
-   *    GET vidrock.net/api/movie/550
-   *    {"Nova":{"url":null},"Atlas":{"url":null},"Luna":{"url":null},
-   *     "Orion":{"url":null},"Astra":{"url":null}}
+   *  Built for one job — Hindi audio on every kind of title — and routed by type,
+   *  like MultiLang HD, because no single provider was best at all three:
    *
-   *  All five upstreams come back with a null url, the player drops every entry
-   *  without one, ends up with zero sources and paints that panel. Same empty
-   *  answer for every title and every mirror (vidrock.ru and vidrock.to share the
-   *  backend), so it was not per-title and not a domain move. Reproduced in real
-   *  Chrome: the frame contains no <video> element at all, only a placeholder
-   *  demo-video.mp4. Worth noting because it is the nastiest failure mode we have:
-   *  the iframe LOADS, so recordPlayerLoad() counts it as a success and the health
-   *  ranking keeps this server near the top while it shows an error to everyone.
+   *    films & series  ollyembed.pages.dev ?server=Hindi — its dedicated Dual Audio
+   *                    / Hindi server. Measured: Endgame (variants to 1012p),
+   *                    Inception (to 800p), 3 Idiots, Game of Thrones S1E1 720p.
+   *    anime           vidnest.fun /anime/{anilist}/{ep}/hindi — VidNest's own Hindi
+   *                    dub route. Measured: One Piece ep1 (to 1080p), Jujutsu Kaisen
+   *                    ep1 720p, Attack on Titan ep1 720p.
    *
-   *  vidsrc.su is the replacement, chosen on measured behaviour rather than a 200:
-   *  driven in headless Chrome inside a real unsandboxed iframe, it decodes actual
-   *  frames — Fight Club at 1920x800 (duration 2:19:08, readyState 4) and House of
-   *  the Dragon S1E1 at 1920x960 — so movies and episodes both genuinely play. It
-   *  is also the fastest host in the list from an Indian connection (~0.26-0.5s to
-   *  first byte) and its bundle carries no popunder, no ad library and no
-   *  analytics beacon, which additionally removes one of the three ad-heavy
-   *  providers this list was carrying.
-   *
-   *  Known parameters (read out of its bundle): autoplay, autonext, pausescreen,
-   *  idlecheck, logo, colour, backbutton. Only the two that matter are sent, and
-   *  `autoplay=true` is neutralised by warmUrlVariant on warm-ups.
-   *
-   *  `skip` is why the entry needs a capability hook: this player deliberately
-   *  refuses to run inside an Android in-app browser (Instagram, Facebook,
-   *  Telegram WebViews), showing "In-App Browser Detected" instead of video —
-   *  verified by spoofing a `; wv)` user agent. That frame still fires `load`, so
-   *  the auto-retry chain would never rescue the viewer. Excluding it from the
-   *  candidate pool on those user agents means they are simply routed elsewhere.
-   */
-  { name: 'VidSrc HD', dubbed: true,
-    skip: () => {
-      try {
-        const ua = navigator.userAgent || '';
-        if (/Android/.test(ua) && (/;\s*wv\)/.test(ua) || /\bwv\b/.test(ua))) return true;
-        const brands = navigator.userAgentData && navigator.userAgentData.brands;
-        return !!(brands && brands.some(b => b.brand === 'Android WebView'));
-      } catch (err) { return false; }
-    },
+   *  Until an anime's AniList id is known the episode plays on VidNest's TMDB route,
+   *  and `anilist: true` lets ensureAnilistThenReload() upgrade it to the Hindi
+   *  route once the id resolves (openModal pre-resolves it, so usually it already is).
+   *  No 4K badge: nothing here was measured above 1080p. */
+  { name: 'Hindi Dub HD', dubbed: true, anime: true, anilist: true,
     url: (id, lang, type, s, e) => {
+      const m = currentModalMovie;
+      if (isAnimeContent(m)) {
+        const anilistId = getAnilistIdSync(m, s);
+        if (anilistId) {
+          return `https://vidnest.fun/anime/${anilistId}/${parseInt(e, 10) || 1}/hindi`;
+        }
+        return type === 'tv'
+          ? `https://vidnest.fun/tv/${id}/${s}/${e}`
+          : `https://vidnest.fun/movie/${id}`;
+      }
       return type === 'tv'
-        ? `https://vidsrc.su/embed/tv/${id}/${s}/${e}?autoplay=true&autonext=true`
-        : `https://vidsrc.su/embed/movie/${id}?autoplay=true`;
+        ? `https://ollyembed.pages.dev/tv/${id}/${s}/${e}?server=Hindi`
+        : `https://ollyembed.pages.dev/movie/${id}?server=Hindi`;
     }},
   // { name: 'Hindi Multi-Audio', dubbed: true, url: (id, lang, type, s, e) => {
   //   const base = `https://embed.smashystream.com/playere.php?tmdb=${id}`;
@@ -12911,9 +13059,6 @@ const LANG_CONFIG = {
   mr: { flag: 'MR', name: 'Marathi',    code: 'mr' },
   bn: { flag: 'BN', name: 'Bengali',    code: 'bn' },
 };
-const DUBBED_LANGS = ['hi', 'ta', 'te', 'ml', 'kn', 'mr', 'bn'];
-const CORE_LANGS   = ['hi', 'en', 'ta', 'te'];
-const EXTRA_LANGS  = ['ml', 'kn', 'mr', 'bn'];
 
 function renderLanguageButtons(spokenLangs) {
   const ext = document.getElementById('externalSources');
@@ -12926,8 +13071,13 @@ function renderLanguageButtons(spokenLangs) {
   return;
 }
 
-function _removedRenderLanguageButtons_unused() {}
-/*  Former body kept as a comment only, so it ships zero bytes after minification:
+/*  Former body kept as a comment only, so it ships zero bytes after minification.
+    Restoring it also needs the three lists only it used, moved in here for that
+    reason (they were the last bytes this dead feature still shipped):
+  const DUBBED_LANGS = ['hi', 'ta', 'te', 'ml', 'kn', 'mr', 'bn'];
+  const CORE_LANGS   = ['hi', 'en', 'ta', 'te'];
+  const EXTRA_LANGS  = ['ml', 'kn', 'mr', 'bn'];
+
   const ext = document.getElementById('externalSources');
   if (!ext) return;
   const old = document.getElementById('mz-lang-section');
@@ -13302,11 +13452,11 @@ function rankSourceIdxs(idxs) {
 
 /** Servers eligible for this content, honouring the anime and dub rules. */
 function candidateSourceIdxs(lang, movie) {
-  /*  A server may declare itself unusable on this browser via `skip()`. Only one
-   *  entry does today: VidSrc HD refuses to run inside Android in-app browsers and
-   *  shows its own "unsupported browser" panel instead — and because that panel
-   *  still fires the iframe's load event, the auto-retry chain cannot detect it.
-   *  Filtering it out here is what keeps those viewers out of that dead end.
+  /*  A server may declare itself unusable on this browser via `skip()` — e.g. a
+   *  player that refuses to run inside Android in-app browsers and shows its own
+   *  "unsupported browser" panel, which still fires the iframe's load event, so the
+   *  auto-retry chain could not detect it. No entry needs it right now (VidSrc HD,
+   *  the one that did, was removed); the hook stays for the next one that does.
    *  Applied first so the anime and dub rules below only ever see usable servers,
    *  and guarded so it can never empty the pool. */
   const usable = playerSources.map((_, i) => i).filter(i => {
@@ -13478,8 +13628,8 @@ function playerHostOrigins() {
      *
      *  This probed only source.url(550, 'en', 'movie', ...), which is correct for
      *  every entry that serves films and episodes from one host — and silently
-     *  wrong for one that does not. MultiLang HD sends films to peachify.top and
-     *  episodes to moviesapi.vip, so with the movie-only probe the episode host was
+     *  wrong for one that does not. MultiLang HD used to send films to peachify.top
+     *  and episodes to moviesapi.vip, so with the movie-only probe the episode host was
      *  never in this list: no dns-prefetch, no preconnect, and every series started
      *  with a cold DNS + TLS handshake on the critical path. Warming both costs two
      *  builder calls at startup and nothing at runtime, and it is future-proof for
@@ -13677,7 +13827,10 @@ function warmPlayerConnection(id, type) {
 function warmUrlVariant(url) {
   // Autoplay params ko warmup ke liye off kar do (param ka exact casing preserve).
   return url.replace(/([?&])(autoplay|autoPlay|autoplayNextEpisode|autoplaynextepisode)=true/g,
-    (m, sep, key) => sep + key + '=false');
+    (m, sep, key) => sep + key + '=false')
+    /*  Numeric form (OmniPlay / VidRift): `autoplay=0` is that player's only
+     *  "do not start" switch, so a hidden warm-up frame must carry it. */
+    .replace(/([?&])autoplay=1(?=&|$)/g, (m, sep) => sep + 'autoplay=0');
 }
 
 /**
@@ -13774,15 +13927,84 @@ function schedulePlayerPrewarm(id, type, delay) {
   window._mzPrewarmTimer = setTimeout(() => prewarmPlayer(id, type), typeof delay === 'number' ? delay : 120);
 }
 
-function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
+/*  ── PROVIDER HANDSHAKE WATCHDOG ───────────────────────────────────────────
+ *  A cross-origin frame that fired `load` may still be an error card (HTTP 451
+ *  "This title is not available.", a dead resolver ...), and `load` alone cannot
+ *  tell the two apart — which is how earlier outages hid behind "the iframe
+ *  loaded". A server that declares `signal: { origin, prefix }` posts messages
+ *  of that prefix as soon as its real player boots (VidRift: vidrift:ui-hidden and
+ *  vidrift:providers within ~1s, measured). No such message by
+ *  MZ_SIGNAL_GRACE_MS after `load` means there is no player in the frame, and the
+ *  viewer is moved to the next server instead of being left on the error card.
+ *
+ *  Title-specific by nature, so it neither records a ranking failure nor
+ *  overwrites the viewer's saved server: the next title still opens on it. */
+const MZ_SIGNAL_GRACE_MS = 7000;
+let _mzSignalWatch = null;
+
+function clearSignalWatch() {
+  if (_mzSignalWatch && _mzSignalWatch.timer) clearTimeout(_mzSignalWatch.timer);
+  _mzSignalWatch = null;
+}
+
+window.addEventListener('message', (event) => {
+  const w = _mzSignalWatch;
+  if (!w || event.origin !== w.origin) return;
+  const d = event.data;
+  const t = (d && typeof d === 'object') ? d.type : null;
+  if (typeof t !== 'string' || t.indexOf(w.prefix) !== 0) return;
+  w.seen = true;
+  if (w.timer) { clearTimeout(w.timer); w.timer = null; }
+});
+
+/** Armed when the frame starts navigating, so an early handshake is not missed. */
+function armSignalWatch(source, iframe, onSilent) {
+  clearSignalWatch();
+  if (!source || !source.signal || !iframe) return null;
+  _mzSignalWatch = { origin: source.signal.origin, prefix: source.signal.prefix,
+    iframe: iframe, onSilent: onSilent, seen: false, timer: null };
+  return _mzSignalWatch;
+}
+
+/** Called from the frame's `load`: start the grace period unless it already spoke. */
+function startSignalGrace(iframe) {
+  const w = _mzSignalWatch;
+  if (!w || w.iframe !== iframe || w.seen || w.timer) return;
+  w.timer = setTimeout(() => {
+    if (_mzSignalWatch !== w || w.seen) return;
+    _mzSignalWatch = null;
+    // Superseded (server switched, modal closed): nothing to rescue.
+    if (!iframe.isConnected || document.getElementById('playerFrame') !== iframe) return;
+    try { w.onSilent(); } catch (e) {}
+  }, MZ_SIGNAL_GRACE_MS);
+}
+
+/*  Referrer policy per provider frame. Everything stays on no-referrer (what each
+ *  server was measured with) EXCEPT OmniPlay's engine, VidRift, which needs to know
+ *  its parent page. With no Referer it sees parent "" and runs its popup-capability
+ *  probe on every viewer's first click; with our origin it recognises the embedder
+ *  (localhost skips the probe outright, and a production host gets judged on its
+ *  own record instead of the anonymous bucket that sandboxing embedders share).
+ *  Origin only — never the path or #watch hash — and the same policy the SSR
+ *  watch page (seo-ssr.js) already uses for this exact player. */
+const MZ_FRAME_REFERRER = { 'https://embed.vidrift.net': 'origin' };
+function frameReferrerPolicy(src) {
+  try { return MZ_FRAME_REFERRER[new URL(src).origin] || 'no-referrer'; } catch (e) { return 'no-referrer'; }
+}
+
+function loadPlayer(id, srcIdx, lang, quality, type = 'movie', opts) {
   // Stop trailer instantly when movie starts playing
   if (activeTrailerStopper) activeTrailerStopper();
+  // A new player supersedes any handshake still pending for the previous one.
+  clearSignalWatch();
 
   const embedEl = document.getElementById('videoEmbed');
   if (!embedEl) return;
   
   currentSourceIdx = srcIdx;
-  setSelectedSourceIdx(srcIdx);
+  // A title-specific automatic fallback (see armSignalWatch) must not overwrite
+  // the viewer's saved server — the next title should still open on it.
+  if (!(opts && opts.keepPick)) setSelectedSourceIdx(srcIdx);
   lang = lang || getSelectedLang();
   setSelectedLang(lang);
   quality = quality || getSelectedQuality();
@@ -13808,8 +14030,10 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   const src = playerSources[srcIdx].url(id, lang, type, s, e);
 
   // Anime/Cartoon servers: AniList ID background me resolve karo aur milte hi
-  // player ko asli anime stream (Hindi dub / dub / sub) par upgrade kar do
-  if (playerSources[srcIdx] && playerSources[srcIdx].anime && isAnimeContent(currentModalMovie)) {
+  // player ko asli anime stream (Hindi dub / dub / sub) par upgrade kar do.
+  // Only servers whose URL actually uses the AniList id (`anilist: true`) —
+  // reloading a TMDB-route player would restart playback for an identical URL.
+  if (playerSources[srcIdx] && playerSources[srcIdx].anilist && isAnimeContent(currentModalMovie)) {
     ensureAnilistThenReload(currentModalMovie, s, srcIdx, lang, quality, type);
   }
  
@@ -13850,7 +14074,7 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
         ${reusable ? 'Almost ready...' : (isDubServer ? 'Loading Hindi Dubbed Stream...' : 'Loading Stream...')}
       </div>
       <div style="color:rgba(255,255,255,0.4); margin-top:6px; font-size:0.75rem;">
-        Server: ${escapeHTML(playerSources[srcIdx].name)} ${isDubServer ? '• Dubbed ?' : ''}
+        Server: ${escapeHTML(playerSources[srcIdx].name)} ${isDubServer ? '• Dubbed' : ''}
       </div>
     `;
     embedEl.appendChild(loader);
@@ -13877,10 +14101,16 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   }
   iframe.setAttribute('title', 'MovieZone video player');
   iframe.setAttribute('tabindex', '0');
-  iframe.setAttribute('referrerpolicy', 'no-referrer');
+  iframe.setAttribute('referrerpolicy', frameReferrerPolicy(src));
   iframe.setAttribute('fetchpriority', 'high');
   iframe.setAttribute('loading', 'eager');
   if (!reusable) embedEl.appendChild(iframe);
+  /*  Handshake watch is armed BEFORE navigation starts, so a provider message
+   *  posted ahead of `load` (VidRift posts at ~0.6s) still counts. */
+  const _mzSource = playerSources[srcIdx];
+  armSignalWatch(_mzSource, iframe, () => {
+    autoRetryNextServer(id, srcIdx, lang, quality, type, { keepPick: true, reason: 'unavailable' });
+  });
   // Same element par navigate: connection + provider assets already warm.
   iframe.src = src;
 
@@ -13894,11 +14124,24 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
    *  why "the frame loaded" is not the signal the ranking needs. */
   window._mzActivePlayerName = _mzSrcName;
 
+  let _mzResumeSent = false;
   iframe.onload = () => {
     hasLoaded = true;
     // Feeds the ranking: this is how the player learns which providers are
     // actually fast on this user's network.
     recordPlayerLoad(_mzSrcName, Date.now() - _mzStartedAt);
+    startSignalGrace(iframe);
+    /*  Players that take the resume point as a message (OmniPlay / VidRift:
+     *  vidrift:resume, "safe to send before the video is ready"). Once per play —
+     *  a later `load` is the provider swapping episodes itself, and an old
+     *  position must not be pushed into a different episode. */
+    if (!_mzResumeSent && _mzSource.resume && _mzSource.signal) {
+      _mzResumeSent = true;
+      const at = (typeof mzResumeSec === 'function') ? mzResumeSec(id, type, s, e) : 0;
+      if (at > 0) {
+        try { iframe.contentWindow.postMessage(_mzSource.resume(at), _mzSource.signal.origin); } catch (err) {}
+      }
+    }
     if (loader && loader.parentNode) { 
       loader.style.opacity = '0';
       setTimeout(() => { if (loader && loader.parentNode) loader.remove(); }, 400);
@@ -13945,16 +14188,22 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
   }, 1500);
  
   // Render Player Controls with "Try All Servers" button
-  let controlsHtml = '<div id="playerControls" class="player-controls">';
+  const _toastLangName = (LANG_CONFIG[lang] && LANG_CONFIG[lang].name) || lang.toUpperCase();
+  const _dubbedStatus = isDubServer ? 'Dubbed' : 'Original';
+  const _epLabel = type === 'tv' ? ` | S${s} E${e}` : '';
+  // Left side of the toolbar: which server is on screen right now.
+  let controlsHtml = '<div id="playerControls" class="player-controls">' +
+    '<div class="player-now"><i></i><b>' + escapeHTML(_mzSrcName) + '</b><span>' +
+    escapeHTML(_toastLangName) + ' · ' + _dubbedStatus + _epLabel.replace(' |', ' ·') + '</span></div>';
   if (type === 'tv') {
-    controlsHtml += '<button onclick="playNextEpisode()" class="player-chip premium-play-btn" style="padding:0 14px; border-radius:999px; min-height:42px; border:none; display:inline-flex; align-items:center; gap:6px;">' +
+    controlsHtml += '<button onclick="playNextEpisode()" class="player-chip premium-play-btn">' +
         '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>' +
-        '<span style="font-size:13px; font-weight:800;">Next Ep</span></button>';
+        '<span>Next Ep</span></button>';
   }
   // TRY ALL SERVERS BUTTON (Dubbed)
-  controlsHtml += '<button onclick="tryAllDubbedServers()" class="player-chip" id="tryAllBtn" style="background:linear-gradient(135deg, rgba(245,197,24,0.15), rgba(230,57,70,0.1)); border:1px solid rgba(245,197,24,0.3); color:var(--gold);" title="Automatically cycle through all dubbed servers to find working Hindi audio">' +
+  controlsHtml += '<button onclick="tryAllDubbedServers()" class="player-chip player-chip--try" id="tryAllBtn" title="Automatically cycle through all dubbed servers to find working Hindi audio">' +
       '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>' +
-      '<span style="font-size:12px; font-weight:700;">Try All Dubbed Servers</span></button>';
+      '<span>Try All Dubbed Servers</span></button>';
   controlsHtml += '<button onclick="togglePlayerFS()" class="player-chip player-chip--fs" id="fsBtn">' +
         '<svg class="player-chip__icon" viewBox="0 0 24 24"><path d="M7 3H3v4h2V5h2V3zm10 0v2h2v2h2V3h-4zM5 17H3v4h4v-2H5v-2zm16 0h-2v2h-2v2h4v-4z"></path></svg>' +
         '<span>Fullscreen</span></button></div>';
@@ -13966,16 +14215,14 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie') {
  
   try { renderExternalSources(id, srcIdx, lang); } catch(e){}
  
-  const _toastLangName = (LANG_CONFIG[lang] && LANG_CONFIG[lang].name) || lang.toUpperCase();
-  const _dubbedStatus = isDubServer ? 'Dubbed' : 'Original';
-  showToast('' + buildSourceLabel(srcIdx) + ' |  ' + _toastLangName + ' | ' + _dubbedStatus + (type === 'tv' ? ` | S${s} E${e}` : ''));
+  showToast('' + buildSourceLabel(srcIdx) + ' |  ' + _toastLangName + ' | ' + _dubbedStatus + _epLabel);
  
   // Smooth scroll to video player
   setTimeout(() => embedEl.scrollIntoView({ behavior: isMzTVMode() ? 'auto' : 'smooth', block: 'center' }), 300);
   
 }
 
-function autoRetryNextServer(id, currentIdx, lang, quality, type) {
+function autoRetryNextServer(id, currentIdx, lang, quality, type, opts) {
   /*  Retry order is measured, not positional.
    *
    *  This used to scan forward from currentIdx and take the next index that
@@ -14005,10 +14252,16 @@ function autoRetryNextServer(id, currentIdx, lang, quality, type) {
   }
   
   if (nextIdx !== -1 && nextIdx !== currentIdx) {
-    showToast(` Server failed. Trying ${playerSources[nextIdx].name}...`);
-    loadPlayer(id, nextIdx, lang, quality, type);
-    // Update active state on server buttons
-    document.querySelectorAll('.player-chip--source').forEach((b, i) => b.classList.toggle('active', i === nextIdx));
+    const from = playerSources[currentIdx] ? playerSources[currentIdx].name : 'Server';
+    showToast((opts && opts.reason === 'unavailable')
+      ? ` ${from} doesn't have this title. Trying ${playerSources[nextIdx].name}...`
+      : ` Server failed. Trying ${playerSources[nextIdx].name}...`);
+    loadPlayer(id, nextIdx, lang, quality, type, opts);
+    /*  loadPlayer() has already re-rendered the chips with the right one active.
+     *  Matched on data-srcidx, not DOM position: the chips are grouped (4K/anime
+     *  first), so the Nth chip is not necessarily playerSources[N]. */
+    document.querySelectorAll('.player-chip--source')
+      .forEach(b => b.classList.toggle('active', b.getAttribute('data-srcidx') === String(nextIdx)));
   } else {
     showToast('All servers tried. Please try again later or change language.');
   }
@@ -14068,8 +14321,9 @@ function tryAllDubbedServers() {
     showToast(` Testing server ${currentTryIdx + 1}/${dubbedIndices.length}: ${serverName}`);
     loadPlayer(id, serverIdx, lang, quality, type);
     
-    // Update active button
-    document.querySelectorAll('.player-chip--source').forEach((b, i) => b.classList.toggle('active', i === serverIdx));
+    // Update active button (by data-srcidx: chip order is grouped, not declared)
+    document.querySelectorAll('.player-chip--source')
+      .forEach(b => b.classList.toggle('active', b.getAttribute('data-srcidx') === String(serverIdx)));
     
     currentTryIdx++;
     
@@ -15095,9 +15349,24 @@ init();
     if (!allowed || allowed.indexOf(event.origin) === -1) return;
 
     const payload = event.data;
-    if (!payload || payload.type !== 'PLAYER_EVENT' || !payload.data) return;
-    const watched = Number(payload.data.currentTime);
-    const duration = Number(payload.data.duration);
+    if (!payload) return;
+    let watched, duration;
+    if (payload.type === 'PLAYER_EVENT' && payload.data) {
+      watched = Number(payload.data.currentTime);
+      duration = Number(payload.data.duration);
+    } else if (payload.type === 'vidrift:progress') {
+      /*  OmniPlay (VidRift) posts { tmdbId, season, episode, currentTime, duration }
+       *  every 5s while playing. Its in-player episode picker can move to another
+       *  episode in the same frame, so a playhead for a different title/episode
+       *  than this session is ignored rather than written to the wrong row. */
+      if (Number(payload.tmdbId) !== Number(session.id)) return;
+      if (session.media_type === 'tv'
+          && (Number(payload.season) !== session.season || Number(payload.episode) !== session.episode)) return;
+      watched = Number(payload.currentTime);
+      duration = Number(payload.duration);
+    } else {
+      return;
+    }
     if (!Number.isFinite(watched) || !(duration > 0)) return;
 
     session.watchedSec = Math.max(0, Math.min(watched, duration));

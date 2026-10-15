@@ -220,7 +220,18 @@ const PORT = process.env.PORT || 3001;
 // Security Middleware: Secures Express apps by setting various HTTP headers
 app.use(helmet({
   contentSecurityPolicy: false, // Disabled to allow images from TMDB and external video iframes
-  crossOriginEmbedderPolicy: false
+  crossOriginEmbedderPolicy: false,
+  /*  PLAYER FIX — "Remove sandboxing to enable playback."
+   *  Helmet's default COOP is `same-origin`. Under that policy the HTML spec opens
+   *  every popup started by a CROSS-ORIGIN iframe as noopener, so window.open()
+   *  inside the player frame returns null even though the window appears.
+   *  OmniPlay (VidRift) checks exactly that on the viewer's first click / seek
+   *  (its "popup-capability gate"), reads null as "this embed is sandboxed" and
+   *  replaces the player with that message. Reproduced and verified in real
+   *  Chrome: same-origin trips it, same-origin-allow-popups does not.
+   *  same-origin-allow-popups keeps the protection against cross-origin pages
+   *  that open US; it only stops severing the popups our own page opens. */
+  crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' }
 }));
 
 // Compression Middleware: Compresses all responses (Gzip) for faster load times and less bandwidth usage
@@ -1036,6 +1047,75 @@ app.get('/api/tmdb-health', (req, res) => {
 // Serve favicon
 app.get('/favicon.ico', (req, res) => {
   res.sendFile(require('path').join(__dirname, 'favicon-32.png'));
+});
+
+/*  ── TMDB IMAGE FALLBACK — /api/img/<size>/<file> ──────────────────────────
+ *  Posters and backdrops normally load straight from image.tmdb.org. Several
+ *  Indian ISPs (Jio and Airtel most often, per TMDB's own forum) block or reset
+ *  that host, and the symptom is exactly the reported one: titles, ratings and
+ *  years arrive (they come through /api/tmdb, same-origin) while every poster
+ *  stays an empty placeholder. moviezone.js retries a failed TMDB image through
+ *  this route; worker.js carries the same route for production.
+ *
+ *  Not an open proxy: only TMDB's own size tokens and a hash-style file name are
+ *  accepted, and the upstream host is fixed. */
+const TMDB_IMG_SIZES = new Set(['w45', 'w92', 'w154', 'w185', 'w300', 'w342', 'w500', 'w780', 'w1280', 'h632', 'original']);
+const TMDB_IMG_FILE = /^[A-Za-z0-9_-]{6,64}\.(?:jpg|jpeg|png|webp|svg)$/;
+const { pipeline } = require('stream');
+const imgLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: Number(process.env.IMG_RATE_LIMIT_MAX) || 1200,
+  standardHeaders: true,
+});
+app.get('/api/img/:size/:file', imgLimiter, async (req, res) => {
+  const { size, file } = req.params;
+  if (!TMDB_IMG_SIZES.has(size) || !TMDB_IMG_FILE.test(file)) return res.status(404).end();
+  // TMDB content-negotiates WebP on Accept; pass the browser's preference on.
+  const webp = /image\/webp/i.test(req.get('accept') || '');
+  // A poster scrolled past is a request the browser cancels: stop the upstream
+  // transfer with it instead of finishing a download nobody will read.
+  const abort = new AbortController();
+  res.on('close', () => abort.abort());
+  try {
+    const upstream = await axios.get('https://image.tmdb.org/t/p/' + size + '/' + file, {
+      responseType: 'stream',
+      timeout: 15000,
+      signal: abort.signal,
+      httpsAgent: keepAliveAgent,
+      maxRedirects: 0,
+      // Relay bytes verbatim: a decoded body under the upstream Content-Length
+      // would be a truncated or overlong response.
+      decompress: false,
+      validateStatus: () => true,
+      headers: {
+        'Accept': webp ? 'image/webp,image/*;q=0.8' : 'image/jpeg,image/png,image/*;q=0.8',
+        'User-Agent': 'MovieZone/1.0 (image fallback)'
+      }
+    });
+    const type = String(upstream.headers['content-type'] || '');
+    // Only an image body is ever relayed from our origin (TMDB's own 404 is HTML).
+    if (upstream.status !== 200 || !/^image\//i.test(type)) {
+      upstream.data.resume();   // drain, so the keep-alive socket is reusable
+      return res.status(upstream.status === 404 ? 404 : 502).end();
+    }
+    res.set({
+      'Content-Type': type,
+      // The path names the bytes (TMDB file names are content hashes): immutable.
+      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Vary': 'Accept',
+      'Access-Control-Allow-Origin': '*',
+      /*  TMDB also serves SVG (logos). Relayed from OUR origin, an SVG opened as a
+       *  document could run script here; a sandboxed, script-free CSP means it
+       *  renders as an image and nothing else. <img> use ignores this header. */
+      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+    });
+    if (upstream.headers['content-length']) res.set('Content-Length', upstream.headers['content-length']);
+    if (upstream.headers['content-encoding']) res.set('Content-Encoding', upstream.headers['content-encoding']);
+    // pipeline (not pipe): a client that disconnects mid-body destroys the upstream.
+    pipeline(upstream.data, res, () => {});
+  } catch (err) {
+    if (!res.headersSent) res.status(abort.signal.aborted ? 499 : 504).end();
+  }
 });
 
 // Log throttle for upstream 403s. Keyed on the endpoint family (ids collapsed) so
