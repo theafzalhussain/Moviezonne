@@ -187,7 +187,10 @@
 // v163: moviezone.min.js 16.2, moviezone.min.css 9.22 - the same poster-first tile
 // on the home grid (cardInfoHTML is shared), and the watch page's meta block no
 // longer reserves a fixed 450px, so the overview follows the studio logos.
-const CACHE_NAME = 'moviezone-v163';
+// v164: moviezone.min.js 16.3, moviezone.min.css 9.23 - season/episode picker
+// rebuilt as labelled fields + an episode tile, phone tab bar, autoplay progress
+// in the active hero dot, and the dead arrow / PWA-banner CSS removed.
+const CACHE_NAME = 'moviezone-v164';
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
  *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream
@@ -359,10 +362,10 @@ const STATIC_ASSETS = [
    *  instead of the shell. '/' is the same document, answered 200 directly. */
   '/',
   '/tv-mode.min.css?v=1.6',
-  '/moviezone.min.css?v=9.22',
+  '/moviezone.min.css?v=9.23',
   '/tv-mode.min.js?v=1.9',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=16.2',
+  '/moviezone.min.js?v=16.3',
   '/manifest.json',
   '/icon-192.png?v=2',
   '/favicon-32.png?v=2',

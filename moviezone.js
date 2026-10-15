@@ -6339,7 +6339,7 @@ function buildCarousel() {
           '</span>' +
           (slideYear ? '<span class="slide-year">'+slideYear+'</span>' : '') +
           (genreLabel ? '<span class="slide-genres">'+escapeHTML(genreLabel)+'</span>' : '') +
-          '<span class="slide-runtime">LANG '+(m.original_language||'EN').toUpperCase()+'</span>' +
+          '<span class="slide-runtime" title="Original language"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>'+escapeHTML(mzLangName(m.original_language))+'</span>' +
           qualityChip +
         '</div>' +
         '<p class="slide-desc">'+escapeHTML(m.overview||'')+'</p>' +
@@ -6360,12 +6360,21 @@ function buildCarousel() {
     const dot = document.createElement('div');
     dot.className = 'dot' + (i === 0 ? ' active' : '');
     dot.tabIndex = 0;
+    // A real control for keyboards and screen readers, not just a 6px circle.
+    dot.setAttribute('role', 'button');
+    dot.setAttribute('aria-label', 'Slide ' + (i + 1) + ': ' + heroTitle);
     dot.addEventListener('click', () => { goToSlide(i); resetAutoSlide(); });
+    dot.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goToSlide(i); resetAutoSlide(); }
+    });
     dotsFrag.appendChild(dot);
  
     const thumb = document.createElement('div');
     thumb.className = 'thumb' + (i === 0 ? ' active' : '');
     thumb.tabIndex = 0;
+    thumb.title = heroTitle;
+    thumb.setAttribute('role', 'button');
+    thumb.setAttribute('aria-label', heroTitle);
     /*  w185, not IMG (w342).
      *  .thumb renders at min(58px, 5.02vh) wide — so w342 was roughly 6x the
      *  pixels it displays on a 1x screen and still 2x on a 3x phone. Ten of these
@@ -6628,12 +6637,36 @@ function autoSlideHeld() {
   return autoSlideHolds.pointer || autoSlideHolds.hidden || autoSlideHolds.offscreen;
 }
 
+/*  The active dot doubles as the autoplay progress bar (.dot.active::after in
+ *  moviezone.css). Two classes keep it honest: .mz-held pauses the fill while
+ *  any hold is on, and flipping .mz-rs swaps the keyframe name, which restarts
+ *  the fill from zero whenever the countdown itself restarts from zero. */
+function syncHeroProgress(restart) {
+  const hero = document.getElementById('hero');
+  if (!hero) return;
+  hero.classList.toggle('mz-held', autoSlideHeld());
+  if (restart) hero.classList.toggle('mz-rs');
+}
+
+/** "en" -> "English". Older TV engines without Intl.DisplayNames get the code.
+ *  The formatter is cached on the function, not in a `let`, so a carousel built
+ *  before this line has run can never hit a temporal-dead-zone error. */
+function mzLangName(code) {
+  const c = String(code || 'en').toLowerCase();
+  try {
+    mzLangName._n = mzLangName._n || new Intl.DisplayNames(['en'], { type: 'language' });
+    const n = mzLangName._n.of(c);
+    return n && n !== c ? n : c.toUpperCase();
+  } catch (e) { return c.toUpperCase(); }
+}
+
 // Restarts the countdown from zero. Deliberately a no-op while held, so a click
 // on a dot cannot resurrect the timer behind a hidden tab.
 function startAutoSlide() {
   if (autoSlideTimer) { clearInterval(autoSlideTimer); autoSlideTimer = null; }
   if (autoSlideHeld()) return;
   autoSlideTimer = setInterval(_mzAutoSlideTick, CAROUSEL_AUTOPLAY_MS);
+  syncHeroProgress(true);
 }
 
 /*  ONE tick body, shared by the start and the resume path so they cannot drift.
@@ -6664,11 +6697,13 @@ function resetAutoSlide() { startAutoSlide(); }
 function pauseAutoSlide(reason) {
   autoSlideHolds[reason || 'pointer'] = true;
   if (autoSlideTimer) { clearInterval(autoSlideTimer); autoSlideTimer = null; }
+  syncHeroProgress(false);
 }
 function resumeAutoSlide(reason) {
   autoSlideHolds[reason || 'pointer'] = false;
-  if (autoSlideTimer || autoSlideHeld()) return;
+  if (autoSlideTimer || autoSlideHeld()) { syncHeroProgress(false); return; }
   autoSlideTimer = setInterval(_mzAutoSlideTick, CAROUSEL_AUTOPLAY_MS);
+  syncHeroProgress(true);
 }
  
 // -- HERO INTERACTIONS — pause-on-hover, swipe, arrow nav (premium UX) --
@@ -6715,11 +6750,8 @@ function resumeAutoSlide(reason) {
     }, { threshold: 0.15 }).observe(hero);
   }
  
-  // Prev / Next arrow buttons
-  const prevBtn = document.getElementById('carouselPrev');
-  const nextBtn = document.getElementById('carouselNext');
-  if (prevBtn) prevBtn.addEventListener('click', () => { goToSlide(currentSlide - 1); resetAutoSlide(); });
-  if (nextBtn) nextBtn.addEventListener('click', () => { goToSlide(currentSlide + 1); resetAutoSlide(); });
+  // (The prev/next arrow buttons this used to bind no longer exist in the
+  // markup; the dots and the thumbnail rail are the hero's navigation.)
  
   // Swipe support for touch devices
   let touchStartX = 0, touchStartY = 0;
@@ -12141,13 +12173,19 @@ async function openModal(id, type = 'movie', activationEvent) {
     if (tvGroup) {
       tvGroup.style.display = type === 'tv' ? 'block' : 'none';
       if (type === 'tv') {
-        tvGroup.innerHTML = `
-          <div style="display:flex; width:100%; gap:12px; margin-bottom:12px;">
-            <select id="seasonInput" class="lang-select" style="flex:1; cursor:pointer;"></select>
-            <select id="episodeInput" class="lang-select" style="flex:2; cursor:pointer;"></select>
-          </div>
-          <div id="episodePreview" style="display:none; background: linear-gradient(180deg, rgba(30, 30, 42, 0.4) 0%, rgba(15, 15, 20, 0.6) 100%); border-radius:12px; overflow:hidden; border:1px solid rgba(255,255,255,0.18); border-bottom-color:rgba(255,255,255,0.05); box-shadow: 0 4px 15px rgba(0,0,0,0.5); backdrop-filter: blur(12px);"></div>
-        `;
+        /*  Season / episode picker: two glass fields with the label inside the
+         *  box, then an episode tile in the poster card's language — still with
+         *  an "S1 · E3" badge, title, one "★ · runtime · date" line, two lines of
+         *  synopsis. The two <select>s stay the source of truth: playNextEpisode()
+         *  and currentEpisodeSelection() read them, so their ids must not change. */
+        tvGroup.innerHTML =
+          '<div class="ep-fields">' +
+            '<label class="ep-field"><span class="ep-label">Season</span>' +
+              '<select id="seasonInput" class="ep-select"></select></label>' +
+            '<label class="ep-field ep-field--wide"><span class="ep-label">Episode<i id="episodeCount"></i></span>' +
+              '<select id="episodeInput" class="ep-select"></select></label>' +
+          '</div>' +
+          '<div id="episodePreview" class="ep-card" hidden></div>';
         const sInput = document.getElementById('seasonInput');
         const eInput = document.getElementById('episodeInput');
         const seasons = (details.seasons || []).filter(s => s.season_number > 0);
@@ -12164,34 +12202,51 @@ async function openModal(id, type = 'movie', activationEvent) {
             }
           } catch(e) {}
  
-          sInput.innerHTML = seasons.map(s => `<option value="${s.season_number}" ${s.season_number == lastS ? 'selected' : ''}>${s.name} (${s.episode_count} Eps)</option>`).join('');
+          // The season's episode count lives in the Episode label ("10 episodes"),
+          // so this option stays short enough for a phone-width field.
+          sInput.innerHTML = seasons.map(s => `<option value="${s.season_number}" ${s.season_number == lastS ? 'selected' : ''}>${escapeHTML(s.name || ('Season ' + s.season_number))}</option>`).join('');
+          const previewDiv = document.getElementById('episodePreview');
+          const countEl = document.getElementById('episodeCount');
           
           const fetchEpisodes = async (seasonNum, targetEp) => {
-            eInput.innerHTML = '<option>Loading Episodes...</option>';
+            eInput.innerHTML = '<option>Loading episodes…</option>';
+            if (previewDiv) previewDiv.classList.add('is-loading');
             try {
               const sData = await tmdb('/tv/'+id+'/season/'+seasonNum, { language: 'en-US' });
               const episodes = sData.episodes || [];
-              eInput.innerHTML = episodes.map(ep => `<option value="${ep.episode_number}">Ep ${ep.episode_number}: ${escapeHTML(ep.name)}</option>`).join('');
+              eInput.innerHTML = episodes.map(ep => `<option value="${ep.episode_number}">Ep ${ep.episode_number} · ${escapeHTML(ep.name || '')}</option>`).join('');
+              if (countEl) countEl.textContent = episodes.length ? episodes.length + (episodes.length === 1 ? ' episode' : ' episodes') : '';
               
               if (targetEp && episodes.find(e => e.episode_number == targetEp)) {
                 eInput.value = targetEp;
               }
  
               const updatePreview = () => {
-                const epNum = eInput.value;
-                const ep = episodes.find(e => e.episode_number == epNum);
-                const previewDiv = document.getElementById('episodePreview');
-                if (ep && previewDiv) {
-                  previewDiv.style.display = 'flex';
-                  const imgSrc = ep.still_path ? IMG + ep.still_path : (details.backdrop_path ? IMG + details.backdrop_path : '');
-                  previewDiv.innerHTML = `
-                  <img src="${imgSrc}" style="width:160px; height:90px; object-fit:cover; flex-shrink:0; border-right:1px solid rgba(255,255,255,0.1);" alt="Ep Thumbnail" width="160" height="90" loading="lazy" decoding="async">
-                  <div style="padding:10px 14px; display:flex; flex-direction:column; justify-content:center;">
-                    <strong style="font-size:0.95rem; color:var(--gold); display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; text-shadow: 0 2px 4px rgba(0,0,0,0.5);">Ep ${ep.episode_number}: ${escapeHTML(ep.name)}</strong>
-                    <span style="font-size:0.8rem; color:rgba(255,255,255,0.7); margin-top:4px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; line-height:1.4;">${escapeHTML(ep.overview || 'No description available.')}</span>
-                    </div>
-                  `;
-                }
+                const ep = episodes.find(e => e.episode_number == eInput.value);
+                if (!ep || !previewDiv) return;
+                const imgSrc = ep.still_path ? IMG + ep.still_path : (details.backdrop_path ? IMG + details.backdrop_path : '');
+                // "★ 8.1 · 1h 2m · 17 Apr 2011" — the home card's .card-sub line.
+                // An episode that has not aired yet says so instead of showing a date.
+                const aired = ep.air_date ? new Date(ep.air_date + 'T00:00:00') : null;
+                let when = '';
+                try { when = aired && !isNaN(aired) ? aired.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : ''; } catch (e) {}
+                const mins = ep.runtime || 0;
+                const meta = [
+                  ep.vote_average > 0 ? '<span class="card-star">&#9733; ' + (+ep.vote_average).toFixed(1) + '</span>' : '',
+                  mins ? '<span>' + (mins >= 60 ? Math.floor(mins / 60) + 'h' + (mins % 60 ? ' ' + (mins % 60) + 'm' : '') : mins + 'm') + '</span>' : '',
+                  when ? (aired > new Date() ? '<span class="card-star">Airs ' + when + '</span>' : '<span>' + when + '</span>') : ''
+                ].join('');
+                previewDiv.innerHTML =
+                  '<div class="ep-still">' +
+                    (imgSrc ? '<img src="' + imgSrc + '" alt="" width="342" height="192" loading="lazy" decoding="async">' : '') +
+                    '<span class="ep-badge">S' + escapeHTML(String(seasonNum)) + ' · E' + ep.episode_number + '</span>' +
+                  '</div>' +
+                  '<div class="ep-body">' +
+                    '<div class="ep-title">' + escapeHTML(ep.name || ('Episode ' + ep.episode_number)) + '</div>' +
+                    (meta ? '<div class="card-sub">' + meta + '</div>' : '') +
+                    '<p class="ep-desc">' + escapeHTML(ep.overview || 'No description available yet.') + '</p>' +
+                  '</div>';
+                previewDiv.hidden = false;
               };
  
               eInput.onchange = () => { 
@@ -12210,6 +12265,7 @@ async function openModal(id, type = 'movie', activationEvent) {
  
               if(embedEl.querySelector('iframe')) playMovie(); 
             } catch(err) { eInput.innerHTML = '<option value="1">Episode 1</option>'; }
+            if (previewDiv) previewDiv.classList.remove('is-loading');
           };
           
           sInput.onchange = (e) => { resetTriedSources(); fetchEpisodes(e.target.value, 1); }; // Season change   Episode 1
@@ -14509,7 +14565,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // button (see the specificity note next to .ripple-span in moviezone.css).
     /*  .nav-btn is not in this list any more — that class had no markup anywhere
         and its CSS has been deleted. */
-    const btn = e.target.closest('.btn-play, .btn-info, .btn-watchlist, .btn-download, .load-more-btn, .premium-play-btn, .cat-tab:not(.cat-group-trigger), .carousel-arrow');
+    const btn = e.target.closest('.btn-play, .btn-info, .btn-watchlist, .btn-download, .load-more-btn, .premium-play-btn, .cat-tab:not(.cat-group-trigger)');
     if (btn && !isMzTV()) {
       btn.classList.add('ripple-wrapper');
       const circle = document.createElement('span');
@@ -14664,6 +14720,53 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 })();
 
+/*  ── Phone tab bar ──────────────────────────────────────────────────────────
+ *  The ≤768px fixed bottom bar (see "PHONE TAB BAR" in moviezone.css). Every tab
+ *  clicks the matching #navLinks anchor, so routing stays in one place and the
+ *  rail's own click handler moves .active; the bar just mirrors that class.
+ *  Matched by label rather than by index so reordering the rail cannot point a
+ *  tab at the wrong destination. Display is CSS-only, so on wider screens the
+ *  node is inert; it is not built at all on a TV.
+ */
+(function initPhoneTabBar() {
+  const ul = document.getElementById('navLinks');
+  if (!ul || isMzTV()) return;
+  const icon = (d) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + '</svg>';
+  const TABS = [
+    ['Home', 'Home', '<path d="M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>'],
+    ['Web Series', 'Series', '<rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/>'],
+    ['Upcoming', 'Upcoming', '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/>'],
+    ['Watchlist', 'My List', '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>']
+  ];
+  const find = (label) => Array.from(ul.querySelectorAll('a')).find((a) => a.textContent.trim() === label);
+  const bar = document.createElement('nav');
+  bar.className = 'mz-tabbar';
+  bar.setAttribute('aria-label', 'Quick navigation');
+  bar.innerHTML = TABS.filter((t) => find(t[0])).map((t) =>
+    '<a href="#" class="mz-tab" data-for="' + t[0] + '">' + icon(t[2]) + '<span>' + t[1] + '</span></a>').join('');
+  document.body.appendChild(bar);
+  document.documentElement.classList.add('mz-has-tabbar');
+
+  const sync = () => {
+    bar.querySelectorAll('.mz-tab').forEach((tab) => {
+      const a = find(tab.dataset.for);
+      const on = !!(a && a.classList.contains('active'));
+      tab.classList.toggle('active', on);
+      if (on) tab.setAttribute('aria-current', 'page'); else tab.removeAttribute('aria-current');
+    });
+  };
+  bar.addEventListener('click', (e) => {
+    const tab = e.target.closest('.mz-tab');
+    if (!tab) return;
+    e.preventDefault();
+    const a = find(tab.dataset.for);
+    if (a) a.click();
+    sync();
+  });
+  new MutationObserver(sync).observe(ul, { subtree: true, attributes: true, attributeFilter: ['class'] });
+  sync();
+})();
+
 /*  ── Phone search toggle ────────────────────────────────────────────────────
  *  On a phone the search field is collapsed to a gold token (#navSearchToggle)
  *  and expands in place into the bar; the whole animation is the ≤768px block in
@@ -14773,7 +14876,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!ul.classList.contains('mz-ind-on')) ul.classList.add('mz-ind-on');
   }
 
-  const rest = () => place(ul.querySelector('a.active'));
+  // Resting state: the pill sits on the active link, which also carries
+  // aria-current so screen readers announce where the viewer is.
+  const rest = () => {
+    const active = ul.querySelector('a.active');
+    ul.querySelectorAll('a').forEach((l) => {
+      if (l === active) l.setAttribute('aria-current', 'page'); else l.removeAttribute('aria-current');
+    });
+    place(active);
+  };
 
   function sync() {
     if (raf) return;

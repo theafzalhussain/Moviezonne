@@ -799,6 +799,87 @@ body {
   }
 }
 
+/*  ── PHONE TAB BAR ──────────────────────────────────────────────────────────
+    Built by initPhoneTabBar() in moviezone.js. Below 769px the link rail and the
+    menu button are both hidden, which left Watchlist and Upcoming with no way in
+    on a phone at all. A bottom bar is the phone-native answer — always visible,
+    inside thumb reach — and it mirrors the navbar's language: opaque ink (the
+    ≤768px block switches every backdrop-filter off), light from the top edge,
+    gold only on the active tab. Hidden at every other width, and never built on
+    a TV. */
+.mz-tabbar {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .mz-tabbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 990;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    padding: 0.2rem 0.4rem calc(0.2rem + env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(180deg, rgba(14, 14, 26, 0.97) 0%, rgb(5, 5, 11) 100%);
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    box-shadow: 0 -14px 34px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+
+  .mz-tab {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    padding: 0.45rem 0 0.35rem;
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.64rem;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    color: rgba(226, 226, 244, 0.58);
+    text-decoration: none;
+  }
+
+  .mz-tab svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .mz-tab.active {
+    color: #ffd75e;
+  }
+
+  /* The bar's echo of the navbar's gold pill: a short lit edge over the tab. */
+  .mz-tab.active::before {
+    content: '';
+    position: absolute;
+    top: -0.2rem;
+    left: 50%;
+    width: 24px;
+    height: 2px;
+    margin-left: -12px;
+    border-radius: 0 0 2px 2px;
+    background: var(--gold);
+    box-shadow: 0 0 10px rgba(245, 197, 24, 0.7);
+  }
+
+  .mz-tab:focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: -4px;
+    border-radius: 12px;
+  }
+
+  /*  Room for the bar at the end of the page, and the toast lifted clear of it. */
+  html.mz-has-tabbar body {
+    padding-bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+  }
+
+  html.mz-has-tabbar #toast {
+    bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
 /* ── Ripple Effect ── */
 .ripple-wrapper {
   position: relative;
@@ -1258,7 +1339,7 @@ body {
   position: relative;
   z-index: 1;
   display: block;
-  color: rgba(226, 226, 244, 0.7);
+  color: rgba(226, 226, 244, 0.78);
   text-decoration: none;
   font-family: 'Outfit', sans-serif;
   /*  0.875rem (14px), up from 0.8rem. The labels are the bar's only body copy and
@@ -2789,6 +2870,7 @@ body {
 }
 
 .dot {
+  position: relative;
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -2798,62 +2880,68 @@ body {
   border: 1px solid transparent;
 }
 
+/* A 6px dot is not a tap target; this invisible pad makes it one. */
+.dot::before {
+  content: '';
+  position: absolute;
+  inset: -9px -4px;
+}
+
 .dot:hover {
   background: rgba(255, 255, 255, 0.55);
   transform: scale(1.3);
 }
 
+.dot:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+}
+
+/*  The active dot is a track, and ::after fills it over one autoplay interval
+ *  (6s, CAROUSEL_AUTOPLAY_MS) — the viewer can see when the slide will move.
+ *  syncHeroProgress() pauses it with .mz-held and restarts it with .mz-rs.
+ *  Wherever animations are switched off (phones, TV, low-end, reduced motion)
+ *  fill-mode `both` / the transform default leave it simply full — the solid
+ *  pill this used to be. */
 .dot.active {
-  width: 32px;
+  width: 34px;
   border-radius: 3px;
-  background: linear-gradient(90deg, var(--gold), var(--red));
-  border-color: rgba(245, 197, 24, 0.3);
-  box-shadow: 0 2px 12px rgba(245, 197, 24, 0.35);
+  background: rgba(255, 255, 255, 0.24);
+  transform: none;
 }
 
-/* Prev / Next arrow controls — glassmorphism, premium */
-.carousel-arrow {
+.dot.active::after {
+  content: '';
   position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 50px;
-  height: 50px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(10, 10, 22, 0.35);
-  backdrop-filter: blur(14px) saturate(160%);
-  -webkit-backdrop-filter: blur(14px) saturate(160%);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  z-index: 12;
-  opacity: 0;
-  transition: opacity 0.35s ease, background 0.3s ease, border-color 0.3s ease, transform 0.3s var(--ease-spring), box-shadow 0.3s ease;
+  inset: -1px;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ffe08a, var(--gold));
+  box-shadow: 0 0 10px rgba(245, 197, 24, 0.45);
+  transform-origin: left center;
+  animation: dotFill 6s linear both;
 }
 
-.carousel-arrow--prev {
-  left: 2.2%;
+#hero.mz-rs .dot.active::after {
+  animation-name: dotFill2;
 }
 
-.carousel-arrow--next {
-  right: 2.2%;
+#hero.mz-held .dot.active::after {
+  animation-play-state: paused;
 }
 
-#hero:hover .carousel-arrow {
-  opacity: 1;
+@keyframes dotFill {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
 }
 
-.carousel-arrow:hover,
-.carousel-arrow:focus-visible {
-  background: rgba(245, 197, 24, 0.18);
-  border-color: var(--gold);
-  color: var(--gold);
-  transform: translateY(-50%) scale(1.08);
-  box-shadow: 0 8px 26px rgba(245, 197, 24, 0.28);
-  opacity: 1;
+@keyframes dotFill2 {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
 }
+
+/*  The prev/next .carousel-arrow rules that sat here were removed: no markup or
+    script has created those buttons for a long time (the thumbnail rail and the
+    dots are the navigation), so they were parse weight for nothing. */
 
 /* Thumbnail rail
    Sized against the VIEWPORT HEIGHT, not fixed pixels. Ten 82px thumbs plus
@@ -3232,31 +3320,6 @@ body {
   flex-shrink: 0;
 }
 
-.see-all {
-  color: var(--gold);
-  text-decoration: none;
-  font-size: 0.84rem;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  transition: all 0.3s var(--ease-spring);
-  padding: 0.45rem 1rem;
-  border-radius: 999px;
-  border: 1px solid rgba(245, 197, 24, 0.15);
-  background: rgba(245, 197, 24, 0.06);
-}
-
-.see-all:hover {
-  gap: 0.7rem;
-  color: #fff;
-  background: rgba(245, 197, 24, 0.12);
-  border-color: rgba(245, 197, 24, 0.3);
-  transform: translateX(2px);
-  box-shadow: 0 4px 16px rgba(245, 197, 24, 0.12);
-}
-
 /* ═══ Category Tabs ═══ */
 .cat-tabs {
   display: flex;
@@ -3592,31 +3655,8 @@ body {
   }
 }
 
-/* Anime source tag on poster (TRENDING / NEW RELEASE / AIRING NOW ...) */
-.card-anime-tag {
-  position: absolute;
-  bottom: 36px;
-  left: 9px;
-  max-width: calc(100% - 18px);
-  padding: 0.2rem 0.5rem;
-  border-radius: 999px;
-  background: rgba(8, 8, 16, 0.82);
-  border: 1px solid rgba(236, 72, 153, 0.35);
-  /* No backdrop blur (also .card-quality, .top10-rating, .top10-quality): on a
-     0.8+ alpha fill it was invisible, yet every card in a scrolling grid paid a
-     blur pass per repaint on laptop GPUs. */
-  transform: translateZ(25px);
-  font-size: 0.55rem;
-  font-weight: 800;
-  letter-spacing: 0.6px;
-  color: #ffd9ef;
-  text-transform: uppercase;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
-  z-index: 3;
-}
+/* (.card-anime-tag — an anime source tag on the poster — is no longer emitted by
+   any card builder; its rules were removed.) */
 
 @media (max-width: 600px) {
   .anime-filter-bar {
@@ -3638,11 +3678,6 @@ body {
   .anime-chip {
     padding: 0.42rem 0.8rem;
     font-size: 0.74rem;
-  }
-
-  .card-anime-tag {
-    font-size: 0.5rem;
-    bottom: 32px;
   }
 }
 
@@ -6098,46 +6133,308 @@ html[data-mz-tv="true"] .cat-group-menu {
   flex-wrap: wrap;
 }
 
-.lang-select,
-.quality-select {
+/*  ── SEASON / EPISODE PICKER (watch page, series only) ─────────────────────
+ *  Built by openModal(). Two glass fields with the label inside the box, and
+ *  an episode tile in the poster card's language: a still with an "S1 · E3"
+ *  badge, the title, one .card-sub meta line and two lines of synopsis.
+ *  Sized in rem, so the TV's 108% / 125% root scale carries it like the rest
+ *  of the page. These replaced .lang-select, whose only users these were. */
+.ep-fields {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+/*  Capped so the block reads as one unit with the action buttons above it on a
+ *  wide watch page, instead of a 1300px field with its count stranded at the
+ *  far end. */
+.ep-fields,
+.ep-card {
+  max-width: 54rem;
+}
+
+.ep-field {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 320px;
+}
+
+.ep-field--wide {
+  flex-grow: 2;
+  max-width: none;
+}
+
+.ep-label {
+  position: absolute;
+  top: 0.55rem;
+  left: 1rem;
+  right: 2.5rem;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: rgba(255, 215, 94, 0.75);
+  pointer-events: none;
+}
+
+.ep-label i {
+  font-style: normal;
+  letter-spacing: 0.6px;
+  color: var(--text2);
+  white-space: nowrap;
+}
+
+.ep-select {
   -webkit-appearance: none;
   appearance: none;
-  padding: 0.78rem 2.3rem 0.78rem 1.2rem;
+  display: block;
+  width: 100%;
+  height: 3.6rem;
+  padding: 1.35rem 2.5rem 0.35rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
   background:
-    linear-gradient(180deg, rgba(28, 28, 42, 0.45) 0%, rgba(14, 14, 22, 0.65) 100%),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center;
-  background-size: auto, 14px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-bottom-color: rgba(255, 255, 255, 0.05);
-  border-radius: 13px;
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffd75e' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 1rem center / 14px,
+    linear-gradient(180deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.015)),
+    rgba(10, 10, 20, 0.6);
   color: #fff;
-  font-family: 'Outfit', sans-serif;
-  font-size: 0.94rem;
+  font: 600 1rem/1.25 'Outfit', sans-serif;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
   outline: none;
-  backdrop-filter: blur(14px);
-  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  transition: all 0.28s var(--ease-smooth);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 8px 22px -12px rgba(0, 0, 0, 0.8);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.lang-select option,
-.quality-select option {
-  background-color: var(--bg2);
+.ep-select:hover {
+  border-color: rgba(245, 197, 24, 0.32);
+}
+
+.ep-select:focus {
+  border-color: rgba(245, 197, 24, 0.6);
+  box-shadow: 0 0 0 3px rgba(245, 197, 24, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* The native list (phones, TVs, older engines) — dark, never white. */
+.ep-select option {
+  background: #0c0c18;
   color: #fff;
-  font-weight: 500;
 }
 
-.lang-select:hover,
-.quality-select:hover {
-  border-color: rgba(255, 255, 255, 0.3);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.18);
-  transform: translateY(-1.5px);
+/*  Desktop only: the open list becomes a styled panel instead of the OS menu.
+ *  Gated three ways — the engine must support base-select, the pointer must be
+ *  a mouse, and it must not be a TV: phones keep their native sheet (best for a
+ *  long list under a thumb) and a D-pad keeps the platform picker it knows. */
+@supports (appearance: base-select) {
+  @media (hover: hover) and (pointer: fine) {
+    html:not([data-mz-tv="true"]) .ep-select {
+      appearance: base-select;
+    }
+
+    html:not([data-mz-tv="true"]) .ep-select::picker(select) {
+      appearance: base-select;
+      margin-top: 6px;
+      padding: 6px;
+      max-height: min(360px, 55vh);
+      overflow-y: auto;
+      border: 1px solid rgba(245, 197, 24, 0.2);
+      border-radius: 14px;
+      background: linear-gradient(180deg, rgb(20, 20, 34), rgb(8, 8, 16));
+      box-shadow: 0 26px 60px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      scrollbar-width: thin;
+      scrollbar-color: rgba(245, 197, 24, 0.4) transparent;
+    }
+
+    html:not([data-mz-tv="true"]) .ep-select::picker-icon {
+      display: none;
+    }
+
+    html:not([data-mz-tv="true"]) .ep-select option {
+      padding: 0.55rem 0.75rem;
+      border-radius: 9px;
+      background: transparent;
+      color: rgba(240, 240, 252, 0.8);
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+
+    html:not([data-mz-tv="true"]) .ep-select option:hover,
+    html:not([data-mz-tv="true"]) .ep-select option:focus-visible {
+      background: rgba(255, 255, 255, 0.06);
+      color: #fff;
+      outline: none;
+    }
+
+    html:not([data-mz-tv="true"]) .ep-select option:checked {
+      background: rgba(245, 197, 24, 0.13);
+      color: #ffd75e;
+      font-weight: 700;
+    }
+
+    html:not([data-mz-tv="true"]) .ep-select option::checkmark {
+      order: 1;
+      margin-left: auto;
+      color: var(--gold);
+    }
+  }
 }
 
-.lang-select:focus,
-.quality-select:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+.ep-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012));
+  transition: opacity 0.2s ease;
+}
+
+.ep-card[hidden] {
+  display: none;
+}
+
+.ep-card.is-loading {
+  opacity: 0.5;
+}
+
+.ep-still {
+  position: relative;
+  flex: 0 0 15rem;
+  aspect-ratio: 16 / 9;
+  border-radius: 11px;
+  overflow: hidden;
+  background: #14142a;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 10px 24px -12px rgba(0, 0, 0, 0.9);
+}
+
+.ep-still img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Same bottom shade as the poster tiles, so the badge reads on any still. */
+.ep-still::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(3, 3, 10, 0.7), transparent 55%);
+}
+
+.ep-badge {
+  position: absolute;
+  left: 0.5rem;
+  bottom: 0.45rem;
+  z-index: 1;
+  padding: 0.16rem 0.5rem;
+  border: 1px solid rgba(245, 197, 24, 0.45);
+  border-radius: 999px;
+  background: rgba(3, 3, 10, 0.75);
+  color: #ffd75e;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+}
+
+.ep-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding-right: 0.4rem;
+}
+
+.ep-title {
+  font-size: 1.02rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ep-desc {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: rgba(240, 240, 252, 0.66);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+@media (max-width: 600px) {
+  .ep-fields {
+    gap: 0.5rem;
+    margin-bottom: 0.6rem;
+  }
+
+  .ep-field {
+    max-width: none;
+  }
+
+  .ep-field--wide {
+    flex-grow: 1.6;
+  }
+
+  .ep-label {
+    top: 0.5rem;
+    left: 0.8rem;
+    right: 2.1rem;
+    font-size: 0.56rem;
+    letter-spacing: 1px;
+  }
+
+  /*  16px is the floor below which iOS zooms the page when the field is tapped. */
+  .ep-select {
+    height: 3.3rem;
+    padding: 1.25rem 2.1rem 0.3rem 0.8rem;
+    font-size: 16px;
+    background-position: right 0.8rem center, 0 0, 0 0;
+  }
+
+  .ep-card {
+    align-items: flex-start;
+    gap: 0.7rem;
+    padding: 0.45rem;
+    border-radius: 14px;
+  }
+
+  .ep-still {
+    flex-basis: 42%;
+    border-radius: 9px;
+  }
+
+  .ep-badge {
+    left: 0.35rem;
+    bottom: 0.3rem;
+    font-size: 0.6rem;
+  }
+
+  .ep-body {
+    gap: 0.2rem;
+    padding: 0.1rem 0.2rem 0 0;
+  }
+
+  .ep-title {
+    font-size: 0.88rem;
+  }
+
+  .ep-desc {
+    font-size: 0.74rem;
+    line-height: 1.45;
+  }
 }
 
 /* Modal bottom */
@@ -7453,6 +7750,22 @@ html[data-mz-tv="true"] .cat-group-menu {
     margin-left: 0;
   }
 
+  /*  Glass, not struck gold. On a phone the bar is medallion · wordmark ·
+      search token · install, and with both round controls solid gold the
+      corner read as two equal primaries. Search is the control used every
+      session; install is used once — so it carries gold in the glyph only.
+      The id is for the cascade: the base install rule sits later in this file. */
+  #navbar .nav-install-btn {
+    border-color: rgba(255, 255, 255, 0.09);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+    color: #ffd75e;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 -1px 0 rgba(0, 0, 0, 0.4);
+  }
+
+  #navbar .nav-install-btn::before {
+    display: none;
+  }
+
   /*  Collapsed by default. `flex: 1 1 auto` + `max-width: 0%` is what makes the
       open state one interpolation: both ends of the max-width are percentages of
       the same containing block, so there is no length↔percentage conversion in
@@ -7505,10 +7818,6 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 
   .carousel-thumbs {
-    display: none;
-  }
-
-  .carousel-arrow {
     display: none;
   }
 
@@ -8145,26 +8454,6 @@ html[data-mz-tv="true"] .cat-group-menu {
     padding: 0.6rem 0.5rem;
     font-size: 0.8rem;
     justify-content: center;
-  }
-
-  .select-group {
-    grid-column: 1 / -1;
-    display: flex;
-    flex-direction: row;
-    gap: 0.5rem;
-  }
-
-  .select-group:not(#tvSelectGroup) {
-    display: none !important;
-  }
-
-  /* Language & Quality ko mobile par hide karne ke liye */
-  .lang-select,
-  .quality-select {
-    width: 50%;
-    padding: 0.55rem 1.5rem 0.55rem 0.8rem;
-    font-size: 0.8rem;
-    background-position: right 8px center;
   }
 }
 
@@ -8927,98 +9216,9 @@ html[data-mz-tv="true"] .cat-group-menu {
   }
 }
 
-/* === PWA INSTALL BANNER === */
-#pwa-install-banner {
-  position: fixed;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 10000;
-  width: 90%;
-  max-width: 480px;
-  animation: slideUpBanner 0.4s ease;
-}
-
-@keyframes slideUpBanner {
-  from {
-    transform: translateX(-50%) translateY(100px);
-    opacity: 0;
-  }
-
-  to {
-    transform: translateX(-50%) translateY(0);
-    opacity: 1;
-  }
-}
-
-.pwa-banner-content {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 18px;
-  background: linear-gradient(135deg, rgba(20, 20, 35, 0.98), rgba(30, 30, 50, 0.98));
-  border: 1px solid rgba(245, 197, 24, 0.3);
-  border-radius: 16px;
-  backdrop-filter: blur(20px);
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-}
-
-.pwa-banner-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #f5c518, #e63946);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 900;
-  font-size: 1rem;
-  color: #000;
-  flex-shrink: 0;
-}
-
-.pwa-banner-text {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.pwa-banner-text strong {
-  font-size: 0.95rem;
-  color: #fff;
-}
-
-.pwa-banner-text span {
-  font-size: 0.78rem;
-  color: rgba(255, 255, 255, 0.6);
-}
-
-.pwa-banner-btn {
-  padding: 8px 18px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #f5c518, #e6a817);
-  color: #000;
-  font-weight: 700;
-  font-size: 0.85rem;
-  border: none;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: transform 0.2s;
-}
-
-.pwa-banner-btn:hover {
-  transform: scale(1.05);
-}
-
-.pwa-banner-close {
-  background: none;
-  border: none;
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 1.3rem;
-  cursor: pointer;
-  padding: 4px;
-}
+/*  The #pwa-install-banner / .pwa-banner-* rules were removed: nothing builds that
+    banner any more (pwa-install.js only deletes a stale one), and the install
+    prompt is the popup. */
 
 
 /* ═══════════════════════════════════════════════════════════════
