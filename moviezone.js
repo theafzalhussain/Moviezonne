@@ -12959,6 +12959,41 @@ const playerSources = [
         ? `https://embed.vidrift.net/embed/tv/${id}/${s}/${e}?${opts}`
         : `https://embed.vidrift.net/embed/movie/${id}?${opts}`;
     }},
+  /*  Hindi Dub HD — replaces VidSrc HD (vidsrc.su), removed by request: it was the
+   *  weakest chip in the list for this audience (no Hindi, and it refused to run
+   *  inside Android in-app browsers).
+   *
+   *  Built for one job — Hindi audio on every kind of title — and routed by type,
+   *  like MultiLang HD, because no single provider was best at all three:
+   *
+   *    films & series  ollyembed.pages.dev ?server=Hindi — its dedicated Dual Audio
+   *                    / Hindi server. Measured: Endgame (variants to 1012p),
+   *                    Inception (to 800p), 3 Idiots, Game of Thrones S1E1 720p.
+   *    anime           vidnest.fun /anime/{anilist}/{ep}/hindi — VidNest's own Hindi
+   *                    dub route. Measured: One Piece ep1 (to 1080p), Jujutsu Kaisen
+   *                    ep1 720p, Attack on Titan ep1 720p.
+   *
+   *  Until an anime's AniList id is known the episode plays on VidNest's TMDB route,
+   *  and `anilist: true` lets ensureAnilistThenReload() upgrade it to the Hindi
+   *  route once the id resolves (openModal pre-resolves it, so usually it already is).
+   *  No 4K badge: nothing here was measured above 1080p. */
+  { name: 'Hindi Dub HD', dubbed: true, anime: true, anilist: true,
+    url: (id, lang, type, s, e) => {
+      const m = currentModalMovie;
+      if (isAnimeContent(m)) {
+        const anilistId = getAnilistIdSync(m, s);
+        if (anilistId) {
+          return `https://vidnest.fun/anime/${anilistId}/${parseInt(e, 10) || 1}/hindi`;
+        }
+        return type === 'tv'
+          ? `https://vidnest.fun/tv/${id}/${s}/${e}`
+          : `https://vidnest.fun/movie/${id}`;
+      }
+      return type === 'tv'
+        ? `https://ollyembed.pages.dev/tv/${id}/${s}/${e}?server=Hindi`
+        : `https://ollyembed.pages.dev/movie/${id}?server=Hindi`;
+    }},
+
   // 🌸 ANIME SPECIALIST: AnimePahe mirror — purane/long-running anime & cartoons ke liye best
   //    `anilist: true` = its anime URL is keyed on an AniList id, so loadPlayer may
   //    reload it once that id resolves (ensureAnilistThenReload). TMDB-only servers
@@ -12984,17 +13019,8 @@ const playerSources = [
       ? `https://www.viduki.net/2/tv/${id}/${s}/${e}`
       : `https://www.viduki.net/2/movie/${id}`;
   }},
-  // 🔁 Cinextream (cinextream.net) ka domain dead ho gaya (DNS record hi nahi bacha),
-  //    uski jagah VidFast — 4K/multi-audio, tez CDN, movies + series dono
-  //    Host is vidfast.vc: vidfast.pro now only 301s here, and the page identifies
-  //    itself as .vc, so we skip the bounce and preconnect the real origin.
-  { name: 'VidFast 4K', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
-    const opts = `autoPlay=true&theme=FFC107&title=true&poster=true&autoNext=true&nextButton=true&lang=${lang}`;
-    return type === 'tv'
-      ? `https://vidfast.vc/tv/${id}/${s}/${e}?${opts}`
-      : `https://vidfast.vc/movie/${id}?${opts}`;
-  }},
-  /*  #8: Flicky — multi-server, multi-audio, 4K. Same player as always; only the
+
+ /*  #8: Flicky — multi-server, multi-audio, 4K. Same player as always; only the
    *  address it lives at changed.
    *
    *  flicky.host now answers every request with a 301 to player.vidzee.wtf, and
@@ -13021,6 +13047,18 @@ const playerSources = [
       ? `https://player.vidzee.wtf/embed/tv/${id}/${s}/${e}`
       : `https://player.vidzee.wtf/embed/movie/${id}`;
   }},
+
+  // 🔁 Cinextream (cinextream.net) ka domain dead ho gaya (DNS record hi nahi bacha),
+  //    uski jagah VidFast — 4K/multi-audio, tez CDN, movies + series dono
+  //    Host is vidfast.vc: vidfast.pro now only 301s here, and the page identifies
+  //    itself as .vc, so we skip the bounce and preconnect the real origin.
+  { name: 'VidFast 4K', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
+    const opts = `autoPlay=true&theme=FFC107&title=true&poster=true&autoNext=true&nextButton=true&lang=${lang}`;
+    return type === 'tv'
+      ? `https://vidfast.vc/tv/${id}/${s}/${e}?${opts}`
+      : `https://vidfast.vc/movie/${id}?${opts}`;
+  }},
+ 
   /*  ══════════════════════════════════════════════════════════════════════
    *  #9: MultiLang HD — replaces VidCore HD, which is blocked, not slow
    *  ══════════════════════════════════════════════════════════════════════
@@ -13088,40 +13126,7 @@ const playerSources = [
       : `https://moviesapi.vip/movie/${id}`;
   }},
 
-  /*  Hindi Dub HD — replaces VidSrc HD (vidsrc.su), removed by request: it was the
-   *  weakest chip in the list for this audience (no Hindi, and it refused to run
-   *  inside Android in-app browsers).
-   *
-   *  Built for one job — Hindi audio on every kind of title — and routed by type,
-   *  like MultiLang HD, because no single provider was best at all three:
-   *
-   *    films & series  ollyembed.pages.dev ?server=Hindi — its dedicated Dual Audio
-   *                    / Hindi server. Measured: Endgame (variants to 1012p),
-   *                    Inception (to 800p), 3 Idiots, Game of Thrones S1E1 720p.
-   *    anime           vidnest.fun /anime/{anilist}/{ep}/hindi — VidNest's own Hindi
-   *                    dub route. Measured: One Piece ep1 (to 1080p), Jujutsu Kaisen
-   *                    ep1 720p, Attack on Titan ep1 720p.
-   *
-   *  Until an anime's AniList id is known the episode plays on VidNest's TMDB route,
-   *  and `anilist: true` lets ensureAnilistThenReload() upgrade it to the Hindi
-   *  route once the id resolves (openModal pre-resolves it, so usually it already is).
-   *  No 4K badge: nothing here was measured above 1080p. */
-  { name: 'Hindi Dub HD', dubbed: true, anime: true, anilist: true,
-    url: (id, lang, type, s, e) => {
-      const m = currentModalMovie;
-      if (isAnimeContent(m)) {
-        const anilistId = getAnilistIdSync(m, s);
-        if (anilistId) {
-          return `https://vidnest.fun/anime/${anilistId}/${parseInt(e, 10) || 1}/hindi`;
-        }
-        return type === 'tv'
-          ? `https://vidnest.fun/tv/${id}/${s}/${e}`
-          : `https://vidnest.fun/movie/${id}`;
-      }
-      return type === 'tv'
-        ? `https://ollyembed.pages.dev/tv/${id}/${s}/${e}?server=Hindi`
-        : `https://ollyembed.pages.dev/movie/${id}?server=Hindi`;
-    }},
+
   // { name: 'Hindi Multi-Audio', dubbed: true, url: (id, lang, type, s, e) => {
   //   const base = `https://embed.smashystream.com/playere.php?tmdb=${id}`;
   //   return type === 'tv' ? `${base}&season=${s}&episode=${e}` : base;
