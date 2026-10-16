@@ -13183,11 +13183,11 @@ const playerSources = [
    *  to false on warm-ups, so a prewarm can never start audio in a hidden frame.
    *  Movie and episode share the vidsrc.buzz origin, so a series never pays a cold
    *  handshake the movie probe already warmed. */
-  { name: 'MultiAudio 4K', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
-    return type === 'tv'
-      ? `https://vidsrc.buzz/embed/tv/${id}/${s}/${e}?autoplay=true`
-      : `https://vidsrc.buzz/embed/movie/${id}?autoplay=true`;
-  }},
+  // { name: 'MultiAudio 4K', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
+  //   return type === 'tv'
+  //     ? `https://vidsrc.buzz/embed/tv/${id}/${s}/${e}?autoplay=true`
+  //     : `https://vidsrc.buzz/embed/movie/${id}?autoplay=true`;
+  // }},
   // { name: 'Ultra HD', dubbed: true, url: (id, lang, type, s, e) => {
   //   // #6: AutoEmbed — India ke networks par blockage kam aati hai
   //   return (type === 'tv' ? `https://autoembed.co/tv/tmdb/${id}-${s}-${e}` : 'https://autoembed.co/movie/tmdb/' + id) + `?lang=${lang}`;
@@ -13203,6 +13203,59 @@ const playerSources = [
   { name: 'Premium Mirror', dubbed: true, url: (id, lang, type, s, e) => {
     // #9: Official proxy mirror to fix 'refused to connect' / iframe block issue
     return (type === 'tv' ? `https://vidsrc.pm/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.pm/embed/movie?tmdb=${id}`) + `&lang=${lang}`;
+  }},
+
+  /*  ══════════════════════════════════════════════════════════════════════
+   *  THREE SERVERS FROM THE OLLY EMBED ROSTER (Oct 2026)
+   *  ══════════════════════════════════════════════════════════════════════
+   *  "Hindi Dub HD" above embeds ollyembed.pages.dev, whose own player carries a
+   *  16-server switcher (HN, S2 ... S16). Its live list is published at
+   *  ollyflix-cloudflare-proxy.../api/embed-servers. These are three of those
+   *  servers, S2, S12 and S15, added as servers of OUR player, so each gets its own
+   *  chip, health record and place in the retry chain instead of hiding two menus
+   *  deep inside another provider's frame. Nothing about "Hindi Dub HD" changed.
+   *
+   *  Measured before shipping in real Chrome, inside an iframe built exactly like
+   *  loadPlayer()'s (no sandbox, same `allow`, referrerpolicy=no-referrer), with the
+   *  verdict taken from the <video> element itself (decoded frames and a running
+   *  clock), never from an HTTP 200:
+   *
+   *                    No Way Home       Game of Thrones S1E1   3 Idiots (Hindi)
+   *    Nitro Hindi     plays, adaptive   plays                  plays, "Hindi" source
+   *    Phantom Multi   plays (Endgame)   plays 720p, Hindi file plays
+   *    Nexus FHD       plays 1080p       plays 1080p            plays 1080p
+   *
+   *  No 4K badge on any of them (none was measured at 2160p) and no anime flag
+   *  (not measured on anime). `dubbed: true` for the same reason every other entry
+   *  carries it: loadPlayer() moves a Hindi-preferring viewer (the default) off any
+   *  server without it, and the retry chain only draws from dubbed servers.
+   *
+   *  All three are ad-supported providers: the first tap inside their player may
+   *  open the provider's own popup, and Phantom Multi shows an "Ads end in" timer.
+   *  Each name is new on purpose — the health ranking keys its history by name. */
+
+  // S2 — nxsha.space, Olly's "Hindi v2": a Nitro multi-audio source with a Hindi
+  // track, plus its own Audio / Subtitles / Quality menus. `lang=hi` is the
+  // parameter Olly ships it with.
+  { name: 'Nitro Hindi', dubbed: true, url: (id, lang, type, s, e) => {
+    return type === 'tv'
+      ? `https://nxsha.space/embed/tv/${id}/${s}/${e}?lang=hi`
+      : `https://nxsha.space/embed/movie/${id}?lang=hi`;
+  }},
+  // S12 — nxsha.screenscape.me, Olly's "Phantom": one embed resolving across ~18
+  // upstreams (Sealx, Nitro, HINDI, Tamil, 4KELITE ...). Olly keys it on IMDb; the
+  // provider documents `tmdb=` as well, which is the id this app always has.
+  { name: 'Phantom Multi', dubbed: true, url: (id, lang, type, s, e) => {
+    return type === 'tv'
+      ? `https://nxsha.screenscape.me/embed?tmdb=${id}&type=tv&s=${s}&e=${e}`
+      : `https://nxsha.screenscape.me/embed?tmdb=${id}&type=movie`;
+  }},
+  // S15 — moviesnexus.fun, Olly's "Nexus" on its vidara source: 1920x1080 on every
+  // title measured, and the fastest of the three to a first frame (~8-20s).
+  { name: 'Nexus FHD', dubbed: true, url: (id, lang, type, s, e) => {
+    return type === 'tv'
+      ? `https://www.moviesnexus.fun/tv/${id}/${s}/${e}?sv=vidara`
+      : `https://www.moviesnexus.fun/movie/${id}?sv=vidara`;
   }}
 ];
 
@@ -14501,23 +14554,82 @@ function tryAllDubbedServers() {
 }
  
  
-async function downloadMovie() {
-  if (!currentModalMovie) return;
-  const id = currentModalMovie.id;
-  const isSeries = currentModalMovie.media_type === 'tv';
+/*  ── DOWNLOADS ─────────────────────────────────────────────────────────────
+ *  The Download button opens a sheet listing every download server on the Olly
+ *  Embed roster (D1-D4), built for this title — or, for a series, for the season
+ *  and episode picked below, with a stepper for the rest of the season. The sheet
+ *  is /downloads.js (its header has the measurements behind each row): only a
+ *  click needs it, so it stays out of the first-paint budget. It is requested the
+ *  first time the button is approached (hover, focus, touch) and the click awaits
+ *  that same request, so a cold click costs one small cached-forever fetch and a
+ *  warm one costs nothing. */
+let _mzDownloads = null;
 
-  // VidVault (VidRock ka official download server) — instant, koi API wait nahi
-  let downloadUrl;
-  if (isSeries) {
-    const sel = currentEpisodeSelection();
-    downloadUrl = `https://vidvault.ru/tv/${id}/${sel.s}/${sel.e}`;
-  } else {
-    downloadUrl = `https://vidvault.ru/movie/${id}`;
+function loadDownloads() {
+  if (!_mzDownloads) {
+    _mzDownloads = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = '/downloads.js?v=1';
+      s.async = true;
+      // A failed load must not poison the next click: forget it so that one retries.
+      const fail = () => { _mzDownloads = null; s.remove(); reject(new Error('downloads.js did not load')); };
+      s.onload = () => (window.MZDownloads ? resolve(window.MZDownloads) : fail());
+      s.onerror = fail;
+      document.head.appendChild(s);
+    });
   }
-
-  // Naya tab turant kholo (user click ke andar, popup blocker se bachne ke liye)
-  window.open(downloadUrl, '_blank', 'noopener');
+  return _mzDownloads;
 }
+
+async function downloadMovie() {
+  const movie = currentModalMovie;
+  if (!movie) return;
+  const btn = document.querySelector('.btn-download');
+  const isSeries = movie.media_type === 'tv';
+  const sel = currentEpisodeSelection();
+  /*  The season's episodes, read back from the Episode <select> openModal() filled:
+   *  "Ep 3 · The Rains of Castamere" -> { n: 3, name: 'The Rains of Castamere' }.
+   *  While a season is still loading its only option is not a number and is skipped. */
+  const episodes = [];
+  const eInput = isSeries ? document.getElementById('episodeInput') : null;
+  if (eInput) {
+    Array.prototype.forEach.call(eInput.options, (o) => {
+      const n = parseInt(o.value, 10);
+      if (n > 0) episodes.push({ n, name: o.textContent.replace(/^Ep\s*\d+\s*\u00b7\s*/, '').trim() });
+    });
+  }
+  const date = movie.release_date || movie.first_air_date || '';
+  let sheet;
+  if (btn) btn.setAttribute('aria-busy', 'true');
+  try {
+    sheet = await loadDownloads();
+  } catch (err) {
+    showToast('Download servers could not load. Check your connection and try again.');
+    return;
+  } finally {
+    if (btn) btn.removeAttribute('aria-busy');
+  }
+  // The viewer may have closed the page, or opened another title, meanwhile.
+  if (currentModalMovie !== movie) return;
+  sheet.open({
+    id: movie.id,
+    type: isSeries ? 'tv' : 'movie',
+    title: movie.title || movie.name || '',
+    year: date.slice(0, 4),
+    s: sel.s,
+    e: sel.e,
+    episodes,
+    opener: btn
+  });
+}
+
+// Warm the sheet on intent, so the click itself does not wait on the network.
+(function warmDownloadsOnIntent() {
+  const btn = document.querySelector('.btn-download');
+  if (!btn) return;
+  const warm = () => { loadDownloads().catch(() => {}); };
+  ['pointerenter', 'focus', 'touchstart'].forEach((type) => btn.addEventListener(type, warm, { once: true, passive: true }));
+})();
  
 function togglePlayerFS() {
   const embedEl = document.getElementById('videoEmbed');

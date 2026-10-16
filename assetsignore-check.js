@@ -35,6 +35,10 @@ const BROWSER_NEEDS = [
    *  leave the Cinematic Universe row as bare skeletons in production. */
   'universes.css', 'universes-rail.js',
   'providers.css',
+  /*  The watch page's Download sheet, injected by moviezone.js on the first
+   *  approach to the Download button. Excluding it leaves that button showing a
+   *  "could not load" toast instead of the server list. */
+  'downloads.js',
   'robots.txt', 'sitemap.xml',
   'moviezone-logo.webp', 'moviezone-logo.png',
   'icon-192.png', 'icon-512.png', 'icon-192.webp', 'icon-512.webp',

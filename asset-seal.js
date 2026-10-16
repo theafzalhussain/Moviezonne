@@ -41,7 +41,10 @@ const ASSETS = ['moviezone.min.js', 'moviezone.min.css', 'tv-mode.min.js', 'tv-m
   /*  _headers serves these three as `immutable` for a year straight from the
    *  asset router (the Worker never sees them), so a changed file under an old
    *  ?v= would never reach a returning visitor. Same failure mode: same seal. */
-  'providers.css', 'universes.css', 'universes-rail.js'];
+  'providers.css', 'universes.css', 'universes-rail.js',
+  /*  The watch page's Download sheet. Same `immutable` rule in _headers, and
+   *  moviezone.js injects it by a ?v= URL, so it is sealed for the same reason. */
+  'downloads.js'];
 
 const html = fs.readFileSync('index.html', 'utf8');
 const sw = fs.readFileSync('sw.js', 'utf8');
@@ -74,6 +77,10 @@ function versionOf(name) {
    *  source, so that fetch call is where their version actually lives. */
   const fetched = new RegExp("fetch\\('/?" + escaped + "\\?v=([\\d.]+)'").exec(appJs);
   if (fetched) return fetched[1];
+  /*  Feature files the bundle injects on demand (downloads.js) carry their version
+   *  in the loader's `s.src = '...'` line, the same shape as the index.html loaders. */
+  const injected = new RegExp("\\.src = '/?" + escaped + "\\?v=([\\d.]+)'").exec(appJs);
+  if (injected) return injected[1];
   return null;
 }
 

@@ -1,0 +1,54 @@
+{
+  "success": true,
+  "total": 4,
+  "download_servers": [
+    {
+      "id": 1,
+      "serverIndex": 1,
+      "name": "⚡ 02Downloader",
+      "displayName": "⚡ 02Downloader",
+      "cleanName": "02Downloader",
+      "badge": "D1",
+      "domain": "02moviedownloader.site",
+      "movie_url": "https://02moviedownloader.site/api/download/movie/{tmdb_id}",
+      "tv_url": "https://02moviedownloader.site/api/download/tv/{tmdb_id}/{season}/{episode}",
+      "color": "linear-gradient(135deg, var(--accent-purple), #6366f1)"
+    },
+    {
+      "id": 2,
+      "serverIndex": 2,
+      "name": "🔥 NxSha",
+      "displayName": "🔥 NxSha",
+      "cleanName": "NxSha",
+      "badge": "D2",
+      "domain": "nxsha.space",
+      "movie_url": "https://nxsha.space/dl/movie/{tmdb_id}",
+      "tv_url": "https://nxsha.space/dl/tv/{tmdb_id}/{season}/{episode}",
+      "color": "linear-gradient(135deg, #f97316, #e11d48)"
+    },
+    {
+      "id": 3,
+      "serverIndex": 3,
+      "name": "🚀 VidSync",
+      "displayName": "🚀 VidSync",
+      "cleanName": "VidSync",
+      "badge": "D3",
+      "domain": "vidsync.pro",
+      "movie_url": "https://vidsync.pro/embed/download/movie/{tmdb_id}",
+      "tv_url": "https://vidsync.pro/embed/download/tv/{tmdb_id}/{season}/{episode}",
+      "color": "linear-gradient(135deg, #22c55e, #059669)"
+    },
+    {
+      "id": 4,
+      "serverIndex": 4,
+      "name": "🎬 VidVault",
+      "displayName": "🎬 VidVault",
+      "cleanName": "VidVault",
+      "badge": "D4",
+      "domain": "vidvault.to",
+      "movie_url": "https://vidvault.to/movie/{tmdb_id}",
+      "tv_url": "https://vidvault.to/tv/{tmdb_id}/{season}/{episode}",
+      "color": "linear-gradient(135deg, #0ea5e9, #2563eb)"
+    }
+  ]
+}

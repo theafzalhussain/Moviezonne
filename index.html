@@ -10,13 +10,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="color-scheme" content="dark">
+<script>(function(){try{var n=navigator,u=n.userAgent||'',t=/\b(?:smart-?tv|smarttv|googletv|android\s*tv|appletv|tvos|crkey|roku|web0?s|tizen|vidaa|hbbtv|netcast|viera|bravia|aquos)\b|\bAFT[A-Z0-9]/i.test(u),m=!t&&/Mobi|Android|iPhone|iPad/i.test(u),l=(n.deviceMemory&&n.deviceMemory<4)||(n.hardwareConcurrency&&n.hardwareConcurrency<4),r=false;try{r=window.matchMedia('(prefers-reduced-motion: reduce)').matches}catch(e){}if(m||l||r)document.documentElement.classList.add('low-end-mode')}catch(e){}})();</script>
 <link rel="preconnect" href="https://image.tmdb.org">
 
 <link rel="stylesheet" href="/moviezone.min.css?v=9.24">
 <!--MZ_PERF_HEAD-->
-<link rel="preload" as="image" media="(max-width: 1024px)" href="https://image.tmdb.org/t/p/w780/1CIaRYKf3zg2Xyce1CSfCMg2Vfw.jpg" fetchpriority="high">
-<link rel="preload" as="image" media="(min-width: 1025px)" href="https://image.tmdb.org/t/p/w1280/1CIaRYKf3zg2Xyce1CSfCMg2Vfw.jpg" fetchpriority="high">
-<meta name="mz-hero-backdrop" content="/1CIaRYKf3zg2Xyce1CSfCMg2Vfw.jpg">
+<link rel="preload" as="image" media="(max-width: 767px) and (orientation: portrait)" href="https://image.tmdb.org/t/p/w780/lFKA4GMz36dImEy3DQPdPF7G4V9.jpg" fetchpriority="high">
+<link rel="preload" as="image" media="(max-width: 1024px) and (min-width: 768px), (max-width: 1024px) and (orientation: landscape)" href="https://image.tmdb.org/t/p/w780/y6RIuwuxLG3Nsb37KUj5yatnTIp.jpg" fetchpriority="high">
+<link rel="preload" as="image" media="(min-width: 1025px)" href="https://image.tmdb.org/t/p/w1280/y6RIuwuxLG3Nsb37KUj5yatnTIp.jpg" fetchpriority="high">
+<meta name="mz-hero-backdrop" content="/y6RIuwuxLG3Nsb37KUj5yatnTIp.jpg">
+<meta name="mz-hero-poster" content="/lFKA4GMz36dImEy3DQPdPF7G4V9.jpg">
 <!--/MZ_PERF_HEAD-->
 
 <link rel="stylesheet" href="/tv-mode.min.css?v=1.6" media="print" onload="this.media='all';this.onload=null">
@@ -25,7 +28,7 @@
 <link rel="preload" href="/fonts/outfit-latin-var.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/bebas-neue-latin-400.woff2" as="font" type="font/woff2" crossorigin>
 
-<link rel="preload" href="/moviezone.min.js?v=16.4" as="script">
+<link rel="preload" href="/moviezone.min.js?v=16.5" as="script">
 
 <style id="mz-fonts">
 @font-face{font-family:'Outfit';font-style:normal;font-weight:300 900;font-display:swap;src:url(/fonts/outfit-latin-var.woff2) format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
@@ -292,6 +295,9 @@
 <link rel="dns-prefetch" href="https://vidsrc.buzz">
 <link rel="dns-prefetch" href="https://vidlink.pro">
 <link rel="dns-prefetch" href="https://vidsrc.pm">
+<link rel="dns-prefetch" href="https://nxsha.space">
+<link rel="dns-prefetch" href="https://nxsha.screenscape.me">
+<link rel="dns-prefetch" href="https://www.moviesnexus.fun">
 <link rel="dns-prefetch" href="https://graphql.anilist.co">
 
 <link rel="manifest" href="/manifest.json">
@@ -617,10 +623,14 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
       //    exactly the two queries slideBackdropMarkup() branches on, so one of
       //    them always lands and the other is never fetched.
       var m = /^(https:\/\/image\.tmdb\.org\/t\/p\/)w\d+(\/.+)$/.exec(h.u);
+      //    Upright phones show the poster (HERO_PORTRAIT_MQ), so the backdrop
+      //    hint is narrowed to the other small screens when a poster is stored.
+      var p = /^https:\/\/image\.tmdb\.org\/t\/p\/w\d+\/[\w-]+\.\w+$/.test(h.p || '') ? h.p : '';
       var want = m
-        ? [['(max-width: 1024px)', m[1] + 'w780' + m[2]],
+        ? [[p ? '(max-width: 1024px) and (min-width: 768px), (max-width: 1024px) and (orientation: landscape)' : '(max-width: 1024px)', m[1] + 'w780' + m[2]],
            ['(min-width: 1025px)', m[1] + 'w1280' + m[2]]]
         : [['', h.u]];
+      if (m && p) want.push(['(max-width: 767px) and (orientation: portrait)', p]);
       for (var i = 0; i < want.length; i++) {
         var l = document.createElement('link');
         l.rel = 'preload'; l.as = 'image'; l.href = want[i][1]; l.fetchPriority = 'high';
@@ -632,45 +642,7 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
 })();
 </script>
 
-<!-- ════════════════════════════════════════════════════════════════════
-     DATADOG RUM — async loader, behind a profile gate.
-     This used to be a plain <script src> at the very top of a duplicated
-     <head>, which meant a third-party, cross-origin, PARSER-BLOCKING request
-     sat in front of the stylesheet, the fonts and the bundles. Nothing on the
-     page could be discovered until Datadog's CDN answered, and the RUM agent's
-     own initialisation ran on the main thread before first paint — it was
-     measuring an LCP/INP that it was itself inflating.
-
-     The official async snippet queues init() until the agent loads, so the
-     document never waits on it. It is placed at the end of <head> so the
-     request is issued after the resources that actually render the page.
-
-     THE GATE (three decisions, each from a measurement, not a guess):
-
-     • Real crawlers get no RUM at all. A bot session is not a user session: it
-       skews every percentile in the dashboard, and the agent is pure waste on a
-       request no human is waiting for. Lighthouse/PageSpeed are deliberately
-       NOT in that list — an audit must see exactly what a user sees, otherwise
-       the score is a lie we tell ourselves.
-
-     • A dev machine reports env "development" and samples nothing. The init
-       used to say env:'production' unconditionally, so every "Failed to fetch"
-       thrown on localhost landed in the production error feed. That is why the
-       production error count could not be trusted at all.
-
-     • Weak devices keep errors and metrics but lose Session Replay. Replay
-       records DOM mutations and this page mutates heavily while rendering
-       rails; tv-perf-check measured ~220ms of main-thread time inside
-       datadog-rum.js during the D-pad phase alone — on the device least able to
-       afford it. Thresholds match isLowEnd in moviezone.js so "weak" means the
-       same thing everywhere.
-
-     sessionReplaySampleRate stays 10 (not 20) on capable devices: replay is the
-     most expensive RUM feature on INP, and 10% is still plenty of sessions.
-
-     window.__mzRumProfile exports the decisions so rum-gate.browser.test.js can
-     assert them instead of trusting them.
-     ════════════════════════════════════════════════════════════════════ -->
+<!-- Datadog RUM: async, crawler-gated, slim agent without replay on weak devices and phones. Rationale: git history of this block. -->
 <script>
 (function () {
   var ua = navigator.userAgent || '';
@@ -684,21 +656,18 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
     || (navigator.deviceMemory && navigator.deviceMemory < 4)
     || (navigator.hardwareConcurrency && navigator.hardwareConcurrency < 4);
 
+  /*  Phones skip replay too: slim agent, no DOM recording on weak CPUs. */
+  var isMobileUA = !isTvUA && /Mobi|Android|iPhone|iPad/i.test(ua);
+  var noReplay = isWeak || isMobileUA;
+
   window.__mzRumProfile = {
     skipped: isCrawler,
     env: isLocal ? 'development' : 'production',
     sessionSampleRate: isLocal ? 0 : 100,
-    sessionReplaySampleRate: isWeak ? 0 : 10,
-    /*  Resource collection is the one RUM feature whose cost scales with the
-     *  page rather than with the session, and this page is the bad case: a cold
-     *  homepage produces ~90 entries (the batch plus up to 60 posters), each of
-     *  which becomes a RUM event to serialise and beacon. On a 2-core phone that
-     *  is main-thread time spent measuring instead of rendering. Tied to the same
-     *  weak-device verdict as replay, so the devices that can afford the
-     *  instrumentation still report it and the ones that cannot are left alone -
-     *  they still send views, errors and long tasks, which is what the TV and
-     *  low-end work is actually driven from. */
-    trackResources: !isWeak,
+    sessionReplaySampleRate: noReplay ? 0 : 10,
+    /*  Keep resource timing coverage for TVs and low-end devices too.
+     *  Resource tracking works with the slim agent; replay stays gated below. */
+    trackResources: true,
     weakDevice: !!isWeak
   };
   if (isCrawler) return;
@@ -1048,14 +1017,7 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
 })();
 </script>
 </head>
-<body>
-
-<!-- The custom cursor layers (#cursor-glow / #cursor-ring / #cursor-dot) used to
-     sit here. Removed for performance: they were drawn by a per-frame JS loop and
-     required `cursor: none` sitewide, so the pointer lagged behind the hand
-     whenever the main thread was busy. The native pointer is drawn by the OS. -->
-
-<!-- ── CINEMATIC LOADER ──
+<body> ──
      The brand medallion (the navbar's own .nav-logo-mark) inside a spinning
      gold-to-violet ring, the wordmark, and a thin indeterminate bar. All motion
      is transform-only, so it keeps moving while the main thread is busy parsing
@@ -1142,7 +1104,7 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
 <!-- â”€â”€ HERO CAROUSEL â”€â”€ -->
 <section id="hero" aria-label="Featured Movies Carousel">
   <h1 class="visually-hidden">MovieZone – Watch Free Movies, Web Series & Anime Online in HD & 4K</h1>
-  <div class="carousel-track" id="carouselTrack"><!--MZ_HERO_SLIDE--><div class="carousel-slide active" data-mz-hero-ssr aria-hidden="true"><div class="slide-bg"><picture><source media="(max-width: 1024px)" srcset="https://image.tmdb.org/t/p/w780/1CIaRYKf3zg2Xyce1CSfCMg2Vfw.jpg"><source media="(min-width: 1025px)" srcset="https://image.tmdb.org/t/p/w1280/1CIaRYKf3zg2Xyce1CSfCMg2Vfw.jpg"><img class="slide-bg-img" src="https://image.tmdb.org/t/p/w1280/1CIaRYKf3zg2Xyce1CSfCMg2Vfw.jpg" alt="" width="1280" height="720" fetchpriority="high" decoding="async" draggable="false"></picture></div><div class="slide-gradient"></div></div><!--/MZ_HERO_SLIDE--></div>
+  <div class="carousel-track" id="carouselTrack"><!--MZ_HERO_SLIDE--><div class="carousel-slide active" data-mz-hero-ssr aria-hidden="true"><div class="slide-bg"><picture><source media="(max-width: 767px) and (orientation: portrait)" srcset="https://image.tmdb.org/t/p/w780/lFKA4GMz36dImEy3DQPdPF7G4V9.jpg"><source media="(max-width: 1024px)" srcset="https://image.tmdb.org/t/p/w780/y6RIuwuxLG3Nsb37KUj5yatnTIp.jpg"><source media="(min-width: 1025px)" srcset="https://image.tmdb.org/t/p/w1280/y6RIuwuxLG3Nsb37KUj5yatnTIp.jpg"><img class="slide-bg-img" src="https://image.tmdb.org/t/p/w1280/y6RIuwuxLG3Nsb37KUj5yatnTIp.jpg" alt="" width="1280" height="720" fetchpriority="high" decoding="async" draggable="false"></picture></div><div class="slide-gradient"></div></div><!--/MZ_HERO_SLIDE--></div>
   <div class="carousel-nav">
     <div class="carousel-dots" id="carouselDots"></div>
   </div>
@@ -1747,7 +1709,7 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
               <span>Watchlist</span>
             </button>
-            <button class="btn-download" onclick="downloadMovie()">
+            <button class="btn-download" type="button" onclick="downloadMovie()" aria-haspopup="dialog" aria-expanded="false">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
               <span>Download</span>
             </button>
@@ -1880,7 +1842,7 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
 <!-- Root-absolute bundle URLs support nested detail routes. -->
 <script src="/tv-mode.min.js?v=2.0" defer></script>
 <script src="/search-engine.min.js?v=2.1" defer></script>
-<script src="/moviezone.min.js?v=16.4" defer></script>
+<script src="/moviezone.min.js?v=16.5" defer></script>
 <script>
 /*  ── pwa-install.min.js is NOT loaded with the others ─────────────────────────
  *  It was a fourth `defer` script, so its 30 KB was parsed and executed inside

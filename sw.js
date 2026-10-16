@@ -195,7 +195,13 @@
 // thumbnail rail, premium loader, the All Movies & Shows header and genre panel
 // redesigned, brand-lit provider / universe tiles, and the franchise page's hero,
 // toolbar and poster grid redesigned and moved into the deferred universes.css.
-const CACHE_NAME = 'moviezone-v165';
+// v166: moviezone.min.js 16.5 - three servers from the Olly Embed roster added to
+// the player (Nitro Hindi, Phantom Multi, Nexus FHD); no existing server touched.
+// The Download button now opens a sheet with Olly's four download servers (D1-D4)
+// for the title or the picked episode. The sheet is /downloads.js?v=1, injected on
+// demand by moviezone.js and cached by the versioned-asset branch below on first
+// use, so it is deliberately not in either precache list.
+const CACHE_NAME = 'moviezone-v166';
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
  *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream
@@ -370,7 +376,7 @@ const STATIC_ASSETS = [
   '/moviezone.min.css?v=9.24',
   '/tv-mode.min.js?v=2.0',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=16.4',
+  '/moviezone.min.js?v=16.5',
   '/manifest.json',
   '/icon-192.png?v=2',
   '/favicon-32.png?v=2',

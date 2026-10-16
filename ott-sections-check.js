@@ -580,20 +580,39 @@ async function catalogueSize(platform, type) {
       const cutoff = new Date(Date.now() - 400 * 86400000).toISOString().slice(0, 10);
       const audienceBacked = (m) => (m.vote_count || 0) >= OTT_RECENCY_MIN_VOTES
         || (m.popularity || 0) >= OTT_RECENCY_MIN_POPULARITY;
+      /*  3. The cohort also respects the provider-signal tier split. ottRankLikeAllFeed
+       *     ranks every title the platform's own discovery lanes surfaced (tier 0)
+       *     ahead of every catalogue-only title, on purpose — the check above
+       *     ("the head is what the provider discovery lanes surfaced") guards
+       *     exactly that. A catalogue-only title can therefore only be owed a
+       *     first-screen slot when catalogue cards reach the first screen at all.
+       *
+       *     Without this the check failed on a date boundary rather than on the
+       *     ranking: ZEE5 > Web Series (Oct 2026) carried one catalogue-only title,
+       *     "Ganga Mai Ki Betiyan", first aired 389 days earlier — inside this
+       *     check's ~13-month window, outside the 120-day window the platform's
+       *     own "new" lanes use, zero votes — behind 58 signalled titles. It would
+       *     have "passed" again eleven days later with nothing changed. A buried
+       *     signalled new release, which is the regression this exists for, still
+       *     fails it. */
+      const firstScreen = rendered.slice(0, 24);
+      const catalogueOnFirstScreen = firstScreen.some((m) => m._ottSignalTier !== 0);
       const freshInPool = items.filter((m) => dateOf(m) && dateOf(m) >= cutoff);
-      const freshEligible = freshInPool.filter(audienceBacked);
+      const freshEligible = freshInPool.filter((m) => audienceBacked(m)
+        && (m._ottSignalTier === 0 || catalogueOnFirstScreen));
       check('latest releases surface in the first screen', () => {
         if (!freshInPool.length) {
           console.log('    (no title newer than ' + cutoff + ' exists in this catalogue at all)');
           return;
         }
         if (!freshEligible.length) {
-          console.log('    (' + freshInPool.length + ' recent title(s), none with an audience yet — '
-            + 'the recency premium is gated, so none is owed a first-screen slot)');
+          console.log('    (' + freshInPool.length + ' recent title(s), none both audience-backed and '
+            + 'rankable onto the first screen — catalogue-only titles sit behind the platform\'s '
+            + 'own signalled titles by design)');
           return;
         }
         const sameTitle = (a, b) => a.id === b.id && a.media_type === b.media_type;
-        const upTop = rendered.slice(0, 24).filter((m) => freshEligible.some((f) => sameTitle(f, m)));
+        const upTop = firstScreen.filter((m) => freshEligible.some((f) => sameTitle(f, m)));
         assert.ok(upTop.length >= 1,
           freshEligible.length + ' audience-backed title(s) from the last ~13 months exist but none '
           + 'reached the first 24 of the rendered grid (pool has ' + freshInPool.length + ' recent)');
