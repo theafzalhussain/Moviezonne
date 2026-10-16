@@ -190,7 +190,12 @@
 // v164: moviezone.min.js 16.3, moviezone.min.css 9.23 - season/episode picker
 // rebuilt as labelled fields + an episode tile, phone tab bar, autoplay progress
 // in the active hero dot, and the dead arrow / PWA-banner CSS removed.
-const CACHE_NAME = 'moviezone-v164';
+// v165: moviezone.min.js 16.4, moviezone.min.css 9.24, tv-mode.min.js 2.0,
+// providers.css 11, universes.css 6, universes-rail.js 6 - Netflix-style episode
+// thumbnail rail, premium loader, the All Movies & Shows header and genre panel
+// redesigned, brand-lit provider / universe tiles, and the franchise page's hero,
+// toolbar and poster grid redesigned and moved into the deferred universes.css.
+const CACHE_NAME = 'moviezone-v165';
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
  *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream
@@ -362,10 +367,10 @@ const STATIC_ASSETS = [
    *  instead of the shell. '/' is the same document, answered 200 directly. */
   '/',
   '/tv-mode.min.css?v=1.6',
-  '/moviezone.min.css?v=9.23',
-  '/tv-mode.min.js?v=1.9',
+  '/moviezone.min.css?v=9.24',
+  '/tv-mode.min.js?v=2.0',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=16.3',
+  '/moviezone.min.js?v=16.4',
   '/manifest.json',
   '/icon-192.png?v=2',
   '/favicon-32.png?v=2',
@@ -384,7 +389,7 @@ const OPTIONAL_ASSETS = [
   // to sit in front of a first paint. 275 KB between them.
   '/icon-512.png?v=2',
   '/apple-touch-icon.png?v=2',
-  '/providers.css?v=10',
+  '/providers.css?v=11',
   '/provider-netflix.svg',
   '/provider-prime.svg',
   '/provider-jiohotstar.png',
@@ -403,8 +408,8 @@ const OPTIONAL_ASSETS = [
   // The Cinematic Universe rail on the homepage. Both are optional for the same
   // reason the catalogue above is: the row is below the fold and built lazily, so
   // a 404 on either must not be able to fail the whole service-worker install.
-  '/universes.css?v=5',
-  '/universes-rail.js?v=5',
+  '/universes.css?v=6',
+  '/universes-rail.js?v=6',
   // pwa-install.min.js moved off the critical path: index.html no longer ships a
   // <script> tag for it, it is injected on idle / on demand. Still worth having
   // offline so the install popup works, but it must not be able to fail a

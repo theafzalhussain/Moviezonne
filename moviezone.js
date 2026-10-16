@@ -12174,10 +12174,14 @@ async function openModal(id, type = 'movie', activationEvent) {
       tvGroup.style.display = type === 'tv' ? 'block' : 'none';
       if (type === 'tv') {
         /*  Season / episode picker: two glass fields with the label inside the
-         *  box, then an episode tile in the poster card's language — still with
-         *  an "S1 · E3" badge, title, one "★ · runtime · date" line, two lines of
-         *  synopsis. The two <select>s stay the source of truth: playNextEpisode()
-         *  and currentEpisodeSelection() read them, so their ids must not change. */
+         *  box, then a Netflix-style rail with one thumbnail tile per episode of
+         *  the season (still, number, runtime, rating or air date, two lines of
+         *  synopsis, and the viewer's own progress). Tapping a tile plays it.
+         *  The two <select>s stay the source of truth: playNextEpisode() and
+         *  currentEpisodeSelection() read them, so their ids must not change, and
+         *  the rail only ever writes to them and mirrors them back. */
+        const railArrow = (dir, pts) => '<button type="button" class="ep-rail-arrow" data-ep-scroll="' + dir +
+          '" aria-label="' + (dir < 0 ? 'Previous' : 'Next') + ' episodes" disabled><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="' + pts + '"/></svg></button>';
         tvGroup.innerHTML =
           '<div class="ep-fields">' +
             '<label class="ep-field"><span class="ep-label">Season</span>' +
@@ -12185,7 +12189,9 @@ async function openModal(id, type = 'movie', activationEvent) {
             '<label class="ep-field ep-field--wide"><span class="ep-label">Episode<i id="episodeCount"></i></span>' +
               '<select id="episodeInput" class="ep-select"></select></label>' +
           '</div>' +
-          '<div id="episodePreview" class="ep-card" hidden></div>';
+          '<div class="ep-rail-head"><span class="ep-rail-title" id="episodeRailTitle">Episodes</span>' +
+            '<span class="ep-rail-nav" hidden>' + railArrow(-1, '15 18 9 12 15 6') + railArrow(1, '9 18 15 12 9 6') + '</span></div>' +
+          '<div class="ep-rail" id="episodeRail" role="group" aria-labelledby="episodeRailTitle"></div>';
         const sInput = document.getElementById('seasonInput');
         const eInput = document.getElementById('episodeInput');
         const seasons = (details.seasons || []).filter(s => s.season_number > 0);
@@ -12205,52 +12211,149 @@ async function openModal(id, type = 'movie', activationEvent) {
           // The season's episode count lives in the Episode label ("10 episodes"),
           // so this option stays short enough for a phone-width field.
           sInput.innerHTML = seasons.map(s => `<option value="${s.season_number}" ${s.season_number == lastS ? 'selected' : ''}>${escapeHTML(s.name || ('Season ' + s.season_number))}</option>`).join('');
-          const previewDiv = document.getElementById('episodePreview');
+          const rail = document.getElementById('episodeRail');
+          const railNav = tvGroup.querySelector('.ep-rail-nav');
           const countEl = document.getElementById('episodeCount');
+          const railTitle = document.getElementById('episodeRailTitle');
+          const smooth = () => (isMzTVMode() ? 'auto' : 'smooth');
+          let episodes = [];
+
+          /*  Arrows and the trailing fade follow the rail's real overflow, the same
+           *  contract as the provider and universe rails. Reads first, writes after. */
+          const syncRailEdges = () => {
+            if (!rail || !railNav) return;
+            const max = rail.scrollWidth - rail.clientWidth;
+            const x = rail.scrollLeft;
+            const over = max > 2;
+            railNav.hidden = !over;
+            railNav.firstChild.disabled = x <= 2;
+            railNav.lastChild.disabled = x >= max - 2;
+            rail.dataset.edge = !over ? 'none' : x <= 2 ? 'end' : x >= max - 2 ? 'start' : 'both';
+          };
+          const syncRailEdgesSoon = mzRafThrottle(syncRailEdges);
+
+          // Mirrors the Episode <select> onto the tiles and keeps the pick in view.
+          const syncRail = (behavior) => {
+            if (!rail) return;
+            let active = null;
+            rail.querySelectorAll('.ep-tile').forEach((t) => {
+              const on = t.dataset.ep === String(eInput.value);
+              t.classList.toggle('is-active', on);
+              if (on) { t.setAttribute('aria-current', 'true'); active = t; } else t.removeAttribute('aria-current');
+            });
+            requestAnimationFrame(() => {
+              if (active) {
+                const left = active.offsetLeft - (rail.clientWidth - active.offsetWidth) / 2;
+                // Direct assignment where smooth scrolling is not wanted (and on
+                // TV engines that predate Element.scrollTo options).
+                if (behavior === 'auto' || smooth() === 'auto' || !rail.scrollTo) rail.scrollLeft = left;
+                else rail.scrollTo({ left: left, behavior: 'smooth' });
+              }
+              syncRailEdges();
+            });
+          };
+
+          const fmtDate = (d) => {
+            try { return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); } catch (e) { return ''; }
+          };
+
+          const renderRail = (seasonNum) => {
+            if (!rail) return;
+            /*  The viewer's own history, per episode: the Continue Watching rows are
+             *  keyed id:season:episode, and finished rows live in mz_watched_done. */
+            let cw = [], done = [];
+            try { cw = JSON.parse(localStorage.getItem('mz_continue_watching')) || []; } catch (e) {}
+            try { done = JSON.parse(localStorage.getItem('mz_watched_done')) || []; } catch (e) {}
+            const today = new Date();
+            const fallback = details.backdrop_path ? 'https://image.tmdb.org/t/p/w300' + details.backdrop_path : '';
+            rail.innerHTML = episodes.map((ep) => {
+              const n = ep.episode_number;
+              const key = Number(id) + ':' + seasonNum + ':' + n;
+              const row = cw.find((r) => r && String(r.key) === key);
+              const watched = done.indexOf(key) !== -1;
+              const pct = watched ? 100 : (row && row.progress > 0 ? Math.min(100, row.progress) : 0);
+              const aired = ep.air_date ? new Date(ep.air_date + 'T00:00:00') : null;
+              const soon = !!(aired && !isNaN(aired) && aired > today);
+              const mins = ep.runtime || 0;
+              const time = mins ? (mins >= 60 ? Math.floor(mins / 60) + 'h' + (mins % 60 ? ' ' + (mins % 60) + 'm' : '') : mins + 'm') : '';
+              const title = ep.name || ('Episode ' + n);
+              const img = ep.still_path ? 'https://image.tmdb.org/t/p/w300' + ep.still_path : fallback;
+              const meta = soon
+                ? '<b>Airs ' + fmtDate(aired) + '</b>'
+                : (ep.vote_average > 0 ? '<b>&#9733; ' + (+ep.vote_average).toFixed(1) + '</b>' : '') +
+                  (aired && !isNaN(aired) ? '<span>' + fmtDate(aired) + '</span>' : '');
+              return '<button type="button" class="ep-tile' + (soon ? ' is-soon' : '') + (watched ? ' is-done' : '') + '" data-ep="' + n + '"' +
+                ' aria-label="' + escapeHTML('Episode ' + n + ': ' + title + (time ? ', ' + time : '') + (soon ? ', not aired yet' : '') + (watched ? ', watched' : '')) + '">' +
+                '<span class="ep-tile-still">' +
+                  (img ? '<img src="' + img + '" alt="" width="300" height="169" loading="lazy" decoding="async">' : '') +
+                  '<span class="ep-tile-num">E' + n + '</span>' +
+                  (watched ? '<span class="ep-tile-time">&#10003; Watched</span>' : (time ? '<span class="ep-tile-time">' + time + '</span>' : '')) +
+                  '<span class="ep-tile-play" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></span>' +
+                  (pct ? '<span class="ep-tile-bar"><i style="width:' + pct + '%"></i></span>' : '') +
+                '</span>' +
+                '<span class="ep-tile-body">' +
+                  '<span class="ep-tile-title">' + n + '. ' + escapeHTML(title) + '</span>' +
+                  (meta ? '<span class="ep-tile-meta">' + meta + '</span>' : '') +
+                  '<span class="ep-tile-desc">' + escapeHTML(ep.overview || 'No description available yet.') + '</span>' +
+                '</span>' +
+              '</button>';
+            }).join('');
+            rail.scrollLeft = 0;
+            syncRail('auto');
+          };
+
+          if (rail) {
+            /*  A tile is a play button: it moves the Episode <select> (whose own
+             *  change handler resets the retry chain and reloads a running player)
+             *  and starts playback if nothing is playing yet — playMovie() scrolls
+             *  the player into view. */
+            rail.addEventListener('click', (ev) => {
+              const tile = ev.target.closest('.ep-tile');
+              if (!tile || tile.classList.contains('ep-tile--skel')) return;
+              if (String(eInput.value) !== tile.dataset.ep) {
+                eInput.value = tile.dataset.ep;
+                eInput.dispatchEvent(new Event('change'));
+              }
+              if (!embedEl.querySelector('iframe')) playMovie();
+            });
+            // Roving arrow keys along the row. tv-mode.js moves focus itself and
+            // marks the event handled, so a remote never steps twice.
+            rail.addEventListener('keydown', (ev) => {
+              if (ev.defaultPrevented || ev.altKey || ev.ctrlKey || ev.metaKey) return;
+              if (ev.key !== 'ArrowRight' && ev.key !== 'ArrowLeft') return;
+              const tiles = Array.from(rail.querySelectorAll('.ep-tile'));
+              const at = tiles.indexOf(ev.target.closest('.ep-tile'));
+              const next = tiles[at + (ev.key === 'ArrowRight' ? 1 : -1)];
+              if (at < 0 || !next) return;
+              ev.preventDefault();
+              next.focus({ preventScroll: true });
+              next.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: smooth() });
+            });
+            rail.addEventListener('scroll', syncRailEdgesSoon, { passive: true });
+            if (typeof ResizeObserver === 'function') new ResizeObserver(syncRailEdgesSoon).observe(rail);
+          }
+          if (railNav) railNav.addEventListener('click', (ev) => {
+            const b = ev.target.closest('[data-ep-scroll]');
+            if (b && !b.disabled) rail.scrollBy({ left: Number(b.dataset.epScroll) * rail.clientWidth * 0.85, behavior: smooth() });
+          });
           
           const fetchEpisodes = async (seasonNum, targetEp) => {
             eInput.innerHTML = '<option>Loading episodes…</option>';
-            if (previewDiv) previewDiv.classList.add('is-loading');
+            if (rail) rail.innerHTML = '<span class="ep-tile ep-tile--skel"></span>'.repeat(4);
             try {
               const sData = await tmdb('/tv/'+id+'/season/'+seasonNum, { language: 'en-US' });
-              const episodes = sData.episodes || [];
+              episodes = sData.episodes || [];
               eInput.innerHTML = episodes.map(ep => `<option value="${ep.episode_number}">Ep ${ep.episode_number} · ${escapeHTML(ep.name || '')}</option>`).join('');
               if (countEl) countEl.textContent = episodes.length ? episodes.length + (episodes.length === 1 ? ' episode' : ' episodes') : '';
+              const sMeta = seasons.find(sz => sz.season_number == seasonNum);
+              if (railTitle) railTitle.textContent = (sMeta && sMeta.name) || ('Season ' + seasonNum);
               
               if (targetEp && episodes.find(e => e.episode_number == targetEp)) {
                 eInput.value = targetEp;
               }
  
-              const updatePreview = () => {
-                const ep = episodes.find(e => e.episode_number == eInput.value);
-                if (!ep || !previewDiv) return;
-                const imgSrc = ep.still_path ? IMG + ep.still_path : (details.backdrop_path ? IMG + details.backdrop_path : '');
-                // "★ 8.1 · 1h 2m · 17 Apr 2011" — the home card's .card-sub line.
-                // An episode that has not aired yet says so instead of showing a date.
-                const aired = ep.air_date ? new Date(ep.air_date + 'T00:00:00') : null;
-                let when = '';
-                try { when = aired && !isNaN(aired) ? aired.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : ''; } catch (e) {}
-                const mins = ep.runtime || 0;
-                const meta = [
-                  ep.vote_average > 0 ? '<span class="card-star">&#9733; ' + (+ep.vote_average).toFixed(1) + '</span>' : '',
-                  mins ? '<span>' + (mins >= 60 ? Math.floor(mins / 60) + 'h' + (mins % 60 ? ' ' + (mins % 60) + 'm' : '') : mins + 'm') + '</span>' : '',
-                  when ? (aired > new Date() ? '<span class="card-star">Airs ' + when + '</span>' : '<span>' + when + '</span>') : ''
-                ].join('');
-                previewDiv.innerHTML =
-                  '<div class="ep-still">' +
-                    (imgSrc ? '<img src="' + imgSrc + '" alt="" width="342" height="192" loading="lazy" decoding="async">' : '') +
-                    '<span class="ep-badge">S' + escapeHTML(String(seasonNum)) + ' · E' + ep.episode_number + '</span>' +
-                  '</div>' +
-                  '<div class="ep-body">' +
-                    '<div class="ep-title">' + escapeHTML(ep.name || ('Episode ' + ep.episode_number)) + '</div>' +
-                    (meta ? '<div class="card-sub">' + meta + '</div>' : '') +
-                    '<p class="ep-desc">' + escapeHTML(ep.overview || 'No description available yet.') + '</p>' +
-                  '</div>';
-                previewDiv.hidden = false;
-              };
- 
               eInput.onchange = () => { 
-                updatePreview();
+                syncRail();
                 /*  Naya episode = naya retry chain.
                  *  _mzTriedSources sirf naye title par reset hota tha, episode
                  *  badalne par nahi. Binge karte waqt set har episode ka failure
@@ -12261,11 +12364,14 @@ async function openModal(id, type = 'movie', activationEvent) {
                 resetTriedSources();
                 if(embedEl.querySelector('iframe')) playMovie(); 
               };
-              updatePreview();
+              renderRail(seasonNum);
  
               if(embedEl.querySelector('iframe')) playMovie(); 
-            } catch(err) { eInput.innerHTML = '<option value="1">Episode 1</option>'; }
-            if (previewDiv) previewDiv.classList.remove('is-loading');
+            } catch(err) {
+              eInput.innerHTML = '<option value="1">Episode 1</option>';
+              if (rail) rail.innerHTML = '';
+              syncRailEdges();
+            }
           };
           
           sInput.onchange = (e) => { resetTriedSources(); fetchEpisodes(e.target.value, 1); }; // Season change   Episode 1
@@ -16152,6 +16258,24 @@ window.handleNotifyMe = async function(btn) {
   const hubCache = new Map();
   let activeUniverseSlug = null;
   let activeTab = 'all'; // 'all' | 'movies' | 'tv'
+  let chHeroObserver = null; // topbar title reveal, one per rendered page
+
+  /*  The page's own styles live in universes.css, which index.html loads
+   *  deferred (media="print" flipped to "all" on load). A tap on a rail tile
+   *  cannot beat it — the tile is styled by that same file — but a cold deep
+   *  link to /#collections-<slug> can, so rendering waits for the sheet. It
+   *  never waits more than 4s: an unstyled page beats no page. */
+  function whenChStyles() {
+    const link = document.querySelector('link[href*="universes.css"]');
+    if (!link || (link.sheet && link.media !== 'print')) return Promise.resolve();
+    return new Promise((resolve) => {
+      const done = () => { link.media = 'all'; resolve(); };
+      if (link.sheet) { done(); return; }
+      link.addEventListener('load', done, { once: true });
+      link.addEventListener('error', resolve, { once: true });
+      setTimeout(resolve, 4000);
+    });
+  }
 
   function getUniverse(slug) {
     return UNIVERSES.find(u => u.slug === slug);
@@ -16327,6 +16451,9 @@ window.handleNotifyMe = async function(btn) {
     const upcomingItems = allItems.filter(isUpcoming);
     const releasedCount = allItems.length - upcomingItems.length;
 
+    const SVG_PLAY = '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
+    const SVG_CLOCK = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+
     function buildCards(items) {
       return items.map((item, idx) => {
         const title = item.title || item.name || '';
@@ -16336,6 +16463,9 @@ window.handleNotifyMe = async function(btn) {
         const isTVItem = item._type === 'tv';
         const soon = isUpcoming(item);
         const delay = Math.min(idx, 16) * 45;
+        // Release order is the franchise's own reading order, so it is printed
+        // as a numeral ("01") and survives re-sorting by rating or title.
+        const order = item._releaseOrder < 9 ? '0' + (item._releaseOrder + 1) : String(item._releaseOrder + 1);
         /*  An unreleased title often has no poster yet. Rendering IMG + null gives
          *  a broken-image icon, so fall back to a lettered placeholder. */
         const art = item.poster_path
@@ -16346,30 +16476,37 @@ window.handleNotifyMe = async function(btn) {
             ' role="button" tabindex="0" aria-label="' + escapeHTML(title) + ' (' + year + ')' + (soon ? ', upcoming' : '') + '" style="--delay:' + delay + 'ms;animation-delay:' + delay + 'ms">' +
             '<div class="ch-movie-card-inner">' +
               art +
-              '<span class="ch-movie-order">' + (idx + 1) + '</span>' +
-              (isTVItem ? '<span class="ch-movie-type-badge ch-type-tv">TV</span>' : '<span class="ch-movie-type-badge ch-type-movie">MOVIE</span>') +
+              '<span class="ch-movie-order" aria-hidden="true">' + order + '</span>' +
+              (isTVItem ? '<span class="ch-movie-type-badge ch-type-tv">SERIES</span>' : '<span class="ch-movie-type-badge ch-type-movie">MOVIE</span>') +
               // A rating on an unreleased film is noise at best and misleading at worst.
               (soon ? '<div class="ch-movie-soon-chip">UPCOMING</div>'
                     : (voteRaw > 0 ? '<div class="ch-movie-rating">★ ' + rating + '</div>' : '')) +
               '<div class="ch-movie-shine"></div>' +
               '<div class="ch-movie-hover-overlay">' +
-                '<div class="ch-movie-hover-play">' + (soon ? '🕒' : '▶') + '</div>' +
+                '<div class="ch-movie-hover-play">' + (soon ? SVG_CLOCK : SVG_PLAY) + '</div>' +
               '</div>' +
             '</div>' +
-            '<div class="ch-movie-info"><h4>' + escapeHTML(title) + '</h4><span>' + year + '</span></div>' +
+            '<div class="ch-movie-info"><h4>' + escapeHTML(title) + '</h4><span>' + year + ' · ' + (isTVItem ? 'Series' : 'Movie') + '</span></div>' +
           '</div>'
         );
       }).join('');
     }
 
     // Swap grid contents without re-binding per-card listeners (delegation handles clicks)
-    function paintGrid(items) {
+    function paintGrid(items, sortLabel) {
       const gridEl = document.getElementById('chMovieGrid');
       if (!gridEl) return;
       gridEl.innerHTML = buildCards(items);
+      const meta = document.getElementById('chGridMeta');
+      if (meta) meta.innerHTML = '<b>' + items.length + '</b> title' + (items.length !== 1 ? 's' : '') + ' · ' + (sortLabel || 'Release order');
       attachImageReveal(gridEl);
       if (enableTilt) gridEl.querySelectorAll('.ch-movie-card').forEach(bindTilt);
     }
+
+    allItems.forEach((item, i) => { item._releaseOrder = i; });
+    /*  The hero's one action: start the franchise where it starts — the first
+     *  title in release order that is actually out. */
+    const firstUp = allItems.find(i => !isUpcoming(i));
 
     detail.innerHTML =
       '<div class="ch-detail-hero ch-accent-' + universe.accent + '">' +
@@ -16377,7 +16514,6 @@ window.handleNotifyMe = async function(btn) {
           ' srcset="https://image.tmdb.org/t/p/w780' + heroItem.backdrop_path + ' 780w, https://image.tmdb.org/t/p/w1280' + heroItem.backdrop_path + ' 1280w"' +
           ' sizes="100vw" alt="" width="1280" height="720" fetchpriority="high" decoding="async" class="ch-detail-hero-img">' : '') +
         '<div class="ch-detail-hero-gradient"></div>' +
-        '<div class="ch-detail-hero-particles"></div>' +
         '<div class="ch-detail-hero-content">' +
           '<span class="ch-card-badge">' + escapeHTML(universe.badge) + '</span>' +
           '<h1>' + escapeHTML(universe.name) + '</h1>' +
@@ -16389,19 +16525,29 @@ window.handleNotifyMe = async function(btn) {
             (upcomingItems.length ? '<span class="ch-detail-count ch-detail-count--soon">' +
               releasedCount + ' of ' + allItems.length + ' released</span>' : '') +
           '</div>' +
+          '<div class="ch-hero-actions">' +
+            (firstUp ? '<button type="button" class="ch-hero-cta" data-id="' + firstUp.id + '" data-type="' + firstUp._type + '">' + SVG_PLAY +
+              '<span>Start with <b>' + escapeHTML(firstUp.title || firstUp.name || '') + '</b></span></button>' : '') +
+            '<button type="button" class="ch-hero-ghost" data-ch-browse>' +
+              '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg>' +
+              'All ' + allItems.length + ' titles</button>' +
+          '</div>' +
         '</div>' +
       '</div>' +
-      '<div class="ch-detail-tabs">' +
-        '<button class="ch-dtab active" data-filter="all">All (' + allItems.length + ')</button>' +
-        '<button class="ch-dtab" data-filter="movies">Movies (' + totalMovies + ')</button>' +
-        (totalTV > 0 ? '<button class="ch-dtab" data-filter="tv">TV Series (' + totalTV + ')</button>' : '') +
-        (upcomingItems.length ? '<button class="ch-dtab" data-filter="upcoming">Upcoming (' + upcomingItems.length + ')</button>' : '') +
+      '<div class="ch-toolbar">' +
+        '<div class="ch-detail-tabs" role="group" aria-label="Show">' +
+          '<button class="ch-dtab active" data-filter="all">All <b>' + allItems.length + '</b></button>' +
+          '<button class="ch-dtab" data-filter="movies">Movies <b>' + totalMovies + '</b></button>' +
+          (totalTV > 0 ? '<button class="ch-dtab" data-filter="tv">TV Series <b>' + totalTV + '</b></button>' : '') +
+          (upcomingItems.length ? '<button class="ch-dtab" data-filter="upcoming">Upcoming <b>' + upcomingItems.length + '</b></button>' : '') +
+        '</div>' +
+        '<div class="ch-detail-sort" role="group" aria-label="Sort by">' +
+          '<button class="ch-sort-btn active" data-sort="release">Release Order</button>' +
+          '<button class="ch-sort-btn" data-sort="rating">Top Rated</button>' +
+          '<button class="ch-sort-btn" data-sort="title">A – Z</button>' +
+        '</div>' +
       '</div>' +
-      '<div class="ch-detail-sort">' +
-        '<button class="ch-sort-btn active" data-sort="release">Release Order</button>' +
-        '<button class="ch-sort-btn" data-sort="rating">Top Rated</button>' +
-        '<button class="ch-sort-btn" data-sort="title">A – Z</button>' +
-      '</div>' +
+      '<div class="ch-grid-meta" id="chGridMeta" aria-live="polite"></div>' +
       '<div class="ch-movie-grid" id="chMovieGrid"></div>';
 
     paintGrid(allItems);
@@ -16409,6 +16555,23 @@ window.handleNotifyMe = async function(btn) {
     // Cinematic slow zoom on the hero backdrop
     const heroEl = detail.querySelector('.ch-detail-hero');
     if (heroEl && !prefersReducedMotion) requestAnimationFrame(() => heroEl.classList.add('ch-kenburns'));
+
+    /*  The top bar repeats the franchise name only once the hero's own title has
+     *  scrolled out of view — with both on screen it is the same words twice.
+     *  Without IntersectionObserver the bar simply keeps its title. */
+    const overlayEl = document.getElementById('collections-hub-overlay');
+    const stats = document.getElementById('chTopbarStats');
+    if (stats) stats.textContent = totalMovies + ' movie' + (totalMovies !== 1 ? 's' : '') + (totalTV ? ' · ' + totalTV + ' series' : '');
+    if (chHeroObserver) { chHeroObserver.disconnect(); chHeroObserver = null; }
+    if (overlayEl) overlayEl.classList.remove('ch-scrolled');
+    if (overlayEl && heroEl && window.IntersectionObserver) {
+      overlayEl.classList.add('ch-io');
+      chHeroObserver = new IntersectionObserver((entries) => {
+        const e = entries[entries.length - 1];
+        overlayEl.classList.toggle('ch-scrolled', !(e.isIntersecting && e.intersectionRatio > 0.18));
+      }, { root: document.getElementById('chScroll'), threshold: [0, 0.18, 0.5] });
+      chHeroObserver.observe(heroEl);
+    }
 
     /*  Filter and sort were each re-deriving the visible list from the DOM, in two
      *  near-identical copies that had to stay in agreement. Adding a third filter to
@@ -16435,17 +16598,20 @@ window.handleNotifyMe = async function(btn) {
     function repaint() {
       const tab = detail.querySelector('.ch-dtab.active');
       const sortBtn = detail.querySelector('.ch-sort-btn.active');
+      const sort = sortBtn ? sortBtn.dataset.sort : 'release';
       paintGrid(applySort(
         applyFilter(allItems, tab ? tab.dataset.filter : 'all'),
-        sortBtn ? sortBtn.dataset.sort : 'release'
-      ));
+        sort
+      ), { rating: 'Top rated first', title: 'A – Z' }[sort]);
     }
 
     function wireGroup(selector) {
       detail.querySelectorAll(selector).forEach(btn => {
+        btn.setAttribute('aria-pressed', btn.classList.contains('active') ? 'true' : 'false');
         btn.addEventListener('click', () => {
-          detail.querySelectorAll(selector).forEach(b => b.classList.remove('active'));
+          detail.querySelectorAll(selector).forEach(b => { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
           btn.classList.add('active');
+          btn.setAttribute('aria-pressed', 'true');
           repaint();
         });
       });
@@ -16468,8 +16634,15 @@ window.handleNotifyMe = async function(btn) {
       openModal(Number(card.dataset.id), card.dataset.type, activationEvent);
     };
     detail.addEventListener('click', (e) => {
-      const card = e.target.closest && e.target.closest('.ch-movie-card');
-      if (card) open(card, e);
+      if (!e.target.closest) return;
+      // The hero's primary action opens its title exactly as a poster would.
+      const card = e.target.closest('.ch-movie-card, .ch-hero-cta');
+      if (card) { open(card, e); return; }
+      if (e.target.closest('[data-ch-browse]')) {
+        const bar = detail.querySelector('.ch-toolbar');
+        const scroller = document.getElementById('chScroll');
+        if (bar && scroller) scroller.scrollTo({ top: bar.offsetTop, behavior: prefersReducedMotion || isMzTV() ? 'auto' : 'smooth' });
+      }
     });
     detail.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -16491,6 +16664,11 @@ window.handleNotifyMe = async function(btn) {
     const backLabel = document.getElementById('chBackLabel');
     if (topbarTitle) topbarTitle.textContent = universe.name;
     if (backLabel) backLabel.textContent = 'Close';
+    // The previous page's title-reveal state must not leak into this one.
+    if (chHeroObserver) { chHeroObserver.disconnect(); chHeroObserver = null; }
+    overlay.classList.remove('ch-io', 'ch-scrolled');
+    const topStats = document.getElementById('chTopbarStats');
+    if (topStats) topStats.textContent = '';
 
     if (!(options && options.skipHistory)) {
       window.history.pushState({ collectionsHub: true, universe: slug }, '', '#collections-' + slug);
@@ -16505,7 +16683,8 @@ window.handleNotifyMe = async function(btn) {
     try {
       const [movies, tvSeries] = await Promise.all([
         fetchUniverseMovies(universe),
-        fetchUniverseTV(universe)
+        fetchUniverseTV(universe),
+        whenChStyles()
       ]);
       if (activeUniverseSlug === slug) renderUniverseDetail(universe, movies, tvSeries);
     } catch (error) {

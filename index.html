@@ -12,7 +12,7 @@
 <meta name="color-scheme" content="dark">
 <link rel="preconnect" href="https://image.tmdb.org">
 
-<link rel="stylesheet" href="/moviezone.min.css?v=9.23">
+<link rel="stylesheet" href="/moviezone.min.css?v=9.24">
 <!--MZ_PERF_HEAD-->
 <link rel="preload" as="image" media="(max-width: 1024px)" href="https://image.tmdb.org/t/p/w780/1CIaRYKf3zg2Xyce1CSfCMg2Vfw.jpg" fetchpriority="high">
 <link rel="preload" as="image" media="(min-width: 1025px)" href="https://image.tmdb.org/t/p/w1280/1CIaRYKf3zg2Xyce1CSfCMg2Vfw.jpg" fetchpriority="high">
@@ -25,7 +25,7 @@
 <link rel="preload" href="/fonts/outfit-latin-var.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/bebas-neue-latin-400.woff2" as="font" type="font/woff2" crossorigin>
 
-<link rel="preload" href="/moviezone.min.js?v=16.3" as="script">
+<link rel="preload" href="/moviezone.min.js?v=16.4" as="script">
 
 <style id="mz-fonts">
 @font-face{font-family:'Outfit';font-style:normal;font-weight:300 900;font-display:swap;src:url(/fonts/outfit-latin-var.woff2) format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
@@ -542,7 +542,6 @@ html.mz-has-cw #continueWatchingGrid{min-height:236px}
    shift — the attributes alone do nothing once CSS sets width:100%. */
 .ud-cast-card img,.modal-cast-chip img{aspect-ratio:2/3;height:auto}
 .modal-cast-chip img{aspect-ratio:1/1}
-.ch-mosaic-tile img{aspect-ratio:2/3;width:100%;height:100%;object-fit:cover}
 .modal-prod-chip img{aspect-ratio:3/2;height:auto;object-fit:contain}
 .ud-backdrop-img{aspect-ratio:16/9}
 
@@ -1056,28 +1055,23 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
      required `cursor: none` sitewide, so the pointer lagged behind the hand
      whenever the main thread was busy. The native pointer is drawn by the OS. -->
 
-<!-- ── CINEMATIC LOADER ── -->
-<div id="mz-loader">
+<!-- ── CINEMATIC LOADER ──
+     The brand medallion (the navbar's own .nav-logo-mark) inside a spinning
+     gold-to-violet ring, the wordmark, and a thin indeterminate bar. All motion
+     is transform-only, so it keeps moving while the main thread is busy parsing
+     the bundles — which is exactly when it is on screen. id="mz-loader" and the
+     .loader-hidden class are load-bearing: tests and the SEO checks key on them. -->
+<div id="mz-loader" role="status" aria-label="Loading MovieZone">
   <div class="mz-loader-brand">
-    <img class="loader-logo-tv" src="/moviezone-logo.webp" alt="MovieZone Premium Cinema - Free HD Movie Streaming" width="80" height="80" aria-hidden="true" fetchpriority="high" decoding="async">
-    <div class="loader-icon">
-      <svg viewBox="0 0 100 100" width="80" height="80">
-        <defs>
-          <linearGradient id="loaderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#f5c518"/>
-            <stop offset="50%" stop-color="#e63946"/>
-            <stop offset="100%" stop-color="#7c3aed"/>
-          </linearGradient>
-        </defs>
-        <circle cx="50" cy="50" r="46" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="2"/>
-        <circle class="loader-spin-ring" cx="50" cy="50" r="46" fill="none" stroke="url(#loaderGrad)" stroke-width="4" stroke-dasharray="80 200" stroke-linecap="round"/>
-        <polygon points="42,32 68,50 42,68" fill="url(#loaderGrad)"/>
-      </svg>
+    <div class="loader-icon" aria-hidden="true">
+      <span class="loader-ring"></span>
+      <span class="nav-logo-mark">MZ</span>
     </div>
-    <div class="loader-text">
+    <div class="loader-text" aria-hidden="true">
       <span class="loader-text-main">MOVIEZONE</span>
       <span class="loader-text-sub">Premium Cinema</span>
     </div>
+    <span class="loader-bar" aria-hidden="true"></span>
   </div>
 </div>
 
@@ -1177,8 +1171,8 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
   <div class="continue-watching-grid" id="continueWatchingGrid"></div>
 </section>
 
-<link rel="stylesheet" href="/providers.css?v=10" media="print" onload="this.media='all'">
-<noscript><link rel="stylesheet" href="/providers.css?v=10"></noscript>
+<link rel="stylesheet" href="/providers.css?v=11" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="/providers.css?v=11"></noscript>
 <section id="top-providers" class="providers-section" aria-labelledby="providersHeading">
   <div class="providers-header">
     <div>
@@ -1291,7 +1285,7 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
      in front of it any more, so this rail and the SSR deep links are the only way
      in. Only the header and skeletons ship; universes-rail.js builds the tiles,
      and that file and universes.css carry the full reasoning. -->
-<link rel="stylesheet" href="/universes.css?v=5" media="print" onload="this.media='all'">
+<link rel="stylesheet" href="/universes.css?v=6" media="print" onload="this.media='all'">
 <noscript><style>#cinematic-universes{display:none}</style></noscript>
 <section id="cinematic-universes" class="uv-section" aria-labelledby="uvHeading">
   <div class="uv-header">
@@ -1312,7 +1306,10 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
   <div class="section-header">
     <div class="section-title">
       <div class="title-line"></div>
-      <h2 id="sectionHeading">ALL MOVIES & SHOWS</h2>
+      <div class="section-title-text">
+        <h2 id="sectionHeading">ALL MOVIES & SHOWS</h2>
+        <p class="section-sub">Stream free in HD &amp; 4K — new titles from every industry, every day.</p>
+      </div>
     </div>
     <!-- Search meta lives here, NOT in the heading. The heading used to become
          'BEST RESULTS FOR "PATHAAN" · DID YOU MEAN "FAHAD PATHAAN"?' — one Bebas
@@ -1881,9 +1878,9 @@ html.mz-ad-native-off .mz-ad-slot{display:none}
 <div id="toast"></div>
 
 <!-- Root-absolute bundle URLs support nested detail routes. -->
-<script src="/tv-mode.min.js?v=1.9" defer></script>
+<script src="/tv-mode.min.js?v=2.0" defer></script>
 <script src="/search-engine.min.js?v=2.1" defer></script>
-<script src="/moviezone.min.js?v=16.3" defer></script>
+<script src="/moviezone.min.js?v=16.4" defer></script>
 <script>
 /*  ── pwa-install.min.js is NOT loaded with the others ─────────────────────────
  *  It was a fourth `defer` script, so its 30 KB was parsed and executed inside
@@ -2009,7 +2006,7 @@ window.addEventListener('load', function () {
     if (pulled) return;
     pulled = true;
     var s = document.createElement('script');
-    s.src = '/universes-rail.js?v=5';
+    s.src = '/universes-rail.js?v=6';
     s.async = true;
     document.head.appendChild(s);
   }

@@ -268,3 +268,85 @@
   .provider-card:hover, .provider-card:active { transform: none; }
   .provider-card:hover .provider-logo { transform: none; }
 }
+
+/* ══ BRAND-LIT TILES ═════════════════════════════════════════════════════
+ *  Every tile used to light up the same gold, so the row read as fourteen
+ *  identical dark boxes with logos on them. Each platform now carries its own
+ *  colour (--pv, bare RGB): a faint bloom rises from the tile's bottom edge at
+ *  rest, and on hover / focus the ring, the aura, the top sheen and a 2px base
+ *  line all take that colour — Netflix glows red, Prime cyan, JioHotstar blue.
+ *  The gold stays on the page's own controls (arrows, focus outline), so brand
+ *  colour only ever means "this platform".
+ *
+ *  Only paint changes here: no layout property moves, so nothing can shift. */
+.provider-card { --pv: 245, 197, 24; isolation: isolate; }
+#top-providers [data-provider-cat="netflix"] { --pv: 229, 9, 20; }
+#top-providers [data-provider-cat="prime"] { --pv: 0, 168, 225; }
+#top-providers [data-provider-cat="jiohotstar"] { --pv: 30, 110, 255; }
+#top-providers [data-provider-cat="crunchyroll"] { --pv: 244, 117, 33; }
+#top-providers [data-provider-cat="apple"] { --pv: 210, 214, 224; }
+#top-providers [data-provider-cat="zee5"] { --pv: 150, 60, 220; }
+#top-providers [data-provider-cat="sonyliv"] { --pv: 240, 170, 40; }
+#top-providers [data-provider-cat="mxplayer"] { --pv: 40, 130, 255; }
+#top-providers [data-provider-cat="aha"] { --pv: 255, 102, 0; }
+#top-providers [data-provider-cat="sunnxt"] { --pv: 255, 140, 0; }
+#top-providers [data-provider-cat="lionsgate"] { --pv: 205, 165, 90; }
+#top-providers [data-provider-cat="discoveryplus"] { --pv: 0, 110, 255; }
+#top-providers [data-provider-cat="shemaroo"] { --pv: 255, 196, 0; }
+#top-providers [data-provider-cat="vi"] { --pv: 238, 0, 45; }
+
+.provider-card {
+  background:
+    radial-gradient(90% 70% at 50% 125%, rgba(var(--pv), .13) 0%, transparent 70%),
+    radial-gradient(125% 100% at 50% 0%, rgba(255, 255, 255, .06) 0%, rgba(255, 255, 255, 0) 62%),
+    linear-gradient(180deg, var(--card2, #13131f) 0%, var(--card, #0d0d1a) 100%);
+}
+.provider-card::before { background: radial-gradient(120% 90% at 50% 118%, rgba(var(--pv), .34) 0%, transparent 62%); }
+.provider-card::after { background: linear-gradient(90deg, transparent, rgba(var(--pv), .95), transparent); }
+
+@media (hover: hover) {
+  .provider-card:hover {
+    border-color: rgba(var(--pv), .4);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, .08),
+      inset 0 -2px 0 rgba(var(--pv), .8),
+      0 0 0 1px rgba(var(--pv), .34),
+      0 18px 36px -16px rgba(0, 0, 0, .85),
+      0 14px 34px -18px rgba(var(--pv), .6);
+  }
+}
+.provider-card:focus-visible {
+  border-color: rgba(var(--pv), .4);
+  box-shadow: inset 0 -2px 0 rgba(var(--pv), .8), 0 14px 34px -18px rgba(var(--pv), .6);
+}
+
+/*  Header: a hairline runs from the heading to the arrows, so the title, the
+    row and its controls read as one band instead of a word floating above. */
+.providers-header > div:first-child {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+  align-self: center;
+}
+.providers-header > div:first-child::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(230, 57, 70, .45), rgba(255, 255, 255, .08) 40%, transparent);
+}
+.providers-heading { flex: none; }
+
+@media (max-width: 600px) {
+  .providers-header > div:first-child { gap: .8rem; }
+  /* Phones never hover: the brand-lit state IS the resting state there. */
+  .provider-card {
+    border-color: rgba(var(--pv), .3);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, .08),
+      inset 0 -2px 0 rgba(var(--pv), .7),
+      0 0 0 1px rgba(var(--pv), .22),
+      0 12px 26px -16px rgba(0, 0, 0, .8);
+  }
+}

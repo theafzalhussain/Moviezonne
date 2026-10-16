@@ -583,7 +583,7 @@
    *  not a flush. Invalidating the cache instead would have cost a full rebuild
    *  (one getBoundingClientRect per focusable) on the press after every scroll. */
   var RAIL_SELECTOR = '.top10-rail,.providers-rail,.uv-rail,.related-slider,.cat-tabs,.continue-watching-grid,' +
-    '.modal-cast-row,.ud-cast-grid,.cat-group-menu,.anime-filter-bar,.ch-detail-tabs';
+    '.modal-cast-row,.ud-cast-grid,.cat-group-menu,.anime-filter-bar,.ch-detail-tabs,.ep-rail';
   /*  The navbar is position:fixed, so the same flaw hit it from the other axis: its
    *  document-space rect was only true for the scroll position of the last rebuild.
    *  A rebuild at scrollY 2239 parked a phantom search box 225px lower in document

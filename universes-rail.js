@@ -162,6 +162,11 @@
          *  announcing it twice is noise. Omitted entirely at zero rather than
          *  rendering "0 TITLES" on a universe whose catalog entry came back empty. */
         (total ? '<span class="uv-count" aria-hidden="true">' + total + ' titles</span>' : '') +
+        // Hover / focus cue that the tile is a door. Decorative: the link's
+        // aria-label already says "open collection".
+        '<span class="uv-go" aria-hidden="true">Explore' +
+          '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3"' +
+          ' stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></span>' +
       '</a>';
 
     /*  Fade the art in only once it has decoded. Cached images can complete
@@ -325,6 +330,15 @@
       if (subtitle && built > 1) {
         subtitle.textContent = built + ' universes · ' + titles.toLocaleString('en-US') +
           ' titles — jump straight in.';
+      }
+      /*  The same scale, as a compact pill beside the heading (the subtitle line
+       *  is commented out of the markup). Counted, never hardcoded. */
+      var heading = document.getElementById('uvHeading');
+      if (heading && built > 1 && !section.querySelector('.uv-total')) {
+        var pill = document.createElement('span');
+        pill.className = 'uv-total';
+        pill.textContent = built + ' universes';
+        heading.insertAdjacentElement('afterend', pill);
       }
 
       initCarousel();
