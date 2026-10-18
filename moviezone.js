@@ -12959,6 +12959,50 @@ const playerSources = [
         ? `https://embed.vidrift.net/embed/tv/${id}/${s}/${e}?${opts}`
         : `https://embed.vidrift.net/embed/movie/${id}?${opts}`;
     }},
+
+ /*  #8: Flicky — multi-server, multi-audio, 4K. Same player as always; only the
+   *  address it lives at changed.
+   *
+   *  flicky.host now answers every request with a 301 to player.vidzee.wtf, and
+   *  in the same move the embed API stopped accepting the id as a query string:
+   *
+   *    /embed/movie/?id=550        -> 404   (what we were sending)
+   *    /embed/movie/550            -> 200   (the route is /embed/movie/$tmdb)
+   *    /embed/tv/?id=1399&s=1&e=1  -> 404
+   *    /embed/tv/1399/1/1          -> 200
+   *
+   *  That 404 is the white "Page not found" screen, and it was never a change on
+   *  our side — the URL builder below is byte-for-byte what it was when this
+   *  server last worked, which is why nothing in the recent commits explains it.
+   *
+   *  We target player.vidzee.wtf directly rather than riding the redirect. It is
+   *  the origin the iframe ends up on either way, so this drops a full redirect
+   *  round-trip before the first frame AND lets playerHostOrigins() preconnect
+   *  the host that actually serves the video instead of the one that only
+   *  bounces us. The chip keeps the name 'Flicky Stream' on purpose: the health
+   *  ranking stores per-server history under that name, so renaming it would
+   *  throw away everything this user's browser has learned about it. */
+  { name: 'Flicky Stream', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
+    return type === 'tv'
+      ? `https://player.vidzee.wtf/embed/tv/${id}/${s}/${e}`
+      : `https://player.vidzee.wtf/embed/movie/${id}`;
+  }},
+
+  { name: '4K Ultra HD', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
+    // #1: Viduki.net API 2 — 4K AI Upscaling + Multi-Language + 5.1 Surround
+    return type === 'tv'
+      ? `https://www.viduki.net/2/tv/${id}/${s}/${e}`
+      : `https://www.viduki.net/2/movie/${id}`;
+  }},
+
+  // S15 — moviesnexus.fun, Olly's "Nexus" on its vidara source: 1920x1080 on every
+  // title measured, and the fastest of the three to a first frame (~8-20s).
+  { name: 'Nexus FHD', dubbed: true, url: (id, lang, type, s, e) => {
+    return type === 'tv'
+      ? `https://www.moviesnexus.fun/tv/${id}/${s}/${e}?sv=vidara`
+      : `https://www.moviesnexus.fun/movie/${id}?sv=vidara`;
+  }},
+
   /*  Hindi Dub HD — replaces VidSrc HD (vidsrc.su), removed by request: it was the
    *  weakest chip in the list for this audience (no Hindi, and it refused to run
    *  inside Android in-app browsers).
@@ -12994,6 +13038,23 @@ const playerSources = [
         : `https://ollyembed.pages.dev/movie/${id}?server=Hindi`;
     }},
 
+  // S12 — nxsha.screenscape.me, Olly's "Phantom": one embed resolving across ~18
+  // upstreams (Sealx, Nitro, HINDI, Tamil, 4KELITE ...). Olly keys it on IMDb; the
+  // provider documents `tmdb=` as well, which is the id this app always has.
+  { name: 'Phantom Multi', dubbed: true, url: (id, lang, type, s, e) => {
+    return type === 'tv'
+      ? `https://nxsha.screenscape.me/embed?tmdb=${id}&type=tv&s=${s}&e=${e}`
+      : `https://nxsha.screenscape.me/embed?tmdb=${id}&type=movie`;
+  }},
+  // S2 — nxsha.space, Olly's "Hindi v2": a Nitro multi-audio source with a Hindi
+  // track, plus its own Audio / Subtitles / Quality menus. `lang=hi` is the
+  // parameter Olly ships it with.
+  { name: 'Nitro Hindi', dubbed: true, url: (id, lang, type, s, e) => {
+    return type === 'tv'
+      ? `https://nxsha.space/embed/tv/${id}/${s}/${e}?lang=hi`
+      : `https://nxsha.space/embed/movie/${id}?lang=hi`;
+  }},
+
   // 🌸 ANIME SPECIALIST: AnimePahe mirror — purane/long-running anime & cartoons ke liye best
   //    `anilist: true` = its anime URL is keyed on an AniList id, so loadPlayer may
   //    reload it once that id resolves (ensureAnilistThenReload). TMDB-only servers
@@ -13013,119 +13074,6 @@ const playerSources = [
       ? `https://vidnest.fun/tv/${id}/${s}/${e}?server=alfa`
       : `https://vidnest.fun/movie/${id}?server=gama`;
   }},
-  { name: '4K Ultra HD', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
-    // #1: Viduki.net API 2 — 4K AI Upscaling + Multi-Language + 5.1 Surround
-    return type === 'tv'
-      ? `https://www.viduki.net/2/tv/${id}/${s}/${e}`
-      : `https://www.viduki.net/2/movie/${id}`;
-  }},
-
- /*  #8: Flicky — multi-server, multi-audio, 4K. Same player as always; only the
-   *  address it lives at changed.
-   *
-   *  flicky.host now answers every request with a 301 to player.vidzee.wtf, and
-   *  in the same move the embed API stopped accepting the id as a query string:
-   *
-   *    /embed/movie/?id=550        -> 404   (what we were sending)
-   *    /embed/movie/550            -> 200   (the route is /embed/movie/$tmdb)
-   *    /embed/tv/?id=1399&s=1&e=1  -> 404
-   *    /embed/tv/1399/1/1          -> 200
-   *
-   *  That 404 is the white "Page not found" screen, and it was never a change on
-   *  our side — the URL builder below is byte-for-byte what it was when this
-   *  server last worked, which is why nothing in the recent commits explains it.
-   *
-   *  We target player.vidzee.wtf directly rather than riding the redirect. It is
-   *  the origin the iframe ends up on either way, so this drops a full redirect
-   *  round-trip before the first frame AND lets playerHostOrigins() preconnect
-   *  the host that actually serves the video instead of the one that only
-   *  bounces us. The chip keeps the name 'Flicky Stream' on purpose: the health
-   *  ranking stores per-server history under that name, so renaming it would
-   *  throw away everything this user's browser has learned about it. */
-  { name: 'Flicky Stream', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
-    return type === 'tv'
-      ? `https://player.vidzee.wtf/embed/tv/${id}/${s}/${e}`
-      : `https://player.vidzee.wtf/embed/movie/${id}`;
-  }},
-
-  // 🔁 Cinextream (cinextream.net) ka domain dead ho gaya (DNS record hi nahi bacha),
-  //    uski jagah VidFast — 4K/multi-audio, tez CDN, movies + series dono
-  //    Host is vidfast.vc: vidfast.pro now only 301s here, and the page identifies
-  //    itself as .vc, so we skip the bounce and preconnect the real origin.
-  { name: 'VidFast 4K', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
-    const opts = `autoPlay=true&theme=FFC107&title=true&poster=true&autoNext=true&nextButton=true&lang=${lang}`;
-    return type === 'tv'
-      ? `https://vidfast.vc/tv/${id}/${s}/${e}?${opts}`
-      : `https://vidfast.vc/movie/${id}?${opts}`;
-  }},
- 
-  /*  ══════════════════════════════════════════════════════════════════════
-   *  #9: MultiLang HD — replaces VidCore HD, which is blocked, not slow
-   *  ══════════════════════════════════════════════════════════════════════
-   *  vidcore.io no longer reaches a player at all. Driven in real Chrome inside a
-   *  real unsandboxed iframe with our own Referer, the embed document answers
-   *
-   *      403  "Attention Required! | Cloudflare"
-   *      "Sorry, you have been blocked — You are unable to access vidcore.io"
-   *
-   *  and the frame's only other network activity is that challenge page. Note that
-   *  a plain server-side fetch of the same URL still returns 200 with a 50 KB
-   *  player document, which is exactly why this was not caught earlier: the status
-   *  code lies. Only a browser gets the block, because only a browser presents the
-   *  fingerprint Cloudflare is filtering on. Every reachability check in this app
-   *  was passing while no viewer could ever see video.
-   *
-   *  ── WHY TWO PROVIDERS BEHIND ONE CHIP ──
-   *  The replacement was chosen on measured playback, not on a landing page: each
-   *  candidate was loaded in a real iframe and its network traffic read over the
-   *  DevTools Protocol, so the pass mark is "an HLS manifest resolved AND media
-   *  segments were actually fetched". Sixteen other providers were tried and
-   *  produced no stream at all from this network (vidsrcapi, vidsrc.cc/to/net/vip,
-   *  cinemaos, vidbinge, streamflizo, smashy, letsembed, nunflix, vidapi.xyz,
-   *  moviee, multiembed, yapgrid, vidjoy — the last of which is now a parked
-   *  domain). Two survived, and they are good at opposite things:
-   *
-   *                     movies      TV        first segment
-   *      peachify.top   5 of 5      0 of 2    2.2-5.0s  (avg 3.7s)
-   *      moviesapi.vip  3 of 5      3 of 4    3.3-9.5s  (avg 5.9s)
-   *
-   *  peachify is both faster and perfect on films, and it is the one that actually
-   *  carries the feature this slot was asked for: its player reads the audio tracks
-   *  out of the HLS manifest and exposes them as a switchable Audio menu, with a
-   *  documented `default_dub` preference — real multi-audio, verified playing on
-   *  3 Idiots, Dangal and Animal as well as on Endgame and Interstellar. Its TV
-   *  route is simply not there: /embed/tv/{id}/{s}/{e} answers 200 and then resolves
-   *  nothing, on Breaking Bad, Stranger Things and House of the Dragon, and the two
-   *  alternative route shapes its docs hint at behave the same. So episodes go to
-   *  moviesapi.vip, which resolved 15-32 segments on three of four series.
-   *
-   *  Routing by type inside one url() is how several entries here already work —
-   *  OmniPlay splits anime/tv/movie, AnimePahe splits anime/everything-else — so
-   *  this keeps the server list the same length and the chip count unchanged.
-   *
-   *  Both are ad-library-free in the traffic capture: peachify pulls only its own
-   *  origin plus fonts and Cloudflare insights, and moviesapi pulls TMDB and
-   *  OpenSubtitles for metadata and subtitles. That is one fewer ad-heavy provider
-   *  than the entry it replaces.
-   *
-   *  The chip is renamed from 'VidCore HD' on purpose: the health ranking keys its
-   *  per-server history off the name, and 'VidCore HD' has been recording load
-   *  successes for a Cloudflare block page. A new key lets this compete on its real
-   *  3.7s from the first visit instead of inheriting that false-positive history.
-   *
-   *  ── Oct 2026: films moved off peachify.top ──
-   *  peachify.top's origin is gone: Cloudflare answers 523 "origin unreachable" on
-   *  every path, which is exactly the reported "web series play, movies don't" —
-   *  episodes were already on moviesapi.vip. Its /movie route was re-measured and
-   *  now plays: Endgame 1920x800, 3 Idiots 1920x816, RRR 1920x1012, with Hindi
-   *  sources in its server menu. Both types now share one provider and one host.
-   */
-  { name: 'MultiLang HD', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
-    return type === 'tv'
-      ? `https://moviesapi.vip/tv/${id}/${s}/${e}`
-      : `https://moviesapi.vip/movie/${id}`;
-  }},
-
 
   // { name: 'Hindi Multi-Audio', dubbed: true, url: (id, lang, type, s, e) => {
   //   const base = `https://embed.smashystream.com/playere.php?tmdb=${id}`;
@@ -13205,62 +13153,87 @@ const playerSources = [
       + `?lang=${lang}` + (at ? '&startAt=' + at : '');
   }},
 
+  /*  ══════════════════════════════════════════════════════════════════════
+   *  #9: MultiLang HD — replaces VidCore HD, which is blocked, not slow
+   *  ══════════════════════════════════════════════════════════════════════
+   *  vidcore.io no longer reaches a player at all. Driven in real Chrome inside a
+   *  real unsandboxed iframe with our own Referer, the embed document answers
+   *
+   *      403  "Attention Required! | Cloudflare"
+   *      "Sorry, you have been blocked — You are unable to access vidcore.io"
+   *
+   *  and the frame's only other network activity is that challenge page. Note that
+   *  a plain server-side fetch of the same URL still returns 200 with a 50 KB
+   *  player document, which is exactly why this was not caught earlier: the status
+   *  code lies. Only a browser gets the block, because only a browser presents the
+   *  fingerprint Cloudflare is filtering on. Every reachability check in this app
+   *  was passing while no viewer could ever see video.
+   *
+   *  ── WHY TWO PROVIDERS BEHIND ONE CHIP ──
+   *  The replacement was chosen on measured playback, not on a landing page: each
+   *  candidate was loaded in a real iframe and its network traffic read over the
+   *  DevTools Protocol, so the pass mark is "an HLS manifest resolved AND media
+   *  segments were actually fetched". Sixteen other providers were tried and
+   *  produced no stream at all from this network (vidsrcapi, vidsrc.cc/to/net/vip,
+   *  cinemaos, vidbinge, streamflizo, smashy, letsembed, nunflix, vidapi.xyz,
+   *  moviee, multiembed, yapgrid, vidjoy — the last of which is now a parked
+   *  domain). Two survived, and they are good at opposite things:
+   *
+   *                     movies      TV        first segment
+   *      peachify.top   5 of 5      0 of 2    2.2-5.0s  (avg 3.7s)
+   *      moviesapi.vip  3 of 5      3 of 4    3.3-9.5s  (avg 5.9s)
+   *
+   *  peachify is both faster and perfect on films, and it is the one that actually
+   *  carries the feature this slot was asked for: its player reads the audio tracks
+   *  out of the HLS manifest and exposes them as a switchable Audio menu, with a
+   *  documented `default_dub` preference — real multi-audio, verified playing on
+   *  3 Idiots, Dangal and Animal as well as on Endgame and Interstellar. Its TV
+   *  route is simply not there: /embed/tv/{id}/{s}/{e} answers 200 and then resolves
+   *  nothing, on Breaking Bad, Stranger Things and House of the Dragon, and the two
+   *  alternative route shapes its docs hint at behave the same. So episodes go to
+   *  moviesapi.vip, which resolved 15-32 segments on three of four series.
+   *
+   *  Routing by type inside one url() is how several entries here already work —
+   *  OmniPlay splits anime/tv/movie, AnimePahe splits anime/everything-else — so
+   *  this keeps the server list the same length and the chip count unchanged.
+   *
+   *  Both are ad-library-free in the traffic capture: peachify pulls only its own
+   *  origin plus fonts and Cloudflare insights, and moviesapi pulls TMDB and
+   *  OpenSubtitles for metadata and subtitles. That is one fewer ad-heavy provider
+   *  than the entry it replaces.
+   *
+   *  The chip is renamed from 'VidCore HD' on purpose: the health ranking keys its
+   *  per-server history off the name, and 'VidCore HD' has been recording load
+   *  successes for a Cloudflare block page. A new key lets this compete on its real
+   *  3.7s from the first visit instead of inheriting that false-positive history.
+   *
+   *  ── Oct 2026: films moved off peachify.top ──
+   *  peachify.top's origin is gone: Cloudflare answers 523 "origin unreachable" on
+   *  every path, which is exactly the reported "web series play, movies don't" —
+   *  episodes were already on moviesapi.vip. Its /movie route was re-measured and
+   *  now plays: Endgame 1920x800, 3 Idiots 1920x816, RRR 1920x1012, with Hindi
+   *  sources in its server menu. Both types now share one provider and one host.
+   */
+  { name: 'MultiLang HD', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
+    return type === 'tv'
+      ? `https://moviesapi.vip/tv/${id}/${s}/${e}`
+      : `https://moviesapi.vip/movie/${id}`;
+  }},
+
+  // 🔁 Cinextream (cinextream.net) ka domain dead ho gaya (DNS record hi nahi bacha),
+  //    uski jagah VidFast — 4K/multi-audio, tez CDN, movies + series dono
+  //    Host is vidfast.vc: vidfast.pro now only 301s here, and the page identifies
+  //    itself as .vc, so we skip the bounce and preconnect the real origin.
+  { name: 'VidFast 4K', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
+    const opts = `autoPlay=true&theme=FFC107&title=true&poster=true&autoNext=true&nextButton=true&lang=${lang}`;
+    return type === 'tv'
+      ? `https://vidfast.vc/tv/${id}/${s}/${e}?${opts}`
+      : `https://vidfast.vc/movie/${id}?${opts}`;
+  }},
+
   { name: 'Premium Mirror', dubbed: true, url: (id, lang, type, s, e) => {
     // #9: Official proxy mirror to fix 'refused to connect' / iframe block issue
     return (type === 'tv' ? `https://vidsrc.pm/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.pm/embed/movie?tmdb=${id}`) + `&lang=${lang}`;
-  }},
-
-  /*  ══════════════════════════════════════════════════════════════════════
-   *  THREE SERVERS FROM THE OLLY EMBED ROSTER (Oct 2026)
-   *  ══════════════════════════════════════════════════════════════════════
-   *  "Hindi Dub HD" above embeds ollyembed.pages.dev, whose own player carries a
-   *  16-server switcher (HN, S2 ... S16). Its live list is published at
-   *  ollyflix-cloudflare-proxy.../api/embed-servers. These are three of those
-   *  servers, S2, S12 and S15, added as servers of OUR player, so each gets its own
-   *  chip, health record and place in the retry chain instead of hiding two menus
-   *  deep inside another provider's frame. Nothing about "Hindi Dub HD" changed.
-   *
-   *  Measured before shipping in real Chrome, inside an iframe built exactly like
-   *  loadPlayer()'s (no sandbox, same `allow`, referrerpolicy=no-referrer), with the
-   *  verdict taken from the <video> element itself (decoded frames and a running
-   *  clock), never from an HTTP 200:
-   *
-   *                    No Way Home       Game of Thrones S1E1   3 Idiots (Hindi)
-   *    Nitro Hindi     plays, adaptive   plays                  plays, "Hindi" source
-   *    Phantom Multi   plays (Endgame)   plays 720p, Hindi file plays
-   *    Nexus FHD       plays 1080p       plays 1080p            plays 1080p
-   *
-   *  No 4K badge on any of them (none was measured at 2160p) and no anime flag
-   *  (not measured on anime). `dubbed: true` for the same reason every other entry
-   *  carries it: loadPlayer() moves a Hindi-preferring viewer (the default) off any
-   *  server without it, and the retry chain only draws from dubbed servers.
-   *
-   *  All three are ad-supported providers: the first tap inside their player may
-   *  open the provider's own popup, and Phantom Multi shows an "Ads end in" timer.
-   *  Each name is new on purpose — the health ranking keys its history by name. */
-
-  // S2 — nxsha.space, Olly's "Hindi v2": a Nitro multi-audio source with a Hindi
-  // track, plus its own Audio / Subtitles / Quality menus. `lang=hi` is the
-  // parameter Olly ships it with.
-  { name: 'Nitro Hindi', dubbed: true, url: (id, lang, type, s, e) => {
-    return type === 'tv'
-      ? `https://nxsha.space/embed/tv/${id}/${s}/${e}?lang=hi`
-      : `https://nxsha.space/embed/movie/${id}?lang=hi`;
-  }},
-  // S12 — nxsha.screenscape.me, Olly's "Phantom": one embed resolving across ~18
-  // upstreams (Sealx, Nitro, HINDI, Tamil, 4KELITE ...). Olly keys it on IMDb; the
-  // provider documents `tmdb=` as well, which is the id this app always has.
-  { name: 'Phantom Multi', dubbed: true, url: (id, lang, type, s, e) => {
-    return type === 'tv'
-      ? `https://nxsha.screenscape.me/embed?tmdb=${id}&type=tv&s=${s}&e=${e}`
-      : `https://nxsha.screenscape.me/embed?tmdb=${id}&type=movie`;
-  }},
-  // S15 — moviesnexus.fun, Olly's "Nexus" on its vidara source: 1920x1080 on every
-  // title measured, and the fastest of the three to a first frame (~8-20s).
-  { name: 'Nexus FHD', dubbed: true, url: (id, lang, type, s, e) => {
-    return type === 'tv'
-      ? `https://www.moviesnexus.fun/tv/${id}/${s}/${e}?sv=vidara`
-      : `https://www.moviesnexus.fun/movie/${id}?sv=vidara`;
   }}
 ];
 
