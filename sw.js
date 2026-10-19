@@ -201,7 +201,19 @@
 // for the title or the picked episode. The sheet is /downloads.js?v=1, injected on
 // demand by moviezone.js and cached by the versioned-asset branch below on first
 // use, so it is deliberately not in either precache list.
-const CACHE_NAME = 'moviezone-v166';
+// v167: moviezone.min.js 16.6 - finishing a title (>= 92%) no longer recurses
+// persistSessionProgress <-> stopWatchSession until "Maximum call stack size
+// exceeded" (371 of 373 RUM errors in a day); the throw used to leave the watch
+// timer running, freeze the page every few seconds and stop the next Play from
+// loading the player. Player progress messages persist every 15s instead of on
+// every message. The server list follows the requested order. No layout reads
+// on the init path (matchMedia replaces innerHeight, which lays out the page on
+// phones), no ICU load for the hero's language label, and Top 10 posters ask for
+// w342 instead of w500 on 360px phones. The aha / SonyLIV / JioHotstar /
+// ShemarooMe logos were re-encoded at their displayed size (218 KB -> 43 KB);
+// their URLs carry no ?v=, so this rename is what makes returning clients
+// re-download them.
+const CACHE_NAME = 'moviezone-v167';
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
  *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream
@@ -376,7 +388,7 @@ const STATIC_ASSETS = [
   '/moviezone.min.css?v=9.24',
   '/tv-mode.min.js?v=2.0',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=16.5',
+  '/moviezone.min.js?v=16.6',
   '/manifest.json',
   '/icon-192.png?v=2',
   '/favicon-32.png?v=2',

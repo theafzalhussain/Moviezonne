@@ -59,9 +59,26 @@ const MZ_PREFETCH_MIN_MARGIN_PX = 120;
  *  @param {number} maxPx the margin this observer used before
  */
 function mzPrefetchRootMargin(maxPx) {
-  const vh = (typeof window !== 'undefined' && window.innerHeight) || 800;
+  const vh = mzViewportHeight();
   const lead = Math.max(MZ_PREFETCH_MIN_MARGIN_PX, MZ_PREFETCH_LEAD_PX - vh);
   return Math.round(Math.min(maxPx || MZ_PREFETCH_LEAD_PX, lead)) + 'px';
+}
+
+/*  The viewport height WITHOUT a layout. On a phone, window.innerHeight lays out
+ *  the whole page before it answers (Chrome needs the page scale, which depends
+ *  on content width): ~9 ms per read on a 6,000-node page unthrottled, and 164 ms
+ *  inside init()'s 4x-throttled task here, where two such reads bracketed the
+ *  pager render and the frame then laid the page out a third time. A media query
+ *  is answered from the viewport alone, so a 12-step binary search over
+ *  (min-height) returns the same integer and never touches layout. */
+function mzViewportHeight() {
+  if (typeof matchMedia !== 'function') return (typeof window !== 'undefined' && window.innerHeight) || 800;
+  let lo = 0, hi = 4096;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (matchMedia('(min-height: ' + mid + 'px)').matches) lo = mid; else hi = mid;
+  }
+  return lo || 800;
 }
 
 /*  ── ONE FRAME, ONE RUN ──
@@ -5992,7 +6009,12 @@ function renderTop10(list) {
         '<div class="top10-poster">' +
           '<img src="' + p342 + '"' +
             ' srcset="' + mzPosterSrcset(m.poster_path) + '"' +
-            ' sizes="(max-width: 420px) 50vw, (max-width: 768px) 43vw, (max-width: 1024px) 212px, 250px"' +
+            /*  The phone entries follow --t10-poster-w in moviezone.css: min(46vw,
+             *  30vh) up to 360px, then 42vw up to 480px. They used to say 50vw,
+             *  which at 360px @2x asks for 360 image px - just over w342 - so
+             *  every Top 10 poster on the commonest budget phone came down as
+             *  w500 (66-99 KB each, 1.5 MB decoded) for a 166px-wide box. */
+            ' sizes="(max-width: 360px) 46vw, (max-width: 480px) 42vw, (max-width: 768px) 43vw, (max-width: 1024px) 212px, 250px"' +
             ' alt="' + title + '" width="250" height="375" loading="lazy" decoding="async" fetchpriority="low" draggable="false">' +
           '<div class="top10-badges">' +
             (rating ? '<span class="top10-rating' + ratingCls + '">' + STAR + rating + '</span>' : '<span></span>') +
@@ -6650,9 +6672,23 @@ function syncHeroProgress(restart) {
 
 /** "en" -> "English". Older TV engines without Intl.DisplayNames get the code.
  *  The formatter is cached on the function, not in a `let`, so a carousel built
- *  before this line has run can never hit a temporal-dead-zone error. */
+ *  before this line has run can never hit a temporal-dead-zone error.
+ *
+ *  The languages this catalogue actually shows are answered from a table first
+ *  (cached on the function for the same TDZ reason), worded exactly as Chrome's
+ *  Intl.DisplayNames words them. Constructing that formatter loads ICU display
+ *  data: 38 ms the first time on a desktop, several times that on a phone, and
+ *  it sat inside the task that builds the hero slides. Anything not in the table
+ *  still goes through Intl, so no label changes. */
 function mzLangName(code) {
   const c = String(code || 'en').toLowerCase();
+  const t = mzLangName._t || (mzLangName._t = {
+    en: 'English', hi: 'Hindi', ta: 'Tamil', te: 'Telugu', ml: 'Malayalam', kn: 'Kannada',
+    mr: 'Marathi', bn: 'Bangla', pa: 'Punjabi', gu: 'Gujarati', ur: 'Urdu', ja: 'Japanese',
+    ko: 'Korean', zh: 'Chinese', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian',
+    pt: 'Portuguese', ru: 'Russian', th: 'Thai', tr: 'Turkish', id: 'Indonesian', ar: 'Arabic'
+  });
+  if (Object.prototype.hasOwnProperty.call(t, c)) return t[c];
   try {
     mzLangName._n = mzLangName._n || new Intl.DisplayNames(['en'], { type: 'language' });
     const n = mzLangName._n.of(c);
@@ -13097,6 +13133,13 @@ const playerSources = [
       ? `https://player.vidlove.cc/embed/tv/${id}/${s}/${e}`
       : `https://player.vidlove.cc/embed/movie/${id}`;
   }},
+  
+    { name: 'VidFast 4K', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
+    const opts = `autoPlay=true&theme=FFC107&title=true&poster=true&autoNext=true&nextButton=true&lang=${lang}`;
+    return type === 'tv'
+      ? `https://vidfast.vc/tv/${id}/${s}/${e}?${opts}`
+      : `https://vidfast.vc/movie/${id}?${opts}`;
+  }},
   /*  #8b: MultiAudio — replaces VidZen, which was pulled for the two reasons it
    *  was reported for: most titles never resolved a source at all, and the ones
    *  that did carried an English track only.
@@ -13224,12 +13267,6 @@ const playerSources = [
   //    uski jagah VidFast — 4K/multi-audio, tez CDN, movies + series dono
   //    Host is vidfast.vc: vidfast.pro now only 301s here, and the page identifies
   //    itself as .vc, so we skip the bounce and preconnect the real origin.
-  { name: 'VidFast 4K', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
-    const opts = `autoPlay=true&theme=FFC107&title=true&poster=true&autoNext=true&nextButton=true&lang=${lang}`;
-    return type === 'tv'
-      ? `https://vidfast.vc/tv/${id}/${s}/${e}?${opts}`
-      : `https://vidfast.vc/movie/${id}?${opts}`;
-  }},
 
   { name: 'Premium Mirror', dubbed: true, url: (id, lang, type, s, e) => {
     // #9: Official proxy mirror to fix 'refused to connect' / iframe block issue
@@ -15563,13 +15600,39 @@ init();
       markDone(key);
       const list = getCWList().filter(item => String(item.key || item.id) !== key);
       saveCWList(list);
+      /*  End the session HERE, before anything else can run — and end it with
+       *  teardownWatchSession(), never stopWatchSession().
+       *
+       *  This used to call stopWatchSession(), which flushes by calling this very
+       *  function. The session was still alive at that point, so it came straight
+       *  back into this branch: persist -> stop -> persist -> ... thousands of
+       *  times, each one rebuilding the rail's innerHTML and rewriting
+       *  localStorage, until the stack overflowed. That is the "Maximum call stack
+       *  size exceeded" RUM was counting (371 of 373 errors in one day, all on /).
+       *  The throw also skipped clearInterval, so the timer, every player progress
+       *  message, every blur and the next Play press re-ran the loop: a freeze
+       *  every few seconds for the rest of the visit, and playMovie() aborting
+       *  before loadPlayer() — Play did nothing until a reload. */
+      teardownWatchSession();
       renderContinueWatching();
-      stopWatchSession();   // nothing left to track
       return;
     }
     upsertEntry(mkEntry(session, null, pct, Math.round(session.watchedSec), Math.round(session.runtimeSec)));
+    session.persistedAt = Date.now();
     // Cheap live update of the on-screen bar without a full re-render.
     liveUpdateCard(key, pct);
+  }
+
+  /*  Clears the session and everything it registered. It never persists, so
+   *  nothing it does can lead back into persistSessionProgress(), and it is safe
+   *  to call twice. */
+  function teardownWatchSession() {
+    if (session) clearInterval(session.timer);
+    session = null;
+    document.removeEventListener('visibilitychange', onVisibility);
+    window.removeEventListener('blur', onVisibility);
+    window.removeEventListener('focus', onFocus);
+    window.removeEventListener('message', onPlayerMessage);
   }
 
   /*  One entry shape, three call sites. `src` is either the running session or a
@@ -15687,7 +15750,16 @@ init();
       session.creditedPlay = true;
       try { recordPlayerPlayed(window._mzActivePlayerName); } catch (e) {}
     }
-    persistSessionProgress();
+    /*  Storage on the timer's 15s cadence, not once per message. OmniPlay posts
+     *  every 5s and vidlink forwards its playhead at timeupdate rate (several per
+     *  second), and each persist is a synchronous localStorage read + write plus
+     *  a rail patch, on the main thread, while video is decoding. The numbers
+     *  above are already current in `session`, so nothing is lost: every exit
+     *  path (close, blur, hide, pagehide) flushes them immediately, and crossing
+     *  the completion line is written at once. */
+    if (currentProgressPct() >= COMPLETE_AT || !(Date.now() - (session.persistedAt || 0) < 15000)) {
+      persistSessionProgress();
+    }
   }
 
   window._mzStartWatchSession = function (movie, runtimeMinutes) {
@@ -15798,15 +15870,8 @@ init();
   function stopWatchSession() {
     if (!session) return;
     accrue();
-    persistSessionProgress();
-    if (session) {   // persist may have cleared it on completion
-      clearInterval(session.timer);
-    }
-    document.removeEventListener('visibilitychange', onVisibility);
-    window.removeEventListener('blur', onVisibility);
-    window.removeEventListener('focus', onFocus);
-    window.removeEventListener('message', onPlayerMessage);
-    session = null;
+    persistSessionProgress();   // on completion this already tore the session down
+    teardownWatchSession();
   }
   window._mzStopWatchSession = stopWatchSession;
 
@@ -15835,7 +15900,7 @@ init();
     const list = getCWList().filter(item => String(item.key || item.id) !== k);
     saveCWList(list);
     if (session && entryKey(session, session.season, session.episode) === k) {
-      clearInterval(session.timer); session = null;
+      teardownWatchSession();
     }
     renderContinueWatching();
   };

@@ -1,7 +1,7 @@
 {
   "moviezone.min.js": {
-    "version": "16.5",
-    "sha256": "8acdcbfc77d8a313"
+    "version": "16.6",
+    "sha256": "58a5d1b3e36227f3"
   },
   "moviezone.min.css": {
     "version": "9.24",
@@ -38,5 +38,9 @@
   "universes-rail.js": {
     "version": "6",
     "sha256": "b2b40a84ac9fd8c5"
+  },
+  "downloads.js": {
+    "version": "1",
+    "sha256": "6912d8d1e81af69b"
   }
 }

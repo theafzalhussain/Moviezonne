@@ -2553,15 +2553,6 @@ function buildMediaSitemap(items, kind) {
  */
 const WATCH_SOURCES = [
   {
-    name: 'VidFast 4K',
-    build: (id, type, s, e) => {
-      const opts = 'autoPlay=true&theme=FFC107&title=true&poster=true&autoNext=true&nextButton=true';
-      return type === 'tv'
-        ? 'https://vidfast.vc/tv/' + id + '/' + s + '/' + e + '?' + opts
-        : 'https://vidfast.vc/movie/' + id + '?' + opts;
-    }
-  },
-  {
     /*  The app's all-rounder: movies, series and anime, with real multi-audio
      *  tracks (Hindi, Telugu, Tamil, Kannada, English measured on a series). Its
      *  engine moved from Videasy (backend down: 502 on every source call) to
@@ -2597,6 +2588,15 @@ const WATCH_SOURCES = [
     build: (id, type, s, e) => (type === 'tv'
       ? 'https://player.vidlove.cc/embed/tv/' + id + '/' + s + '/' + e
       : 'https://player.vidlove.cc/embed/movie/' + id)
+  },
+  {
+    name: 'VidFast 4K',
+    build: (id, type, s, e) => {
+      const opts = 'autoPlay=true&theme=FFC107&title=true&poster=true&autoNext=true&nextButton=true';
+      return type === 'tv'
+        ? 'https://vidfast.vc/tv/' + id + '/' + s + '/' + e + '?' + opts
+        : 'https://vidfast.vc/movie/' + id + '?' + opts;
+    }
   }
 ];
 
