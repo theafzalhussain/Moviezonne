@@ -13,7 +13,7 @@
 <script>(function(){try{var n=navigator,u=n.userAgent||'',t=/\b(?:smart-?tv|smarttv|googletv|android\s*tv|appletv|tvos|crkey|roku|web0?s|tizen|vidaa|hbbtv|netcast|viera|bravia|aquos)\b|\bAFT[A-Z0-9]/i.test(u),m=!t&&/Mobi|Android|iPhone|iPad/i.test(u),l=(n.deviceMemory&&n.deviceMemory<4)||(n.hardwareConcurrency&&n.hardwareConcurrency<4),r=false;try{r=window.matchMedia('(prefers-reduced-motion: reduce)').matches}catch(e){}if(m||l||r)document.documentElement.classList.add('low-end-mode')}catch(e){}})();</script>
 <link rel="preconnect" href="https://image.tmdb.org">
 
-<link rel="stylesheet" href="/moviezone.min.css?v=9.25">
+<link rel="stylesheet" href="/moviezone.min.css?v=9.26">
 <!--MZ_PERF_HEAD-->
 <link rel="preload" as="image" media="(max-width: 767px) and (orientation: portrait)" href="https://image.tmdb.org/t/p/w780/lFKA4GMz36dImEy3DQPdPF7G4V9.jpg" fetchpriority="high">
 <link rel="preload" as="image" media="(max-width: 1024px) and (min-width: 768px), (max-width: 1024px) and (orientation: landscape)" href="https://image.tmdb.org/t/p/w780/y6RIuwuxLG3Nsb37KUj5yatnTIp.jpg" fetchpriority="high">
@@ -2027,7 +2027,7 @@ window.addEventListener('load', function () {
     if (pulled) return;
     pulled = true;
     var s = document.createElement('script');
-    s.src = '/mz-extras.js?v=2';
+    s.src = '/mz-extras.js?v=3';
     s.async = true;
     document.head.appendChild(s);
   }

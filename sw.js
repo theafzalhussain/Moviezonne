@@ -227,7 +227,10 @@
 // v170: search-plus.js?v=1 (typo recall, franchise + related search results)
 // is injected by moviezone.js on first search focus and fetches
 // /search-vocab.json; both are cached on first use, not precached.
-const CACHE_NAME = 'moviezone-v170';
+// v171: moviezone.min.css?v=9.26 (no search clear button on phones) and
+// mz-extras.js?v=3 (mobile Continue Watching layout, English voice prompts,
+// compact Top 10 chip).
+const CACHE_NAME = 'moviezone-v171';
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
  *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream
@@ -399,7 +402,7 @@ const STATIC_ASSETS = [
    *  instead of the shell. '/' is the same document, answered 200 directly. */
   '/',
   '/tv-mode.min.css?v=1.6',
-  '/moviezone.min.css?v=9.25',
+  '/moviezone.min.css?v=9.26',
   '/tv-mode.min.js?v=2.0',
   '/search-engine.min.js?v=2.1',
   '/moviezone.min.js?v=16.7',

@@ -4,8 +4,8 @@
     "sha256": "09829a80b29c08e1"
   },
   "moviezone.min.css": {
-    "version": "9.25",
-    "sha256": "bac8cb45ec08fdca"
+    "version": "9.26",
+    "sha256": "689e0be9571603bb"
   },
   "tv-mode.min.js": {
     "version": "2.0",
@@ -44,8 +44,8 @@
     "sha256": "6912d8d1e81af69b"
   },
   "mz-extras.js": {
-    "version": "2",
-    "sha256": "8a92083e3006cb93"
+    "version": "3",
+    "sha256": "4cdd80063a0b28ac"
   },
   "search-plus.js": {
     "version": "1",

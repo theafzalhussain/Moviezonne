@@ -12753,3 +12753,5 @@ img { content-visibility: auto; }
   outline-offset: 4px;
 }
 [data-mz-tv="true"] .top10-arrow { width: 48px; height: 48px; }
+/* Phones: no clear (x) in the search field; the keyboard has delete and the mic needs the corner. */
+@media (max-width:768px){.mz-search-clear.visible{display:none}}

@@ -141,8 +141,10 @@
     '.nav-search.has-mic .mz-search-clear.visible::after{content:"";position:absolute;right:-7px;top:5px;bottom:5px;width:1px;background:rgba(255,255,255,.14)}',
     '.nav-search.has-mic .mz-search-clear{right:44px}',
     /* touch screens: 32px target (the box is only 32px tall on phones) */
-    '@media (pointer:coarse){.nav-search .mz-search-clear{width:30px;height:30px;max-height:30px}.nav-search .mz-search-clear svg{width:13px;height:13px}',
-    '.nav-search.has-mic .mz-search-clear{right:40px}.nav-search.has-mic input{padding-right:5rem}}',
+    /* Phones and small screens: no clear button at all. The field is narrow,
+       the keyboard already has a delete key, and the mic needs that corner. */
+    '@media (max-width:768px){.nav-search .mz-search-clear,.nav-search .mz-search-clear.visible{display:none!important}',
+    '.nav-search.has-mic input{padding-right:2.75rem}}',
     'html[data-mz-tv="true"] .nav-search .mz-search-clear{width:38px;height:38px;max-height:38px;right:56px}',
     'html[data-mz-tv="true"] .nav-search .mz-search-clear:focus{background:#f5c518;color:#0b0b14}',
     '@keyframes mzClearIn{from{opacity:0;transform:translateY(-50%) scale(.6)}to{opacity:1;transform:translateY(-50%) scale(1)}}',
@@ -154,11 +156,13 @@
     '@keyframes mzT10Shine{from{background-position:100% 0}to{background-position:0 0}}',
     '.top10-sub{gap:.55em}',
     '.top10-sub-a{background:linear-gradient(90deg,#fff,#e8e2c8);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}',
-    '.top10-sub-b{position:relative;display:inline-flex;align-items:center;gap:.5em;width:max-content;padding:.42em .8em .42em .68em;border-radius:999px;',
-    'color:#f5c518;-webkit-text-fill-color:#f5c518;background:linear-gradient(180deg,rgba(245,197,24,.16),rgba(245,197,24,.05));border:1px solid rgba(245,197,24,.45);',
-    'box-shadow:0 0 18px -6px rgba(245,197,24,.6),inset 0 1px 0 rgba(255,255,255,.08)}',
-    '.top10-sub-b::before{content:"";width:.55em;height:.55em;border-radius:50%;background:#ff3b3b;box-shadow:0 0 0 0 rgba(255,59,59,.7);animation:mzLive 1.8s ease-out infinite}',
-    '@keyframes mzLive{0%{box-shadow:0 0 0 0 rgba(255,59,59,.65)}70%{box-shadow:0 0 0 .55em rgba(255,59,59,0)}100%{box-shadow:0 0 0 0 rgba(255,59,59,0)}}',
+    /* Compact live chip: tight padding, small caps-height, hairline gold ring. */
+    '.top10-sub-b{position:relative;display:inline-flex;align-items:center;gap:.42em;width:max-content;padding:.3em .62em .3em .5em;border-radius:6px;',
+    'font-size:clamp(.6rem,.82vw,.78rem)!important;letter-spacing:.18em!important;line-height:1;',
+    'color:#0b0b14;-webkit-text-fill-color:#0b0b14;background:linear-gradient(135deg,#ffe27a 0%,#f5c518 45%,#d99a00 100%);',
+    'box-shadow:0 4px 14px -6px rgba(245,180,0,.75),inset 0 1px 0 rgba(255,255,255,.55),inset 0 -1px 0 rgba(0,0,0,.18)}',
+    '.top10-sub-b::before{content:"";flex:none;width:.5em;height:.5em;border-radius:50%;background:#e11d2e;box-shadow:0 0 0 0 rgba(225,29,46,.6);animation:mzLive 1.8s ease-out infinite}',
+    '@keyframes mzLive{0%{box-shadow:0 0 0 0 rgba(225,29,46,.55)}70%{box-shadow:0 0 0 .45em rgba(225,29,46,0)}100%{box-shadow:0 0 0 0 rgba(225,29,46,0)}}',
     '@media (prefers-reduced-motion:reduce){.top10-big-num,.top10-sub-b::before{animation:none}.top10-big-num{background-position:30% 0}}',
     'html[data-mz-tv="true"] .top10-sub-b::before{animation:none}',
 
@@ -194,7 +198,31 @@
     '.mz-cw2 .cw-remove-btn{z-index:4;top:8px;right:8px;width:30px;height:30px;border-radius:50%;background:rgba(0,0,0,.55);backdrop-filter:blur(4px);opacity:1;filter:none}',
     '.mz-cw2 .cw-remove-btn:hover{background:#e63946;color:#fff;transform:none}',
     '@media (hover:hover){.mz-cw2 .cw-remove-btn{opacity:0}.mz-cw2 .cw-card:hover .cw-remove-btn,.mz-cw2 .cw-card:focus-within .cw-remove-btn{opacity:1}}',
-    '@media (max-width:600px){.mz-cw2 .cw-card{min-width:74vw;max-width:74vw}}',
+    /* Phones: title at the START (the shared .section-header rule centres and
+       stacks it), Clear all on the same row, compact cards that leave a peek of
+       the next one so the row reads as scrollable. */
+    '@media (max-width:768px){',
+    'html #continue-watching .section-header{flex-direction:row!important;align-items:center!important;justify-content:space-between!important;text-align:left!important;gap:10px;flex-wrap:nowrap}',
+    'html #continue-watching .section-title{justify-content:flex-start!important;margin:0!important;min-width:0;flex:1 1 auto}',
+    'html #continue-watching .section-title h2{font-size:clamp(1.05rem,5vw,1.35rem);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}',
+    '.cw-count{min-width:20px;height:20px;padding:0 6px;margin-left:8px;font-size:11px}',
+    '.cw-tools{flex:none;margin-left:0}',
+    '.cw-tool{height:30px;padding:0 11px;font-size:12px}',
+    '.cw-tool[data-act=clear] svg{width:13px;height:13px}',
+    '.continue-watching-grid.mz-cw2{gap:12px;padding:4px 0 12px;scroll-padding-left:0;scroll-snap-type:x mandatory}',
+    '.mz-cw2 .cw-card{min-width:min(78vw,300px);max-width:min(78vw,300px);border-radius:12px;scroll-snap-align:start}',
+    '.mz-cw2 .cw-card:hover{transform:none}',
+    '.mz-cw2 .cw-card-info{padding:9px 11px 11px}',
+    '.mz-cw2 .cw-card-title{font-size:.92rem}',
+    '.mz-cw2 .cw-card-meta{font-size:.74rem}',
+    '.mz-cw2 .cw-resume{margin-top:7px;font-size:11.5px}',
+    '.mz-cw2 .cw-badge{left:8px;top:8px;padding:3px 7px;font-size:10px}',
+    '.mz-cw2 .cw-left{right:8px;bottom:10px;padding:3px 7px;font-size:10px}',
+    '.mz-cw2 .cw-play-icon{width:42px;height:42px}',
+    /* the X: 28px circle, with an invisible 40px hit area around it */
+    '.mz-cw2 .cw-remove-btn{top:6px;right:6px;width:28px;height:28px}',
+    '.mz-cw2 .cw-remove-btn::before{content:"";position:absolute;inset:-6px}}',
+    '@media (max-width:360px){.mz-cw2 .cw-card{min-width:84vw;max-width:84vw}.cw-tool[data-act=clear] .cw-clear-txt{display:none}.cw-tool[data-act=clear]{width:30px;padding:0}}',
     'html[data-mz-tv="true"] .mz-cw2 .cw-card:focus{transform:scale(1.05);border-color:#f5c518;box-shadow:0 0 0 3px rgba(245,197,24,.6)}',
     'html[data-mz-tv="true"] .mz-cw2 .cw-play-icon{opacity:1}',
   ].join('');
@@ -313,8 +341,8 @@
       sheet.setAttribute('aria-label', 'Voice search');
       sheet.innerHTML = '<div class="mz-voice-card">' +
         '<div class="mz-voice-orb">' + MIC_SVG + '</div>' +
-        '<h2 class="mz-voice-title">Bolo, kya dekhna hai?</h2>' +
-        '<p class="mz-voice-text" aria-live="polite">Movie, web series ya actor ka naam bolo</p>' +
+        '<h2 class="mz-voice-title">What would you like to watch?</h2>' +
+        '<p class="mz-voice-text" aria-live="polite">Say a movie, web series or actor name</p>' +
         '<button type="button" class="mz-voice-cancel">Cancel</button></div>';
       textEl = sheet.querySelector('.mz-voice-text');
       titleEl = sheet.querySelector('.mz-voice-title');
@@ -359,7 +387,7 @@
 
     function fail(msg) {
       if (sheet) sheet.classList.remove('is-listening');
-      show('Hmm\u2026', msg, false);
+      show('Didn\u2019t catch that', msg, false);
       clearTimeout(closeTimer);
       closeTimer = setTimeout(function () { stop(false); }, 2600);
     }
@@ -378,7 +406,7 @@
       if (sheet && sheet.parentNode) return;
       if (!sheet) buildSheet();
       gotFinal = false;
-      show('Bolo, kya dekhna hai?', 'Movie, web series ya actor ka naam bolo', false);
+      show('What would you like to watch?', 'Say a movie, web series or actor name', false);
       document.body.appendChild(sheet);
       // Next frame, so the fade-in transition actually runs.
       requestAnimationFrame(function () { sheet.classList.add('is-open', 'is-listening'); });
@@ -393,7 +421,7 @@
         rec.maxAlternatives = 1;
         rec.continuous = false;
       } catch (_) {
-        fail('Is browser mein voice search nahi chal sakta.');
+        fail('Voice search isn\u2019t supported in this browser.');
         return;
       }
 
@@ -405,7 +433,7 @@
         }
         if (final) {
           gotFinal = true;
-          show('Search kar rahe hain\u2026', '\u201C' + final.trim() + '\u201D', true);
+          show('Searching\u2026', '\u201C' + final.trim() + '\u201D', true);
           deliver(final);
           clearTimeout(closeTimer);
           closeTimer = setTimeout(close, 700);
@@ -416,18 +444,18 @@
       rec.onerror = function (event) {
         var e = event && event.error;
         if (e === 'aborted') return;
-        if (e === 'not-allowed' || e === 'service-not-allowed') fail('Mic ki permission chahiye. Browser settings mein mic allow karo.');
-        else if (e === 'no-speech') fail('Kuch sunai nahi diya. Mic dabake dobara bolo.');
-        else if (e === 'audio-capture') fail('Koi mic nahi mila. Remote ya phone ka mic check karo.');
-        else if (e === 'network') fail('Internet slow hai, voice search abhi nahi ho paya.');
-        else fail('Voice search abhi nahi ho paya. Dobara try karo.');
+        if (e === 'not-allowed' || e === 'service-not-allowed') fail('Microphone access is blocked. Allow it in your browser settings and try again.');
+        else if (e === 'no-speech') fail('We couldn\u2019t hear anything. Tap the mic and try again.');
+        else if (e === 'audio-capture') fail('No microphone found. Check your device or remote and try again.');
+        else if (e === 'network') fail('Network problem. Check your connection and try again.');
+        else fail('Voice search didn\u2019t work this time. Please try again.');
       };
       rec.onend = function () {
         if (sheet) sheet.classList.remove('is-listening');
-        if (!gotFinal && sheet && sheet.parentNode && !closeTimer) fail('Kuch sunai nahi diya. Mic dabake dobara bolo.');
+        if (!gotFinal && sheet && sheet.parentNode && !closeTimer) fail('We couldn\u2019t hear anything. Tap the mic and try again.');
       };
       closeTimer = 0;
-      try { rec.start(); } catch (_) { fail('Mic shuru nahi ho paya. Dobara try karo.'); }
+      try { rec.start(); } catch (_) { fail('Couldn\u2019t start the microphone. Please try again.'); }
     }
 
     mic.addEventListener('click', function (e) {
@@ -487,6 +515,7 @@
     var mins = Math.max(1, Math.round(run * (100 - pct) / 100 / 60));
     return mins >= 60 ? Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm left' : mins + ' min left';
   }
+  var TRASH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>';
   var ARROW = function (d) { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + (d < 0 ? 'M15 18l-6-6 6-6' : 'M9 18l6-6-6-6') + '"/></svg>'; };
 
   function renderCW2() {
@@ -513,7 +542,7 @@
         tools.className = 'cw-tools';
         tools.innerHTML = '<button type="button" class="cw-tool is-arrow" data-dir="-1" aria-label="Scroll left">' + ARROW(-1) + '</button>' +
           '<button type="button" class="cw-tool is-arrow" data-dir="1" aria-label="Scroll right">' + ARROW(1) + '</button>' +
-          '<button type="button" class="cw-tool" data-act="clear">Clear all</button>';
+          '<button type="button" class="cw-tool" data-act="clear" aria-label="Clear all from Continue Watching">' + TRASH + '<span class="cw-clear-txt">Clear all</span></button>';
         header.appendChild(tools);
         tools.addEventListener('click', function (e) {
           var b = e.target.closest('button');
@@ -522,13 +551,15 @@
             grid.scrollBy({ left: Number(b.getAttribute('data-dir')) * grid.clientWidth * 0.85, behavior: 'smooth' });
             return;
           }
+          var label = b.querySelector('.cw-clear-txt');
           if (!b.classList.contains('is-confirm')) {        // two taps, so a stray tap loses nothing
-            b.classList.add('is-confirm'); b.textContent = 'Tap again to clear';
-            setTimeout(function () { b.classList.remove('is-confirm'); b.textContent = 'Clear all'; }, 3200);
+            b.classList.add('is-confirm'); if (label) label.textContent = 'Confirm';
+            b.setAttribute('aria-label', 'Tap again to clear Continue Watching');
+            setTimeout(function () { b.classList.remove('is-confirm'); if (label) label.textContent = 'Clear all'; }, 3200);
             return;
           }
           try { localStorage.setItem(CW_KEY, '[]'); } catch (_) {}
-          b.classList.remove('is-confirm'); b.textContent = 'Clear all';
+          b.classList.remove('is-confirm'); if (label) label.textContent = 'Clear all';
           renderCW2();
         });
       }
