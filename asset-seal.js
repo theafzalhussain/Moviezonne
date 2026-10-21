@@ -44,7 +44,13 @@ const ASSETS = ['moviezone.min.js', 'moviezone.min.css', 'tv-mode.min.js', 'tv-m
   'providers.css', 'universes.css', 'universes-rail.js',
   /*  The watch page's Download sheet. Same `immutable` rule in _headers, and
    *  moviezone.js injects it by a ?v= URL, so it is sealed for the same reason. */
-  'downloads.js'];
+  'downloads.js',
+  /*  WhatsApp share + voice search, requested by index.html as ?v=. Same rule. */
+  'mz-extras.js',
+  /*  Typo recall + franchise results, injected by moviezone.js as ?v= on first
+   *  search focus. search-vocab.json is deliberately NOT here: the workflow
+   *  rebuilds it daily and it is served with a one-day max-age instead. */
+  'search-plus.js'];
 
 const html = fs.readFileSync('index.html', 'utf8');
 const sw = fs.readFileSync('sw.js', 'utf8');

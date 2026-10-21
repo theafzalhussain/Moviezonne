@@ -220,7 +220,14 @@
 // Providers. Each card opens the Cartoons tab scoped to that brand's TMDB
 // networks / studios only. Five official logos as local SVGs (~30 KB total),
 // precached opportunistically like the Top Providers logos.
-const CACHE_NAME = 'moviezone-v168';
+// v169: index.html loads /mz-extras.js?v=1 (WhatsApp share button + voice
+// search) at idle after load; cached by the versioned-asset branch on first use,
+// like downloads.js, so it is not in either precache list. Homepage og:image is
+// now the 1200x630 /og-image.jpg share card.
+// v170: search-plus.js?v=1 (typo recall, franchise + related search results)
+// is injected by moviezone.js on first search focus and fetches
+// /search-vocab.json; both are cached on first use, not precached.
+const CACHE_NAME = 'moviezone-v170';
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
  *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream

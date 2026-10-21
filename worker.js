@@ -2544,6 +2544,13 @@ async function ssrCategoryPage(family, rawSlug, url, env, ctx) {
 
   let results = [];
   let totalPages = 1;
+  // Same "new this month" rail as server.js (seo.ottLatestParams), fetched in
+  // parallel and isolated: its failure never costs the page its main list.
+  const latestParams = page === 1 ? seo.ottLatestParams(cat) : null;
+  const latestPromise = latestParams
+    ? ssrTmdb(env, ctx)(cat.endpoint, Object.assign({ language: 'en-US', page: '1' }, latestParams))
+      .then((d) => (d && d.results) || [], () => [])
+    : Promise.resolve(null);
   try {
     const data = await ssrTmdb(env, ctx)(cat.endpoint, Object.assign(
       { language: 'en-US', page: String(page) },
@@ -2557,11 +2564,23 @@ async function ssrCategoryPage(family, rawSlug, url, env, ctx) {
     console.warn('[ssr] category ' + slug + ' failed:', err && err.message);
   }
 
+  const latest = await latestPromise;
+
   return ssrHtml(
-    seo.renderCategoryPage(slug, cat, results, page, totalPages),
+    seo.renderCategoryPage(slug, cat, results, page, totalPages, latest),
     SSR_CATEGORY_CACHE,
-    'index, follow'
+    page > 1 ? 'noindex, follow' : 'index, follow'
   );
+}
+
+async function ssrFranchisePage(slug, env, ctx) {
+  const f = seo.FRANCHISE_BY_SLUG[slug];
+  if (!f) return null;
+  // The curated universes ship as a static asset; TMDB collections go through
+  // the same KV-cached fetcher as every other SSR page.
+  const catalog = f.universe ? await assetJson('/collections-catalog.json', env).catch(() => null) : null;
+  const data = await seo.loadFranchise(f, ssrTmdb(env, ctx), catalog);
+  return ssrHtml(seo.renderFranchisePage(f, data), SSR_CATEGORY_CACHE, 'index, follow');
 }
 
 async function ssrDetailPage(kind, rawSlug, env, ctx) {
@@ -3192,6 +3211,13 @@ async function ssrResponse(request, env, ctx, url) {
       decodeURIComponent(browseLetter[1]).toLowerCase(), url, env, ctx
     );
   }
+
+  // Franchise hubs: /collection and /collection/<slug> ("golmaal all parts").
+  if (pathname === seo.FRANCHISE_INDEX_PATH) {
+    return ssrHtml(seo.renderFranchiseIndex(), SSR_CATEGORY_CACHE, 'index, follow');
+  }
+  const franchise = /^\/collection\/([^/]+)$/.exec(pathname);
+  if (franchise) return ssrFranchisePage(decodeURIComponent(franchise[1]).toLowerCase(), env, ctx);
 
   const category = /^\/(movies|series)\/([^/]+)$/.exec(pathname);
   if (category) {

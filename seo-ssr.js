@@ -52,6 +52,14 @@ const APP_DIR = typeof __dirname === 'string' ? __dirname : '.';
 const SITE_URL = (process.env.SITE_URL || 'https://moviezone.dev').replace(/\/+$/, '');
 const SITE_NAME = 'MovieZone';
 const LOGO_URL = SITE_URL + '/icon-512.png';
+/*  1200x630 share card. Category, browse and other non-title pages used the
+ *  512px square app icon as og:image, which WhatsApp, Telegram and X render as
+ *  a tiny thumbnail beside the link instead of a full-width card. */
+const OG_IMAGE = SITE_URL + '/og-image.jpg';
+/*  Title pages share their landscape backdrop at w780 (~60-150 KB): a 1.78:1
+ *  image gets the large WhatsApp preview, a portrait poster only the small
+ *  square one, and w1280 can exceed the ~300 KB WhatsApp will fetch. */
+const IMG_OG = 'https://image.tmdb.org/t/p/w780';
 
 const IMG_POSTER = 'https://image.tmdb.org/t/p/w342';
 const IMG_POSTER_LG = 'https://image.tmdb.org/t/p/w500';
@@ -325,7 +333,9 @@ function buildDetailDescription(item, kind) {
   const facts = [];
   if (year) facts.push(year);
   if (genres) facts.push(genres);
-  if (rating) facts.push('IMDb style rating ' + rating + '/10');
+  // TMDB's score, labelled as such: the old IMDb-style label borrowed a trademark
+  // for a number IMDb never produced, and read as spam in the snippet.
+  if (rating) facts.push('Rated ' + rating + '/10');
 
   if (overview) {
     const prefix = facts.length ? '(' + facts.join(' • ') + ') ' : '';
@@ -1215,6 +1225,7 @@ ${body}
           <li><a href="/series/anime">Anime</a></li>
           <li><a href="/series/kdrama">Korean drama</a></li>
           <li><a href="/series/kids">Cartoons</a></li>
+          <li><a href="/collection">Franchises in order</a></li>
         </ul>
       </div>
       <div>
@@ -1689,6 +1700,8 @@ function renderDetailPage(item, kind) {
 
   ${faqHtml}
 
+  ${franchiseLinkFor(item, kind, title)}
+
   <section>
     <h2>Browse more on ${esc(SITE_NAME)}</h2>
     <ul class="pill-links">
@@ -1702,7 +1715,7 @@ function renderDetailPage(item, kind) {
     title: pageTitle,
     description,
     canonicalPath,
-    ogImage: posterLg || (backdrop || LOGO_URL),
+    ogImage: (item.backdrop_path ? IMG_OG + item.backdrop_path : '') || posterLg || OG_IMAGE,
     ogType: 'video.movie',
     ads: true,
     schemas: faqSchema ? [schema, faqSchema] : [schema],
@@ -1826,18 +1839,79 @@ function pageHref(basePath, page) {
   return page > 1 ? basePath + '?page=' + page : basePath;
 }
 
-function renderCategoryPage(slug, cat, results, page, totalPages) {
+/*  ── OTT "new this month" ──────────────────────────────────────────────────
+ *  Search Console (Jul–Oct 2026) showed /movies/prime-video ranking #1–7 for
+ *  "new movie on prime", "amazon prime new releases" and "prime new releases"
+ *  with ZERO clicks across ~70 impressions. The snippet promised a "Full List"
+ *  and the page opened on an all-time popularity ranking, so searchers looking
+ *  for what is NEW skipped it. Every platform page (any category gated on
+ *  with_watch_providers) now leads with the platform's releases of the last 90
+ *  days, and its page-1 title/description name the current month — but only
+ *  when at least OTT_FRESH_MIN such titles exist, so a platform with nothing
+ *  new in TMDB (Zee5, measured) keeps its evergreen title instead of a false
+ *  "New on" promise.
+ *  The full catalogue stays below, so nothing the page ranked for is lost. */
+const OTT_FRESH_MIN = 4;
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+  'August', 'September', 'October', 'November', 'December'];
+function istDate(offsetDays) {
+  return new Date(Date.now() + 5.5 * 3600 * 1000 + (offsetDays || 0) * 86400000);
+}
+function istMonthYear() {
+  const d = istDate(0);
+  return MONTHS[d.getUTCMonth()] + ' ' + d.getUTCFullYear();
+}
+function platformLabel(cat) {
+  return String(cat.heading || '').replace(/\s+(Movies|Web Series|Series|Shows)$/i, '').trim();
+}
+/** The /discover params for a platform's recent releases, or null. */
+function ottLatestParams(cat) {
+  const p = cat && cat.params;
+  if (!p || !p.with_watch_providers) return null;
+  const isTv = cat.kind === 'tv';
+  const from = istDate(-90).toISOString().slice(0, 10);
+  const to = istDate(0).toISOString().slice(0, 10);
+  // vote_count >= 1 drops zero-vote placeholder records; anything stricter
+  // emptied JioHotstar's rail (measured: 14 titles at >=0, 2 at >=3).
+  const out = Object.assign({}, p, { sort_by: 'popularity.desc', 'vote_count.gte': '1' });
+  out[isTv ? 'first_air_date.gte' : 'primary_release_date.gte'] = from;
+  out[isTv ? 'first_air_date.lte' : 'primary_release_date.lte'] = to;
+  return out;
+}
+function ottFreshTitle(cat) {
+  const what = cat.kind === 'tv' ? 'Web Series' : 'Movies';
+  // ~60 visible characters: Google cuts longer titles mid-word. Opens with the
+  // searcher's own words ("new on prime"), then the month as the freshness cue.
+  return 'New on ' + platformLabel(cat) + ' India (' + istMonthYear() + ') \u2014 Latest ' + what;
+}
+function ottFreshDescription(cat) {
+  const what = cat.kind === 'tv' ? 'web series' : 'movies';
+  return truncate('New on ' + platformLabel(cat) + ' India in ' + istMonthYear() + ': the latest '
+    + what + ' from the last 90 days, plus the full catalogue ranked by popularity, with ratings and cast.', 158);
+}
+
+function renderCategoryPage(slug, cat, results, page, totalPages, latest) {
   const basePath = categoryPath(slug);
   const canonicalPath = page > 1 ? basePath + '?page=' + page : basePath;
   const isTv = cat.kind === 'tv';
 
   // Page 2+ gets its own description so paginated URLs are not duplicates.
+  const latestItems = (page === 1 && Array.isArray(latest) && ottLatestParams(cat))
+    ? latest.filter((r) => r && r.id && r.poster_path).slice(0, 12)
+    : [];
+  const isOtt = latestItems.length >= OTT_FRESH_MIN;
   const description = page > 1
     ? truncate('Page ' + page + ' of ' + cat.heading.toLowerCase() + ' on ' + SITE_NAME + '. ' + cat.description, 158)
-    : cat.description;
+    : (isOtt ? ottFreshDescription(cat) : cat.description);
   const title = page > 1
-    ? cat.heading + ' — Page ' + page + ' | ' + SITE_NAME
-    : cat.title + ' | ' + SITE_NAME;
+    ? cat.heading + ' \u2014 Page ' + page + ' | ' + SITE_NAME
+    : (isOtt ? ottFreshTitle(cat) : cat.title) + ' | ' + SITE_NAME;
+  const latestHtml = isOtt ? `
+  <section id="new-this-month" aria-labelledby="newThisMonth">
+    <h2 id="newThisMonth">New on ${esc(platformLabel(cat))} \u2014 ${esc(istMonthYear())}</h2>
+    <p class="lede">${esc('The latest ' + (isTv ? 'web series' : 'movies') + ' added to ' + platformLabel(cat) + ' India in the last 90 days, most-watched first.')}</p>
+    <ul class="grid">${latestItems.map((r) => renderCard(r, cat.kind)).filter(Boolean).join('')}</ul>
+  </section>` : '';
 
   const cards = results.map((r) => renderCard(r, cat.kind)).filter(Boolean).join('');
 
@@ -1908,9 +1982,10 @@ function renderCategoryPage(slug, cat, results, page, totalPages) {
     ${page === 1 && cat.intro ? '<p class="lede">' + esc(cat.intro) + '</p>' : ''}
     ${updatedHtml}
   </section>
+  ${latestHtml}
 
   <section>
-    <h2 class="skip">${esc(cat.heading)} list</h2>
+    <h2 class="${latestHtml ? '' : 'skip'}">${esc(latestHtml ? 'All ' + cat.heading + ' \u2014 most popular' : cat.heading + ' list')}</h2>
     ${cards
     ? '<ul class="grid">' + cards + '</ul>'
     : '<div class="empty"><p>No titles could be loaded for this category right now. Please try again in a moment.</p></div>'}
@@ -1944,7 +2019,7 @@ function renderCategoryPage(slug, cat, results, page, totalPages) {
     title,
     description,
     canonicalPath,
-    ogImage: LOGO_URL,
+    ogImage: OG_IMAGE,
     schemas: faqSchema
       ? [collectionSchema, itemListSchema, faqSchema]
       : [collectionSchema, itemListSchema],
@@ -1953,6 +2028,12 @@ function renderCategoryPage(slug, cat, results, page, totalPages) {
       { name: isTv ? 'Series' : 'Movies', path: isTv ? '/series/web-series' : '/movies/popular' },
       { name: cat.heading + (page > 1 ? ' — page ' + page : '') }
     ],
+    /*  Page 2+ is "noindex, follow" (Oct 2026). Search Console showed 8,167
+     *  URLs "Discovered - not indexed" and 297 "Crawled - not indexed" against
+     *  302 indexed: Google was spending its budget on ~840 near-identical
+     *  paginated lists. Their links are still followed, so every title stays
+     *  discoverable; page 1, the title pages and the hubs carry the ranking. */
+    robots: page > 1 ? 'noindex, follow' : undefined,
     body
   });
 }
@@ -1999,7 +2080,7 @@ function renderBrowseIndexPage(counts) {
     title: 'Browse All Movies & Series A-Z | ' + SITE_NAME,
     description: 'The full ' + SITE_NAME + ' catalogue indexed A to Z. Browse every movie and web series alphabetically and jump straight to any title.',
     canonicalPath: '/browse',
-    ogImage: LOGO_URL,
+    ogImage: OG_IMAGE,
     breadcrumbs: [{ name: 'Home', path: '/' }, { name: 'Browse A-Z' }],
     body
   });
@@ -2064,7 +2145,7 @@ function renderBrowseLetterPage(letter, entries, page, totalPages) {
     description: 'Browse every movie and web series on ' + SITE_NAME + ' starting with ' + shown
       + '. Alphabetical index with release years and direct links to each title.',
     canonicalPath,
-    ogImage: LOGO_URL,
+    ogImage: OG_IMAGE,
     schemas: [itemList],
     breadcrumbs: [
       { name: 'Home', path: '/' },
@@ -2261,6 +2342,7 @@ function renderHomeLinkBlock(groups) {
     + '<section class="mz-ssr-sec" aria-labelledby="mz-ssr-cats-h">'
     + '<h2 id="mz-ssr-cats-h">Browse ' + esc(SITE_NAME) + ' by category</h2>'
     + '<ul class="mz-ssr-cats">' + cats + '</ul></section>'
+    + homeFranchiseSection()
     + '<section class="mz-ssr-sec" aria-labelledby="mz-ssr-az-h">'
     + '<h2 id="mz-ssr-az-h">Browse the full catalogue A-Z</h2>'
     + '<p class="mz-ssr-blurb">Every title on ' + esc(SITE_NAME) + ', indexed alphabetically.</p>'
@@ -2313,6 +2395,10 @@ function buildStaticSitemap() {
       changefreq: VOLATILE_CATEGORY_SLUGS.has(slug) ? 'daily' : 'weekly',
       priority: '0.8'
     }));
+  });
+  urls.push(sitemapUrl(FRANCHISE_INDEX_PATH, { lastmod: SITEMAP_FALLBACK_DATE, changefreq: 'weekly', priority: '0.7' }));
+  FRANCHISES.forEach((f) => {
+    urls.push(sitemapUrl(franchisePath(f), { lastmod: SITEMAP_FALLBACK_DATE, changefreq: 'weekly', priority: '0.7' }));
   });
   return wrapUrlset(urls);
 }
@@ -2833,6 +2919,14 @@ function registerSeoRoutes(app, deps) {
 
     let results = [];
     let totalPages = 1;
+    // Platform pages lead with what is new this month (see ottLatestParams).
+    // Fetched in parallel and allowed to fail on its own: a missing rail must
+    // never cost the page its main list.
+    const latestParams = page === 1 ? ottLatestParams(cat) : null;
+    const latestPromise = latestParams
+      ? tmdb(cat.endpoint, Object.assign({ language: 'en-US', page: '1' }, latestParams))
+        .then((d) => (d && d.results) || [], () => [])
+      : Promise.resolve(null);
     try {
       const data = await tmdb(cat.endpoint, Object.assign(
         { language: 'en-US', page: String(page) },
@@ -2845,18 +2939,44 @@ function registerSeoRoutes(app, deps) {
       // Still render the page: the copy, schema and internal links are the
       // SEO payload, and an empty grid beats a 500 for both users and crawlers.
     }
+    const latest = await latestPromise;
 
-    const html = renderCategoryPage(slug, cat, results, page, totalPages);
+    const html = renderCategoryPage(slug, cat, results, page, totalPages, latest);
     if (results.length) cacheSet(cacheKey, html);
 
     res.set('Content-Type', 'text/html; charset=utf-8');
     res.set('Cache-Control', CATEGORY_CACHE);
-    res.set('X-Robots-Tag', 'index, follow');
+    res.set('X-Robots-Tag', page > 1 ? 'noindex, follow' : 'index, follow');
     return res.status(200).send(html);
   };
 
   app.get('/movies/:slug', categoryHandler('movies'));
   app.get('/series/:slug', categoryHandler('series'));
+
+  // ── Franchise hubs ("golmaal all parts", "marvel movies in order") ───────
+  app.get(FRANCHISE_INDEX_PATH, (req, res) => {
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.set('Cache-Control', CATEGORY_CACHE);
+    res.set('X-Robots-Tag', 'index, follow');
+    return res.status(200).send(renderFranchiseIndex());
+  });
+  app.get(FRANCHISE_INDEX_PATH + '/:slug', async (req, res, next) => {
+    const f = FRANCHISE_BY_SLUG[String(req.params.slug || '').toLowerCase()];
+    if (!f) return next();
+    const cacheKey = 'ssr:franchise:' + f.slug;
+    let html = cacheGet(cacheKey);
+    if (!html) {
+      let catalog = null;
+      try { catalog = JSON.parse(fs.readFileSync(path.join(APP_DIR, 'collections-catalog.json'), 'utf8')); } catch (e) { catalog = null; }
+      const data = await loadFranchise(f, tmdb, catalog);
+      html = renderFranchisePage(f, data);
+      if (data.movies.length) cacheSet(cacheKey, html);
+    }
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.set('Cache-Control', CATEGORY_CACHE);
+    res.set('X-Robots-Tag', 'index, follow');
+    return res.status(200).send(html);
+  });
 
   // Bare family URLs are useful entry points; send them to the best default.
   app.get('/movies', (req, res) => res.redirect(301, '/movies/popular'));
@@ -3342,8 +3462,372 @@ function registerHomeSsr(app, deps) {
   console.log('🏠 Homepage SSR link block active on /');
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+//  FRANCHISE HUBS  (/collection, /collection/<slug>)
+//  "All parts in order" pages. Measured India demand (Google Ads, Oct 2026):
+//  marvel movies in order 201K/mo, shinchan movies 74K, harry potter all parts
+//  33K, fast and furious all parts 27K, chhota bheem movies 22K, doraemon movies
+//  list 18K, ben 10 movies 15K, motu patlu movies 12K, golmaal all parts 1.6K,
+//  dhamaal all parts 1.9K - ~440K searches a month, all low competition, and
+//  the site had no page that answered any of them.
+//
+//  Each page is a real answer, not a doorway: every part in release order with
+//  its year, rating and a one-line synopsis, the upcoming part if one is dated,
+//  quick facts, the TV series for kids/anime franchises, and an FAQ written
+//  from the data. Data is TMDB collections (or the curated universes in
+//  collections-catalog.json), so a new part appears the day TMDB lists it.
+// ══════════════════════════════════════════════════════════════════════════
+
+/*  slug is the URL and matches the query people type. group drives the related
+ *  links. collections = TMDB collection ids; tv = TMDB tv ids; universe = a key
+ *  in collections-catalog.json (no API call). */
+const FRANCHISES = [
+  // Bollywood / Indian
+  { slug: 'golmaal-all-parts', name: 'Golmaal', group: 'indian', collections: [483464] },
+  { slug: 'housefull-all-parts', name: 'Housefull', group: 'indian', collections: [142015] },
+  { slug: 'dhamaal-all-parts', name: 'Dhamaal', group: 'indian', collections: [142021] },
+  { slug: 'hera-pheri-all-parts', name: 'Hera Pheri', group: 'indian', collections: [142022] },
+  { slug: 'welcome-all-parts', name: 'Welcome', group: 'indian', collections: [401655] },
+  { slug: 'singham-cop-universe-in-order', name: 'Rohit Shetty Cop Universe (Singham)', short: 'Cop Universe', group: 'indian', universe: 'cop-universe' },
+  { slug: 'yrf-spy-universe-in-order', name: 'YRF Spy Universe', group: 'indian', universe: 'yrf-spy' },
+  { slug: 'stree-maddock-horror-universe-in-order', name: 'Stree & Maddock Horror Comedy Universe', short: 'Maddock Universe', group: 'indian', universe: 'maddock' },
+  { slug: 'krrish-all-parts', name: 'Krrish', group: 'indian', collections: [246091] },
+  { slug: 'dhoom-all-parts', name: 'Dhoom', group: 'indian', collections: [44976] },
+  { slug: 'race-all-parts', name: 'Race', group: 'indian', collections: [259256] },
+  { slug: 'bhool-bhulaiyaa-all-parts', name: 'Bhool Bhulaiyaa', group: 'indian', collections: [977824] },
+  { slug: 'jolly-llb-all-parts', name: 'Jolly LLB', group: 'indian', collections: [557748] },
+  { slug: 'munna-bhai-all-parts', name: 'Munna Bhai', group: 'indian', collections: [44722] },
+  { slug: 'fukrey-all-parts', name: 'Fukrey', group: 'indian', collections: [489399] },
+  { slug: 'drishyam-all-parts', name: 'Drishyam', group: 'indian', collections: [1029834] },
+  { slug: 'dabangg-all-parts', name: 'Dabangg', group: 'indian', collections: [256433] },
+  { slug: 'baahubali-all-parts', name: 'Baahubali', group: 'indian', collections: [350309] },
+  { slug: 'kgf-all-parts', name: 'KGF', group: 'indian', collections: [657153] },
+  { slug: 'pushpa-all-parts', name: 'Pushpa', group: 'indian', collections: [921781] },
+  // Hollywood
+  { slug: 'marvel-movies-in-order', name: 'Marvel (MCU)', h1: 'Marvel Movies in Order', group: 'hollywood', universe: 'mcu' },
+  { slug: 'harry-potter-all-parts', name: 'Harry Potter', group: 'hollywood', collections: [1241] },
+  { slug: 'fast-and-furious-all-parts', name: 'Fast & Furious', group: 'hollywood', collections: [9485] },
+  { slug: 'mission-impossible-all-parts', name: 'Mission: Impossible', group: 'hollywood', collections: [87359] },
+  { slug: 'conjuring-movies-in-order', name: 'The Conjuring', group: 'hollywood', collections: [313086] },
+  { slug: 'dc-movies-in-order', name: 'DC Extended Universe', short: 'DC', group: 'hollywood', universe: 'dceu' },
+  { slug: 'x-men-movies-in-order', name: 'X-Men', group: 'hollywood', universe: 'x-men' },
+  { slug: 'star-wars-movies-in-order', name: 'Star Wars', group: 'hollywood', universe: 'star-wars' },
+  { slug: 'james-bond-movies-in-order', name: 'James Bond', group: 'hollywood', universe: 'james-bond' },
+  { slug: 'spider-man-movies-in-order', name: 'Spider-Man', group: 'hollywood', collections: [556, 125574, 531241] },
+  { slug: 'john-wick-all-parts', name: 'John Wick', group: 'hollywood', collections: [404609] },
+  { slug: 'jurassic-park-movies-in-order', name: 'Jurassic Park', group: 'hollywood', universe: 'jurassic-park' },
+  { slug: 'transformers-movies-in-order', name: 'Transformers', group: 'hollywood', universe: 'transformers' },
+  { slug: 'pirates-of-the-caribbean-all-parts', name: 'Pirates of the Caribbean', group: 'hollywood', collections: [295] },
+  { slug: 'twilight-movies-in-order', name: 'Twilight', group: 'hollywood', collections: [33514] },
+  { slug: 'hunger-games-movies-in-order', name: 'The Hunger Games', group: 'hollywood', collections: [131635] },
+  // Cartoons & animation
+  { slug: 'shinchan-movies', name: 'Shinchan', h1: 'Shinchan Movies List', group: 'kids', collections: [117354], tv: [30623] },
+  { slug: 'doraemon-movies', name: 'Doraemon', h1: 'Doraemon Movies List', group: 'kids', collections: [148065, 728776], tv: [57911, 65733] },
+  { slug: 'chhota-bheem-movies', name: 'Chhota Bheem', h1: 'Chhota Bheem Movies List', group: 'kids', collections: [1573972], tv: [32035] },
+  { slug: 'ben-10-movies', name: 'Ben 10', h1: 'Ben 10 Movies & Series in Order', group: 'kids', collections: [1596417, 781195], tv: [4686, 6040, 31109, 46922, 68295] },
+  { slug: 'motu-patlu-movies', name: 'Motu Patlu', h1: 'Motu Patlu Movies List', group: 'kids', collections: [1632008], tv: [70058] },
+  { slug: 'kung-fu-panda-all-parts', name: 'Kung Fu Panda', group: 'kids', collections: [77816] },
+  { slug: 'toy-story-all-parts', name: 'Toy Story', group: 'kids', collections: [10194] },
+  { slug: 'despicable-me-minions-in-order', name: 'Despicable Me & Minions', group: 'kids', collections: [86066, 544669] },
+  { slug: 'shrek-all-parts', name: 'Shrek', group: 'kids', collections: [2150] },
+  { slug: 'ice-age-all-parts', name: 'Ice Age', group: 'kids', collections: [8354] },
+  { slug: 'frozen-movies', name: 'Frozen', group: 'kids', collections: [386382] },
+  // Anime
+  { slug: 'naruto-movies-in-order', name: 'Naruto', h1: 'Naruto Movies & Series in Order', group: 'anime', collections: [23616], tv: [46260, 31910, 70881] },
+  { slug: 'pokemon-movies-in-order', name: 'Pokémon', h1: 'Pokémon Movies in Order', group: 'anime', collections: [34055], tv: [60572] },
+  { slug: 'dragon-ball-movies-in-order', name: 'Dragon Ball', h1: 'Dragon Ball Movies in Order', group: 'anime', collections: [386410, 425164, 620873] }
+];
+const FRANCHISE_BY_SLUG = Object.fromEntries(FRANCHISES.map((f) => [f.slug, f]));
+const FRANCHISE_GROUPS = { indian: 'Bollywood & South Indian', hollywood: 'Hollywood', kids: 'Cartoons & animation', anime: 'Anime' };
+const FRANCHISE_INDEX_PATH = '/collection';
+
+function franchisePath(f) { return FRANCHISE_INDEX_PATH + '/' + f.slug; }
+
+/**
+ * Fetches a franchise's parts. tmdb is the runtime's cached fetcher; catalog is
+ * the parsed collections-catalog.json (or null). Never throws: a failed
+ * collection just contributes nothing, and the page still renders.
+ */
+async function loadFranchise(f, tmdb, catalog) {
+  const movies = [];
+  const tv = [];
+  if (f.universe) {
+    const u = catalog && catalog.universes && catalog.universes[f.universe];
+    (u && u.movies || []).forEach((m) => movies.push(Object.assign({ media_type: 'movie' }, m)));
+    (u && u.tv || []).forEach((t) => tv.push(Object.assign({ media_type: 'tv' }, t)));
+  }
+  const parts = await Promise.all((f.collections || []).map((id) =>
+    tmdb('/collection/' + id, { language: 'en-US' }).then((d) => (d && d.parts) || [], () => [])));
+  parts.forEach((list) => list.forEach((p) => movies.push(Object.assign({ media_type: 'movie' }, p))));
+  const shows = await Promise.all((f.tv || []).map((id) =>
+    tmdb('/tv/' + id, { language: 'en-US' }).then((d) => d, () => null)));
+  shows.forEach((s) => { if (s && s.id) tv.push(Object.assign({ media_type: 'tv' }, s)); });
+
+  const seen = new Set();
+  const clean = (list) => list.filter((m) => {
+    if (!m || !m.id || !titleOf(m)) return false;
+    const k = (m.media_type || 'movie') + ':' + m.id;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  const byDate = (a, b) => String(a.release_date || a.first_air_date || '9999').localeCompare(String(b.release_date || b.first_air_date || '9999'));
+  return { movies: clean(movies).sort(byDate), tv: clean(tv).sort(byDate) };
+}
+
+function franchiseTitle(f, n) {
+  const base = f.h1 || (f.name + ' Movies in Order');
+  const count = n > 1 ? ': All ' + n + (/series|list/i.test(base) ? ' Movies' : ' Parts') : '';
+  const full = base + count + ' | ' + SITE_NAME;
+  return full.length <= 75 ? full : base + ' | ' + SITE_NAME;
+}
+
+function istTodayIso() {
+  return new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+function longDate(iso) {
+  if (!isCalendarDate(iso)) return '';
+  const d = new Date(iso + 'T00:00:00Z');
+  return d.getUTCDate() + ' ' + d.toLocaleString('en-GB', { month: 'long', timeZone: 'UTC' }) + ' ' + d.getUTCFullYear();
+}
+
+function firstSentence(text, max) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!t) return '';
+  const m = /^(.{40,}?[.!?])\s/.exec(t + ' ');
+  return truncate(m ? m[1] : t, max || 170);
+}
+
+function renderFranchisePage(f, data) {
+  const today = istTodayIso();
+  const movies = data.movies || [];
+  const tv = data.tv || [];
+  const released = movies.filter((m) => m.release_date && m.release_date <= today);
+  const upcoming = movies.filter((m) => !m.release_date || m.release_date > today);
+  const n = movies.length;
+  const short = f.short || f.name;
+  const h1 = f.h1 || (f.name + ' Movies in Order');
+  const years = released.map((m) => yearOf(m)).filter(Boolean);
+  const first = released[0];
+  const latest = released[released.length - 1];
+  const next = upcoming.find((m) => m.release_date);
+  const best = released.filter((m) => (m.vote_count || 0) >= 20 || m.vote_average)
+    .slice().sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0))[0];
+
+  const span = years.length ? (years[0] === years[years.length - 1] ? years[0] : years[0] + ' to ' + years[years.length - 1]) : '';
+  const lede = n
+    ? 'Every ' + short + ' movie in release order: ' + n + ' film' + (n === 1 ? '' : 's')
+      + (span ? ' from ' + span : '')
+      + (tv.length ? ', plus ' + tv.length + ' TV series' : '')
+      + '. Each title links to its page, where you can watch it in HD.'
+    : 'The ' + short + ' films and series in release order.';
+  const description = truncate(
+    (n ? 'All ' + n + ' ' + short + ' movies in order' : short + ' movies in order')
+    + (span ? ' (' + span + ')' : '')
+    + (tv.length ? ' plus ' + tv.length + ' TV series' : '')
+    + (latest ? '. Latest: ' + titleOf(latest) + '.' : '.')
+    + (next ? ' Next: ' + titleOf(next) + '.' : '')
+    + ' Watch online in HD on ' + SITE_NAME + '.', 158);
+
+  const items = movies.map((m, i) => {
+    const href = detailPath('movie', m);
+    const year = yearOf(m);
+    const rating = ratingOf(m);
+    const isNext = !m.release_date || m.release_date > today;
+    const when = isNext ? (m.release_date ? 'Releasing ' + longDate(m.release_date) : 'Release date not announced') : longDate(m.release_date);
+    return '<li class="fr-item">'
+      + '<span class="fr-n" aria-hidden="true">' + (i + 1) + '</span>'
+      + '<a class="fr-p" href="' + esc(href) + '" tabindex="-1" aria-hidden="true">'
+      + (m.poster_path ? '<img src="' + esc(IMG_POSTER + m.poster_path) + '" alt="" width="342" height="513" loading="lazy" decoding="async">' : '')
+      + '</a><div class="fr-b">'
+      + '<h3><a href="' + esc(href) + '">' + esc(titleOf(m)) + (year ? ' (' + esc(year) + ')' : '') + '</a></h3>'
+      + '<p class="fr-m">' + (rating ? '<span class="r">\u2605 ' + esc(rating) + '</span>' : '')
+      + (when ? '<span' + (isNext ? ' class="up"' : '') + '>' + esc(when) + '</span>' : '') + '</p>'
+      + (m.overview ? '<p class="fr-o">' + esc(firstSentence(m.overview)) + '</p>' : '')
+      + '</div></li>';
+  }).join('');
+
+  const facts = [];
+  if (n) facts.push(['Movies', String(n) + (upcoming.length ? ' (' + upcoming.length + ' upcoming)' : '')]);
+  if (tv.length) facts.push(['TV series', String(tv.length)]);
+  if (first) facts.push(['First', titleOf(first) + ' (' + yearOf(first) + ')']);
+  if (latest) facts.push(['Latest', titleOf(latest) + ' (' + yearOf(latest) + ')']);
+  if (next) facts.push(['Next', titleOf(next) + ' \u2014 ' + longDate(next.release_date)]);
+  if (best && ratingOf(best)) facts.push(['Highest rated', titleOf(best) + ' (\u2605 ' + ratingOf(best) + ')']);
+
+  const faq = [];
+  if (n) {
+    faq.push(['How many ' + short + ' movies are there?',
+      'There ' + (released.length === 1 ? 'is ' : 'are ') + released.length + ' released ' + short + ' movie' + (released.length === 1 ? '' : 's')
+      + (upcoming.length ? ', with ' + upcoming.length + ' more announced' : '') + (tv.length ? ', and ' + tv.length + ' TV series' : '') + '.']);
+    faq.push(['What is the correct order to watch ' + short + '?',
+      'In release order: ' + movies.map((m) => titleOf(m) + (yearOf(m) ? ' (' + yearOf(m) + ')' : '')).join(', ') + '.']);
+  }
+  if (latest) faq.push(['Which is the latest ' + short + ' movie?', titleOf(latest) + ', released on ' + longDate(latest.release_date) + '.']);
+  faq.push(['Is a new ' + short + ' movie coming?', next
+    ? 'Yes. ' + titleOf(next) + ' is scheduled for ' + longDate(next.release_date) + '.'
+    : upcoming.length ? 'Yes. ' + titleOf(upcoming[0]) + ' has been announced; the release date is not confirmed yet.'
+      : 'No new part has a confirmed release date yet. This page updates as soon as one is listed.']);
+  faq.push(['Where can I watch all ' + short + ' movies online?', 'Every title above links to its page on ' + SITE_NAME + ', where you can stream it free in HD.']);
+
+  const related = FRANCHISES.filter((x) => x.group === f.group && x.slug !== f.slug).slice(0, 14);
+  const others = FRANCHISES.filter((x) => x.group !== f.group).slice(0, 10);
+
+  const body = `
+<style>
+.fr-list{list-style:none;padding:0;margin:14px 0;display:grid;gap:12px}
+.fr-item{display:grid;grid-template-columns:28px 76px 1fr;gap:12px;align-items:start;background:#12121c;border:1px solid #23233a;border-radius:12px;padding:10px}
+.fr-n{font-weight:800;color:#f5c518;font-size:1.1rem;text-align:center;padding-top:4px}
+.fr-p img{width:76px;height:auto;border-radius:8px;display:block}
+.fr-b h3{margin:2px 0 4px;font-size:1rem}.fr-b h3 a{color:#fff;text-decoration:none}
+.fr-m{margin:0;display:flex;gap:10px;flex-wrap:wrap;font-size:.85rem;color:#9a9ab0}.fr-m .r{color:#f5c518}.fr-m .up{color:#4ade80}
+.fr-o{margin:6px 0 0;font-size:.88rem;color:#c4c4d4;line-height:1.45}
+.fr-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin:12px 0;padding:0;list-style:none}
+.fr-facts li{background:#12121c;border:1px solid #23233a;border-radius:10px;padding:8px 10px;font-size:.88rem}.fr-facts b{display:block;color:#9a9ab0;font-weight:600;font-size:.75rem;text-transform:uppercase;letter-spacing:.04em}
+</style>
+<div class="wrap">
+  <section style="margin-top:26px">
+    <h1>${esc(h1)}</h1>
+    <p class="lede">${esc(lede)}</p>
+    ${facts.length ? '<ul class="fr-facts">' + facts.map(([k, v]) => '<li><b>' + esc(k) + '</b>' + esc(v) + '</li>').join('') + '</ul>' : ''}
+  </section>
+
+  <section>
+    <h2>${esc(n ? 'All ' + n + ' ' + short + ' movies in release order' : short + ' movies')}</h2>
+    ${items ? '<ol class="fr-list">' + items + '</ol>' : '<div class="empty"><p>The list could not be loaded right now. Please try again in a moment.</p></div>'}
+  </section>
+
+  ${tv.length ? `<section>
+    <h2>${esc(short)} TV series</h2>
+    <ul class="grid">${tv.map((t) => renderCard(t, 'tv')).filter(Boolean).join('')}</ul>
+  </section>` : ''}
+
+  <section class="faq">
+    <h2>${esc(short)}: frequently asked questions</h2>
+    ${faq.map(([q, a]) => '<details><summary>' + esc(q) + '</summary><p>' + esc(a) + '</p></details>').join('')}
+  </section>
+
+  <section>
+    <h2>More ${esc(FRANCHISE_GROUPS[f.group] || '')} franchises in order</h2>
+    <ul class="pill-links">${related.map((x) => '<li><a href="' + esc(franchisePath(x)) + '">' + esc(x.h1 || x.name + ' movies in order') + '</a></li>').join('')}</ul>
+  </section>
+  <section>
+    <h2>Other franchises</h2>
+    <ul class="pill-links">${others.map((x) => '<li><a href="' + esc(franchisePath(x)) + '">' + esc(x.h1 || x.name + ' movies in order') + '</a></li>').join('')}
+      <li><a href="${FRANCHISE_INDEX_PATH}">All franchises</a></li></ul>
+  </section>
+</div>`;
+
+  const canonicalPath = franchisePath(f);
+  const itemList = {
+    '@context': 'https://schema.org',
+    '@type': 'ItemList',
+    name: h1,
+    itemListOrder: 'https://schema.org/ItemListOrderAscending',
+    numberOfItems: n,
+    itemListElement: movies.map((m, i) => ({ '@type': 'ListItem', position: i + 1, url: SITE_URL + detailPath('movie', m), name: titleOf(m) }))
+  };
+  const faqSchema = {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: faq.map(([q, a]) => ({ '@type': 'Question', name: q, acceptedAnswer: { '@type': 'Answer', text: a } }))
+  };
+  const heroImage = (latest || movies[0] || {}).backdrop_path;
+
+  return renderShell({
+    title: franchiseTitle(f, n),
+    description,
+    canonicalPath,
+    ogImage: heroImage ? IMG_OG + heroImage : OG_IMAGE,
+    schemas: [itemList, faqSchema],
+    breadcrumbs: [
+      { name: 'Home', path: '/' },
+      { name: 'Franchises', path: FRANCHISE_INDEX_PATH },
+      { name: h1 }
+    ],
+    body
+  });
+}
+
+/**
+ * A title that belongs to a franchise links to its "all parts in order" hub:
+ * Golmaal 3's page points at /collection/golmaal-all-parts. TMDB puts the
+ * collection on the movie record; series are matched by their tv id.
+ */
+function franchiseLinkFor(item, kind, title) {
+  const cid = item && item.belongs_to_collection && item.belongs_to_collection.id;
+  const f = FRANCHISES.find((x) => kind === 'tv'
+    ? (x.tv || []).indexOf(item.id) !== -1
+    : cid && (x.collections || []).indexOf(cid) !== -1);
+  if (!f) return '';
+  return '<section><h2>Part of ' + esc(f.short || f.name) + '</h2>'
+    + '<p class="lede">' + esc(title) + ' is part of the ' + esc(f.short || f.name) + ' series. '
+    + '<a href="' + esc(franchisePath(f)) + '">See ' + esc(f.h1 || 'all ' + f.name + ' movies in order') + '</a>, with every part, its year and rating.</p></section>';
+}
+
+/*  The homepage carries the 16 highest-demand hubs (India search volume, Oct
+    2026), not all of them: index.html is inside the first-paint byte budget,
+    and /collection is one hop away for the rest. */
+const HOME_FRANCHISES = ['marvel-movies-in-order', 'shinchan-movies', 'harry-potter-all-parts', 'fast-and-furious-all-parts',
+  'chhota-bheem-movies', 'doraemon-movies', 'ben-10-movies', 'motu-patlu-movies', 'mission-impossible-all-parts',
+  'conjuring-movies-in-order', 'dhamaal-all-parts', 'golmaal-all-parts', 'housefull-all-parts', 'hera-pheri-all-parts',
+  'baahubali-all-parts', 'kgf-all-parts'];
+
+/** The homepage link block's franchise section. */
+function homeFranchiseSection() {
+  return '<section class="mz-ssr-sec" aria-labelledby="mz-ssr-fr-h">'
+    + '<h2 id="mz-ssr-fr-h">Movie franchises in order</h2>'
+    + '<ul class="mz-ssr-cats">'
+    + HOME_FRANCHISES.map((slug) => FRANCHISE_BY_SLUG[slug]).filter(Boolean).map((f) => '<li><a href="' + esc(franchisePath(f)) + '">' + esc(f.h1 || f.name + ' movies in order') + '</a></li>').join('')
+    + '<li><a href="' + FRANCHISE_INDEX_PATH + '">All franchises</a></li></ul></section>';
+}
+
+function renderFranchiseIndex() {
+  const groups = Object.keys(FRANCHISE_GROUPS).map((g) => {
+    const list = FRANCHISES.filter((f) => f.group === g);
+    return '<section><h2>' + esc(FRANCHISE_GROUPS[g]) + '</h2><ul class="pill-links">'
+      + list.map((f) => '<li><a href="' + esc(franchisePath(f)) + '">' + esc(f.h1 || f.name + ' movies in order') + '</a></li>').join('')
+      + '</ul></section>';
+  }).join('');
+  const body = `
+<div class="wrap">
+  <section style="margin-top:26px">
+    <h1>Movie Franchises &amp; Series in Order</h1>
+    <p class="lede">Every part of ${FRANCHISES.length} film franchises and cartoon series in release order: Golmaal, Housefull, Marvel, Harry Potter, Shinchan, Doraemon, Chhota Bheem, Ben 10 and more. Open one to see each film with its year, rating and where to watch it.</p>
+  </section>
+  ${groups}
+</div>`;
+  return renderShell({
+    title: 'Movie Franchises in Order: All Parts Lists | ' + SITE_NAME,
+    description: truncate('All parts in order for ' + FRANCHISES.length + ' franchises: Golmaal, Housefull, Marvel, Harry Potter, Shinchan, Doraemon, Chhota Bheem, Ben 10 and more, with years and ratings.', 158),
+    canonicalPath: FRANCHISE_INDEX_PATH,
+    ogImage: OG_IMAGE,
+    schemas: [{
+      '@context': 'https://schema.org',
+      '@type': 'CollectionPage',
+      name: 'Movie franchises in order',
+      url: SITE_URL + FRANCHISE_INDEX_PATH,
+      isPartOf: { '@type': 'WebSite', name: SITE_NAME, url: SITE_URL + '/' }
+    }],
+    breadcrumbs: [{ name: 'Home', path: '/' }, { name: 'Franchises' }],
+    body
+  });
+}
+
 module.exports = {
   registerSeoRoutes,
+  // Franchise hubs, shared with worker.js.
+  FRANCHISES,
+  FRANCHISE_BY_SLUG,
+  FRANCHISE_INDEX_PATH,
+  franchisePath,
+  loadFranchise,
+  renderFranchisePage,
+  renderFranchiseIndex,
+  homeFranchiseSection,
+  // Shared with worker.js so both runtimes fetch the same "new this month" rail.
+  ottLatestParams,
   registerHomeSsr,
   renderBrowseIndexPage,
   renderWatchPage,

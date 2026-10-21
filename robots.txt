@@ -19,15 +19,8 @@
 # AND RELATED RIGHTS IN THE DIGITAL SINGLE MARKET.
 
 # ── Everyone else ──────────────────────────────────────────────────────────
-# One group for User-agent: * instead of two. Two separate "*" groups is legal
-# but fragile — crawlers differ on whether they merge them or honour only the
-# first, and the rules below are the ones that actually matter.
-#
-# No Crawl-delay. Google ignores it, but Bing and Yandex obey it, and at one
-# request per second a 1,200-page catalogue takes 20+ minutes of continuous
-# crawling to get through. There is no reason to throttle them.
-User-agent: *
-Content-Signal: search=yes,ai-train=no,use=reference
+# One group for User-agent: *
+Content-Signal: search=yes,ai-input=yes,ai-train=yes
 Allow: /
 Disallow: /api/
 Disallow: /sw.js
@@ -36,37 +29,45 @@ Disallow: /sw.js
 Disallow: /*?search=
 Disallow: /*&search=
 
-# ── AI crawlers ────────────────────────────────────────────────────────────
-User-agent: Amazonbot
-Disallow: /
-
+# ── AI assistants and AI search ─────────────────────────────────────────────
+# Allowed on purpose (Oct 2026). These are the crawlers behind ChatGPT search,
+# Claude, Perplexity, Gemini, Apple Intelligence, Meta AI, Copilot and the
+# Common Crawl corpus most models read. A site they cannot fetch is a site they
+# cannot recommend when someone asks "where can I watch movies free". Each
+# gets the same rules as everyone else; /llms.txt is their summary of the site.
+#
+# NOTE: Cloudflare's "Block AI bots" / AI Crawl Control setting answers GPTBot
+# and ClaudeBot with 403 at the edge before this file is ever read. It must be
+# switched off in the Cloudflare dashboard for these lines to take effect.
+User-agent: GPTBot
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: ClaudeBot
+User-agent: Claude-SearchBot
+User-agent: Claude-User
+User-agent: PerplexityBot
+User-agent: Perplexity-User
+User-agent: Google-Extended
 User-agent: Applebot-Extended
-Disallow: /
+User-agent: meta-externalagent
+User-agent: Amazonbot
+User-agent: CCBot
+User-agent: DuckAssistBot
+User-agent: MistralAI-User
+Allow: /
+Disallow: /api/
+Disallow: /sw.js
+# Search result URLs are an unbounded duplicate space. The homepage also
+# serves these with a noindex tag; this keeps them out of the crawl entirely.
+Disallow: /*?search=
+Disallow: /*&search=
 
+# Aggressive scrapers that ignore crawl budgets and send no visitors back.
 User-agent: Bytespider
 Disallow: /
 
-User-agent: CCBot
-Disallow: /
-
-User-agent: ClaudeBot
-Disallow: /
-
-User-agent: CloudflareBrowserRenderingCrawler
-Disallow: /
-
-User-agent: Google-Extended
-Disallow: /
-
-User-agent: GPTBot
-Disallow: /
-
-User-agent: meta-externalagent
-Disallow: /
-
-# Paginated category URLs are intentionally crawlable: each one carries a
-# rel=canonical and its own description, so Google can resolve duplicates
-# itself. Blocking them here would hide those signals instead.
+# Paginated category URLs stay crawlable so their links are followed, but page
+# 2+ answers "noindex, follow": blocking them here would hide the links too.
 
 # Sitemap index — lists the static, browse, movie and series child sitemaps
 Sitemap: https://moviezone.dev/sitemap.xml

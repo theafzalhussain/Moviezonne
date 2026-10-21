@@ -143,6 +143,8 @@
       "/tv/*",
       "/browse",
       "/browse/*",
+      "/collection",
+      "/collection/*",
       "/sitemap.xml",
       "/sitemap-*"
     ]

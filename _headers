@@ -36,6 +36,20 @@
 /downloads.js
   Cache-Control: public, max-age=31536000, immutable
 
+/mz-extras.js
+  Cache-Control: public, max-age=31536000, immutable
+
+/search-plus.js
+  Cache-Control: public, max-age=31536000, immutable
+
+/llms.txt
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: public, max-age=86400
+
+# Rebuilt daily by the SEO refresh workflow, so NOT immutable and not sealed.
+/search-vocab.json
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+
 /collections-catalog.json
   Cache-Control: public, max-age=31536000, immutable
 

@@ -9615,7 +9615,10 @@ async function loadMovies(cat, isLoadMore = false) {
     const tail = allMovies.slice(firstPaintCount, MZ_FEED_PAGE_SIZE);
     renderMovies(head, false);
     if (tail.length) {
-      const paintTail = () => renderMovies(tail, true);
+      // The tail is painted on idle. If a search (or anything else) repainted
+      // the grid meanwhile, it must not be appended under those results.
+      const headRun = renderMoviesRunId;
+      const paintTail = () => { if (renderMoviesRunId === headRun && !isSearchResultsMode) renderMovies(tail, true); };
       if ('requestIdleCallback' in window) requestIdleCallback(paintTail, { timeout: 1500 });
       else setTimeout(paintTail, 300);
     }
@@ -9864,7 +9867,7 @@ function renderMovies(movies, append = false) {
           `<img src="${IMG}${m.poster_path}"` +
             ` srcset="${mzPosterSrcset(m.poster_path)}"` +
             ` sizes="(max-width: 600px) 45vw, (max-width: 1200px) 200px, 230px"` +
-            ` alt="${escapeHTML(m.title||'')}" width="171" height="256"` +
+            ` alt="${escapeHTML(m.title||m.name||'')}" width="171" height="256"` +
             /*  Every grid poster is lazy now, including the first row.
              *
              *  They used to be eager for the first six, justified as
@@ -10419,7 +10422,8 @@ function renderCurrentFeedPage() {
   renderMovies(slice.slice(0, firstPaint), false);
   const tail = slice.slice(firstPaint);
   if (tail.length) {
-    const paintTail = () => renderMovies(tail, true);
+    const headRun = renderMoviesRunId;
+    const paintTail = () => { if (renderMoviesRunId === headRun && !isSearchResultsMode) renderMovies(tail, true); };
     if ('requestIdleCallback' in window) requestIdleCallback(paintTail, { timeout: 1500 });
     else setTimeout(paintTail, 300);
   }
@@ -11256,6 +11260,7 @@ if (searchInput) {
 
   // Re-open the last suggestions when the user comes back to a filled box.
   searchInput.addEventListener('focus', () => {
+    mzSearchPlus();
     const query = searchInput.value.trim();
     toggleSearchClear(query.length > 0);
     if (query.length < SEARCH_MIN_CHARS) return;
@@ -11434,6 +11439,25 @@ const SEARCH_POSTER_FALLBACK = 'data:image/svg+xml,<svg xmlns=%22http://www.w3.o
  *   /search/multi  (actor & mixed matches)
  * Everything is then re-ranked by the Fuse.js-compatible fuzzy engine.
  */
+/*  search-plus.js (typo recall, franchise + related results) is loaded the
+    first time the search box is focused, never on the critical path. Search
+    works without it; a slow or failed load just means plain search. */
+let _mzPlusP = null;
+function mzSearchPlus() {
+  if (window.MZSearchPlus) return Promise.resolve(window.MZSearchPlus);
+  if (!_mzPlusP) {
+    _mzPlusP = new Promise(res => {
+      const s = document.createElement('script');
+      s.src = '/search-plus.js?v=1';
+      s.async = true;
+      s.onload = () => res(window.MZSearchPlus || null);
+      s.onerror = () => { _mzPlusP = null; res(null); };
+      document.head.appendChild(s);
+    });
+  }
+  return Promise.race([_mzPlusP, new Promise(r => setTimeout(() => r(null), 2500))]);
+}
+
 async function intelligentMovieSearch(query, limit = 20, signal = null) {
   const engine = searchEngineApi();
   const cacheKey = (engine?.normalizeSearchText(query) || query.toLowerCase()) + '|' + limit;
@@ -11446,10 +11470,15 @@ async function intelligentMovieSearch(query, limit = 20, signal = null) {
 
   const searchQuery = aliasQuery && aliasQuery !== normalizedQuery ? aliasQuery : query;
   let searchResults = [];
+  const plus = await mzSearchPlus();
+  // TMDB does no typo correction ("housful" -> 0 results), so the corrected
+  // spelling is searched alongside what was typed and both are ranked.
+  const fixedRaw = plus ? await plus.correct(query).catch(() => '') : '';
 
   try {
-    const response = await tmdb('/search/multi', { ...baseParams, query: searchQuery }, { signal });
-    searchResults = response.results || [];
+    const runQ = q => tmdb('/search/multi', { ...baseParams, query: q }).then(r => r.results || []);
+    const lists = await Promise.all([runQ(searchQuery)].concat(fixedRaw ? [runQ(fixedRaw)] : []));
+    searchResults = [].concat(...lists);
   } catch (error) {
     if (error && error.name === 'AbortError') throw error;
     console.warn('[MovieZone] Search request failed:', error);
@@ -11473,18 +11502,30 @@ async function intelligentMovieSearch(query, limit = 20, signal = null) {
   }
 
   const rankedPeople = engine.rankSearchCandidates(query, directPeople, 5);
-  const personMedia = expandPersonResults(rankedPeople);
+  const bestPerson = rankedPeople[0];
+  // Only the actor the query names (and namesakes nearly as well known) feed
+  // their films in; a little-known namesake's credits were topping the list.
+  const personMedia = expandPersonResults(rankedPeople.filter(p => p === bestPerson || (p.popularity || 0) >= (bestPerson.popularity || 0) / 3));
   let pool = directMedia.concat(personMedia);
   let ranked = engine.rankSearchCandidates(query, pool, Math.max(limit * 3, 30));
+  // Without search-plus, any strong name match counts as an actor search (the
+  // old behaviour); with it, only a query that IS the person's name does.
+  const personFound = plus ? plus.isPerson(query, bestPerson, ranked) : !!(bestPerson && bestPerson._searchScore >= 700);
+  let fixed = fixedRaw;
+  if (fixed && plus.useFix(query, ranked, personFound)) {
+    ranked = plus.merge(ranked, engine.rankSearchCandidates(fixed, pool, Math.max(limit * 3, 30)));
+  } else fixed = '';
+  if (plus) ranked = plus.strict(plus.order(ranked, query, personFound), query, fixed, personFound);
   let correction = engine.getCorrection(query, ranked);
 
-  const bestPerson = rankedPeople[0];
-  if (bestPerson && bestPerson._searchScore >= 700) correction = bestPerson.name;
+  if (plus) correction = plus.correction(query, correction);
+  if (personFound) correction = bestPerson.name;
 
   ranked.forEach(item => {
     if (item._matchedPerson) item._matchQuality = 'With ' + item._matchedPerson;
   });
-  const value = { results: ranked.slice(0, limit), correction };
+  const person = personFound ? bestPerson : null;
+  const value = { results: ranked.slice(0, limit), correction, fixed, person };
   intelligentSearchCache.set(cacheKey, { savedAt: Date.now(), value });
   return value;
 }
@@ -11626,6 +11667,9 @@ async function searchAndDisplay(query) {
   if (!grid) return;
   const signal = beginSearchRequest();
   isSearchResultsMode = true;
+  // Any feed load still in flight is now stale: it must not repaint or append
+  // to the grid underneath the search results.
+  _mzFeedLoadGeneration++;
   document.querySelectorAll('.cat-tab').forEach(t => t.classList.remove('active'));
   const scrollTrigger = document.getElementById('infiniteScrollTrigger');
   if (scrollTrigger) scrollTrigger.style.display = 'none';
@@ -11650,7 +11694,12 @@ async function searchAndDisplay(query) {
 
   try {
     const search = await intelligentMovieSearch(query, 40, signal);
-    const movies = search.results.filter(item => item.poster_path && item.media_type !== 'person');
+    let movies = search.results.filter(item => item.poster_path && item.media_type !== 'person');
+    // Only the searched title and its official franchise (every Housefull,
+    // every Ben 10); off-topic matches and fan uploads are dropped.
+    const plus = window.MZSearchPlus;
+    if (plus && movies.length) movies = await plus.franchise(query, search.fixed, movies, tmdb, search.person).catch(() => movies);
+    if (signal && signal.aborted) return;
     allMovies = movies;
     if (heading) heading.textContent = searchHeadingText(query);
     /*  The banner shows the query and nothing else. It used to carry a result
@@ -11668,7 +11717,11 @@ async function searchAndDisplay(query) {
     // Keeps the page title aligned with what the user is actually looking at.
     try { document.title = query.trim() + ' – Search results | MovieZone'; } catch (e) {}
     if (movies.length) renderMovies(movies);
-    else grid.innerHTML = '<div class="search-grid-empty"><strong>No close matches found</strong><span>Try a title fragment, actor name, or check the spelling.</span></div>';
+    else {
+      grid.innerHTML = '<div class="search-grid-empty"><strong>No close matches found</strong><span>Try a title fragment, actor name, or check the spelling.</span></div>';
+      // The feed's page numbers must not stay under an empty search.
+      renderFeedPager();
+    }
   } catch (error) {
     if (error && error.name === 'AbortError') return;
     console.warn('[MovieZone] Search page failed:', error);
