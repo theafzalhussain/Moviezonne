@@ -207,6 +207,10 @@
 // timer running, freeze the page every few seconds and stop the next Play from
 // loading the player. Player progress messages persist every 15s instead of on
 // every message. The server list follows the requested order. No layout reads
+// v172: moviezone.min.js 16.8 - the Playback Servers grid now renders in the
+// exact declared order of playerSources (the is4K/anime partition that floated
+// 4K/anime chips to the front was removed in renderExternalSources), so the chip
+// sequence matches the requested order 1:1. No server, badge or URL changed.
 // on the init path (matchMedia replaces innerHeight, which lays out the page on
 // phones), no ICU load for the hero's language label, and Top 10 posters ask for
 // w342 instead of w500 on 360px phones. The aha / SonyLIV / JioHotstar /
@@ -230,7 +234,7 @@
 // v171: moviezone.min.css?v=9.26 (no search clear button on phones) and
 // mz-extras.js?v=3 (mobile Continue Watching layout, English voice prompts,
 // compact Top 10 chip).
-const CACHE_NAME = 'moviezone-v171';
+const CACHE_NAME = 'moviezone-v173';
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
  *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream
@@ -405,7 +409,7 @@ const STATIC_ASSETS = [
   '/moviezone.min.css?v=9.26',
   '/tv-mode.min.js?v=2.0',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=16.7',
+  '/moviezone.min.js?v=16.9',
   '/manifest.json',
   '/icon-192.png?v=2',
   '/favicon-32.png?v=2',

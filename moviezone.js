@@ -13172,7 +13172,7 @@ const playerSources = [
 
   // S15 — moviesnexus.fun, Olly's "Nexus" on its vidara source: 1920x1080 on every
   // title measured, and the fastest of the three to a first frame (~8-20s).
-  { name: 'Nexus FHD', dubbed: true, url: (id, lang, type, s, e) => {
+  { name: 'Nexus 4K', dubbed: true, is4K: true, anime: true, url: (id, lang, type, s, e) => {
     return type === 'tv'
       ? `https://www.moviesnexus.fun/tv/${id}/${s}/${e}?sv=vidara`
       : `https://www.moviesnexus.fun/movie/${id}?sv=vidara`;
@@ -13213,21 +13213,21 @@ const playerSources = [
         : `https://ollyembed.pages.dev/movie/${id}?server=Hindi`;
     }},
 
-  // S12 — nxsha.screenscape.me, Olly's "Phantom": one embed resolving across ~18
-  // upstreams (Sealx, Nitro, HINDI, Tamil, 4KELITE ...). Olly keys it on IMDb; the
-  // provider documents `tmdb=` as well, which is the id this app always has.
-  { name: 'Phantom Multi', dubbed: true, url: (id, lang, type, s, e) => {
-    return type === 'tv'
-      ? `https://nxsha.screenscape.me/embed?tmdb=${id}&type=tv&s=${s}&e=${e}`
-      : `https://nxsha.screenscape.me/embed?tmdb=${id}&type=movie`;
-  }},
   // S2 — nxsha.space, Olly's "Hindi v2": a Nitro multi-audio source with a Hindi
   // track, plus its own Audio / Subtitles / Quality menus. `lang=hi` is the
   // parameter Olly ships it with.
-  { name: 'Nitro Hindi', dubbed: true, url: (id, lang, type, s, e) => {
+  { name: 'Nitro Hindi', dubbed: true, is4K: true, anime: true, url: (id, lang, type, s, e) => {
     return type === 'tv'
       ? `https://nxsha.space/embed/tv/${id}/${s}/${e}?lang=hi`
       : `https://nxsha.space/embed/movie/${id}?lang=hi`;
+  }},
+  // S12 — nxsha.screenscape.me, Olly's "Phantom": one embed resolving across ~18
+  // upstreams (Sealx, Nitro, HINDI, Tamil, 4KELITE ...). Olly keys it on IMDb; the
+  // provider documents `tmdb=` as well, which is the id this app always has.
+  { name: 'Phantom Multi', dubbed: true, is4K: true, url: (id, lang, type, s, e) => {
+    return type === 'tv'
+      ? `https://nxsha.screenscape.me/embed?tmdb=${id}&type=tv&s=${s}&e=${e}`
+      : `https://nxsha.screenscape.me/embed?tmdb=${id}&type=movie`;
   }},
 
   // 🌸 ANIME SPECIALIST: AnimePahe mirror — purane/long-running anime & cartoons ke liye best
@@ -13521,16 +13521,11 @@ function renderExternalSources(id, srcIdx, lang) {
    *  stays the one asked for. buildServerCard's tooltip is likewise untouched and
    *  still says "Hindi Dubbed + Multi-Audio" for them rather than claiming 4K.
    */
-  const premium4K = [];
-  const hdStreams = [];
-
-  playerSources.forEach((s, i) => {
-    const serverData = { ...s, _idx: i };
-    if (s.is4K || s.anime) { premium4K.push(serverData); }
-    else { hdStreams.push(serverData); }
-  });
-
-  const allServers = premium4K.concat(hdStreams);
+  /*  Chips are rendered in the exact declared order of `playerSources` (no
+   *  is4K/anime partition), so the on-screen sequence matches the array 1:1.
+   *  `_idx` is still the true declared index, so playback/active-chip logic is
+   *  unaffected — only the visual order follows the array now. */
+  const allServers = playerSources.map((s, i) => ({ ...s, _idx: i }));
 
   function buildServerCard(s) {
     const tip = s.anime
