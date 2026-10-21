@@ -350,3 +350,119 @@
       0 12px 26px -16px rgba(0, 0, 0, .8);
   }
 }
+
+
+/*  ══════════════════════════════════════════════════════════════════════════
+ *  CARTOON PROVIDERS — the kids rail under Top Providers
+ *  ══════════════════════════════════════════════════════════════════════════
+ *  Reuses every .provider-card rule above (geometry, brand glow via --pv,
+ *  hover lift, focus ring, phone resting state, reduced motion), so the two
+ *  rails read as one family. Only two things are new here:
+ *    • a warmer, sunnier heading and hairline, so the section reads as "kids"
+ *      without leaving the site's dark cinematic palette;
+ *    • per-brand logo sizing. CN, Disney and DreamWorks ship dark marks; their
+ *      SVGs are recoloured white in the FILE rather than with a CSS filter,
+ *      because .low-end-mode strips every filter and they would turn black. */
+/*  Sits directly under Top Providers, so it takes less top padding and the two
+ *  rails read as one group. Height is unchanged: moviezone.css reserves the
+ *  same min-height for every .providers-section, so nothing below can shift. */
+.cartoon-providers { padding-top: 1.5rem; }
+/*  Five tiles fill the row on wide screens instead of leaving a dead right
+ *  half; below that they keep the Top Providers basis and scroll. */
+@media (min-width: 1100px) {
+  #cartoonProvidersRail > li { flex: 1 1 0; max-width: 300px; }
+}
+.cartoon-providers .providers-heading {
+  background-image: linear-gradient(176deg, #ffffff 0%, #fff4cf 58%, #ffd66b 118%);
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, .35)) drop-shadow(0 3px 20px rgba(255, 196, 0, .2));
+}
+.cartoon-providers .providers-heading::before {
+  background: linear-gradient(180deg, #ffd23f 0%, #ff8a3d 55%, #3ec6ff 100%);
+  box-shadow: 0 0 14px rgba(255, 196, 0, .35);
+  animation-name: cartoonBarPulse;
+}
+@keyframes cartoonBarPulse {
+  0%, 100% { box-shadow: 0 0 12px rgba(255, 196, 0, .28); }
+  50%      { box-shadow: 0 0 22px rgba(62, 198, 255, .45); }
+}
+.cartoon-providers .providers-header > div:first-child::after {
+  background: linear-gradient(90deg, rgba(255, 196, 0, .5), rgba(62, 198, 255, .22) 35%, rgba(255, 255, 255, .06) 60%, transparent);
+}
+.cartoon-providers-badge {
+  flex: none;
+  padding: .28rem .7rem;
+  border: 1px solid rgba(255, 196, 0, .32);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 196, 0, .14), rgba(255, 138, 61, .08));
+  color: #ffe08a;
+  font: 650 11px/1 'Outfit', sans-serif;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/*  Logo-only tiles, exactly like Top Providers: the logo sits dead centre of
+ *  the card (the base .provider-card is a centred grid). Heights are per brand
+ *  because the marks have very different aspect ratios — Nickelodeon is a 7:1
+ *  wordmark, so it gets width rather than height. */
+.cartoon-card .provider-logo { height: 100%; }
+.cartoon-card .provider-logo img { height: 64px; max-width: 168px; }
+
+#cartoon-providers [data-cartoon-mode="disney"]     { --pv: 30, 120, 255; }
+#cartoon-providers [data-cartoon-mode="cn"]         { --pv: 236, 236, 242; }
+#cartoon-providers [data-cartoon-mode="nick"]       { --pv: 255, 121, 0; }
+#cartoon-providers [data-cartoon-mode="dreamworks"] { --pv: 80, 160, 255; }
+#cartoon-providers [data-cartoon-mode="desi"]       { --pv: 255, 196, 0; }
+
+.cartoon-card .provider-logo--ccn img { height: 62px; }
+.cartoon-card .provider-logo--cdw img { height: 70px; }
+.cartoon-card .provider-logo--cnick img { height: 30px; max-width: 178px; }
+.cartoon-card .provider-logo--cpogo img { height: 52px; max-width: 160px; border-radius: 4px; }
+
+@media (max-width: 600px) {
+  .cartoon-providers { padding-top: .9rem; }
+  .cartoon-providers-badge { padding: .24rem .55rem; font-size: 10px; }
+  .cartoon-card .provider-logo img { height: 54px; max-width: 142px; }
+  .cartoon-card .provider-logo--ccn img { height: 52px; }
+  .cartoon-card .provider-logo--cdw img { height: 58px; }
+  .cartoon-card .provider-logo--cnick img { height: 24px; max-width: 146px; }
+  .cartoon-card .provider-logo--cpogo img { height: 44px; max-width: 134px; }
+}
+/*  Below ~520px the heading, the badge and the two arrows cannot share one row:
+ *  the badge slid under the arrows. The heading already says it. */
+@media (max-width: 520px) {
+  .cartoon-providers-badge { display: none; }
+}
+
+/*  ── Cartoons tab chip icons ──
+ *  Monochrome SVG masks painted in the chip's own text colour, replacing emoji
+ *  that Smart TVs, Windows (flags) and older systems (Emoji 12) drew as empty
+ *  boxes. Here rather than in moviezone.css because the chip bar only exists
+ *  after the visitor opens Cartoons, long after this deferred sheet has loaded,
+ *  so the icons cost the first paint nothing. Without mask or custom-property
+ *  support the icon is simply omitted — never a solid square. */
+.cz-i { display: none; }
+@supports ((-webkit-mask-size: contain) or (mask-size: contain)) and (--cz: 0) {
+  .cz-i {
+    display: inline-block;
+    flex: none;
+    width: 15px; height: 15px;
+    background-color: currentColor;
+    -webkit-mask: var(--cz-i) center / contain no-repeat;
+            mask: var(--cz-i) center / contain no-repeat;
+  }
+}
+.cz-i-all{--cz-i:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='13.5' cy='6.5' r='1.5'/%3E%3Ccircle cx='17.5' cy='10.5' r='1.5'/%3E%3Ccircle cx='8.5' cy='7.5' r='1.5'/%3E%3Ccircle cx='6.5' cy='12.5' r='1.5'/%3E%3Cpath d='M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.6-.75 1.6-1.69 0-.44-.18-.84-.44-1.13-.29-.29-.44-.65-.44-1.13a1.64 1.64 0 0 1 1.67-1.67h2c3.05 0 5.56-2.5 5.56-5.55C21.97 6.01 17.46 2 12 2z'/%3E%3C/svg%3E")}
+.cz-i-trending{--cz-i:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z'/%3E%3C/svg%3E")}
+.cz-i-legends{--cz-i:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8l3.5 10h11L21 8l-5 3.5L12 5l-4 6.5z'/%3E%3Cpath d='M6 21h12'/%3E%3C/svg%3E")}
+.cz-i-hindi{--cz-i:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 8 6 6'/%3E%3Cpath d='m4 14 6-6 2-3'/%3E%3Cpath d='M2 5h12'/%3E%3Cpath d='M7 2h1'/%3E%3Cpath d='m22 22-5-10-5 10'/%3E%3Cpath d='M14 18h6'/%3E%3C/svg%3E")}
+.cz-i-japanese{--cz-i:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9'/%3E%3Cpath d='M10.3 21a1.94 1.94 0 0 0 3.4 0'/%3E%3C/svg%3E")}
+.cz-i-series{--cz-i:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='7' width='20' height='15' rx='2'/%3E%3Cpath d='m17 2-5 5-5-5'/%3E%3C/svg%3E")}
+.cz-i-movies{--cz-i:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='2' width='20' height='20' rx='2.2'/%3E%3Cpath d='M7 2v20M17 2v20M2 12h20M2 7h5M2 17h5M17 17h5M17 7h5'/%3E%3C/svg%3E")}
+.cz-i-cn{--cz-i:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='8' height='8' rx='1.5' fill='%23000'/%3E%3Crect x='13' y='3' width='8' height='8' rx='1.5'/%3E%3Crect x='3' y='13' width='8' height='8' rx='1.5'/%3E%3Crect x='13' y='13' width='8' height='8' rx='1.5' fill='%23000'/%3E%3C/svg%3E")}
+.cz-i-nick{--cz-i:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath fill='%23000' stroke='none' d='M12 2.5c1.9 0 2.4 1.9 3.9 2.4s3.4-.6 4 1.3-1.3 2.9-.9 4.4 2.1 2.8.7 4.3-3.4 0-4.4 1.5-1.4 3.1-3.3 3.1-2.1-1.8-3.5-2.4-3.4.4-4.3-1.1 1-2.9.6-4.4S1.6 9.3 3 7.9s3.4-.4 4.6-1.7S10.1 2.5 12 2.5z'/%3E%3C/svg%3E")}
+.cz-i-disney{--cz-i:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 21V11l2-1.5L7 11V7l2-1.5L11 7V4l1-2 1 2v3l2-1.5L17 7v4l2-1.5 2 1.5v10z'/%3E%3Cpath d='M10 21v-3.5a2 2 0 0 1 4 0V21'/%3E%3C/svg%3E")}
+.cz-i-dreamworks{--cz-i:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z'/%3E%3Cpath d='M17 4.5l.5 1 1 .5-1 .5-.5 1-.5-1-1-.5 1-.5z'/%3E%3C/svg%3E")}
+.cz-i-desi{--cz-i:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2l7 7-7 7-7-7z'/%3E%3Cpath d='M12 2v14M5 9h14'/%3E%3Cpath d='M12 16c-1.5 1.8 1.5 3.2 0 5.5'/%3E%3C/svg%3E")}
+.cz-i-superhero{--cz-i:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'/%3E%3Cpath d='M13 7l-3 5h4l-3 5'/%3E%3C/svg%3E")}
+.cz-i-latest{--cz-i:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z'/%3E%3Cpath d='M19 3v4M17 5h4M5 17v4M3 19h4'/%3E%3C/svg%3E")}

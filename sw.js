@@ -213,7 +213,14 @@
 // ShemarooMe logos were re-encoded at their displayed size (218 KB -> 43 KB);
 // their URLs carry no ?v=, so this rename is what makes returning clients
 // re-download them.
-const CACHE_NAME = 'moviezone-v167';
+// v168: moviezone.min.js 16.7 + providers.css 12 + moviezone.min.css 9.25 (the
+// 395b7be CSS change shipped under the old 9.24, so returning clients kept the
+// stale file) - a "Cartoon Providers" rail
+// (Disney, Cartoon Network, Nickelodeon, DreamWorks, Desi Toons) under Top
+// Providers. Each card opens the Cartoons tab scoped to that brand's TMDB
+// networks / studios only. Five official logos as local SVGs (~30 KB total),
+// precached opportunistically like the Top Providers logos.
+const CACHE_NAME = 'moviezone-v168';
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
  *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream
@@ -385,10 +392,10 @@ const STATIC_ASSETS = [
    *  instead of the shell. '/' is the same document, answered 200 directly. */
   '/',
   '/tv-mode.min.css?v=1.6',
-  '/moviezone.min.css?v=9.24',
+  '/moviezone.min.css?v=9.25',
   '/tv-mode.min.js?v=2.0',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=16.6',
+  '/moviezone.min.js?v=16.7',
   '/manifest.json',
   '/icon-192.png?v=2',
   '/favicon-32.png?v=2',
@@ -407,7 +414,7 @@ const OPTIONAL_ASSETS = [
   // to sit in front of a first paint. 275 KB between them.
   '/icon-512.png?v=2',
   '/apple-touch-icon.png?v=2',
-  '/providers.css?v=11',
+  '/providers.css?v=12',
   '/provider-netflix.svg',
   '/provider-prime.svg',
   '/provider-jiohotstar.png',
@@ -422,6 +429,11 @@ const OPTIONAL_ASSETS = [
   '/provider-discoveryplus.png',
   '/provider-shemaroo.png',
   '/provider-vi.png',
+  '/cartoon-disney.svg',
+  '/cartoon-cn.svg',
+  '/cartoon-nick.svg',
+  '/cartoon-dreamworks.svg',
+  '/cartoon-pogo.svg',
   '/collections-catalog.json?v=4',
   // The Cinematic Universe rail on the homepage. Both are optional for the same
   // reason the catalogue above is: the row is below the fold and built lazily, so

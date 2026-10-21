@@ -8607,12 +8607,44 @@ const CARTOON_GENRE_FAMILY    = '10751';
 // 56/4945 Cartoon Network, 13/8053 Nickelodeon, 54 Disney Channel, 44 Disney XD,
 // 523/8726 Boomerang, 1439 Pogo, 6622 Discovery Kids, 103 tv asahi
 // (Doraemon/Shin Chan/Ninja Hattori), 2854 ABC Kids, 15 CBBC, 112 CITV, 2638 Gulli.
-const CARTOON_NET_ALL    = '56|4945|13|8053|54|44|523|8726|1439|6622|103|2854|15|112|2638';
-const CARTOON_NET_CN     = '56|4945|523|8726';
-const CARTOON_NET_NICK   = '13|8053';
-const CARTOON_NET_DISNEY = '54|44';
-const CARTOON_NET_INDIA  = '4945|8053|1439|6622';
+// Oct 2026: 281 Disney Junior, 35 Nick Jr., 9012 Nickelodeon Sonic (IN) aur
+// 5619 Sony YAY! (IN) add kiye. Chaaron /network/<id> par live verify kiye gaye
+// aur Honey Bunny Ka Jholmaal (5619) / Shiva (9012) jaise shows se cross-check.
+const CARTOON_NET_ALL    = '56|4945|13|8053|9012|35|54|44|281|523|8726|1439|5619|6622|103|2854|15|112|2638';
+// Sirf Cartoon Network (56 US, 4945 India). Boomerang (523/8726) alag brand
+// hai, isliye CN card me nahi — wo CARTOON_NET_ALL ke through Cartoons tab me hai.
+const CARTOON_NET_CN     = '56|4945';
+const CARTOON_NET_NICK   = '13|8053|9012|35';
+const CARTOON_NET_DISNEY = '54|44|281';
+const CARTOON_NET_INDIA  = '4945|8053|9012|1439|5619|6622';
 const CARTOON_NET_JAPAN  = '103';
+
+/*  ── CARTOON PROVIDERS (homepage "Cartoon Providers" rail) ──
+ *
+ *  Cartoon brands TMDB par watch PROVIDERS nahi, TV NETWORKS aur film STUDIOS
+ *  hain, isliye ye OTT table (with_watch_providers) me nahi baith sakte. Har
+ *  card ek scope hai: series = with_networks (ya studio with_companies), movies
+ *  = with_companies. Har query par Animation gate + isStrictCartoon() bhi lagta
+ *  hai, to card sirf USI brand ka animated catalogue dikhata hai.
+ *
+ *  Har id live API se padhi gayi (/network, /company), aur depth measure ki:
+ *    disney      54|44|281|2739 tv ~280   6125|3 movies ~200
+ *    cn          56|4945 ~205             7899 Cartoon Network Studios 161
+ *    nick        13|8053|9012|35 ~169     2348 Nickelodeon Movies 44
+ *    dreamworks  521|42141 tv ~11         521 DreamWorks Animation 127
+ *    desi        Indian kids nets 18 + Indian-language animation 57 tv / 232 movies
+ *  Pogo/Sony YAY!/Discovery Kids akele 2-2 titles dete hain, isliye "desi"
+ *  unhe Indian-language animation ke saath ek card me jodta hai — warna grid
+ *  khaali. Language scope origin-country se behtar nikla: with_origin_country=IN
+ *  Gladiators of Rome / Dogtanian jaise foreign co-productions bhi le aata tha.
+ *  2739 (Disney+) sirf tv par: uska /discover movie scope live-action bhi hai. */
+const CARTOON_PROVIDERS = {
+  disney:     { net: CARTOON_NET_DISNEY + '|2739', movieCo: '6125|3' },
+  cn:         { net: CARTOON_NET_CN, movieCo: '7899' },
+  nick:       { net: CARTOON_NET_NICK, movieCo: '2348' },
+  dreamworks: { tvCo: '521|42141', movieCo: '521' },
+  desi:       { net: CARTOON_NET_INDIA, langs: 'hi|ta|te|mr|bn|kn|ml|gu|pa' }
+};
 
 /* Tier 1 — jo cartoons India me sabse zyada dekhe jaate hain. Ye grid ke top
    par pin hote hain. Saari ids TMDB se verify ki gayi hain. */
@@ -8667,19 +8699,25 @@ const CARTOON_NSFW_RE = /(hentai|ecchi|erotic|uncensored|\bxxx\b|\bsex\b|\bnude\
 /* Ghar-ghar ke naam — curated id list se choot jaane par bhi boost mile. */
 const CARTOON_FAMOUS_RE = /\b(doraemon|shin[\s-]?chan|shinchan|crayon shin|ninja hattori|kiteretsu|perman|pokemon|pok[eé]mon|tom and jerry|tom & jerry|oggy|spongebob|dexter's laboratory|courage the cowardly|powerpuff|gumball|phineas and ferb|scooby|mr\.? bean|we bare bears|teen titans|adventure time|regular show|gravity falls|rugrats|peppa pig|paw patrol|bluey|masha and the bear|shaun the sheep|fairly odd|ninja turtles|loud house|jimmy neutron|penguins of madagascar|miraculous|motu patlu|chhota bheem|chota bheem|little bheem|mighty raju|bandbudh|simple samosa|little singham|roll no|rat-a-tat|pakdam|ben 10|my little pony|the last airbender|ninjago|chiikawa|bernard|rantaro|beyblade|johnny test|kick buttowski|dragon ball|looney tunes|bugs bunny|mickey mouse|donald duck|tweety|popeye|garfield|pink panther|richie rich|dora the explorer|noddy|winx club|transformers|smurfs|flintstones|jetsons|inspector gadget|swat kats|justice league|batman|superman|spider-verse|winnie the pooh|toy story|frozen|moana|zootopia|minions|despicable me|shrek|kung fu panda|madagascar|ice age|finding nemo|incredibles|lion king|aladdin|tangled|encanto|ratatouille|monsters, inc|inside out|jungle book|mowgli|super mario|sonic x|hagemaru|kochikame|duck ?tales|jackie chan adventures|eena meena deeka)\b/i;
 
+/*  Chip icons are SVG masks in providers.css (.cz-i-<id>), not emoji: Smart TV
+ *  browsers ship no colour-emoji font, Windows never draws flag emoji, and
+ *  Emoji 12 glyphs (kite, orange circle) are missing on older systems — all of
+ *  them rendered as empty boxes. A mask also takes the chip's text colour. */
 const CARTOON_MODES = [
-  { id: 'all',       label: 'All Cartoons',    icon: '🎨' },
-  { id: 'trending',  label: 'Trending',        icon: '🔥' },
-  { id: 'legends',   label: 'All Time Famous', icon: '👑' },
-  { id: 'hindi',     label: 'Hindi Cartoons',  icon: '🇮🇳' },
-  { id: 'japanese',  label: 'Doraemon & Co',   icon: '🇯🇵' },
-  { id: 'series',    label: 'Cartoon Series',  icon: '📺' },
-  { id: 'movies',    label: 'Cartoon Movies',  icon: '🎬' },
-  { id: 'cn',        label: 'Cartoon Network', icon: '🌀' },
-  { id: 'nick',      label: 'Nickelodeon',     icon: '🟠' },
-  { id: 'disney',    label: 'Disney',          icon: '🏰' },
-  { id: 'superhero', label: 'Action & Heroes', icon: '🦸' },
-  { id: 'latest',    label: 'New Cartoons',    icon: '🆕' }
+  { id: 'all',       label: 'All Cartoons' },
+  { id: 'trending',  label: 'Trending' },
+  { id: 'legends',   label: 'All Time Famous' },
+  { id: 'hindi',     label: 'Hindi Cartoons' },
+  { id: 'japanese',  label: 'Doraemon & Co' },
+  { id: 'series',    label: 'Cartoon Series' },
+  { id: 'movies',    label: 'Cartoon Movies' },
+  { id: 'cn',        label: 'Cartoon Network' },
+  { id: 'nick',      label: 'Nickelodeon' },
+  { id: 'disney',    label: 'Disney' },
+  { id: 'dreamworks', label: 'DreamWorks' },
+  { id: 'desi',      label: 'Desi Toons' },
+  { id: 'superhero', label: 'Action & Heroes' },
+  { id: 'latest',    label: 'New Cartoons' }
 ];
 
 let currentCartoonMode = 'all';
@@ -8773,6 +8811,39 @@ function buildCartoonQueries(mode, page) {
   const q = [];
   const push = (endpoint, params, type) => q.push({ endpoint, params: Object.assign({}, base, params), type });
 
+  /*  Provider scope (rail card ya chip). Har request isi brand ke networks /
+   *  studios tak bandhi hai — koi global ya trending source nahi, isliye grid me
+   *  sirf wahi brand aata hai jis par user ne click kiya. */
+  const cp = Object.prototype.hasOwnProperty.call(CARTOON_PROVIDERS, mode) ? CARTOON_PROVIDERS[mode] : null;
+  if (cp) {
+    const POP = 'popularity.desc', VOTES = 'vote_count.desc';
+    const tvScope = cp.net ? { with_networks: cp.net } : { with_companies: cp.tvCo };
+    // Indian cartoons (Little Singham etc.) TMDB par aksar bina Animation genre
+    // ke hain, isliye desi networks par genre source par nahi lagta; curated ids
+    // ke alawa live-action ko isStrictCartoon() phir bhi rok deta hai.
+    const tvGenre = cp.langs ? {} : { with_genres: A };
+    const tv = (sort, page) => push('/discover/tv', Object.assign({ sort_by: sort, page }, tvGenre, tvScope), 'tv');
+    const movieCo = (sort, page) => push('/discover/movie', { with_genres: A, with_companies: cp.movieCo, sort_by: sort, page }, 'movie');
+    if (cp.langs) {
+      // Desi: Indian kids channels + Indian-language animation (bina adult genres).
+      const o = { with_genres: A, with_original_language: cp.langs };
+      const om = Object.assign({ without_genres: '27,53,80,10749,10752' }, o);
+      tv(POP, p1);
+      push('/discover/tv', Object.assign({ sort_by: POP, page: p1 }, o), 'tv');
+      push('/discover/tv', Object.assign({ sort_by: VOTES, page: p1 }, o), 'tv');
+      push('/discover/movie', Object.assign({ sort_by: POP, page: p1 }, om), 'movie');
+      push('/discover/movie', Object.assign({ sort_by: VOTES, page: p1 }, om), 'movie');
+    } else if (cp.tvCo) {
+      // DreamWorks: studio hai, channel nahi — films hi asli catalogue hain.
+      movieCo(POP, p1); movieCo(VOTES, p1); movieCo(POP, p2);
+      tv(POP, pg);
+    } else {
+      tv(POP, p1); tv(VOTES, p1); tv(POP, p2);
+      movieCo(POP, pg); movieCo(VOTES, pg);
+    }
+    return q;
+  }
+
   switch (mode) {
     case 'trending':
       push('/trending/tv/week',    { page: pg }, 'tv');
@@ -8822,27 +8893,6 @@ function buildCartoonQueries(mode, page) {
       push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_ALL, sort_by: 'popularity.desc', page: p1 }, 'tv');
       push('/discover/tv', { with_genres: AK, sort_by: 'popularity.desc', page: p2 }, 'tv');
       push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_ALL, sort_by: 'vote_count.desc', page: p1 }, 'tv');
-      break;
-
-    case 'cn':
-      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_CN, sort_by: 'popularity.desc', page: p1 }, 'tv');
-      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_CN, sort_by: 'vote_count.desc', page: p1 }, 'tv');
-      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_CN, sort_by: 'popularity.desc', page: p2 }, 'tv');
-      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_CN, sort_by: 'vote_count.desc', page: p2 }, 'tv');
-      break;
-
-    case 'nick':
-      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_NICK, sort_by: 'popularity.desc', page: p1 }, 'tv');
-      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_NICK, sort_by: 'vote_count.desc', page: p1 }, 'tv');
-      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_NICK, sort_by: 'popularity.desc', page: p2 }, 'tv');
-      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_NICK, sort_by: 'vote_count.desc', page: p2 }, 'tv');
-      break;
-
-    case 'disney':
-      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_DISNEY, sort_by: 'popularity.desc', page: p1 }, 'tv');
-      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_DISNEY, sort_by: 'vote_count.desc', page: p1 }, 'tv');
-      push('/discover/tv', { with_genres: A, with_networks: CARTOON_NET_DISNEY, sort_by: 'popularity.desc', page: p2 }, 'tv');
-      push('/discover/movie', { with_genres: AF, with_companies: '2|3|6125', sort_by: 'popularity.desc', page: p1 }, 'movie');
       break;
 
     case 'superhero':
@@ -8905,7 +8955,19 @@ async function fetchCartoonMovies(mode, page) {
     });
   });
 
-  return Array.from(picked.values()).sort((a, b) => b._cartoonScore - a._cartoonScore);
+  const ranked = Array.from(picked.values()).sort((a, b) => b._cartoonScore - a._cartoonScore);
+  /*  Provider scope: films outscore series on raw popularity, so a brand grid
+   *  turned into six shows and then a wall of films. Alternate the two
+   *  famous-first lists instead, so every page shows the brand's whole range. */
+  if (!Object.prototype.hasOwnProperty.call(CARTOON_PROVIDERS, mode)) return ranked;
+  const tv = ranked.filter(m => m.media_type === 'tv');
+  const films = ranked.filter(m => m.media_type !== 'tv');
+  const mixed = [];
+  for (let i = 0; i < Math.max(tv.length, films.length); i++) {
+    if (tv[i]) mixed.push(tv[i]);
+    if (films[i]) mixed.push(films[i]);
+  }
+  return mixed;
 }
 
 // ── CARTOON SUB-FILTER BAR (chips under category tabs) ──
@@ -8923,10 +8985,22 @@ function renderCartoonFilterBar() {
   }
   bar.innerHTML = CARTOON_MODES.map(m => {
     const active = m.id === currentCartoonMode;
-    return `<button type="button" class="anime-chip${active ? ' active' : ''}" role="tab" tabindex="0" aria-selected="${active}" onclick="setCartoonMode('${m.id}')"><span class="anime-chip-icon" aria-hidden="true">${m.icon}</span><span>${m.label}</span></button>`;
+    return `<button type="button" class="anime-chip${active ? ' active' : ''}" role="tab" tabindex="0" aria-selected="${active}" onclick="setCartoonMode('${m.id}')"><span class="anime-chip-icon cz-i cz-i-${m.id}" aria-hidden="true"></span><span>${m.label}</span></button>`;
   }).join('');
   bar.style.display = 'flex';
   syncCatFilterSeparator();
+  /*  A Cartoon Providers card lands on a chip near the END of the strip, which
+   *  was off-screen, so the user could not see which brand was active. Centre
+   *  it after layout — horizontal only, so the page's own scroll to the grid
+   *  is never fought. */
+  const active = bar.querySelector('.anime-chip.active');
+  if (active && active !== bar.firstElementChild) {
+    requestAnimationFrame(() => {
+      // Rect-based, so it does not depend on which ancestor is offsetParent.
+      const b = bar.getBoundingClientRect(), a = active.getBoundingClientRect();
+      bar.scrollLeft = Math.max(0, bar.scrollLeft + (a.left - b.left) - (b.width - a.width) / 2);
+    });
+  }
 }
 
 function hideCartoonFilterBar() {
@@ -10082,10 +10156,17 @@ document.addEventListener('keydown', (e) => {
 });
 
 (function initProviderCarousel() {
-  function mount() {
-    const section = document.getElementById('top-providers');
-    if (!section) return;
-    const rail = section.querySelector('#providersRail');
+  /*  One carousel per rail: Top Providers and Cartoon Providers share the
+   *  markup, the styles and this behaviour, so both are mounted from here. */
+  function mountAll() {
+    ['top-providers', 'cartoon-providers'].forEach(id => {
+      const section = document.getElementById(id);
+      if (section) mount(section);
+    });
+  }
+  function mount(section) {
+    const rail = section.querySelector('.providers-rail');
+    if (!rail) return;
     const controls = section.querySelector('.providers-controls');
     const previous = section.querySelector('[data-provider-scroll="-1"]');
     const next = section.querySelector('[data-provider-scroll="1"]');
@@ -10126,6 +10207,11 @@ document.addEventListener('keydown', (e) => {
       const provider = event.target.closest('[data-provider-cat]');
       if (provider && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey && event.button === 0) {
         event.preventDefault();
+        /*  Cartoon Providers cards open the Cartoons tab scoped to one brand.
+         *  The mode is read off the card but only ever ACCEPTED from the
+         *  CARTOON_MODES whitelist, so an edited attribute cannot inject a mode. */
+        const cartoonMode = provider.dataset.cartoonMode;
+        if (cartoonMode) currentCartoonMode = CARTOON_MODES.some(m => m.id === cartoonMode) ? cartoonMode : 'all';
         filterCat(provider.dataset.providerCat);
         const heading = document.getElementById('sectionHeading');
         if (heading) {
@@ -10174,8 +10260,8 @@ document.addEventListener('keydown', (e) => {
     if (typeof ResizeObserver === 'function') new ResizeObserver(updateControlsThrottled).observe(rail);
     else { window.addEventListener('resize', updateControlsThrottled, { passive: true }); updateControls(); }
   }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true });
-  else mount();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountAll, { once: true });
+  else mountAll();
 })();
 
 function filterCat(cat, e) {

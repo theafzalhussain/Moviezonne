@@ -106,7 +106,20 @@ const brotliOf = (p) => zlib.brotliCompressSync(fs.readFileSync(p), {
   params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 }
 }).length;
 
-const CRITICAL_WIRE_BUDGET = 124 * 1024;
+const CRITICAL_WIRE_BUDGET = 125 * 1024;
+
+/*  Raised 124 -> 125 KB (Oct 2026) for the Cartoon Providers rail.
+ *
+ *  Measured against the previous commit through the same build: +0.36 KB brotli
+ *  index.html (five static cards, so the rail paints with the page and stays
+ *  crawlable, exactly like Top Providers) and +0.3 KB JS (CARTOON_PROVIDERS and
+ *  its query plans, the carousel mounting both rails, and centring the active
+ *  cartoon chip; the chip emoji it dropped give a little back). CSS untouched:
+ *  the rail's styles and the chip SVG icons live in the deferred providers.css.
+ *  That lands at 123.9 of 124.0, which is a budget in name only, so one KB
+ *  restores alarm headroom.
+ *  Logos are local SVGs (~30 KB together) and lazy, so none of them is on the
+ *  first-paint wire. */
 
 /*  Raised 122 -> 124 KB, and the parse ceiling 456 -> 461 (Oct 2026), for the
  *  player servers, posters on networks that block image.tmdb.org, and weak phones.
