@@ -210,21 +210,28 @@
     '.cw-tool{height:30px;padding:0 11px;font-size:12px}',
     '.cw-tool[data-act=clear] svg{width:13px;height:13px}',
     '.continue-watching-grid.mz-cw2{gap:12px;padding:4px 0 12px;scroll-padding-left:0;scroll-snap-type:x mandatory}',
-    '.mz-cw2 .cw-card{min-width:min(78vw,300px);max-width:min(78vw,300px);border-radius:12px;scroll-snap-align:start}',
+    '.mz-cw2 .cw-card{min-width:min(66vw,258px);max-width:min(66vw,258px);border-radius:12px;scroll-snap-align:start}',
     '.mz-cw2 .cw-card:hover{transform:none}',
-    '.mz-cw2 .cw-card-info{padding:9px 11px 11px}',
-    '.mz-cw2 .cw-card-title{font-size:.92rem}',
-    '.mz-cw2 .cw-card-meta{font-size:.74rem}',
-    '.mz-cw2 .cw-resume{margin-top:7px;font-size:11.5px}',
-    '.mz-cw2 .cw-badge{left:8px;top:8px;padding:3px 7px;font-size:10px}',
-    '.mz-cw2 .cw-left{right:8px;bottom:10px;padding:3px 7px;font-size:10px}',
-    '.mz-cw2 .cw-play-icon{width:42px;height:42px}',
+    '.mz-cw2 .cw-card-info{padding:8px 10px 10px}',
+    '.mz-cw2 .cw-card-title{font-size:.86rem}',
+    '.mz-cw2 .cw-card-meta{font-size:.7rem}',
+    '.mz-cw2 .cw-resume{margin-top:6px;font-size:11px}',
+    '.mz-cw2 .cw-badge{left:8px;top:8px;padding:3px 6px;font-size:9.5px}',
+    '.mz-cw2 .cw-left{right:8px;bottom:10px;padding:3px 6px;font-size:9.5px}',
+    '.mz-cw2 .cw-play-icon{width:38px;height:38px}',
     /* the X: 28px circle, with an invisible 40px hit area around it */
     '.mz-cw2 .cw-remove-btn{top:6px;right:6px;width:28px;height:28px}',
     '.mz-cw2 .cw-remove-btn::before{content:"";position:absolute;inset:-6px}}',
-    '@media (max-width:360px){.mz-cw2 .cw-card{min-width:84vw;max-width:84vw}.cw-tool[data-act=clear] .cw-clear-txt{display:none}.cw-tool[data-act=clear]{width:30px;padding:0}}',
+    '@media (max-width:360px){.mz-cw2 .cw-card{min-width:76vw;max-width:76vw}.cw-tool[data-act=clear] .cw-clear-txt{display:none}.cw-tool[data-act=clear]{width:30px;padding:0}}',
     'html[data-mz-tv="true"] .mz-cw2 .cw-card:focus{transform:scale(1.05);border-color:#f5c518;box-shadow:0 0 0 3px rgba(245,197,24,.6)}',
     'html[data-mz-tv="true"] .mz-cw2 .cw-play-icon{opacity:1}',
+    /* TV: the X floated as a permanent dim circle that read as clutter from the
+       couch. Hide it until the card (or the button itself) is focused, then show
+       a larger, cleaner target with an unmistakable red focus ring. */
+    'html[data-mz-tv="true"] .mz-cw2 .cw-remove-btn{top:10px;right:10px;width:40px;height:40px;background:rgba(0,0,0,.72);color:#fff;opacity:0;transition:opacity .2s ease,background .2s ease,box-shadow .2s ease}',
+    'html[data-mz-tv="true"] .mz-cw2 .cw-remove-btn svg{width:20px;height:20px}',
+    'html[data-mz-tv="true"] .mz-cw2 .cw-card:focus .cw-remove-btn,html[data-mz-tv="true"] .mz-cw2 .cw-card:focus-within .cw-remove-btn{opacity:1}',
+    'html[data-mz-tv="true"] .mz-cw2 .cw-remove-btn:focus{opacity:1;background:#e63946;color:#fff;box-shadow:0 0 0 3px rgba(245,197,24,.7);transform:none;outline:none}',
   ].join('');
 
   var style = document.createElement('style');

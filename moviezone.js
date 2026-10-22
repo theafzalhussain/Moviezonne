@@ -13407,10 +13407,10 @@ const playerSources = [
   //    Host is vidfast.vc: vidfast.pro now only 301s here, and the page identifies
   //    itself as .vc, so we skip the bounce and preconnect the real origin.
 
-  { name: 'Premium Mirror', dubbed: true, url: (id, lang, type, s, e) => {
-    // #9: Official proxy mirror to fix 'refused to connect' / iframe block issue
-    return (type === 'tv' ? `https://vidsrc.pm/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.pm/embed/movie?tmdb=${id}`) + `&lang=${lang}`;
-  }}
+  // { name: 'Premium Mirror', dubbed: true, url: (id, lang, type, s, e) => {
+  //   // #9: Official proxy mirror to fix 'refused to connect' / iframe block issue
+  //   return (type === 'tv' ? `https://vidsrc.pm/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.pm/embed/movie?tmdb=${id}`) + `&lang=${lang}`;
+  // }}
 ];
 
 
