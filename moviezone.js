@@ -3051,15 +3051,21 @@ function rankByFreshness(pool, nowMs) {
 }
 
 /** Limits same-language runs without allowing an item to cross a strict
- *  priority-group boundary. rankByFreshness() must run before this helper. */
-function diversifyByLanguageWithinPriority(pool) {
+ *  priority-group boundary. rankByFreshness() must run before this helper.
+ *
+ *  `groupOf` is optional and defaults to the priority group, which is what every
+ *  ALL-feed and platform caller uses. The release ladder (rankReleaseLadder)
+ *  passes the release month instead, so its language mixing can never move a
+ *  title out of the month it was released in. */
+function diversifyByLanguageWithinPriority(pool, groupOf) {
+  const keyOf = groupOf || ((m) => m._priorityGroup);
   const output = [];
   let start = 0;
 
   while (start < pool.length) {
-    const group = pool[start]._priorityGroup;
+    const group = keyOf(pool[start]);
     let end = start + 1;
-    while (end < pool.length && pool[end]._priorityGroup === group) end++;
+    while (end < pool.length && keyOf(pool[end]) === group) end++;
 
     const groupOutput = [];
     const skipped = [];
@@ -7888,6 +7894,203 @@ function setOttMode(mode) {
 }
 
 /*  ══════════════════════════════════════════════════════════════════════
+ *  RELEASE LADDER — the industry tabs and Web Series page in release order
+ *  ══════════════════════════════════════════════════════════════════════
+ *  Bollywood, Hollywood, Tollywood and Web Series used to page through TMDB's
+ *  all-time popularity list. rankCategoryFeed() put the fresh releases first
+ *  inside each gather, so page 1 looked right — but every "Next" past the pool
+ *  appended the next popularity page, and a popularity page is a mix of every
+ *  era. Measured on the live catalogue (Oct 2026): Hollywood page 2 ran
+ *  2017-2026 and page 3 2001-2026, every Bollywood page from 2 on carried titles
+ *  newer than the page before it, Tollywood page 4 went back to 2026 after page
+ *  3 had reached 2015, and Web Series mixed 1969 and 1999 shows in with this
+ *  month's premieres. No ranking applied afterwards can turn popularity order
+ *  into release order.
+ *
+ *  So these tabs ask TMDB a different question: the most popular titles INSIDE
+ *  consecutive release windows ("rungs"), newest window first.
+ *
+ *    rung 0   the ALL feed's latest window — 35 days for films, 45 for series
+ *    rung 1   from there to day 135, the floor of the ALL feed's print-upgrade
+ *             windows, so rungs 0+1 are exactly what the ALL feed calls fresh
+ *    rung 2+  120 days each, older and older, down to FEED_MIN_RELEASE_YEAR
+ *
+ *  The first gather takes rungs 0 .. 2*span-1, so the opening pool is deep enough
+ *  for several instant pages; every extension takes the next `span` rungs. The
+ *  windows are contiguous and never overlap, so a later gather can only hold
+ *  OLDER titles than an earlier one — release order across pages holds by
+ *  construction, not by ranking.
+ *
+ *  `span` and the pages read per source follow how much each industry really
+ *  releases, probed window by window (Oct 2026): Hindi has ~20 titles with an
+ *  audience per 120 days, so Bollywood takes three windows per gather; English
+ *  has hundreds, so Hollywood reads two pages of each window; the four South
+ *  languages and the eight series sources fill a page or more per window between
+ *  them. Every gather stays inside MAX_BATCH_PATHS (24) — the largest, Web
+ *  Series' first, is 17 — so it is still one round trip.
+ */
+const FEED_LADDER_HEAD_DAYS = MOVIE_QUALITY_TIMELINE[4].fromDay + 15;   // 135, as printUpgradeWindowQuery
+const FEED_LADDER_STEP_DAYS = 120;
+const FEED_LADDER_FLOOR = FEED_MIN_RELEASE_YEAR + '-01-01';
+
+/*  The audience gate. A dated popularity page reaches much deeper into the long
+ *  tail than an all-time one: of the 20 most popular Hindi films of the last 35
+ *  days, eight had under 4 popularity AND under 3 votes (Prem Keetanu 3.3 / 0,
+ *  Only Me 1.9 / 0), and sixteen of Telugu's twenty did. Either signal is
+ *  enough to stay — a day-old release has popularity before it has votes, and an
+ *  older one keeps its votes after its popularity has decayed. Windows older than
+ *  135 days also send the vote floor to TMDB itself, so their page is not spent
+ *  on rows this gate would drop. */
+const FEED_LADDER_MIN_VOTES = 3;
+const FEED_LADDER_MIN_POPULARITY = 4;
+
+/*  One entry per laddered tab. `sources` rows are [params, pages, voteFloor];
+ *  a source's own voteFloor wins over the rung-2+ default.
+ *
+ *  'south' is an alias of 'tollywood', not a second tab: /movies/south is a live
+ *  SSR page and the footer, JSON-LD and generated link block still call
+ *  filterCat('south'), so both ids resolve to the same merged South pool —
+ *  Telugu, Tamil, Malayalam and Kannada, one request per language because
+ *  with_original_language has no OR form on /discover/movie.
+ *
+ *  Web Series keeps the questions its plan always asked, now per window: the
+ *  streaming-network allow-list (linear Indian channels excluded) for any
+ *  language, English, Hindi, Korean and Chinese, plus the network-FREE regional
+ *  windows (hi|ta|te|ko|zh, and Hindi alone — the tab leads with Hindi, see
+ *  FEED_LEAD_LANGUAGE_BY_CATEGORY) that find a premiere on a service TMDB has no
+ *  network record for, with News/Reality/Soap/Talk excluded server-side. TMDB's
+ *  own trending list joins the first gather; it carries every era, so
+ *  rankReleaseLadder clips it to the gather's window. */
+const _mzLadderMovie = (span, languages, pages) => ({
+  endpoint: '/discover/movie', date: 'primary_release_date', fresh: LATEST_WINDOW_DAYS, span: span,
+  sources: languages.map((code) => [{ with_original_language: code }, pages])
+});
+const _mzLadderGate = (extra) => Object.assign({ with_networks: STREAMING_NETWORK_IDS, without_networks: LINEAR_TV_EXCLUDE_IDS }, extra);
+const _mzLadderRegional = (languages) => [{
+  with_original_language: languages, without_networks: LINEAR_TV_EXCLUDE_IDS, without_genres: NON_DRAMA_TV_GENRES
+}, 1, REGIONAL_SERIES_MIN_VOTES];
+const FEED_LADDER = {
+  bollywood: _mzLadderMovie(3, [BOLLYWOOD_LANGUAGE], 1),
+  hollywood: _mzLadderMovie(2, ['en'], 2),
+  tollywood: _mzLadderMovie(2, ['te', 'ta', 'ml', 'kn'], 1),
+  tv: {
+    endpoint: '/discover/tv', date: 'first_air_date', fresh: LATEST_SERIES_WINDOW_DAYS, span: 1,
+    trending: '/trending/tv/week',
+    sources: [
+      [_mzLadderGate(), 2],
+      [_mzLadderGate({ with_original_language: 'en' }), 1],
+      [_mzLadderGate({ with_original_language: 'hi' }), 1],
+      [_mzLadderGate({ with_original_language: 'ko' }), 1],
+      [_mzLadderGate({ with_original_language: 'zh' }), 1],
+      _mzLadderRegional(REGIONAL_SERIES_LANGUAGES),
+      _mzLadderRegional('hi')
+    ]
+  }
+};
+FEED_LADDER.south = FEED_LADDER.tollywood;
+
+/** The release windows one gather covers, newest first, as IST date strings.
+ *  Empty once the ladder is past FEED_LADDER_FLOOR — that, and only that, is
+ *  the end of a laddered tab. */
+function feedLadderRungs(cat, gather) {
+  const cfg = FEED_LADDER[cat];
+  const g = Math.max(1, gather || 1);
+  const out = [];
+  for (let r = g === 1 ? 0 : g * cfg.span; r < (g + 1) * cfg.span; r++) {
+    // [newest, oldest] day offsets, both inclusive, matching TMDB's gte/lte.
+    const older = r === 0 ? cfg.fresh : FEED_LADDER_HEAD_DAYS + Math.max(0, r - 1) * FEED_LADDER_STEP_DAYS;
+    const newer = r === 0 ? 0 : r === 1 ? cfg.fresh + 1 : older - FEED_LADDER_STEP_DAYS + 1;
+    const lte = istDateStr(newer);
+    if (lte < FEED_LADDER_FLOOR) break;
+    const gte = istDateStr(older);
+    out.push({ rung: r, gte: gte < FEED_LADDER_FLOOR ? FEED_LADDER_FLOOR : gte, lte: lte });
+  }
+  return out;
+}
+
+/** The tmdbBatch plan for one gather. Shared by loadMovies, the next-page
+ *  prefetch and the hover prefetch through _mzCatPlan, so every caller sends
+ *  byte-identical params. Key order is chosen so rung 0 reproduces the ALL
+ *  feed's own windows where they ask the same question — latestBollywoodWindowQuery
+ *  and latestRegionalSeriesWindowQuery — and shares their cache entries. */
+function feedLadderPlan(cat, gather) {
+  const cfg = FEED_LADDER[cat];
+  const plan = [];
+  feedLadderRungs(cat, gather).forEach((w) => {
+    cfg.sources.forEach(([base, pages, votes]) => {
+      for (let page = 1; page <= pages; page++) {
+        const p = Object.assign({}, base, { sort_by: 'popularity.desc' });
+        p[cfg.date + '.gte'] = w.gte;
+        p[cfg.date + '.lte'] = w.lte;
+        const floor = votes || (w.rung >= 2 ? String(FEED_LADDER_MIN_VOTES) : '');
+        if (floor) p['vote_count.gte'] = floor;
+        p.page = String(page);
+        p.language = 'en-US';
+        plan.push([cfg.endpoint, p]);
+      }
+    });
+  });
+  if (cfg.trending && plan.length && gather <= 1) {
+    plan.push([cfg.trending, { language: 'en-US', page: '1' }]);
+  }
+  return plan;
+}
+
+/*  Ranking one gather of the ladder.
+ *
+ *  Gather 1 opens with the tab's LATEST WINDOW (rung 0: the last 35 days for
+ *  films, 45 for series — the ALL feed's own latest window), ordered exactly the
+ *  way the ALL feed orders it, industry front row and Web Series' Hindi lead
+ *  included. That is the page 1 these tabs already had.
+ *
+ *  Everything else — the rest of gather 1 and every later gather — runs by
+ *  release month, newest first, and by the ALL feed's composite score inside a
+ *  month. Month rather than day, so the biggest film of a month leads it instead
+ *  of whichever no-name title came out on the 31st; language mixing works inside
+ *  each month for the same reason, and never moves a title out of it.
+ *
+ *  ── WHY THE HEAD IS DATED, NOT GROUPED ──
+ *  The head used to be "priority groups 0-3 from the last 135 days", which let
+ *  print upgrades (days 36-135) into it while a title from last week that did
+ *  not qualify for those groups fell to the month-sorted tail. The tail then
+ *  opened with this month — newer than the head's last rows — so a reader
+ *  paging forward watched the dates jump back up (Web Series page 3 ended in
+ *  July, page 4 opened in October; Tollywood went June, then October). Cutting
+ *  the head on the window's own date, for every group, makes the boundary hold
+ *  by construction: every tail title is older than every head title. Print
+ *  upgrades still come straight after the head — they are the tail's newest
+ *  months — just in release order rather than ahead of it.
+ *
+ *  Rows outside the gather's windows are dropped first (trending carries every
+ *  era), then every title failing the audience gate. */
+function rankReleaseLadder(items, cat, gather, nowMs) {
+  const rungs = feedLadderRungs(cat, gather);
+  if (!rungs.length || !Array.isArray(items)) return [];
+  const from = rungs[rungs.length - 1].gte;
+  const to = rungs[0].lte;
+  const dateOf = (m) => m.release_date || m.first_air_date || '';
+  const pool = items.filter((m) => {
+    const d = dateOf(m);
+    return d >= from && d <= to
+      && ((m.vote_count || 0) >= FEED_LADDER_MIN_VOTES || (m.popularity || 0) >= FEED_LADDER_MIN_POPULARITY);
+  });
+  if (!pool.length) return pool;
+
+  rankByFreshness(pool, nowMs || Date.now());
+  // Only gather 1 holds rung 0, the latest window; later gathers have no head.
+  const headFrom = rungs[0].rung === 0 ? rungs[0].gte : null;
+  const inHead = (m) => headFrom !== null && dateOf(m) >= headFrom;
+  const monthOf = (m) => dateOf(m).slice(0, 7);
+  const tail = pool.filter((m) => !inHead(m)).sort((a, b) =>
+    (monthOf(a) < monthOf(b) ? 1 : monthOf(a) > monthOf(b) ? -1 : 0)
+    || (b._rankScore - a._rankScore));
+
+  return interleaveFeedByType(diversifyByLanguageWithinPriority(pool.filter(inHead)), false,
+    FEED_LEAD_LANGUAGE_BY_CATEGORY[cat])
+    .concat(diversifyByLanguageWithinPriority(tail, monthOf));
+}
+
+/*  ══════════════════════════════════════════════════════════════════════
  *  ONE PLAN PER CATEGORY, IN ONE PLACE
  *  ══════════════════════════════════════════════════════════════════════
  *  The set of TMDB sources a category needs used to be written out twice: once
@@ -7986,78 +8189,10 @@ function _mzCatPlan(cat, pageNum) {
     ];
   }
 
-  if (cat === 'tv') {
-    /*  ── THE WEB SERIES TAB ASKS THE SAME QUESTIONS THE ALL FEED DOES ──
-     *
-     *  This plan used to be four popularity pages (hi / en / ko / any) plus one
-     *  dated Hindi-Tamil-Telugu window. Sorted by TMDB popularity, which is a
-     *  lifetime-ish signal, so what the tab actually opened with was the
-     *  catalogue's biggest long-runners: measured live, C.I.D. (first aired 1998,
-     *  popularity 209) and Reacher (2022) sat at cards 4 and 3 while The Scandal
-     *  and Neagley — both 2026, both wearing a NEW ribbon — were at 5 and 6.
-     *
-     *  rankCategoryFeed() was not the problem. It orders fresh group 2 ahead of
-     *  the stale group 5 correctly; it simply had almost nothing to PUT in group
-     *  2, because a popularity page returns this week's premiere on page three.
-     *  A ranking cannot promote what was never fetched.
-     *
-     *  So the plan is now built in the order the tab promises — latest, then
-     *  trending, then popular — and each of those is a real source rather than a
-     *  hoped-for side effect of a popularity sort:
-     *
-     *    LATEST    three dated windows. The global one (network-gated, all 25 OTT
-     *              platforms), the regional one (hi/ta/te/ko/zh on ANY service,
-     *              which is the only source that can see a premiere on a platform
-     *              TMDB does not carry a network record for), and the print-upgrade
-     *              cohort — a series whose clean full-season encode or 4K master
-     *              just landed is news on this tab for the same reason it is on
-     *              the ALL feed.
-     *    TRENDING  /trending/tv/week, TMDB's own live signal. Filtered through
-     *              isNonDramaTvRow() on arrival — see NON_DRAMA_TV_GENRE_IDS for
-     *              why that has to happen client-side for this one source.
-     *    POPULAR   the popularity pages, kept, because a category tab promises the
-     *              best of the category and not only this week's arrivals. Chinese
-     *              is added: C-drama had NO source at all here, so however large a
-     *              title was it could not appear.
-     *
-     *  Request cost: 5 sources -> 10. This is a tab click rather than the first
-     *  screen, and tmdbBatch() collapses the whole wave into one round trip, so
-     *  the first-screen budget MZ_RATE_LIMIT protects is untouched.
-     */
-    // Web series only: streaming networks in, traditional Indian TV channels out.
-    const N = STREAMING_NETWORK_IDS;
-    const X = LINEAR_TV_EXCLUDE_IDS;
-    return [
-      // ── LATEST ──
-      ['/discover/tv', latestSeriesWindowQuery(pageStr)],
-      ['/discover/tv', latestRegionalSeriesWindowQuery(pageStr)],
-      /*  Hindi, asked on its own. The regional window above covers five languages
-       *  in ONE popularity-sorted page, and Korean drama outweighs Hindi on that
-       *  axis every week — so "Hindi is in the pool" was never actually guaranteed
-       *  by it. This tab leads with Hindi (FEED_LEAD_LANGUAGE_BY_CATEGORY), and a
-       *  lead slot is worth nothing if the language has no candidate to put in it.
-       *  Network-free for the same reason as the regional window: a new Hindi
-       *  original on a service TMDB carries no network record for is exactly the
-       *  title this is here to find. */
-      ['/discover/tv', latestRegionalSeriesWindowQuery(pageStr, 'hi')],
-      ['/discover/tv', seriesUpgradeWindowQuery(pageStr)],
-      // ── TRENDING ──
-      ['/trending/tv/week', { language: L, page: pageStr }],
-      // ── POPULAR CATALOGUE ──
-      ['/discover/tv', { with_networks: N, without_networks: X, with_original_language: 'hi', sort_by: POP, page: pageStr, language: L }],
-      ['/discover/tv', { with_networks: N, without_networks: X, with_original_language: 'en', sort_by: POP, page: pageStr, language: L }],
-      ['/discover/tv', { with_networks: N, without_networks: X, with_original_language: 'ko', sort_by: POP, page: pageStr, language: L }],
-      ['/discover/tv', { with_networks: N, without_networks: X, with_original_language: 'zh', sort_by: POP, page: pageStr, language: L }],
-      ['/discover/tv', { with_networks: N, without_networks: X, sort_by: POP, page: pageStr, language: L }]
-    ];
-  }
-
-  if (cat === 'hollywood') {
-    return [
-      ['/discover/movie', { with_original_language: 'en', sort_by: POP, language: L, page: p1 }],
-      ['/discover/movie', { with_original_language: 'en', sort_by: POP, language: L, page: p2 }]
-    ];
-  }
+  /*  Bollywood, Hollywood, Tollywood (with its 'south' alias) and Web Series:
+   *  the most popular titles inside consecutive release windows, newest first.
+   *  See FEED_LADDER for the sources and why. */
+  if (FEED_LADDER[cat]) return feedLadderPlan(cat, pageNum);
 
   // Both engines own their own source lists; the plan is taken from the very
   // same builder they use so the cache keys match byte for byte.
@@ -8152,40 +8287,6 @@ function _mzCatPlan(cat, pageNum) {
       ['/discover/tv', Object.assign({}, KO, { page: p1 })],
       ['/discover/tv', Object.assign({}, KO, { page: p2 })],
       ['/discover/tv', Object.assign({}, KO, { page: String(pageNum * 3) })]
-    ];
-  }
-
-  /*  TOLLYWOOD — the merged South Indian tab.
-   *
-   *  This used to be two separate tabs: 'south' (Tamil only) on the strip and
-   *  'tollywood' (Telugu only) hidden in the Category dropdown. They are one tab
-   *  now, so the pool has to carry both industries plus the two that were never
-   *  covered at all, Malayalam and Kannada.
-   *
-   *  It has to be a multi-request plan: TMDB's with_original_language takes a
-   *  single code and has no OR form, so one request per language is the only way
-   *  to get a genuine merge. That costs nothing extra in practice — tmdbBatch()
-   *  sends the whole plan as ONE POST to /api/tmdb/batch, exactly like the
-   *  16-source ALL feed does.
-   *
-   *  Telugu and Tamil get both pages because they are the two biggest producers
-   *  and the tab is named after Telugu; Malayalam and Kannada get one page each,
-   *  which is enough depth to be represented without diluting the first screen.
-   *  rankCategoryFeed() decides the actual order, so the per-language request
-   *  order below does not leak into what the user sees.
-   *
-   *  'south' is kept as an alias rather than deleted: /movies/south is a live SSR
-   *  page and the footer, JSON-LD and generated link block all still point at
-   *  filterCat('south'). Both ids resolve to this same merged pool. */
-  if (cat === 'tollywood' || cat === 'south') {
-    const S = { sort_by: POP, language: L };
-    return [
-      ['/discover/movie', Object.assign({}, S, { with_original_language: 'te', page: p1 })],
-      ['/discover/movie', Object.assign({}, S, { with_original_language: 'te', page: p2 })],
-      ['/discover/movie', Object.assign({}, S, { with_original_language: 'ta', page: p1 })],
-      ['/discover/movie', Object.assign({}, S, { with_original_language: 'ta', page: p2 })],
-      ['/discover/movie', Object.assign({}, S, { with_original_language: 'ml', page: p1 })],
-      ['/discover/movie', Object.assign({}, S, { with_original_language: 'kn', page: p1 })]
     ];
   }
 
@@ -9197,6 +9298,12 @@ async function loadMovies(cat, isLoadMore = false) {
       currentMoviePage = pool.tmdbPage;
       mzFeedPage = pool.page;
       mzFeedPoolExhausted = pool.exhausted;
+      /*  A pool saved part-way through a chained Next (see MZ_FEED_CHAIN_MAX)
+       *  records the page the reader was heading for, which that pool may not
+       *  fill yet. Reopening there would paint a part-full page with no Next —
+       *  the same dead end the chain exists to prevent — so reopen on the last
+       *  page the pool really fills. */
+      if (!mzFeedPageIsReady(mzFeedPage)) mzFeedPage = mzFeedLastReadyPage();
       _mzFeedRetryState(cat).attempts = 0;
       if (MZ_FEED_PAGED && !isFullViewMovies) renderCurrentFeedPage();
       else renderMovies(isFullViewMovies ? allMovies : allMovies.slice(0, MZ_FEED_PAGE_SIZE), false);
@@ -9307,9 +9414,10 @@ async function loadMovies(cat, isLoadMore = false) {
 
       /*  Remove duplicates, keeping the first occurrence — and drop the rows a
        *  web-series tab must not carry. The genre gate is here rather than in the
-       *  query because /trending/tv/week accepts no without_genres parameter; the
-       *  eight /discover/tv sources are filtered server-side already, so for them
-       *  this is a no-op. See NON_DRAMA_TV_GENRE_IDS. */
+       *  query because /trending/tv/week accepts no without_genres parameter, and
+       *  the network-gated windows rely on the streaming allow-list instead of a
+       *  genre exclusion; the regional windows exclude these genres server-side
+       *  already, so for them this is a no-op. See NON_DRAMA_TV_GENRE_IDS. */
       const uniqueShows = [];
       const seenIds = new Set();
       for (const show of combinedShows) {
@@ -9321,9 +9429,9 @@ async function loadMovies(cat, isLoadMore = false) {
 
       /*  No sort here on purpose. This used to be a plain first_air_date
        *  descending sort, which put whichever obscure show aired most recently at
-       *  the top regardless of whether anyone was watching it. rankCategoryFeed()
-       *  below orders the pool instead: fresh relevant premieres first, then the
-       *  rest of the catalogue by composite demand. */
+       *  the top regardless of whether anyone was watching it. rankReleaseLadder()
+       *  below orders the pool instead: the fresh premieres the ALL feed would
+       *  lead with, then everything else by release month and demand. */
       movies.push(...uniqueShows);
     } else if (cat === 'kids') {
       // POWERFUL CARTOON ENGINE: strictly animated content only, famous first.
@@ -9393,7 +9501,8 @@ async function loadMovies(cat, isLoadMore = false) {
       movies = movies.concat(
         ottRankLikeAllFeed(await fetchOttMovies(cat, requestedOttMode, requestedMoviePage)));
     } else {
-      // hollywood and every CAT_PARAMS genre/industry tab: two pages, in order.
+      // The movie ladder tabs (Hollywood, Bollywood, Tollywood) and every
+      // CAT_PARAMS genre tab: sources concatenated in plan order.
       vals.forEach(v => { movies = movies.concat(v.results || []); });
     }
   } catch(e) { console.warn(e); }
@@ -9412,6 +9521,7 @@ async function loadMovies(cat, isLoadMore = false) {
       || loadGeneration !== _mzFeedLoadGeneration) {
     if (isLoadMore) {
       isLoadingMore = false;
+      _mzFeedChainBudget = 0;   // a superseded chain must not arm some later extension
       const supersededIndicator = document.getElementById('loadingIndicator');
       if (supersededIndicator) supersededIndicator.style.display = 'none';
     }
@@ -9436,10 +9546,15 @@ async function loadMovies(cat, isLoadMore = false) {
   });
 
   /*  ── UNIVERSAL RANKING FOR EVERY REMAINING TAB ────────────────────────────
-   *  Hollywood, Bollywood, Tollywood, Web Series, K-Drama, Trending, 4K and each
-   *  genre used to render TMDB's raw popularity order, which is why 1990s titles
-   *  opened those tabs. They all go through the ALL-feed ranking now: newest
-   *  releases, then prints that just upgraded, then trending, then popular.
+   *  K-Drama, Trending, 4K and each genre used to render TMDB's raw popularity
+   *  order, which is why 1990s titles opened those tabs. They all go through the
+   *  ALL-feed ranking now: newest releases, then prints that just upgraded, then
+   *  trending, then popular.
+   *
+   *  Bollywood, Hollywood, Tollywood and Web Series go through the release
+   *  ladder instead (see FEED_LADDER): their gathers are dated windows, so the
+   *  ranking has to keep each gather in release order rather than re-sort it by
+   *  popularity — that re-sort is what made their later pages jump between eras.
    *
    *  Runs after the filter above so no effort is spent ordering titles that are
    *  about to be dropped, and after the superseded-gather guard so it can never
@@ -9448,7 +9563,9 @@ async function loadMovies(cat, isLoadMore = false) {
    *
    *  On the isLoadMore path `movies` holds only the newly fetched batch, so the
    *  pages already on screen keep the order the user is looking at. */
-  if (!FEED_SELF_RANKED.has(cat) && !OTT[cat]) {
+  if (FEED_LADDER[cat]) {
+    movies = rankReleaseLadder(movies, cat, requestedMoviePage, Date.now());
+  } else if (!FEED_SELF_RANKED.has(cat) && !OTT[cat]) {
     movies = rankCategoryFeed(movies, Date.now(), FEED_LEAD_LANGUAGE_BY_CATEGORY[cat]);
   }
 
@@ -9546,6 +9663,11 @@ async function loadMovies(cat, isLoadMore = false) {
     if (existingById) existingById.set(k, m);
     return true;
   });
+  /*  The pool as it stood before this gather. concat() builds a new array and
+   *  the OTT re-rank below replaces it again, so this reference still holds the
+   *  pre-extension pool untouched; a failed extension that cannot fill the
+   *  requested page restores it instead of committing a partial gather. */
+  const poolBefore = allMovies;
   allMovies = allMovies.concat(newMovies);
 
   /*  Each OTT source page contains its own dynamic and catalogue tiers. A plain
@@ -9589,17 +9711,83 @@ async function loadMovies(cat, isLoadMore = false) {
   if (MZ_FEED_PAGED && !isFullViewMovies) {
     /*  Paged feed: the pool just grew (or was just built), so repaint whichever
      *  page the user is on out of it. An extension must NOT append to the DOM —
-     *  the point of paging is that the grid holds one page.
-     *
-     *  If the extension produced nothing new, TMDB is out of titles for this
-     *  category: mark the pool final and step back onto the last page that has
-     *  content, so the user is never left on a blank grid.
-     */
-    if (isLoadMore && !newMovies.length) {
-      mzFeedPoolExhausted = true;
-      mzFeedPage = Math.min(mzFeedPage, mzFeedTotalPages());
-      if (typeof showToast === 'function') showToast('That was the last page.');
+     *  the point of paging is that the grid holds one page. */
+    if (isLoadMore) {
+      /*  1. THE WIRE FAILED AND THE PAGE IS STILL SHORT — undo the gather.
+       *
+       *  tmdb() never rejects, so a failed source is indistinguishable from an
+       *  empty one by its result; the failure counter is how they are told
+       *  apart. It used to be consulted only when the extension added NOTHING.
+       *  A PARTIAL failure slipped past: on the ALL feed, one of sixteen sources
+       *  answered from cache while the rest failed, four titles were appended,
+       *  the gather index moved on, and the reader landed on a 26-card page 7
+       *  with no Next — and the fifteen failed sources of that gather were never
+       *  asked for again.
+       *
+       *  So a failed gather that cannot fill the requested page is not
+       *  committed at all: the pool goes back to what it was, the gather index
+       *  steps back so the same sources are asked for again, and the reader
+       *  returns to the full page they were reading. Retrying is cheap — what
+       *  did arrive is in tmdb()'s cache. A failure that still filled the page
+       *  is kept, as before: the reader got a whole page, and refusing it would
+       *  turn one dead source into a feed that can never advance. */
+      const networkFailed = _mzFetchFailureCount > _mzFeedFailureMark ||
+        navigator.onLine === false;
+      if (networkFailed && !mzFeedPageIsReady(mzFeedPage)) {
+        allMovies = poolBefore;
+        currentMoviePage = Math.max(1, requestedMoviePage - 1);   // re-fetch this gather next time
+        mzFeedPage = Math.min(Math.max(1, _mzReturnFeedPage), mzFeedLastReadyPage());
+        _mzFeedChainBudget = 0;
+        renderCurrentFeedPage();
+        renderFeedPager();
+        _mzSavePool(cat, loadPoolKey);
+        isLoadingMore = false;
+        const offIndicator = document.getElementById('loadingIndicator');
+        if (offIndicator) offIndicator.style.display = 'none';
+        if (typeof showToast === 'function') {
+          showToast('Couldn’t load the next page. Check your connection and try again.');
+        }
+        return;
+      }
+
+      /*  2. NOTHING NEW, AND NOTHING FAILED. On a ladder tab with older windows
+       *  still below (feedLadderRungs for the next gather is non-empty) that is
+       *  a sparse window, not the end: leave the pool open and let the chain
+       *  below fetch the next one. Anywhere else — a tab out of TMDB pages, a
+       *  ladder past its floor — it really is the end. Mark the pool final. */
+      if (!newMovies.length) {
+        const ladderHasMore = !!FEED_LADDER[cat] &&
+          feedLadderRungs(cat, requestedMoviePage + 1).length > 0;
+        if (!ladderHasMore) {
+          mzFeedPoolExhausted = true;
+          mzFeedPage = Math.min(mzFeedPage, mzFeedTotalPages());
+          if (typeof showToast === 'function') showToast('That was the last page.');
+        }
+      }
     }
+
+    /*  Fill the requested page before painting it. While there is budget, the
+     *  pool can still grow and the page is not covered yet, gather again rather
+     *  than paint a part-full page with no Next. Every paged tab chains: a thin
+     *  ladder window is the common case, but dedup against the pool can leave
+     *  ANY tab's gather short of a page, the ALL feed included. */
+    const needsMore = isLoadMore && !mzFeedPoolExhausted && !mzFeedPageIsReady(mzFeedPage);
+    if (needsMore && _mzFeedChainBudget > 0) {
+      _mzFeedChainBudget--;
+      _mzSavePool(cat, loadPoolKey);   // keep what this gather added if the chain is superseded
+      isLoadingMore = false;           // let the chained call through the re-entry gate
+      loadMovies(cat, true);
+      return;
+    }
+    _mzFeedChainBudget = 0;
+    if (needsMore) {
+      /*  Budget spent with the page still short — only reachable at a ladder's
+       *  deepest windows or after heavy dedup. Step back onto the last page the
+       *  pool fills so Next stays live and a further click resumes the climb. */
+      mzFeedPage = Math.min(mzFeedPage, mzFeedLastReadyPage());
+      if (typeof showToast === 'function') showToast('Couldn’t load more right now. Try Next again.');
+    }
+
     if (!renderCurrentFeedPage() && mzFeedPage > 1) {
       // Defensive: the slice came back empty even though the pool has titles.
       mzFeedPoolExhausted = true;
@@ -10365,6 +10553,25 @@ let mzFeedPagerCategory = 'all';
 let mzFeedPoolExhausted = false;   // TMDB has no further pages for this category
 let _mzPagerDelegated = false;
 
+/*  CHAINING ONE "NEXT" ACROSS MORE THAN ONE GATHER.
+ *
+ *  A gather does not always add a whole page. A laddered window (see FEED_LADDER)
+ *  can be thin, and dedup against the pool can eat most of a batch, so a single
+ *  extension can leave the reader on a part-full page with no Next — a dead end
+ *  that only a Prev-then-Next would clear. When Next triggers an extension the
+ *  pager grants a budget of extra gathers; loadMovies() spends one per gather
+ *  until the requested page is full, the pool is exhausted, or the budget runs
+ *  out. Bounded so a near-floor window that keeps trickling cannot gather without
+ *  end. Every paged tab can chain — dedup against the pool can leave the ALL feed
+ *  or a platform tab short of a page too, it is just rarer there. The budget
+ *  defaults to zero, so only a pager click arms it and any other caller keeps the
+ *  old single-gather behaviour. */
+const MZ_FEED_CHAIN_MAX = 3;
+let _mzFeedChainBudget = 0;
+/*  The page the reader was on before a Next optimistically advanced mzFeedPage,
+ *  so a failed extension can put them back rather than onto a blank grid. */
+let _mzReturnFeedPage = 1;
+
 /** Where the current page starts in the pool. */
 function mzFeedPageStart(page) {
   return (Math.max(1, page) - 1) * MZ_FEED_PAGE_SIZE;
@@ -10394,6 +10601,16 @@ function mzFeedPageIsReady(page) {
   return mzFeedPoolExhausted
     ? start < allMovies.length
     : allMovies.length >= start + MZ_FEED_PAGE_SIZE;
+}
+
+/*  The deepest page the pool can show right now: the last COMPLETE page while
+ *  the pool can still grow, the final partial page once it cannot. Where a
+ *  reader is put back when the page they asked for could not be filled, so
+ *  they always land on a whole page with Next still live. */
+function mzFeedLastReadyPage() {
+  const size = allMovies.length / MZ_FEED_PAGE_SIZE;
+  const pages = mzFeedPoolExhausted ? Math.ceil(size) : Math.floor(size);
+  return Math.max(1, Math.min(pages, MZ_FEED_PAGE_CAP));
 }
 
 /*  Which page numbers to show: first, last, the current page's neighbours, and
@@ -10521,6 +10738,7 @@ function goToFeedPage(page) {
   const sec = document.getElementById('movies-section');
   if (sec) sec.scrollIntoView({ behavior: isMzTVMode() ? 'auto' : 'smooth', block: 'start' });
 
+  _mzReturnFeedPage = mzFeedPage;
   mzFeedPage = target;
 
   /*  The pool already covers this page, so there is nothing to fetch. This is
@@ -10536,7 +10754,11 @@ function goToFeedPage(page) {
   /*  Past what the pool holds: extend it. isLoadMore appends the next TMDB page
    *  to allMovies rather than replacing it, so every earlier page keeps showing
    *  exactly what it showed before, and the new titles cannot repeat old ones —
-   *  loadMovies dedups the append against the whole pool. */
+   *  loadMovies dedups the append against the whole pool. One gather may not
+   *  fill the page on a thin ladder window, so arm the chain budget: loadMovies
+   *  keeps gathering until the page is full, the pool is exhausted or the budget
+   *  is spent. */
+  _mzFeedChainBudget = MZ_FEED_CHAIN_MAX;
   loadMovies(mzFeedPagerCategory, true);
 }
 window.goToFeedPage = goToFeedPage;
@@ -13100,6 +13322,55 @@ function ensureAnilistThenReload(m, season, srcIdx, lang, quality, type) {
 // Every entry was re-measured in real Chrome inside a real iframe (this app's
 // own frame attributes: no sandbox, referrerpolicy=no-referrer — origin for
 // OmniPlay/VidRift only, see frameReferrerPolicy()).
+
+/*  ── TOON HINDI: what the server has told us it does not carry ─────────────
+ *  The server itself is the last entry in playerSources; toon-resolver.js has
+ *  the full story. Its frame always loads our own /api/toon/embed, which 302s
+ *  to the player or shows a "not on this server" page — so the URL is the same
+ *  string whether or not the title was ever looked up, and prewarm matching
+ *  (takePrewarmedFrame compares URLs as strings) keeps working.
+ *
+ *  That page posts mz-toon:unavailable to us as soon as it loads. From the live
+ *  player frame it moves the viewer on at once instead of after a timeout; from
+ *  either frame it is remembered, so skip() keeps the opening pick and the
+ *  retry chain off this server for that title (or that episode) from then on.
+ *  keepPick, like the signal watch: one missing title must not overwrite the
+ *  server the viewer chose for the next one.
+ *
+ *  No lookup is made ahead of the click: the 302 path costs one same-origin
+ *  round trip, and a speculative resolve per opened title would put AnimeSalt
+ *  requests behind every animated detail view, played or not. */
+const TOON_API = BASE.replace(/\/tmdb$/, '/toon');
+const _mzToonMissing = new Set();
+function toonMissingKeys(m) {
+  const type = m.media_type === 'tv' ? 'tv' : 'movie';
+  const sel = currentEpisodeSelection();
+  return [type + ':' + m.id, type + ':' + m.id + (type === 'tv' ? ':' + sel.s + ':' + sel.e : '')];
+}
+function toonKnownMissing(m) {
+  if (!m) return false;
+  const keys = toonMissingKeys(m);
+  return _mzToonMissing.has(keys[0]) || _mzToonMissing.has(keys[1]);
+}
+window.addEventListener('message', (event) => {
+  const d = event.data;
+  if (!d || typeof d !== 'object' || d.type !== 'mz-toon:unavailable') return;
+  const live = document.getElementById('playerFrame');
+  const warm = document.getElementById('mzPrewarmFrame');
+  const fromLive = !!(live && event.source === live.contentWindow);
+  if (!fromLive && !(warm && event.source === warm.contentWindow)) return;
+  const m = currentModalMovie;
+  const idx = playerSources.findIndex((s) => s.toon);
+  if (!m || idx === -1) return;
+  const reason = String(d.reason || '');
+  // A failed lookup is transient and is not remembered; everything else is.
+  if (reason !== 'upstream-error') {
+    _mzToonMissing.add(toonMissingKeys(m)[/^(not-on-animesalt|not-animated|tmdb)$/.test(reason) ? 0 : 1]);
+  }
+  if (!fromLive || currentSourceIdx !== idx) return;
+  if (window._mzRetryTimer) { clearTimeout(window._mzRetryTimer); window._mzRetryTimer = null; }
+  autoRetryNextServer(m.id, idx, getSelectedLang(), getSelectedQuality(), m.media_type, { keepPick: true, reason: 'unavailable' });
+});
 const playerSources = [
   /*  #0 OmniPlay 4K — same chip, same slot, same badges; the engine changed.
    *
@@ -13411,6 +13682,38 @@ const playerSources = [
   //   // #9: Official proxy mirror to fix 'refused to connect' / iframe block issue
   //   return (type === 'tv' ? `https://vidsrc.pm/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.pm/embed/movie?tmdb=${id}`) + `&lang=${lang}`;
   // }}
+
+  /*  🌸 TOON HINDI — anime and cartoons ONLY, multi-audio with Hindi first.
+   *
+   *  The player ToonPlay shows as its "Server 1": AnimeSalt's JW Player, one
+   *  stream carrying Hindi, Tamil, Telugu, Malayalam, English and Japanese audio,
+   *  Hindi selected by default (measured: Naruto Shippuden 1x1 at 720p with
+   *  tracks Japanese/English/Malayalam/Tamil/Hindi; Pokémon and Ben 10 fall back
+   *  to AnimeSalt's per-language Hindi file). Resolved server-side from the TMDB
+   *  id by /api/toon/embed — see toon-resolver.js — so it needs no AniList id.
+   *
+   *  Last in the array on purpose: every server before it keeps its index, so
+   *  saved picks (moviezone.playerSourceIdx) and learned health stay attached
+   *  to the servers they were measured on.
+   *
+   *  `toon`: shown and picked only for animated titles (isCartoonContent —
+   *  anime included). skip() also drops it for a title or episode the server
+   *  has already said it does not carry, so neither the opening pick nor the
+   *  retry chain lands on it there. `hosts`: where its frames actually end up
+   *  after the redirect, so they are warmed like every other provider.
+   *
+   *  The builder reads nothing but its arguments and standard globals, guarded,
+   *  because player-health.test.js evaluates this array in a bare sandbox. */
+  { name: 'Toon Hindi', dubbed: true, anime: true, toon: true,
+    hosts: ['https://ravok.buzz', 'https://player.abyssplayer.com'],
+    skip: () => !isCartoonContent(currentModalMovie) || toonKnownMissing(currentModalMovie),
+    url: (id, lang, type, s, e) => {
+      const tv = type === 'tv';
+      const api = (typeof TOON_API === 'string') ? TOON_API : '/api/toon';
+      const page = (typeof location !== 'undefined' && /^https?:$/.test(location.protocol)) ? location.href : 'https://moviezone.dev/';
+      return new URL(api + '/embed?type=' + (tv ? 'tv' : 'movie') + '&id=' + encodeURIComponent(id)
+        + (tv ? '&s=' + (parseInt(s, 10) || 1) + '&e=' + (parseInt(e, 10) || 1) : ''), page).href;
+    }}
 ];
 
 
@@ -13525,10 +13828,14 @@ function renderExternalSources(id, srcIdx, lang) {
    *  is4K/anime partition), so the on-screen sequence matches the array 1:1.
    *  `_idx` is still the true declared index, so playback/active-chip logic is
    *  unaffected — only the visual order follows the array now. */
-  const allServers = playerSources.map((s, i) => ({ ...s, _idx: i }));
+  const allServers = playerSources.map((s, i) => ({ ...s, _idx: i }))
+    // Toon Hindi is an anime + cartoon server: not offered for anything else.
+    .filter((s) => !s.toon || isCartoonContent(currentModalMovie));
 
   function buildServerCard(s) {
-    const tip = s.anime
+    const tip = s.toon
+      ? 'Anime + Cartoons only • Hindi first, multi-audio'
+      : s.anime
       ? 'All-Rounder: Anime + Cartoons + Movies + Series (Hindi Dub supported)'
       : (s.is4K ? '4K AI Upscaling + Multi-Language + Spatial Audio' : (s.dubbed ? 'Hindi Dubbed + Multi-Audio' : 'Mostly English Audio'));
     const badges = [];
@@ -13874,6 +14181,15 @@ function getSelectedSourceIdx() {
   // rather than always on index 0.
   if (isNaN(saved) || saved < 0 || saved >= playerSources.length) return best;
 
+  /*  A saved pick that rules itself out for THIS title (skip(): Toon Hindi on a
+   *  live-action film) is not reopened on it; the next animated title still is,
+   *  because the saved index itself is left alone. Only servers that declare
+   *  skip() are affected. */
+  const savedSource = playerSources[saved];
+  if (savedSource && typeof savedSource.skip === 'function') {
+    try { if (savedSource.skip()) return best; } catch (err) { /* keep the saved pick */ }
+  }
+
   /*  A stored pick is respected, with one exception: if that server's measured
    *  record is far worse than the best available, honouring it would mean
    *  knowingly making the user watch a spinner. The threshold is deliberately
@@ -13906,6 +14222,16 @@ function playMovie() {
   currentSourceIdx = getSelectedSourceIdx();
   const lang = getSelectedLang();
   const quality = getSelectedQuality();
+  /*  The saved server ruled itself out for this title (skip(): Toon Hindi on a
+   *  live-action film), so getSelectedSourceIdx() opened another one. That is a
+   *  per-title stand-in, not a new choice: keepPick leaves the saved server in
+   *  place for the next title it does serve. */
+  const savedRaw = parseInt(localStorage.getItem('moviezone.playerSourceIdx') || '-1', 10);
+  const savedSource = playerSources[savedRaw];
+  let savedStandIn = false;
+  if (savedSource && savedRaw !== currentSourceIdx && typeof savedSource.skip === 'function') {
+    try { savedStandIn = !!savedSource.skip(); } catch (e) { savedStandIn = false; }
+  }
   // Anime/Cartoon: agar user ka saved server anime support nahi karta to
   // automatically All-Rounder (anime-capable) server pe switch kar do
   if ((isAnimeContent(currentModalMovie) || isCartoonContent(currentModalMovie)) &&
@@ -13916,7 +14242,8 @@ function playMovie() {
       showToast(`Anime detected — switched to ${playerSources[animeIdx].name}`);
     }
   }
-  loadPlayer(currentModalMovie.id, currentSourceIdx, lang, quality, currentModalMovie.media_type);
+  loadPlayer(currentModalMovie.id, currentSourceIdx, lang, quality, currentModalMovie.media_type,
+    savedStandIn ? { keepPick: true } : undefined);
 }
  
 function playNextEpisode() {
@@ -14000,6 +14327,8 @@ function playerHostOrigins() {
      *  any other entry that splits by type. */
     try { add(source.url(550, 'en', 'movie', '1', '1')); } catch (e) { /* needs a modal */ }
     try { add(source.url(1399, 'en', 'tv', '1', '1')); } catch (e) { /* needs a modal */ }
+    // A server whose URL is our own redirect names the hosts its frames land on.
+    if (Array.isArray(source.hosts)) source.hosts.forEach(add);
   });
   origins.push(ANILIST_HOST);
   _mzPlayerOrigins = origins;
@@ -14656,9 +14985,15 @@ function tryAllDubbedServers() {
   const type = currentModalMovie.media_type || 'movie';
   const id = currentModalMovie.id;
   
-  // Get only dubbed servers
+  // Get only dubbed servers — minus any that rules itself out for this title
+  // (skip(): Toon Hindi on a live-action film), so the cycle never stops on a
+  // "not on this server" page.
   const dubbedIndices = [];
-  playerSources.forEach((s, i) => { if (s.dubbed) dubbedIndices.push(i); });
+  playerSources.forEach((s, i) => {
+    if (!s.dubbed) return;
+    if (typeof s.skip === 'function') { try { if (s.skip()) return; } catch (err) { /* keep it */ } }
+    dubbedIndices.push(i);
+  });
   
   if (dubbedIndices.length === 0) {
     showToast('No dubbed servers available');

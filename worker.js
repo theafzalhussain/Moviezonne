@@ -44,6 +44,10 @@ import seo from './seo-ssr.js';
  *  Express server and this Worker and the two deployments cannot drift. */
 import ottCharts from './ott-charts.js';
 
+/*  Toon Hindi — the anime + cartoon player resolver, shared with server.js the
+ *  same way. See toon-resolver.js for where the player comes from. */
+import toonResolver from './toon-resolver.js';
+
 // ── Constants ───────────────────────────────────────────────────────────────
 
 /** RFC 8188 record size. One record is always enough for these payloads. */
@@ -2207,6 +2211,82 @@ async function handleOttCharts(request, env, ctx, url) {
   return ottChartResponse(body, 'MISS');
 }
 
+/*  ── TOON HINDI — /api/toon/resolve and /api/toon/embed ────────────────────
+ *  Same contract as server.js. One resolver per isolate, so its memo (title
+ *  -> AnimeSalt slug, episode -> player URL) is shared by every request this
+ *  isolate serves; TMDB goes through fetchTmdbJson, i.e. the same memo + edge
+ *  layers as the /api/tmdb proxy. */
+let _toon = null;
+function toonInstance() {
+  if (_toon) return _toon;
+  _toon = toonResolver.createToonResolver({
+    tmdbDetails: async (type, id, context) => {
+      const path = '/' + type + '/' + id + '?language=en-US'
+        + '&append_to_response=images,alternative_titles&include_image_language=en,null,ja,hi';
+      const res = await fetchTmdbJson(path, context.env, context.ctx);
+      if (res.status === 404) return null;
+      if (res.status !== 200) throw new Error('TMDB responded ' + res.status);
+      return JSON.parse(res.text);
+    },
+    log: (message) => console.log(message)
+  });
+  return _toon;
+}
+
+function toonCacheControl(result, scope) {
+  if (result.available) return scope + ', max-age=3600';
+  if (result.reason === 'upstream-error') return 'no-store';
+  return scope + ', max-age=600';
+}
+
+async function handleToon(isEmbed, env, ctx, url) {
+  let req = null;
+  try { req = toonResolver.parseToonRequest(url.searchParams); } catch (err) { req = null; }
+
+  if (!isEmbed) {
+    if (!req) return json({ error: 'expected type=movie|tv, id=<tmdb id>, and s/e for tv' }, 400);
+    const result = await toonInstance().resolve(req, { env, ctx });
+    return new Response(JSON.stringify({
+      available: !!result.available,
+      url: result.url || null,
+      audio: result.audio || null,
+      reason: result.reason || null,
+      scope: result.scope || null
+    }), {
+      status: 200,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': toonCacheControl(result, 'public'),
+        'x-cache': result.cache || 'MISS',
+        'x-robots-tag': 'noindex'
+      }
+    });
+  }
+
+  const result = req ? await toonInstance().resolve(req, { env, ctx }) : { available: false, reason: 'bad-request' };
+  if (result.available) {
+    return new Response(null, {
+      status: 302,
+      headers: {
+        location: result.url,
+        'cache-control': toonCacheControl(result, 'private'),
+        'referrer-policy': 'no-referrer',
+        'x-robots-tag': 'noindex'
+      }
+    });
+  }
+  return new Response(toonResolver.unavailablePageHtml(result.reason), {
+    status: req ? 200 : 400,
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': toonCacheControl(result, 'private'),
+      'content-security-policy': toonResolver.UNAVAILABLE_FRAME_ANCESTORS,
+      'referrer-policy': 'no-referrer',
+      'x-robots-tag': 'noindex'
+    }
+  });
+}
+
 /*  ── TMDB IMAGE FALLBACK — /api/img/<size>/<file> ───────────────────────────
  *  Posters normally load straight from image.tmdb.org, and several Indian ISPs
  *  (Jio and Airtel most often, per TMDB's own forum) block or reset that host. The
@@ -2305,6 +2385,13 @@ async function routeApi(request, env, ctx, url) {
   if (pathname === '/api/ott/charts') {
     if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
     return handleOttCharts(request, env, ctx, url);
+  }
+
+  /*  Toon Hindi (anime + cartoons). GET-only; the upstream is fixed inside
+   *  toon-resolver.js and the redirect target is shape-checked there. */
+  if (pathname === '/api/toon/resolve' || pathname === '/api/toon/embed') {
+    if (request.method !== 'GET' && request.method !== 'HEAD') return json({ error: 'Method not allowed' }, 405);
+    return handleToon(pathname === '/api/toon/embed', env, ctx, url);
   }
 
   const post = request.method === 'POST';

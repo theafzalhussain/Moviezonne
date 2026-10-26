@@ -17,8 +17,9 @@
  *     Shares the title that is open in the detail view, as its real SEO page
  *     (/movie/<id>-<slug>), or the homepage when nothing is open. Those pages
  *     are server-rendered with Open Graph tags, so WhatsApp shows the poster
- *     and title as a rich preview. Hidden on TVs (no WhatsApp there) and while
- *     the player is running, so it never sits on top of video controls.
+ *     and title as a rich preview. Hidden on TVs (no WhatsApp there), while
+ *     the player is running, so it never sits on top of video controls, and
+ *     while a category dropdown is open, so it never covers a menu item.
  *
  *  2. VOICE SEARCH (mic button inside the search box)
  *     Built for TV remotes as much as phones: typing a title with a D-pad on
@@ -307,13 +308,33 @@
     a.addEventListener('click', refresh);
     document.body.appendChild(a);
 
-    function sync() { a.classList.toggle('is-hidden', playerRunning()); }
+    /*  An open category dropdown also hides it. On a small phone (360x640) the
+     *  panel reaches down into the corner this button sits in, and no z-index on
+     *  the panel can win: it lives inside #movies-section, whose
+     *  content-visibility:auto implies contain:paint and so a stacking context of
+     *  its own, while this button sits on <body> at z-index 9050. The bottom
+     *  items ("Animation") were under the button and could not be tapped. The
+     *  menu is a short-lived choice, so the share button steps aside until it
+     *  closes. */
+    function menuOpen() { return !!document.querySelector('.cat-group.is-open'); }
+    function sync() {
+      var hide = playerRunning() || menuOpen();
+      a.classList.toggle('is-hidden', hide);
+      // Hidden means hidden for every input, not just the pointer: a
+      // transparent link that still takes Tab focus is a trap for keyboard and
+      // screen-reader users.
+      if (hide) { a.setAttribute('tabindex', '-1'); a.setAttribute('aria-hidden', 'true'); }
+      else { a.removeAttribute('tabindex'); a.removeAttribute('aria-hidden'); }
+    }
     var overlay = document.getElementById('modal-overlay');
     var embed = document.getElementById('videoEmbed');
+    var strip = document.getElementById('catTabs');
     if (typeof MutationObserver === 'function') {
       var mo = new MutationObserver(sync);
       if (overlay) mo.observe(overlay, { attributes: true, attributeFilter: ['class'] });
       if (embed) mo.observe(embed, { childList: true, attributes: true, attributeFilter: ['class', 'style'] });
+      // .cat-group toggles `is-open` on itself; subtree covers groups injected later.
+      if (strip) mo.observe(strip, { subtree: true, attributes: true, attributeFilter: ['class'] });
     }
     sync();
     // Enter after the page has settled, so it never competes with the hero.

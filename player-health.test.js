@@ -404,6 +404,61 @@ it('the warm list is derived from playerSources, never hand-written', () => {
     });
 });
 
+/*  ── THE STATIC HINTS IN index.html DRIFT THE SAME WAY ──
+ *  index.html resolves provider hosts in <head>, before moviezone.js has parsed,
+ *  from a hand-written list. That list drifted twice: first it still resolved
+ *  vidrock.ru and embed.smashystream.com, then vidsrc.pm and vidsrc.buzz stayed
+ *  after Premium Mirror and MultiAudio 4K were commented out. A dead hint costs a
+ *  DNS lookup on every visit and names a provider the app no longer uses; a
+ *  missing one costs the live server its early lookup. Checked both ways against
+ *  the origins the shipped servers really build (anime and cartoon branches too).
+ *  graphql.anilist.co is the one deliberate non-player entry: the AniList id
+ *  bridge those servers resolve through, read from moviezone.js itself. */
+it("index.html's provider dns-prefetch hints match the shipped servers exactly", () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const at = html.indexOf('<!-- Playback providers');
+  assert.ok(at !== -1, 'the provider hint block in index.html is gone or renamed');
+  const block = html.slice(at, html.indexOf('<link rel="manifest"', at));
+  const hinted = [...block.matchAll(/<link rel="dns-prefetch" href="([^"]+)">/g)].map((m) => m[1]);
+  assert.ok(hinted.length > 0, 'no dns-prefetch hints found in the provider block');
+
+  const start = src.indexOf('const playerSources = [');
+  const end = src.indexOf('\n];', start) + 3;
+  const built = new Set();
+  [[false, false], [true, false], [false, true]].forEach(([anime, cartoon]) => {
+    const sandbox = {
+      console, URL, String, Number, parseInt, Array, Object, JSON, Math, Date,
+      currentModalMovie: null,
+      isAnimeContent: () => anime,
+      isCartoonContent: () => cartoon,
+      getAnilistIdSync: () => 12345,
+      animeAudioTrack: (l) => (l === 'hi' ? 'hindi' : l === 'en' ? 'dub' : 'sub')
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(src.slice(start, end) + '\nthis.__sources = playerSources;', sandbox);
+    sandbox.__sources.forEach((s) => {
+      [['movie', 550], ['tv', 1396]].forEach(([type, id]) => ['en', 'hi'].forEach((lang) => {
+        try { built.add(new URL(s.url(id, lang, type, '1', '1')).origin); } catch (e) { /* no URL */ }
+      }));
+      // A server whose URL is our own redirect (Toon Hindi) names its real hosts.
+      (Array.isArray(s.hosts) ? s.hosts : []).forEach((h) => built.add(new URL(h).origin));
+    });
+  });
+  /*  The site's own origin needs no hint: a same-origin redirect rides the
+   *  connection the page already has. The sandbox has no `location`, so a
+   *  same-origin builder reports the canonical host. */
+  built.delete('https://moviezone.dev');
+  const anilist = (/const ANILIST_HOST = '([^']+)'/.exec(src) || [])[1];
+  assert.ok(anilist, 'ANILIST_HOST not found in moviezone.js');
+
+  const dead = hinted.filter((h) => !built.has(h) && h !== anilist);
+  const missing = [...built].filter((o) => !hinted.includes(o));
+  assert.deepStrictEqual(dead, [], 'index.html resolves hosts no shipped server uses: ' + dead.join(', '));
+  assert.deepStrictEqual(missing, [], 'live servers whose host index.html never resolves: ' + missing.join(', '));
+  assert.strictEqual(new Set(hinted).size, hinted.length, 'a host is hinted twice');
+  console.log('        ' + hinted.length + ' hints = ' + built.size + ' player origins + the AniList bridge');
+});
+
 /*  ── WHAT THIS CHECK IS REALLY FOR, AND WHY IT WAS REWRITTEN ──
  *
  *  The invariant that matters is in the title: no server may send episodes to a

@@ -234,7 +234,28 @@
 // v171: moviezone.min.css?v=9.26 (no search clear button on phones) and
 // mz-extras.js?v=3 (mobile Continue Watching layout, English voice prompts,
 // compact Top 10 chip).
-const CACHE_NAME = 'moviezone-v173';
+// v175 (v174 / 17.0 / mz-extras v4 were built but never deployed; live was still
+// v173 / 16.9 / v3, so this one entry covers everything that ships together):
+// moviezone.min.js 17.1 - the industry tabs (Bollywood, Hollywood, Tollywood)
+// and Web Series page through consecutive RELEASE WINDOWS newest first
+// (FEED_LADDER) instead of TMDB's all-time popularity list, so their later
+// pages no longer jump between eras, and page 1 is the latest window alone, so
+// the dates never climb back up after it. Next chains gathers on every tab, so
+// a thin gather cannot strand a part-full page; a failed extension - even a
+// partial one, where some sources answered from cache - is rolled back to the
+// reader's full page and retried, instead of leaving a short page with no Next
+// or falsely claiming "last page". First build since f09a90e (Oct 22), which
+// removed the 'Premium Mirror' (vidsrc.pm) server from moviezone.js without
+// rebuilding the bundle; index.html drops its dns-prefetch for vidsrc.pm and
+// vidsrc.buzz. mz-extras.js?v=5: hides the WhatsApp button while a category
+// dropdown is open (it covered "Animation" on 360px phones), and carries
+// f09a90e's Continue Watching restyle, which had kept ?v=3 and the old seal.
+// Also in 17.1: a new server, Toon Hindi (anime + cartoons only, Hindi-first
+// multi-audio), appended last to playerSources so every existing server keeps
+// its index; its frame loads same-origin /api/toon/embed (never cached here -
+// /api/ is not handled by this worker) and lands on ravok.buzz or
+// player.abyssplayer.com, both now dns-prefetched by index.html.
+const CACHE_NAME = 'moviezone-v175';
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
  *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream
@@ -409,7 +430,7 @@ const STATIC_ASSETS = [
   '/moviezone.min.css?v=9.26',
   '/tv-mode.min.js?v=2.0',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=16.9',
+  '/moviezone.min.js?v=17.1',
   '/manifest.json',
   '/icon-192.png?v=2',
   '/favicon-32.png?v=2',

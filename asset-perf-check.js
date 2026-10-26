@@ -106,7 +106,36 @@ const brotliOf = (p) => zlib.brotliCompressSync(fs.readFileSync(p), {
   params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 }
 }).length;
 
-const CRITICAL_WIRE_BUDGET = 125 * 1024;
+const CRITICAL_WIRE_BUDGET = 127 * 1024;
+
+/*  Raised 126 -> 127 KB (Oct 2026) for Toon Hindi, the anime + cartoon server.
+ *
+ *  Measured through the same build: +0.65 KB brotli JS (66.85 -> 67.5) and
+ *  ~0.05 KB index.html (two provider dns-prefetch hints), landing at 126.3 of
+ *  the old 126.0. The client half was trimmed before raising this: the
+ *  speculative per-title lookup was dropped (the server's own "not on this
+ *  server" page reports a miss instead), leaving the server entry, its skip()
+ *  rule (also honoured by the saved pick, Try All and playMovie's keepPick),
+ *  the unavailable-page failover and the picker filter. The resolver itself is
+ *  server-side (toon-resolver.js) and costs the first paint nothing. Parse
+ *  stays inside its own budget. */
+
+/*  Raised 125 -> 126 KB (Oct 2026) for the release ladder in moviezone.js.
+ *
+ *  Measured against the previous commit through the same build: +0.80 KB brotli
+ *  JS (66.05 -> 66.85); index.html +0.2 KB (the daily SEO link-block refresh and
+ *  the comment that now explains the provider hints), CSS untouched. That lands
+ *  at 125.6, over the old 125.0 by 0.6, so one KB restores alarm headroom. The
+ *  parse ceiling is unmoved and still inside its own budget — wire, not parse.
+ *
+ *  What it buys: Bollywood, Hollywood, Tollywood and Web Series now page through
+ *  consecutive release WINDOWS newest-first instead of TMDB's all-time
+ *  popularity list, so their later pages stop jumping between eras (measured:
+ *  Hollywood page 3 ran 2001-2026, every Bollywood page carried titles newer
+ *  than the page before). The pager also chains gathers and rolls back a failed
+ *  extension, so neither a thin release window nor a partly failed gather can
+ *  strand the reader on a part-full page with no Next. The bytes are net of the
+ *  three per-tab plan branches the one FEED_LADDER builder replaced. */
 
 /*  Raised 124 -> 125 KB (Oct 2026) for the Cartoon Providers rail.
  *

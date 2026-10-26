@@ -208,6 +208,58 @@ check('the in-flight gate is released on that early return',
 check('the two-stage paint is kept for page changes',
   /function renderCurrentFeedPage[\s\S]{0,600}requestIdleCallback\(paintTail/.test(js));
 
+// ── 3b. no dead end after Next ──────────────────────────────────────────────
+console.log('');
+/*  The reported dead end: an extension on the ALL feed where one source came from
+ *  cache and the rest failed. Four titles were appended, the gather index moved
+ *  on, and the reader sat on a 26-card page 7 with no Next — while the failed
+ *  sources of that gather were never asked for again. These pin the three pieces
+ *  that close it, plus the chain that keeps a thin gather from doing the same. */
+check('the pool as it was before an extension is kept until the extension is judged',
+  /const poolBefore = allMovies;\s*allMovies = allMovies\.concat\(newMovies\)/.test(js));
+check('a failed extension that cannot fill the page is undone, not committed',
+  /networkFailed && !mzFeedPageIsReady\(mzFeedPage\)\) \{\s*allMovies = poolBefore;/.test(js),
+  'checking only for an EMPTY extension lets a partial failure strand the reader');
+check('...and the same gather is asked for again on the next Next',
+  /allMovies = poolBefore;\s*currentMoviePage = Math\.max\(1, requestedMoviePage - 1\);/.test(js));
+check('...and the reader goes back to a page the pool fills',
+  /allMovies = poolBefore;[\s\S]{0,200}mzFeedPage = Math\.min\(Math\.max\(1, _mzReturnFeedPage\), mzFeedLastReadyPage\(\)\);/.test(js));
+check('...and that early return releases the in-flight gate',
+  /allMovies = poolBefore;[\s\S]{0,700}isLoadingMore = false;[\s\S]{0,300}return;/.test(js));
+check('goToFeedPage remembers the page to return to before advancing',
+  /_mzReturnFeedPage = mzFeedPage;\s*mzFeedPage = target;/.test(js));
+
+check('every paged tab may chain gathers — no category is exempt',
+  /const needsMore = isLoadMore && !mzFeedPoolExhausted && !mzFeedPageIsReady\(mzFeedPage\);/.test(js),
+  "an exemption such as cat !== 'all' is how the ALL feed could still end on a short page");
+const chainMax = Number((/const MZ_FEED_CHAIN_MAX = (\d+);/.exec(js) || [])[1]);
+check('the chain is bounded', chainMax >= 1 && chainMax <= 5, 'MZ_FEED_CHAIN_MAX = ' + chainMax);
+check('only a pager click arms the chain; it starts disarmed',
+  /let _mzFeedChainBudget = 0;/.test(js)
+  && /_mzFeedChainBudget = MZ_FEED_CHAIN_MAX;\s*loadMovies\(mzFeedPagerCategory, true\);/.test(js));
+check('a chained gather spends budget and releases the gate before recursing',
+  /_mzFeedChainBudget--;[\s\S]{0,200}isLoadingMore = false;[\s\S]{0,120}loadMovies\(cat, true\);\s*return;/.test(js));
+check('a superseded extension disarms the chain',
+  /isLoadingMore = false;\s*_mzFeedChainBudget = 0;/.test(js));
+check('a spent budget steps back to a full page instead of painting a short one',
+  /if \(needsMore\) \{[\s\S]{0,400}mzFeedPage = Math\.min\(mzFeedPage, mzFeedLastReadyPage\(\)\);/.test(js));
+check('a restored pool reopens on a page it fills (a mid-chain save may not)',
+  /mzFeedPoolExhausted = pool\.exhausted;[\s\S]{0,600}if \(!mzFeedPageIsReady\(mzFeedPage\)\) mzFeedPage = mzFeedLastReadyPage\(\);/.test(js));
+
+// The shipped helper, run for real.
+// eslint-disable-next-line no-new-func
+const lastReady = new Function('allMovies', 'mzFeedPoolExhausted', 'MZ_FEED_PAGE_SIZE', 'MZ_FEED_PAGE_CAP',
+  extract('mzFeedLastReadyPage') + '; return mzFeedLastReadyPage();');
+const pool = (n) => new Array(n).fill(0);
+check('the last ready page is the last COMPLETE page while the pool can grow',
+  lastReady(pool(206), false, 30, 25) === 6 && lastReady(pool(210), false, 30, 25) === 7,
+  '206 -> ' + lastReady(pool(206), false, 30, 25) + ', 210 -> ' + lastReady(pool(210), false, 30, 25));
+check('...the final partial page once the pool is exhausted',
+  lastReady(pool(206), true, 30, 25) === 7);
+check('...never below 1, never past the cap',
+  lastReady(pool(0), false, 30, 25) === 1 && lastReady(pool(12), false, 30, 25) === 1
+  && lastReady(pool(5000), false, 30, 25) === 25);
+
 // ── 4. finite result sets get no pager ───────────────────────────────────────
 console.log('');
 check('the pager clears itself for search results and the watchlist',

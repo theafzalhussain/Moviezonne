@@ -1020,6 +1020,81 @@ app.get('/api/ott/charts', apiLimiter, async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════════════════════════
+//  TOON HINDI — the anime + cartoon player (see toon-resolver.js)
+// ══════════════════════════════════════════════════════════════
+//
+//  /api/toon/resolve?type=tv&id=31910&s=1&e=1   -> { available, url, audio }
+//  /api/toon/embed?type=tv&id=31910&s=1&e=1     -> 302 to the player, or a
+//      small "not on this server" page that tells the app to fail over.
+//
+//  The embed route is what the player iframe loads, so a title nobody has
+//  resolved yet still plays in one navigation. Neither route proxies media:
+//  the iframe ends up talking to the player host directly.
+const toonResolver = require('./toon-resolver');
+const toon = toonResolver.createToonResolver({
+  tmdbDetails: async (type, id) => {
+    try {
+      return await tmdbForSsr('/' + type + '/' + id, {
+        language: 'en-US',
+        append_to_response: 'images,alternative_titles',
+        include_image_language: 'en,null,ja,hi'
+      });
+    } catch (err) {
+      if (err && err.tmdbStatus === 404) return null;
+      throw err;
+    }
+  },
+  log: (message) => console.warn(message)
+});
+
+function toonRequestOrNull(req) {
+  try { return toonResolver.parseToonRequest(req.query); } catch (err) { return null; }
+}
+
+/*  A positive answer is stable for hours (a page's player hash does not change
+ *  between visits); a miss is short so a title added today appears today; an
+ *  upstream failure is not cached anywhere. */
+function toonCacheControl(result, scope) {
+  if (result.available) return scope + ', max-age=3600';
+  if (result.reason === 'upstream-error') return 'no-store';
+  return scope + ', max-age=600';
+}
+
+app.get('/api/toon/resolve', apiLimiter, async (req, res) => {
+  const q = toonRequestOrNull(req);
+  if (!q) return res.status(400).json({ error: 'expected type=movie|tv, id=<tmdb id>, and s/e for tv' });
+  const result = await toon.resolve(q);
+  res.setHeader('Cache-Control', toonCacheControl(result, 'public'));
+  res.setHeader('X-Cache', result.cache || 'MISS');
+  res.setHeader('X-Robots-Tag', 'noindex');
+  return res.json({
+    available: !!result.available,
+    url: result.url || null,
+    audio: result.audio || null,
+    reason: result.reason || null,
+    scope: result.scope || null
+  });
+});
+
+app.get('/api/toon/embed', apiLimiter, async (req, res) => {
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Robots-Tag', 'noindex');
+  const q = toonRequestOrNull(req);
+  const result = q ? await toon.resolve(q) : { available: false, reason: 'bad-request' };
+  if (result.available) {
+    res.setHeader('Cache-Control', toonCacheControl(result, 'private'));
+    return res.redirect(302, result.url);
+  }
+  /*  Framed by the app's own player, so helmet's X-Frame-Options: SAMEORIGIN is
+   *  replaced by the equivalent frame-ancestors list, which also covers the dev
+   *  server's split ports. */
+  res.removeHeader('X-Frame-Options');
+  res.setHeader('Content-Security-Policy', toonResolver.UNAVAILABLE_FRAME_ANCESTORS);
+  res.setHeader('Cache-Control', toonCacheControl(result, 'private'));
+  return res.status(q ? 200 : 400).type('html').send(toonResolver.unavailablePageHtml(result.reason));
+});
+
 // Health Check / Ping Endpoint: UptimeRobot ko server jagaye rakhne ke liye
 app.get('/ping', (req, res) => {
   res.status(200).send('Pong! Server is awake.');
