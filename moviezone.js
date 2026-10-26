@@ -13323,23 +13323,24 @@ function ensureAnilistThenReload(m, season, srcIdx, lang, quality, type) {
 // own frame attributes: no sandbox, referrerpolicy=no-referrer — origin for
 // OmniPlay/VidRift only, see frameReferrerPolicy()).
 
-/*  ── TOON HINDI: what the server has told us it does not carry ─────────────
+/*  ── TOON HINDI: the app's side of the server ──────────────────────────────
  *  The server itself is the last entry in playerSources; toon-resolver.js has
- *  the full story. Its frame always loads our own /api/toon/embed, which 302s
- *  to the player or shows a "not on this server" page — so the URL is the same
- *  string whether or not the title was ever looked up, and prewarm matching
- *  (takePrewarmedFrame compares URLs as strings) keeps working.
+ *  the full story. Its frame loads our own /api/toon/embed: the Toon Hindi
+ *  player, a source bar (Hindi libraries first, then backups) over the actual
+ *  player. The URL is the same string whether or not the title was ever looked
+ *  up, so prewarm matching (takePrewarmedFrame compares URLs as strings) keeps
+ *  working, and the warm-up copy (autoplay=0) only looks the title up.
  *
- *  That page posts mz-toon:unavailable to us as soon as it loads. From the live
- *  player frame it moves the viewer on at once instead of after a timeout; from
- *  either frame it is remembered, so skip() keeps the opening pick and the
- *  retry chain off this server for that title (or that episode) from then on.
- *  keepPick, like the signal watch: one missing title must not overwrite the
- *  server the viewer chose for the next one.
+ *  NOTHING HERE MOVES THE VIEWER TO ANOTHER SERVER. That was the reported bug:
+ *  tap Toon Hindi on a cartoon AnimeSalt lacked, get "Toon Hindi doesn't have
+ *  this title. Playing it on Nexus 4K…", and land on that server's Cloudflare
+ *  error page. A title the Hindi libraries do not carry now plays a backup
+ *  inside Toon Hindi, and the player page says so (mz-toon:playing below).
  *
- *  No lookup is made ahead of the click: the 302 path costs one same-origin
- *  round trip, and a speculative resolve per opened title would put AnimeSalt
- *  requests behind every animated detail view, played or not. */
+ *  The one exception is a request the server refuses outright (a malformed
+ *  id: mz-toon:unavailable). A hand pick stays on screen with a toast; only a
+ *  server the app chose by itself moves on, keepPick, so the next title still
+ *  opens on the viewer's saved server. */
 const TOON_API = BASE.replace(/\/tmdb$/, '/toon');
 const _mzToonMissing = new Set();
 /*  True while the live player is Toon Hindi AND the viewer picked it by tapping
@@ -13355,29 +13356,41 @@ function toonKnownMissing(m) {
   const keys = toonMissingKeys(m);
   return _mzToonMissing.has(keys[0]) || _mzToonMissing.has(keys[1]);
 }
+/** The Toon Hindi frame a message came from: 'live', 'warm' or null. */
+function toonFrameOf(event) {
+  const live = document.getElementById('playerFrame');
+  if (live && event.source === live.contentWindow) return 'live';
+  const warm = document.getElementById('mzPrewarmFrame');
+  if (warm && event.source === warm.contentWindow) return 'warm';
+  return null;
+}
+let _mzToonBackupToast = '';
 window.addEventListener('message', (event) => {
   const d = event.data;
-  if (!d || typeof d !== 'object' || d.type !== 'mz-toon:unavailable') return;
-  const live = document.getElementById('playerFrame');
-  const warm = document.getElementById('mzPrewarmFrame');
-  const fromLive = !!(live && event.source === live.contentWindow);
-  if (!fromLive && !(warm && event.source === warm.contentWindow)) return;
+  if (!d || typeof d !== 'object' || (d.type !== 'mz-toon:unavailable' && d.type !== 'mz-toon:playing')) return;
+  const from = toonFrameOf(event);
+  if (!from) return;
   const m = currentModalMovie;
   const idx = playerSources.findIndex((s) => s.toon);
   if (!m || idx === -1) return;
-  const reason = String(d.reason || '');
-  // A failed lookup is transient and is not remembered; everything else is.
-  if (reason !== 'upstream-error') {
-    _mzToonMissing.add(toonMissingKeys(m)[/^(not-on-animesalt|not-animated|tmdb)$/.test(reason) ? 0 : 1]);
+  const onScreen = from === 'live' && currentSourceIdx === idx;
+
+  if (d.type === 'mz-toon:playing') {
+    /*  A backup the viewer did not pick inside the player: say why once per
+     *  title/episode, so a different-sounding stream is not a surprise. */
+    if (!onScreen || d.library || d.byHand) return;
+    const key = toonMissingKeys(m)[1];
+    if (_mzToonBackupToast === key) return;
+    _mzToonBackupToast = key;
+    showToast('Toon Hindi: not in the Hindi library yet, playing a backup stream. Switch sources at the top of the player.');
+    return;
   }
-  if (!fromLive || currentSourceIdx !== idx) return;
+
+  _mzToonMissing.add(toonMissingKeys(m)[0]);
+  if (!onScreen) return;
   if (window._mzRetryTimer) { clearTimeout(window._mzRetryTimer); window._mzRetryTimer = null; }
-  /*  Picked by hand: stay on it. The page says why; the toast says what to do.
-   *  Only a server the app chose by itself is moved on from. */
   if (_mzToonUserPick) {
-    showToast(reason === 'upstream-error'
-      ? 'Toon Hindi is busy right now. Try again in a moment, or pick another server.'
-      : 'Not on Toon Hindi. Pick another server to watch this one.');
+    showToast('Toon Hindi cannot open this title. Pick another server below the player.');
     return;
   }
   autoRetryNextServer(m.id, idx, getSelectedLang(), getSelectedQuality(), m.media_type, { keepPick: true, reason: 'unavailable' });
@@ -13694,14 +13707,18 @@ const playerSources = [
   //   return (type === 'tv' ? `https://vidsrc.pm/embed/tv?tmdb=${id}&season=${s}&episode=${e}` : `https://vidsrc.pm/embed/movie?tmdb=${id}`) + `&lang=${lang}`;
   // }}
 
-  /*  🌸 TOON HINDI — anime and cartoons ONLY, multi-audio with Hindi first.
+  /*  🌸 TOON HINDI — anime and cartoons, Hindi first.
    *
-   *  The player ToonPlay shows as its "Server 1": AnimeSalt's JW Player, one
-   *  stream carrying Hindi, Tamil, Telugu, Malayalam, English and Japanese audio,
-   *  Hindi selected by default (measured: Naruto Shippuden 1x1 at 720p with
-   *  tracks Japanese/English/Malayalam/Tamil/Hindi; Pokémon and Ben 10 fall back
-   *  to AnimeSalt's per-language Hindi file). Resolved server-side from the TMDB
-   *  id by /api/toon/embed — see toon-resolver.js — so it needs no AniList id.
+   *  Our own player (/api/toon/embed, see toon-resolver.js) with a source bar:
+   *    Hindi libraries  AnimeSalt (multi-audio JW player: Hindi, Tamil, Telugu,
+   *                     Malayalam, English, Japanese, Hindi selected) and
+   *                     ToonStream (Disney / Pixar / DreamWorks / Nick / CN films
+   *                     and series in Hindi), looked up in parallel from the
+   *                     TMDB id — so it needs no AniList id;
+   *    backups          VidRift / vidnest / vidzee / moviesapi, measured on the
+   *                     cartoons the libraries lack, so every title plays HERE.
+   *  The viewer switches between them inside the player; this server never
+   *  sends anyone to another one (the mz-toon listener above).
    *
    *  Last in the array on purpose: every server before it keeps its index, so
    *  saved picks (moviezone.playerSourceIdx) and learned health stay attached
@@ -13710,25 +13727,26 @@ const playerSources = [
    *  `toon`: picked by the app itself only for animated titles (isCartoonContent —
    *  anime included) — though it is OFFERED on every title, like the other
    *  servers. skip() keeps it out of the opening pick, the retry chain and Try
-   *  All for non-animated titles and for a title or episode it has already said
-   *  it does not carry. Picked by hand it is never switched away from
-   *  (loadPlayer's _mzStayPut). `patience`: its first navigation includes the
-   *  server-side lookup (bounded by RESOLVE_DEADLINE_MS) plus a third-party
-   *  player document, which the app's 5-6s load timeout does not allow for.
-   *  `hosts`: where its frames actually end up
-   *  after the redirect, so they are warmed like every other provider.
+   *  All for non-animated titles and for a title the server refused. Picked by
+   *  hand, a slow load is never switched away from (loadPlayer's _mzStayPut).
+   *  `patience`: the first load of our own page is fast, but a cold Worker plus
+   *  a slow network should not trip the app's 5-6s load timeout.
+   *  `autoplay=1`: warmUrlVariant turns it into autoplay=0 for the hidden
+   *  warm-up frame, where the page only looks the title up and plays nothing.
+   *  `hosts`: where the inner frames end up, so they are warmed like every
+   *  other provider.
    *
    *  The builder reads nothing but its arguments and standard globals, guarded,
    *  because player-health.test.js evaluates this array in a bare sandbox. */
   { name: 'Toon Hindi', dubbed: true, anime: true, toon: true, patience: 15000,
-    hosts: ['https://ravok.buzz', 'https://player.abyssplayer.com'],
+    hosts: ['https://ravok.buzz', 'https://player.abyssplayer.com', 'https://abyssplayer.com', 'https://vidnest.fun', 'https://embed.vidrift.net'],
     skip: () => !isCartoonContent(currentModalMovie) || toonKnownMissing(currentModalMovie),
     url: (id, lang, type, s, e) => {
       const tv = type === 'tv';
       const api = (typeof TOON_API === 'string') ? TOON_API : '/api/toon';
       const page = (typeof location !== 'undefined' && /^https?:$/.test(location.protocol)) ? location.href : 'https://moviezone.dev/';
       return new URL(api + '/embed?type=' + (tv ? 'tv' : 'movie') + '&id=' + encodeURIComponent(id)
-        + (tv ? '&s=' + (parseInt(s, 10) || 1) + '&e=' + (parseInt(e, 10) || 1) : ''), page).href;
+        + (tv ? '&s=' + (parseInt(s, 10) || 1) + '&e=' + (parseInt(e, 10) || 1) : '') + '&autoplay=1', page).href;
     }}
 ];
 
@@ -13848,7 +13866,7 @@ function renderExternalSources(id, srcIdx, lang) {
 
   function buildServerCard(s) {
     const tip = s.toon
-      ? 'Anime + Cartoons • Hindi first, multi-audio'
+      ? 'Anime + Cartoons • Hindi first, multi-audio • backups built in'
       : s.anime
       ? 'All-Rounder: Anime + Cartoons + Movies + Series (Hindi Dub supported)'
       : (s.is4K ? '4K AI Upscaling + Multi-Language + Spatial Audio' : (s.dubbed ? 'Hindi Dubbed + Multi-Audio' : 'Mostly English Audio'));
@@ -14817,8 +14835,9 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie', opts) {
   /*  Handshake watch is armed BEFORE navigation starts, so a provider message
    *  posted ahead of `load` (VidRift posts at ~0.6s) still counts. */
   const _mzSource = playerSources[srcIdx];
-  /*  Toon Hindi picked by hand stays put: no timeout switch, and its "not on
-   *  this server" page is left on screen (see the mz-toon:unavailable listener).
+  /*  Toon Hindi picked by hand stays put while it LOADS: no timeout switch.
+   *  Nothing else moves it either — a title its Hindi libraries lack plays a
+   *  backup inside its own player (see the mz-toon listener).
    *  The pick sticks while Toon Hindi is the server — an episode, season or
    *  language change reloads it without a flag and must not undo the choice.
    *  It is cleared by loading any other server, and by the app choosing a
@@ -14982,11 +15001,17 @@ function autoRetryNextServer(id, currentIdx, lang, quality, type, opts) {
   
   if (nextIdx !== -1 && nextIdx !== currentIdx) {
     const from = playerSources[currentIdx] ? playerSources[currentIdx].name : 'Server';
-    showToast((opts && opts.reason === 'unavailable')
-      ? ` ${from} doesn't have this title. Trying ${playerSources[nextIdx].name}...`
-      : ` Server failed. Trying ${playerSources[nextIdx].name}...`);
+    const why = opts && opts.reason;
+    const toName = playerSources[nextIdx].name;
+    // A server that said "not here": the reason is shown AFTER loadPlayer,
+    // whose own "<server> | Hindi" toast would otherwise replace it at once and
+    // leave the viewer wondering why the server changed.
+    const reasonToast = why === 'unavailable'
+      ? ` ${from} doesn't have this title. Playing it on ${toName}...` : '';
+    if (!reasonToast) showToast(` Server failed. Trying ${toName}...`);
     _mzToonUserPick = false;   // the app is choosing now, not the viewer
     loadPlayer(id, nextIdx, lang, quality, type, opts);
+    if (reasonToast) showToast(reasonToast);
     /*  loadPlayer() has already re-rendered the chips with the right one active.
      *  Matched on data-srcidx, not DOM position: the chips are grouped (4K/anime
      *  first), so the Nth chip is not necessarily playerSources[N]. */

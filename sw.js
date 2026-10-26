@@ -263,7 +263,13 @@
 // another server. 17.1 shipped with an index.html that still asked for 16.9 /
 // mz-extras v3 (a rebase conflict resolved to upstream's whole file); this
 // index.html is the intended one again.
-const CACHE_NAME = 'moviezone-v176';
+// v177 (never deployed): moviezone.min.js 17.3 - moved a hand pick of Toon
+// Hindi on to another server when the title was missing; reported as the bug.
+// v178: moviezone.min.js 17.4 - Toon Hindi is its own player: a source bar over
+// the frame with two Hindi libraries (AnimeSalt + ToonStream) and backups, so
+// every title plays inside Toon Hindi and nothing switches the viewer to
+// another server. /api/toon/ is still never cached here.
+const CACHE_NAME = 'moviezone-v178';
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
  *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream
@@ -438,7 +444,7 @@ const STATIC_ASSETS = [
   '/moviezone.min.css?v=9.26',
   '/tv-mode.min.js?v=2.0',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=17.2',
+  '/moviezone.min.js?v=17.4',
   '/manifest.json',
   '/icon-192.png?v=2',
   '/favicon-32.png?v=2',

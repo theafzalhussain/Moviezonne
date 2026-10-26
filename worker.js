@@ -2213,7 +2213,7 @@ async function handleOttCharts(request, env, ctx, url) {
 
 /*  ── TOON HINDI — /api/toon/resolve and /api/toon/embed ────────────────────
  *  Same contract as server.js. One resolver per isolate, so its memo (title
- *  -> AnimeSalt slug, episode -> player URL) is shared by every request this
+ *  -> library slug, episode -> player URLs) is shared by every request this
  *  isolate serves; TMDB goes through fetchTmdbJson, i.e. the same memo + edge
  *  layers as the /api/tmdb proxy. */
 let _toon = null;
@@ -2239,6 +2239,20 @@ function toonCacheControl(result, scope) {
   return scope + ', max-age=600';
 }
 
+/*  The answer /api/toon/resolve gives: the best Hindi-library player (url,
+ *  audio) for older callers, every library player (sources) and the backups. */
+function toonPublicAnswer(result) {
+  return {
+    available: !!result.available,
+    url: result.url || null,
+    audio: result.audio || null,
+    reason: result.reason || null,
+    scope: result.scope || null,
+    sources: Array.isArray(result.sources) ? result.sources : [],
+    backups: Array.isArray(result.backups) ? result.backups : []
+  };
+}
+
 async function handleToon(isEmbed, env, ctx, url) {
   let req = null;
   try { req = toonResolver.parseToonRequest(url.searchParams); } catch (err) { req = null; }
@@ -2246,13 +2260,7 @@ async function handleToon(isEmbed, env, ctx, url) {
   if (!isEmbed) {
     if (!req) return json({ error: 'expected type=movie|tv, id=<tmdb id>, and s/e for tv' }, 400);
     const result = await toonInstance().resolve(req, { env, ctx });
-    return new Response(JSON.stringify({
-      available: !!result.available,
-      url: result.url || null,
-      audio: result.audio || null,
-      reason: result.reason || null,
-      scope: result.scope || null
-    }), {
+    return new Response(JSON.stringify(toonPublicAnswer(result)), {
       status: 200,
       headers: {
         'content-type': 'application/json; charset=utf-8',
@@ -2263,25 +2271,32 @@ async function handleToon(isEmbed, env, ctx, url) {
     });
   }
 
-  const result = req ? await toonInstance().resolve(req, { env, ctx }) : { available: false, reason: 'bad-request' };
-  if (result.available) {
-    return new Response(null, {
-      status: 302,
+  if (!req) {
+    return new Response(toonResolver.unavailablePageHtml('bad-request'), {
+      status: 400,
       headers: {
-        location: result.url,
-        'cache-control': toonCacheControl(result, 'private'),
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-store',
+        'content-security-policy': toonResolver.UNAVAILABLE_FRAME_ANCESTORS,
         'referrer-policy': 'no-referrer',
         'x-robots-tag': 'noindex'
       }
     });
   }
-  return new Response(toonResolver.unavailablePageHtml(result.reason), {
-    status: req ? 200 : 400,
+
+  /*  The Toon Hindi player page (toon-resolver.js, playerPageHtml) answers at
+   *  once and asks /api/toon/resolve for its sources. The lookup starts here so
+   *  that call, landing on this isolate, joins it instead of starting over. */
+  ctx.waitUntil(toonInstance().resolve(req, { env, ctx }).catch(() => {}));
+  const nonce = toonResolver.makeNonce();
+  return new Response(toonResolver.playerPageHtml(nonce, toonResolver.backupSources(req)), {
+    status: 200,
     headers: {
       'content-type': 'text/html; charset=utf-8',
-      'cache-control': toonCacheControl(result, 'private'),
-      'content-security-policy': toonResolver.UNAVAILABLE_FRAME_ANCESTORS,
+      'cache-control': 'no-store',
+      'content-security-policy': toonResolver.playerPageCsp(nonce),
       'referrer-policy': 'no-referrer',
+      'x-content-type-options': 'nosniff',
       'x-robots-tag': 'noindex'
     }
   });
@@ -2387,8 +2402,8 @@ async function routeApi(request, env, ctx, url) {
     return handleOttCharts(request, env, ctx, url);
   }
 
-  /*  Toon Hindi (anime + cartoons). GET-only; the upstream is fixed inside
-   *  toon-resolver.js and the redirect target is shape-checked there. */
+  /*  Toon Hindi (anime + cartoons). GET-only; the upstreams are fixed inside
+   *  toon-resolver.js and every player URL is shape-checked there. */
   if (pathname === '/api/toon/resolve' || pathname === '/api/toon/embed') {
     if (request.method !== 'GET' && request.method !== 'HEAD') return json({ error: 'Method not allowed' }, 405);
     return handleToon(pathname === '/api/toon/embed', env, ctx, url);

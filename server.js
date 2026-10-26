@@ -1024,13 +1024,14 @@ app.get('/api/ott/charts', apiLimiter, async (req, res) => {
 //  TOON HINDI — the anime + cartoon player (see toon-resolver.js)
 // ══════════════════════════════════════════════════════════════
 //
-//  /api/toon/resolve?type=tv&id=31910&s=1&e=1   -> { available, url, audio }
-//  /api/toon/embed?type=tv&id=31910&s=1&e=1     -> 302 to the player, or a
-//      small "not on this server" page that tells the app to fail over.
+//  /api/toon/resolve?type=tv&id=31910&s=1&e=1   -> { available, url, audio,
+//      sources: [Hindi-library players, best first], backups: [...] }
+//  /api/toon/embed?type=tv&id=31910&s=1&e=1     -> the Toon Hindi player page:
+//      a source bar over the player, which asks /api/toon/resolve and plays
+//      the best source (a backup when the Hindi libraries lack the title).
 //
-//  The embed route is what the player iframe loads, so a title nobody has
-//  resolved yet still plays in one navigation. Neither route proxies media:
-//  the iframe ends up talking to the player host directly.
+//  Neither route proxies media: the inner iframe talks to the player host
+//  directly.
 const toonResolver = require('./toon-resolver');
 const toon = toonResolver.createToonResolver({
   tmdbDetails: async (type, id) => {
@@ -1073,29 +1074,30 @@ app.get('/api/toon/resolve', apiLimiter, async (req, res) => {
     url: result.url || null,
     audio: result.audio || null,
     reason: result.reason || null,
-    scope: result.scope || null
+    scope: result.scope || null,
+    sources: Array.isArray(result.sources) ? result.sources : [],
+    backups: Array.isArray(result.backups) ? result.backups : []
   });
 });
 
-app.get('/api/toon/embed', apiLimiter, async (req, res) => {
+app.get('/api/toon/embed', apiLimiter, (req, res) => {
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-Robots-Tag', 'noindex');
-  const q = toonRequestOrNull(req);
-  const result = q ? await toon.resolve(q) : { available: false, reason: 'bad-request' };
-  if (result.available) {
-    // A redirect renders nothing; the player's own headers govern the frame.
-    // Same as the Worker, which sends no X-Frame-Options here either.
-    res.removeHeader('X-Frame-Options');
-    res.setHeader('Cache-Control', toonCacheControl(result, 'private'));
-    return res.redirect(302, result.url);
-  }
+  res.setHeader('Cache-Control', 'no-store');
   /*  Framed by the app's own player, so helmet's X-Frame-Options: SAMEORIGIN is
-   *  replaced by the equivalent frame-ancestors list, which also covers the dev
-   *  server's split ports. */
+   *  replaced by the equivalent frame-ancestors list (inside both CSPs), which
+   *  also covers the dev server's split ports. */
   res.removeHeader('X-Frame-Options');
-  res.setHeader('Content-Security-Policy', toonResolver.UNAVAILABLE_FRAME_ANCESTORS);
-  res.setHeader('Cache-Control', toonCacheControl(result, 'private'));
-  return res.status(q ? 200 : 400).type('html').send(toonResolver.unavailablePageHtml(result.reason));
+  const q = toonRequestOrNull(req);
+  if (!q) {
+    res.setHeader('Content-Security-Policy', toonResolver.UNAVAILABLE_FRAME_ANCESTORS);
+    return res.status(400).type('html').send(toonResolver.unavailablePageHtml('bad-request'));
+  }
+  // Start the lookup now; the page's own /api/toon/resolve call joins it.
+  toon.resolve(q).catch(() => {});
+  const nonce = toonResolver.makeNonce();
+  res.setHeader('Content-Security-Policy', toonResolver.playerPageCsp(nonce));
+  return res.status(200).type('html').send(toonResolver.playerPageHtml(nonce, toonResolver.backupSources(q)));
 });
 
 // Health Check / Ping Endpoint: UptimeRobot ko server jagaye rakhne ke liye
