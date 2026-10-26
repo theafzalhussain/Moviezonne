@@ -269,7 +269,9 @@
 // the frame with two Hindi libraries (AnimeSalt + ToonStream) and backups, so
 // every title plays inside Toon Hindi and nothing switches the viewer to
 // another server. /api/toon/ is still never cached here.
-const CACHE_NAME = 'moviezone-v178';
+// v179: moviezone.min.js 17.5 - chip renamed "Toon Hindi" -> "Anime/Toon Hindi"
+// (label only; the server's `toon` flag, routes and behaviour are unchanged).
+const CACHE_NAME = 'moviezone-v179';
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
  *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream
@@ -444,7 +446,7 @@ const STATIC_ASSETS = [
   '/moviezone.min.css?v=9.26',
   '/tv-mode.min.js?v=2.0',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=17.4',
+  '/moviezone.min.js?v=17.5',
   '/manifest.json',
   '/icon-192.png?v=2',
   '/favicon-32.png?v=2',

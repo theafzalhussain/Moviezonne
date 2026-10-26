@@ -416,7 +416,7 @@ const ABYSS = 'https://abyssplayer.com/29pJ-4F4A';
   };
   await check('the client server is the LAST entry, so no existing server changes index', () => {
     const srcs = evalSources(null);
-    assert.strictEqual(srcs[srcs.length - 1].name, 'Toon Hindi');
+    assert.strictEqual(srcs[srcs.length - 1].name, 'Anime/Toon Hindi');
     assert.strictEqual(srcs.filter((s) => s.toon).length, 1, 'exactly one toon server');
   });
   await check('it plays through the same-origin embed route, for films and episodes; the warm-up copy cannot play', () => {

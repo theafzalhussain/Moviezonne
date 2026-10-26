@@ -13738,7 +13738,7 @@ const playerSources = [
    *
    *  The builder reads nothing but its arguments and standard globals, guarded,
    *  because player-health.test.js evaluates this array in a bare sandbox. */
-  { name: 'Toon Hindi', dubbed: true, anime: true, toon: true, patience: 15000,
+  { name: 'Anime/Toon Hindi', dubbed: true, anime: true, toon: true, patience: 15000,
     hosts: ['https://ravok.buzz', 'https://player.abyssplayer.com', 'https://abyssplayer.com', 'https://vidnest.fun', 'https://embed.vidrift.net'],
     skip: () => !isCartoonContent(currentModalMovie) || toonKnownMissing(currentModalMovie),
     url: (id, lang, type, s, e) => {
