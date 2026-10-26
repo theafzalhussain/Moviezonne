@@ -255,7 +255,15 @@
 // its index; its frame loads same-origin /api/toon/embed (never cached here -
 // /api/ is not handled by this worker) and lands on ravok.buzz or
 // player.abyssplayer.com, both now dns-prefetched by index.html.
-const CACHE_NAME = 'moviezone-v175';
+// v176: moviezone.min.js 17.2 - Toon Hindi is offered on every title like the
+// other servers (the app still only picks it by itself for animated titles),
+// and a viewer who picks it by hand is never switched away: no 5-6s load
+// timeout for it (patience 15s, and none at all for a hand pick), and its
+// "not on Toon Hindi" page stays on screen with a toast instead of jumping to
+// another server. 17.1 shipped with an index.html that still asked for 16.9 /
+// mz-extras v3 (a rebase conflict resolved to upstream's whole file); this
+// index.html is the intended one again.
+const CACHE_NAME = 'moviezone-v176';
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
  *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream
@@ -430,7 +438,7 @@ const STATIC_ASSETS = [
   '/moviezone.min.css?v=9.26',
   '/tv-mode.min.js?v=2.0',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=17.1',
+  '/moviezone.min.js?v=17.2',
   '/manifest.json',
   '/icon-192.png?v=2',
   '/favicon-32.png?v=2',

@@ -116,10 +116,14 @@ const RAVOK = 'https://ravok.buzz/video/49182f81e6a13cf5eaa496d51fea6406';
       + '<a href="https://animesalt.cx/episode/naruto-shippuden-16x349/"></a><a href="https://animesalt.cx/episode/other-show-16x1/"></a>', 'naruto-shippuden');
     assert.deepStrictEqual(parsed.map((x) => x.number), [349, 350]);
   });
-  await check('the unavailable page tells its parent, and echoes nothing it was given', () => {
+  await check('the unavailable page tells its parent, says why, and echoes nothing it was given', () => {
     const html = toon.unavailablePageHtml('not-on-animesalt"><script>alert(1)</script>');
     assert.ok(/postMessage\(\{type:"mz-toon:unavailable",reason:"not-on-animesaltscriptalertscript"\}/.test(html), html.slice(-200));
     assert.ok(!/<script>alert/.test(html));
+    assert.ok(/Not on Toon Hindi/.test(toon.unavailablePageHtml('not-on-animesalt')));
+    assert.ok(/busy/i.test(toon.unavailablePageHtml('upstream-error')));
+    assert.ok(/episode/i.test(toon.unavailablePageHtml('no-player-on-page')));
+    assert.ok(!/Switching to another server/.test(toon.unavailablePageHtml('not-on-animesalt')), 'the page must not promise a switch');
     assert.ok(/frame-ancestors 'self'/.test(toon.UNAVAILABLE_FRAME_ANCESTORS));
   });
 
@@ -140,13 +144,50 @@ const RAVOK = 'https://ravok.buzz/video/49182f81e6a13cf5eaa496d51fea6406';
   const series = (id) => ({ id, name: 'Naruto Shippuden', original_name: 'ナルト 疾風伝', genres: [{ id: 16 }],
     poster_path: '/a.jpg', images: { posters: [{ file_path: '/kV27j3Nz4d5z8u6mN3EJw9RiLg2.jpg' }] }, alternative_titles: { results: [] } });
 
-  await check('a title TMDB does not tag Animation/Kids never reaches AnimeSalt', async () => {
-    const site = fakeSite([]);
-    const r = toon.createToonResolver({ fetch: site.fetchFn, tmdbDetails: async () => ({ id: 1396, name: 'Breaking Bad', genres: [{ id: 18 }] }) });
+  await check('a live-action title is looked up too, and a miss is reported as not on AnimeSalt', async () => {
+    const site = fakeSite([[/\?s=Breaking%20Bad$/, searchPage([card('series', 'one-piece-live-action', 'ONE PIECE Live Action', '/op.jpg')])]]);
+    const r = toon.createToonResolver({ fetch: site.fetchFn, tmdbDetails: async () => ({ id: 1396, name: 'Breaking Bad', genres: [{ id: 18 }], poster_path: '/bb.jpg' }) });
     const out = await r.resolve(toon.parseToonRequest({ type: 'tv', id: '1396', s: '1', e: '1' }));
     assert.strictEqual(out.available, false);
-    assert.strictEqual(out.reason, 'not-animated');
-    assert.deepStrictEqual(site.calls, []);
+    assert.strictEqual(out.reason, 'not-on-animesalt');
+    assert.ok(site.calls.length >= 1 && site.calls.every((c) => /\?s=/.test(c)), site.calls.join(', '));
+  });
+  await check('...and live action AnimeSalt does carry is found by poster', async () => {
+    const site = fakeSite([
+      [/\?s=ONE%20PIECE$/, searchPage([card('series', 'one-piece-live-action', 'ONE PIECE Live Action', '/op.jpg')])],
+      [/\/series\/one-piece-live-action\/$/, '<div data-post="9" data-season="1"></div>'],
+      [Object.assign(/admin-ajax\.php$/, { post: true }), '<a href="https://animesalt.cx/episode/one-piece-live-action-1x1/"></a>'],
+      [/\/episode\/one-piece-live-action-1x1\/$/, playerPage(['src="' + RAVOK + '"'])]
+    ]);
+    const r = toon.createToonResolver({ fetch: site.fetchFn, tmdbDetails: async () => ({ id: 111110, name: 'ONE PIECE', genres: [{ id: 10759 }], poster_path: '/op.jpg' }) });
+    const out = await r.resolve(toon.parseToonRequest({ type: 'tv', id: '111110', s: '1', e: '1' }));
+    assert.strictEqual(out.available, true, JSON.stringify(out));
+    assert.strictEqual(out.match.slug, 'one-piece-live-action');
+  });
+  await check('a stalled upstream is answered "busy" at the deadline, and the late answer still lands in the memo', async () => {
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const site = fakeSite([
+      [/\?s=Your%20Name$/, async () => { await gate; return searchPage([card('movies', 'your-name', 'Your Name', '/q.jpg')]); }],
+      [/\/movies\/your-name\/$/, playerPage(['src="' + RAVOK + '"'])]
+    ]);
+    const fetchFn = async (u, init) => {
+      const route = /\?s=Your%20Name$/.test(String(u)) ? await (async () => { await gate; return searchPage([card('movies', 'your-name', 'Your Name', '/q.jpg')]); })() : null;
+      if (route) return new Response(route, { status: 200 });
+      return site.fetchFn(u, init);
+    };
+    const r = toon.createToonResolver({ fetch: fetchFn, deadlineMs: 50, log: () => {},
+      tmdbDetails: async () => ({ id: 372058, title: 'Your Name', genres: [{ id: 16 }], poster_path: '/q.jpg' }) });
+    const req = toon.parseToonRequest({ type: 'movie', id: '372058' });
+    const t0 = Date.now();
+    const first = await r.resolve(req);
+    assert.ok(Date.now() - t0 < 1000, 'took ' + (Date.now() - t0) + 'ms');
+    assert.strictEqual(first.reason, 'upstream-error');
+    release();
+    await new Promise((d) => setTimeout(d, 50));
+    const second = await r.resolve(req);
+    assert.strictEqual(second.available, true, JSON.stringify(second));
+    assert.strictEqual(second.cache, 'HIT');
   });
   await check('poster identity picks the right series even when the name differs', async () => {
     const seasonRe = /admin-ajax\.php$/; seasonRe.post = true;
@@ -240,9 +281,26 @@ const RAVOK = 'https://ravok.buzz/video/49182f81e6a13cf5eaa496d51fea6406';
     assert.strictEqual(evalSources({ id: 2, genre_ids: [16] }).find((x) => x.toon).skip(), false);
     assert.strictEqual(evalSources({ id: 2, genre_ids: [16] }, true).find((x) => x.toon).skip(), true);
   });
-  await check('the picker shows it only for animated titles; Try All honours skip()', () => {
-    assert.ok(/\.filter\(\(s\) => !s\.toon \|\| isCartoonContent\(currentModalMovie\)\)/.test(client));
+  await check('the picker offers it on every title, like the other servers; Try All honours skip()', () => {
+    assert.ok(/const allServers = playerSources\.map\(\(s, i\) => \(\{ \.\.\.s, _idx: i \}\)\);/.test(client),
+      'renderExternalSources must not filter Toon Hindi out');
+    assert.ok(!/!s\.toon \|\| isCartoonContent/.test(client), 'the old animation-only filter is back');
     assert.ok(/if \(!s\.dubbed\) return;\s*if \(typeof s\.skip === 'function'\)/.test(client));
+  });
+  await check('picked by hand it is never switched away from', () => {
+    assert.ok(/loadPlayer\(id, idx, getSelectedLang\(\), quality, type, \{ userPick: true \}\)/.test(client), 'card click does not mark the pick');
+    assert.ok(/if \(_mzToonUserPick\) \{[\s\S]{0,300}return;\s*\}\s*autoRetryNextServer/.test(client), 'unavailable page still switches a hand pick');
+    assert.ok(/if \(!hasLoaded && _mzStayPut\) \{[\s\S]{0,400}return;/.test(client), 'load timeout still switches a hand pick');
+  });
+  await check('the app\'s own picks still fail over, and clear the hand pick first', () => {
+    const clears = (client.match(/_mzToonUserPick = false;\s*\/\/ the app is/g) || []).length;
+    assert.strictEqual(clears, 3, 'playMovie, the retry chain and Try All must each clear it (found ' + clears + ')');
+  });
+  await check('it gets its own load patience, longer than the default timeout', () => {
+    const s = evalSources(null).find((x) => x.toon);
+    const def = Number((/const MZ_PH_MAX_TIMEOUT = (\d+);/.exec(client) || [])[1]);
+    assert.ok(s.patience > def, 'patience ' + s.patience + ' vs max timeout ' + def);
+    assert.ok(/Math\.max\(adaptivePlayerTimeout\(_mzSrcName\), _mzSource\.patience \|\| 0\)/.test(client));
   });
   await check('its "not on this server" page fails over at once without overwriting the saved pick', () => {
     assert.ok(/d\.type !== 'mz-toon:unavailable'/.test(client));

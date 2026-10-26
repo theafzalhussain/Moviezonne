@@ -50,9 +50,12 @@
  *  torofilm player lists) or nothing is returned. No media passes through us:
  *  the browser's iframe talks to the player directly.
  *
- *  Anime and cartoons only: anything TMDB does not tag Animation (16) or Kids
- *  (10762) is refused before AnimeSalt is asked anything — the same rule the
- *  client uses (isCartoonContent) to show the server at all.
+ *  Offered on every title (the viewer asked for it to sit with the other
+ *  servers), and every title is looked up: AnimeSalt is anime and cartoons with
+ *  a little live action, so it decides. The app only PICKS it by itself for
+ *  animated titles (isCartoonContent); on anything else it is there to click.
+ *  Upstream steps are bounded one by one (UPSTREAM_TIMEOUT_MS) and as a whole
+ *  (RESOLVE_DEADLINE_MS).
  *
  *  Used by server.js and worker.js (bundled by wrangler from "main"), like
  *  ott-charts.js. Needs only a global fetch.
@@ -61,6 +64,12 @@
 const ORIGIN = 'https://animesalt.cx';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
 const UPSTREAM_TIMEOUT_MS = 8000;
+/*  The whole answer, however many upstream steps it takes. The embed route is
+ *  what the player iframe is loading, so a hang here is a frame stuck on a
+ *  spinner: measured once at 105s for a title that normally answers in 1s
+ *  (an upstream stall). Past this the frame gets the "busy" page at once; the
+ *  lookup keeps running and fills the memo, so the next try is instant. */
+const RESOLVE_DEADLINE_MS = 12000;
 
 /*  How long answers are kept in this process / isolate. A player hash on a page
  *  does not change between visits, so hits live for hours; a miss is kept short
@@ -309,6 +318,7 @@ function createToonResolver(opts) {
   if (!doFetch) throw new Error('no fetch implementation available');
   const now = options.now || (() => Date.now());
   const log = options.log || (() => {});
+  const deadlineMs = options.deadlineMs > 0 ? options.deadlineMs : RESOLVE_DEADLINE_MS;
 
   const memo = new Map();
   const inFlight = new Map();
@@ -361,7 +371,10 @@ function createToonResolver(opts) {
     return once(key, async () => {
       const details = await tmdbDetails(type, id, context);
       if (!details) { memoPut(key, { miss: 'tmdb' }, TTL_MS.titleMiss); return { miss: 'tmdb' }; }
-      if (!isAnimated(details)) { memoPut(key, { miss: 'not-animated' }, TTL_MS.title); return { miss: 'not-animated' }; }
+      /*  No genre gate. The server is offered on every title now, and AnimeSalt
+       *  does carry some live action (ONE PIECE Live Action) — so AnimeSalt
+       *  decides, by poster identity like everything else. A live-action title
+       *  it does not have costs one or two searches and is memoised as a miss. */
 
       const want = type === 'tv' ? 'series' : 'movies';
       const posters = posterSet(details);
@@ -463,7 +476,7 @@ function createToonResolver(opts) {
     const key = resultKey(req);
     const cached = memoGet(key);
     if (cached !== undefined) return Object.assign({ cache: 'HIT' }, cached);
-    return once(key, async () => {
+    const work = once(key, async () => {
       let value;
       try {
         value = await resolveUncached(req, context);
@@ -476,26 +489,50 @@ function createToonResolver(opts) {
       memoPut(key, value, value.available ? TTL_MS.hit : TTL_MS.miss);
       return Object.assign({ cache: 'MISS' }, value);
     });
+    // A Worker would cancel the late lookup with the response; keep it alive.
+    const ctx = context && context.ctx;
+    if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(work.catch(() => {}));
+    let timer = null;
+    const late = new Promise((done) => {
+      timer = setTimeout(() => {
+        log('[toon] ' + key + ' over the ' + deadlineMs + 'ms deadline, answering busy');
+        done({ available: false, reason: 'upstream-error', scope: 'request', cache: 'MISS', late: true });
+      }, deadlineMs);
+    });
+    try {
+      return await Promise.race([work, late]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   return { resolve, _memo: memo };
 }
 
 /*  The page the player frame shows when there is nothing to play. It tells the
- *  app (its parent, which created the frame) straight away, so the viewer is
- *  moved to the next server instead of reading this. No user input is echoed:
- *  `reason` is one of this module's own constants. */
+ *  app (its parent, which created the frame) straight away. Whether the app then
+ *  moves on is the app's call — it does for a server it picked by itself, and
+ *  does NOT when the viewer picked Toon Hindi by hand — so the copy promises no
+ *  switch. No user input is echoed: `reason` is one of this module's own
+ *  constants, and only lowercase letters and dashes survive. */
+const UNAVAILABLE_COPY = {
+  busy: ['Toon Hindi is busy', 'It is not responding right now. Try again in a moment, or pick another server below.'],
+  episode: ['This episode is not on Toon Hindi yet', 'The show is here, this episode is not. Pick another episode, or another server below.'],
+  title: ['Not on Toon Hindi', 'Toon Hindi carries anime and cartoons with Hindi audio, and this title is not one of them yet. Pick another server below.']
+};
 function unavailablePageHtml(reason) {
   const safe = String(reason || 'not-found').replace(/[^a-z-]/g, '');
+  const copy = safe === 'upstream-error' ? UNAVAILABLE_COPY.busy
+    : /^(season|episode)-|^no-player/.test(safe) ? UNAVAILABLE_COPY.episode
+      : UNAVAILABLE_COPY.title;
   return '<!doctype html><html lang="en"><head><meta charset="utf-8">'
     + '<meta name="viewport" content="width=device-width,initial-scale=1">'
     + '<meta name="robots" content="noindex">'
-    + '<title>Not on Toon Hindi</title>'
+    + '<title>' + copy[0] + '</title>'
     + '<style>html,body{margin:0;height:100%;background:#05050c;color:#e8e8f4;font:500 15px/1.5 system-ui,sans-serif}'
     + 'main{height:100%;display:grid;place-items:center;text-align:center;padding:20px;box-sizing:border-box}'
-    + 'h1{margin:0 0 6px;font-size:17px;color:#f5c518}p{margin:0;color:rgba(232,232,244,.7)}</style></head>'
-    + '<body><main><div><h1>Not on Toon Hindi</h1>'
-    + '<p>This title is not in the Toon Hindi catalogue. Switching to another server&hellip;</p></div></main>'
+    + 'h1{margin:0 0 6px;font-size:17px;color:#f5c518}p{margin:0 auto;max-width:440px;color:rgba(232,232,244,.72)}</style></head>'
+    + '<body><main><div><h1>' + copy[0] + '</h1><p>' + copy[1] + '</p></div></main>'
     + '<script>try{parent.postMessage({type:"mz-toon:unavailable",reason:"' + safe + '"},"*")}catch(e){}</script>'
     + '</body></html>';
 }

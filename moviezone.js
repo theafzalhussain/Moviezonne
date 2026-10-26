@@ -13342,6 +13342,9 @@ function ensureAnilistThenReload(m, season, srcIdx, lang, quality, type) {
  *  requests behind every animated detail view, played or not. */
 const TOON_API = BASE.replace(/\/tmdb$/, '/toon');
 const _mzToonMissing = new Set();
+/*  True while the live player is Toon Hindi AND the viewer picked it by tapping
+ *  its card. Set by loadPlayer on every load. */
+let _mzToonUserPick = false;
 function toonMissingKeys(m) {
   const type = m.media_type === 'tv' ? 'tv' : 'movie';
   const sel = currentEpisodeSelection();
@@ -13369,6 +13372,14 @@ window.addEventListener('message', (event) => {
   }
   if (!fromLive || currentSourceIdx !== idx) return;
   if (window._mzRetryTimer) { clearTimeout(window._mzRetryTimer); window._mzRetryTimer = null; }
+  /*  Picked by hand: stay on it. The page says why; the toast says what to do.
+   *  Only a server the app chose by itself is moved on from. */
+  if (_mzToonUserPick) {
+    showToast(reason === 'upstream-error'
+      ? 'Toon Hindi is busy right now. Try again in a moment, or pick another server.'
+      : 'Not on Toon Hindi. Pick another server to watch this one.');
+    return;
+  }
   autoRetryNextServer(m.id, idx, getSelectedLang(), getSelectedQuality(), m.media_type, { keepPick: true, reason: 'unavailable' });
 });
 const playerSources = [
@@ -13696,15 +13707,20 @@ const playerSources = [
    *  saved picks (moviezone.playerSourceIdx) and learned health stay attached
    *  to the servers they were measured on.
    *
-   *  `toon`: shown and picked only for animated titles (isCartoonContent —
-   *  anime included). skip() also drops it for a title or episode the server
-   *  has already said it does not carry, so neither the opening pick nor the
-   *  retry chain lands on it there. `hosts`: where its frames actually end up
+   *  `toon`: picked by the app itself only for animated titles (isCartoonContent —
+   *  anime included) — though it is OFFERED on every title, like the other
+   *  servers. skip() keeps it out of the opening pick, the retry chain and Try
+   *  All for non-animated titles and for a title or episode it has already said
+   *  it does not carry. Picked by hand it is never switched away from
+   *  (loadPlayer's _mzStayPut). `patience`: its first navigation includes the
+   *  server-side lookup (bounded by RESOLVE_DEADLINE_MS) plus a third-party
+   *  player document, which the app's 5-6s load timeout does not allow for.
+   *  `hosts`: where its frames actually end up
    *  after the redirect, so they are warmed like every other provider.
    *
    *  The builder reads nothing but its arguments and standard globals, guarded,
    *  because player-health.test.js evaluates this array in a bare sandbox. */
-  { name: 'Toon Hindi', dubbed: true, anime: true, toon: true,
+  { name: 'Toon Hindi', dubbed: true, anime: true, toon: true, patience: 15000,
     hosts: ['https://ravok.buzz', 'https://player.abyssplayer.com'],
     skip: () => !isCartoonContent(currentModalMovie) || toonKnownMissing(currentModalMovie),
     url: (id, lang, type, s, e) => {
@@ -13828,13 +13844,11 @@ function renderExternalSources(id, srcIdx, lang) {
    *  is4K/anime partition), so the on-screen sequence matches the array 1:1.
    *  `_idx` is still the true declared index, so playback/active-chip logic is
    *  unaffected — only the visual order follows the array now. */
-  const allServers = playerSources.map((s, i) => ({ ...s, _idx: i }))
-    // Toon Hindi is an anime + cartoon server: not offered for anything else.
-    .filter((s) => !s.toon || isCartoonContent(currentModalMovie));
+  const allServers = playerSources.map((s, i) => ({ ...s, _idx: i }));
 
   function buildServerCard(s) {
     const tip = s.toon
-      ? 'Anime + Cartoons only • Hindi first, multi-audio'
+      ? 'Anime + Cartoons • Hindi first, multi-audio'
       : s.anime
       ? 'All-Rounder: Anime + Cartoons + Movies + Series (Hindi Dub supported)'
       : (s.is4K ? '4K AI Upscaling + Multi-Language + Spatial Audio' : (s.dubbed ? 'Hindi Dubbed + Multi-Audio' : 'Mostly English Audio'));
@@ -13920,7 +13934,8 @@ function renderExternalSources(id, srcIdx, lang) {
       const idx = parseInt(btn.getAttribute('data-srcidx')||'0', 10);
       const type = currentModalMovie ? currentModalMovie.media_type : 'movie';
       const quality = getSelectedQuality();
-      loadPlayer(id, idx, getSelectedLang(), quality, type);
+      // userPick: the viewer chose this server by hand (read by Toon Hindi only).
+      loadPlayer(id, idx, getSelectedLang(), quality, type, { userPick: true });
       srcButtons.forEach(b => { b.classList.remove('active'); });
       btn.classList.add('active');
     });
@@ -14242,6 +14257,7 @@ function playMovie() {
       showToast(`Anime detected — switched to ${playerSources[animeIdx].name}`);
     }
   }
+  _mzToonUserPick = false;   // the app is choosing now, not the viewer
   loadPlayer(currentModalMovie.id, currentSourceIdx, lang, quality, currentModalMovie.media_type,
     savedStandIn ? { keepPick: true } : undefined);
 }
@@ -14801,6 +14817,15 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie', opts) {
   /*  Handshake watch is armed BEFORE navigation starts, so a provider message
    *  posted ahead of `load` (VidRift posts at ~0.6s) still counts. */
   const _mzSource = playerSources[srcIdx];
+  /*  Toon Hindi picked by hand stays put: no timeout switch, and its "not on
+   *  this server" page is left on screen (see the mz-toon:unavailable listener).
+   *  The pick sticks while Toon Hindi is the server — an episode, season or
+   *  language change reloads it without a flag and must not undo the choice.
+   *  It is cleared by loading any other server, and by the app choosing a
+   *  server itself (playMovie, the retry chain, Try All), which fail over. */
+  if (!_mzSource.toon) _mzToonUserPick = false;
+  else if (opts && opts.userPick) _mzToonUserPick = true;
+  const _mzStayPut = _mzToonUserPick;
   armSignalWatch(_mzSource, iframe, () => {
     autoRetryNextServer(id, srcIdx, lang, quality, type, { keepPick: true, reason: 'unavailable' });
   });
@@ -14854,9 +14879,20 @@ function loadPlayer(id, srcIdx, lang, quality, type = 'movie', opts) {
   // history instead of a flat 5 s, so a provider that normally answers in
   // ~1.2 s is abandoned in ~2.6 s rather than holding the user for five.
   if (!hasLoaded) {
-    const base = adaptivePlayerTimeout(_mzSrcName);
+    /*  `patience`: a server whose first navigation includes work on our side
+     *  (Toon Hindi resolves the title before redirecting) gets that time on top
+     *  of its measured history. Only servers that declare it are affected. */
+    const base = Math.max(adaptivePlayerTimeout(_mzSrcName), _mzSource.patience || 0);
     const retryAfter = Math.max(MZ_PH_MIN_TIMEOUT, reusable ? base - 800 : base);
     window._mzRetryTimer = setTimeout(() => {
+      if (!hasLoaded && _mzStayPut) {
+        // Picked by hand: never switch away. Uncover the frame so whatever it
+        // is showing can be seen, and say so; the viewer decides what next.
+        const slowLoader = document.getElementById('mzPlayerLoader');
+        if (slowLoader) slowLoader.remove();
+        showToast(`${_mzSrcName} is slow right now. Give it a moment, or pick another server.`);
+        return;
+      }
       if (!hasLoaded) {
         recordPlayerFailure(_mzSrcName);
         const loaderEl = document.getElementById('mzPlayerLoader');
@@ -14949,6 +14985,7 @@ function autoRetryNextServer(id, currentIdx, lang, quality, type, opts) {
     showToast((opts && opts.reason === 'unavailable')
       ? ` ${from} doesn't have this title. Trying ${playerSources[nextIdx].name}...`
       : ` Server failed. Trying ${playerSources[nextIdx].name}...`);
+    _mzToonUserPick = false;   // the app is choosing now, not the viewer
     loadPlayer(id, nextIdx, lang, quality, type, opts);
     /*  loadPlayer() has already re-rendered the chips with the right one active.
      *  Matched on data-srcidx, not DOM position: the chips are grouped (4K/anime
@@ -15018,6 +15055,7 @@ function tryAllDubbedServers() {
     if (btn) btn.innerHTML = `<div class="player-spinner" style="width:14px;height:14px;border-width:2px;border-color:rgba(245,197,24,0.2);border-left-color:var(--gold);"></div><span style="font-size:12px;font-weight:700;">Testing ${currentTryIdx + 1}/${dubbedIndices.length}... (Click to Stop)</span>`;
     
     showToast(` Testing server ${currentTryIdx + 1}/${dubbedIndices.length}: ${serverName}`);
+    _mzToonUserPick = false;   // the app is cycling, not the viewer picking
     loadPlayer(id, serverIdx, lang, quality, type);
     
     // Update active button (by data-srcidx: chip order is grouped, not declared)

@@ -1083,6 +1083,9 @@ app.get('/api/toon/embed', apiLimiter, async (req, res) => {
   const q = toonRequestOrNull(req);
   const result = q ? await toon.resolve(q) : { available: false, reason: 'bad-request' };
   if (result.available) {
+    // A redirect renders nothing; the player's own headers govern the frame.
+    // Same as the Worker, which sends no X-Frame-Options here either.
+    res.removeHeader('X-Frame-Options');
     res.setHeader('Cache-Control', toonCacheControl(result, 'private'));
     return res.redirect(302, result.url);
   }
