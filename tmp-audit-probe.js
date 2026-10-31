@@ -24,15 +24,25 @@ const get = (url) => new Promise((resolve, reject) => {
 });
 
 let currentTarget = '';
+const escapeHtmlAttribute = (value) => value.replace(/[&<>"']/g, (char) => ({
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;'
+}[char]));
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
   res.end('<!doctype html><meta charset="utf-8"><style>html,body{margin:0;background:#000;height:100%}iframe{width:100vw;height:100vh;border:0}</style>'
-    + '<iframe src="' + currentTarget.replace(/"/g, '&quot;') + '" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" referrerpolicy="'
+    + '<iframe src="' + escapeHtmlAttribute(currentTarget) + '" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" referrerpolicy="'
     + (/vidrift|vidzee/.test(currentTarget) ? 'origin' : 'no-referrer') + '" allowfullscreen></iframe>');
 });
 
 (async () => {
-  await new Promise((r) => server.listen(HARNESS_PORT, r));
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(HARNESS_PORT, '127.0.0.1', resolve);
+  });
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'mzaudit-'));
   const chrome = spawn(CHROME, ['--headless=new', '--remote-debugging-port=' + PORT, '--user-data-dir=' + profile,
     '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--mute-audio',

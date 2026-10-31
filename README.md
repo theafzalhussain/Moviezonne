@@ -105,11 +105,18 @@ VAPID_PUBLIC_KEY	Web Push public key served to browsers	No
 VAPID_PRIVATE_KEY	Web Push private key used to sign pushes — keep secret	No
 VAPID_EMAIL	mailto: contact for push services (RFC 8292 subject)	No
 CRON_SECRET	Cloudflare Worker only — when set, /api/notifications/process-due requires it	No
-SENTRY_DSN	Sentry DSN for server-side error tracking	No
+BLACKFIRE_SERVER_ID Blackfire agent credential; configure outside the Worker runtime No
+BLACKFIRE_SERVER_TOKEN Blackfire agent credential; store as a secret, never in source No
+SENTRY_DSN Sentry DSN for server-side error tracking No
 PORT	HTTP port; defaults to 3001	No
 SITE_URL	Canonical origin for the SEO layer; defaults to https://moviezone.dev	No
 API_RATE_LIMIT_MAX	Per-IP /api/tmdb ceiling per 5-minute window; defaults to 1500	No
 SITEMAP_LASTMOD	Fallback lastmod date for sitemap entries	No
+
+Blackfire profiling requests are recognized by the Worker through Blackfire's
+`x-blackfire-query` header. Those requests bypass Worker and location caches and
+receive `Cache-Control: no-store`; the Blackfire server ID/token are not embedded
+in the Worker. Rotate any token that was pasted into chat or source control.
 SITEMAP_DISCOVER_PAGES	Discover pages walked by the sitemap builder; defaults to 60	No
 SITEMAP_LIST_PAGES	List pages walked by the sitemap builder; defaults to 15	No
 SITEMAP_ALLOW_SHRINK	Allows a sitemap rebuild to write a smaller catalogue	No

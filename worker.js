@@ -70,6 +70,21 @@ const NOTIFY_ICON = '/icon-192.png?v=2';
 
 const TE = new TextEncoder();
 
+function isBlackfireRequest(request) {
+  return request.headers.has('x-blackfire-query');
+}
+
+function profilingResponse(response) {
+  if (!response) return response;
+  const headers = new Headers(response.headers);
+  headers.set('Cache-Control', 'no-store');
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
+}
+
 /*  ══════════════════════════════════════════════════════════════════════════
  *  TUNABLES
  *  ══════════════════════════════════════════════════════════════════════════
@@ -1284,6 +1299,7 @@ function scheduleTmdbRefresh(path, softTtl, env, ctx, budget) {
  */
 async function fetchTmdbJson(path, env, ctx, opts) {
   const options = opts || {};
+  const profiling = Boolean(ctx && ctx.blackfire);
   const budget = options.budget || null;
   const softTtl = tmdbCacheTtl(path, env);
   const freshMs = softTtl * 1000;
@@ -1294,7 +1310,7 @@ async function fetchTmdbJson(path, env, ctx, opts) {
   const consider = (text, t, layer) => { if (!stale || t > stale.t) stale = { text, t, layer }; };
 
   // L1 — this isolate's memory. Free, so it is always asked first.
-  const memo = memoGet(state, path);
+  const memo = profiling ? null : memoGet(state, path);
   if (memo) {
     if (now - memo.t < freshMs) {
       budgetRelease(budget);
@@ -1305,7 +1321,7 @@ async function fetchTmdbJson(path, env, ctx, opts) {
 
   // L2 — this location's cache. Inside a fan-out the lookup is optional: it is
   // skipped when it would eat a TMDB fetch another path has reserved.
-  const colo = options.edge === false ? null : coloCache();
+  const colo = profiling || options.edge === false ? null : coloCache();
   if (colo && budgetOptional(budget)) {
     try {
       const hit = await settleWithin(readTmdbEdge(colo, path), TMDB_EDGE_READ_TIMEOUT_MS, EDGE_READ_TIMED_OUT);
@@ -1351,7 +1367,9 @@ async function fetchTmdbJson(path, env, ctx, opts) {
   // L3 — TMDB, collapsed to one request per path within this request.
   const res = await tmdbOnce(path, env, ctx, budget);
   const storedAt = Date.now();
-  if (res.status === 200) storeTmdb(path, res.text, softTtl, storedAt, env, ctx, budget);
+  if (res.status === 200 && !profiling) {
+    storeTmdb(path, res.text, softTtl, storedAt, env, ctx, budget);
+  }
   return { status: res.status, text: res.text, cache: 'MISS', layer: 'origin', storedAt };
 }
 
@@ -1856,7 +1874,7 @@ async function handleTmdbBatch(request, env, ctx, url) {
   /*  LAYER 1 — the location cache. No quota, no Worker-side assemble, and it is
    *  the layer that answers the overwhelming majority of homepage loads once a
    *  location is warm. */
-  const colo = coloCache();
+  const colo = ctx && ctx.blackfire ? null : coloCache();
   if (colo && budgetRequire(budget)) {
     try {
       const cached = await settleWithin(colo.match(planCacheKey),
@@ -3744,6 +3762,7 @@ async function serveHome(request, env, ctx, url) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    ctx.blackfire = isBlackfireRequest(request);
 
     // SEO: www → non-www 301 redirect
     if (url.hostname === 'www.moviezone.dev') {
@@ -3757,10 +3776,13 @@ export default {
      *  generic edge match that used to run here first found nothing for any of
      *  them except the proxy, and cost every /api request a cache lookup. */
     if (url.pathname.startsWith('/api/')) {
-      return routeApi(request, env, ctx, url);
+      return profilingResponse(await routeApi(request, env, ctx, url));
     }
 
     if (request.method === 'GET' && isHomePath(url.pathname)) {
+      if (ctx.blackfire) {
+        return profilingResponse((await renderHome(request, env, ctx)).response);
+      }
       return serveHome(request, env, ctx, url);
     }
 
@@ -3770,7 +3792,7 @@ export default {
      *  writes an entry per request. */
     const edgeCache = coloCache();
     const cacheKey = request.method === 'GET' ? edgeCacheKey(request, url) : request;
-    if (edgeCache && request.method === 'GET') {
+    if (!ctx.blackfire && edgeCache && request.method === 'GET') {
       let cached = null;
       try {
         cached = await edgeCache.match(cacheKey);
@@ -3802,14 +3824,14 @@ export default {
        *  non-GET key — which would surface as an unhandled waitUntil rejection in
        *  the observability logs, i.e. noise in the one place you look when
        *  diagnosing errors. */
-      if (edgeCache && ssr.status === 200 && request.method === 'GET') {
+      if (!ctx.blackfire && edgeCache && ssr.status === 200 && request.method === 'GET') {
         waitFor(ctx, edgeCache.put(cacheKey, forEdgeStore(ssr.clone())));
       }
       /*  Store the full 200 above, hand the client a 304 below. Doing it in that
        *  order matters: caching the 304 instead would poison the entry for every
        *  subsequent visitor who has no copy to revalidate against. */
       const ssrFresh = notModified(request, ssr);
-      return ssrFresh || ssr;
+      return profilingResponse(ssrFresh || ssr);
     }
 
     // ─── Static Assets with SEO Headers ────────────────────────
@@ -3852,6 +3874,7 @@ export default {
       newHeaders.append('Link', '<https://image.tmdb.org>; rel=preconnect');
     }
 
+    if (ctx.blackfire) newHeaders.set('Cache-Control', 'no-store');
     const finalResponse = new Response(assetResponse.body, {
       status: assetResponse.status,
       statusText: assetResponse.statusText,
@@ -3859,7 +3882,7 @@ export default {
     });
 
     // ✅ Cache static assets (200 only)
-    if (edgeCache && request.method === 'GET' && finalResponse.status === 200 && path !== '/sw.js') {
+    if (!ctx.blackfire && edgeCache && request.method === 'GET' && finalResponse.status === 200 && path !== '/sw.js') {
       waitFor(ctx, edgeCache.put(cacheKey, forEdgeStore(finalResponse.clone())));
     }
 
