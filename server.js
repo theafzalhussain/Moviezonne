@@ -120,7 +120,7 @@ tmdbClient.interceptors.response.use(
 // Axios Retry Interceptor — fast first retries, host flip on connection errors
 axiosRetry(tmdbClient, {
   retries: 2,
-  shouldResetTimeout: false,
+  shouldResetTimeout: false, // 5s shared by the initial attempt + up to 2 retries
   retryDelay: (retryCount, error) => {
     const retryAfter = Number(error?.response?.headers?.['retry-after']);
     if (error?.response?.status === 429 && Number.isFinite(retryAfter)) {
@@ -774,12 +774,31 @@ app.get('/api/push/stats', async (req, res) => {
   }
 });
 
-/*  */// Backend Advanced Cache: Initialize NodeCache with a standard TTL of 2 hours (7200 seconds) for faster loads
-const apiCache = new NodeCache({ stdTTL: 7200, maxKeys: 2000, useClones: false });
+/* NodeCache's maxKeys rejects writes (even replacement of an existing key),
+ * rather than evicting. A successful upstream response must not become a 500
+ * because a cache is full. Evict the least-recently-written entry synchronously
+ * after a successful set instead; reads keep NodeCache's normal TTL semantics.
+ * Cloning isolates the upstream object, cache readers, and the stale fallback. */
+function createBoundedCache(stdTTL, maxKeys = 2000) {
+  const cache = new NodeCache({ stdTTL, useClones: true });
+  const written = new Map();
+  cache.on('set', (key) => {
+    key = String(key);
+    written.delete(key);
+    written.set(key, true);
+    while (written.size > maxKeys) cache.del(written.keys().next().value);
+  });
+  cache.on('del', (key) => written.delete(String(key)));
+  cache.on('flush', () => written.clear());
+  return cache;
+}
+
+// Fresh API/SSR payloads live for two hours, with at most 2000 keys.
+const apiCache = createBoundedCache(7200);
 
 // Stale-fallback cache: keeps the last known-good payload for 24h so a network
 // hiccup (ISP resets, TMDB outage) degrades into slightly old data instead of a 503.
-const staleCache = new NodeCache({ stdTTL: 86400, maxKeys: 2000, useClones: false });
+const staleCache = createBoundedCache(86400);
 
 // In-flight request map: collapses duplicate concurrent requests for the same URL
 // into a single upstream call. Fewer parallel TLS handshakes = fewer resets.

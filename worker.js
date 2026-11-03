@@ -2050,7 +2050,11 @@ async function buildOttChart(platform, region, env, ctx, budget) {
   // JustWatch and the chart's own cache write are reserved before any optional
   // per-title edge lookup can spend the budget.
   if (budget) budget.reserve += OTT_CHART_UPSTREAM_CALLS + 1;
-  for (let i = 0; i < OTT_CHART_UPSTREAM_CALLS; i++) budgetRequire(budget);
+  for (let i = 0; i < OTT_CHART_UPSTREAM_CALLS; i++) {
+    // Concurrency limits do not cap total subrequests. Never dispatch the two
+    // JustWatch calls unless both have been charged to this invocation.
+    if (!budgetRequire(budget)) throw budgetError();
+  }
   const chart = await ottCharts.fetchPlatformChart(platform, { region });
   const order = ottCharts.mergeChartOrder(chart, OTT_CHART_HEAD);
   if (budget) budget.reserve += order.length;

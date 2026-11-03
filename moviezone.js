@@ -743,6 +743,7 @@ function _mzSavePool(cat, capturedKey) {
 
 let currentSlide = 0;
 let carouselMovies = [];
+let carouselBuildRunId = 0;
 let autoSlideTimer = null;
 let isLoadingMore = false;
 let isSearchResultsMode = false;
@@ -6230,6 +6231,11 @@ function buildCarousel() {
   const dots  = document.getElementById('carouselDots');
   const thumbs = document.getElementById('carouselThumbs');
   if (!track || !dots || !thumbs) return;
+  const runId = ++carouselBuildRunId;
+  const deck = carouselMovies;
+  const isCurrentBuild = () => runId === carouselBuildRunId;
+  // A refresh can replace the deck while idle chunks or an image load are
+  // pending. Old work must not append slides or warm images into the new deck.
   track.innerHTML = ''; dots.innerHTML = ''; thumbs.innerHTML = '';
   currentSlide = 0;
  
@@ -6420,18 +6426,19 @@ function buildCarousel() {
   //  Both are cheap (slide 1 carries no image request, only data-bg), so they
   //  are built inline and everything after them is deferred.
   const INLINE_SLIDES = 2;
-  carouselMovies.slice(0, INLINE_SLIDES).forEach((m, i) =>
+  deck.slice(0, INLINE_SLIDES).forEach((m, i) =>
     buildOne(m, i, trackFrag, dotsFrag, thumbsFrag));
 
   track.appendChild(trackFrag);
   dots.appendChild(dotsFrag);
   thumbs.appendChild(thumbsFrag);
 
-  if (carouselMovies.length > INLINE_SLIDES) {
-    const rest = carouselMovies.slice(INLINE_SLIDES);
+  if (deck.length > INLINE_SLIDES) {
+    const rest = deck.slice(INLINE_SLIDES);
     let cursor = 0;
     const BATCH = 3;
     const drain = () => {
+      if (!isCurrentBuild()) return;
       const tf = document.createDocumentFragment();
       const df = document.createDocumentFragment();
       const hf = document.createDocumentFragment();
@@ -6455,9 +6462,10 @@ function buildCarousel() {
   // actually see - the LCP element - gets half the bandwidth for nothing, since
   // the next slide is not needed until the auto-slide timer fires seconds later.
   // Wait for the hero to finish, then warm slide 1 while the main thread is idle.
-  if (carouselMovies.length > 1) {
+  if (deck.length > 1) {
     const warmNext = () => {
-      const run = () => ensureSlideBg(1 % carouselMovies.length);
+      if (!isCurrentBuild()) return;
+      const run = () => { if (isCurrentBuild()) ensureSlideBg(1 % deck.length); };
       if ('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 2000 });
       else setTimeout(run, 600);
     };
@@ -6481,11 +6489,13 @@ function buildCarousel() {
    *  holding the same deck send the same plan. Under Data Saver nothing is
    *  fetched ahead; goToSlide() still resolves each slide as it is reached. */
   const settleHeroQuality = () => {
+    if (!isCurrentBuild()) return;
     refreshSlideQuality(currentSlide);
     if (typeof isDataSaver === 'function' && isDataSaver()) return;
     setTimeout(() => {
+      if (!isCurrentBuild()) return;
       const ids = new Set();
-      carouselMovies.forEach((m) => { if (m && m.id && mediaTypeOf(m) === 'movie') ids.add(m.id); });
+      deck.forEach((m) => { if (m && m.id && mediaTypeOf(m) === 'movie') ids.add(m.id); });
       const plan = [...ids].sort((a, b) => a - b).map((id) => ['/movie/' + id + '/release_dates']);
       if (plan.length >= MZ_BATCH_MIN_REQUESTS) tmdbBatch(plan);
     }, CAROUSEL_AUTOPLAY_MS);
@@ -9238,14 +9248,9 @@ function mzInterleave(buckets, onItem) {
   return out;
 }
 
-/*  Sources concatenated in plan order, then deduplicated by TMDB id with the
- *  first occurrence winning. `tag` runs on every item before the dedupe and also
- *  receives the source index.
- *
- *  Deliberately keyed on id alone, not type+id, because these categories fetch
- *  one media type per source and tag it from the index — so the collision the
- *  ALL feed guards against cannot arise here.
- */
+/*  Sources concatenated in plan order, with the first occurrence of each
+ *  type+id winning. `tag` runs before dedupe: Trending and Top Rated combine
+ *  movie AND TV sources, whose numeric TMDB ids are separate namespaces. */
 function mzDedupeById(buckets, tag) {
   const seen = new Set();
   const out = [];
@@ -9253,12 +9258,167 @@ function mzDedupeById(buckets, tag) {
     (v.results || []).forEach(item => {
       if (!item) return;
       if (tag) tag(item, idx);
-      if (!item.id || seen.has(item.id)) return;
-      seen.add(item.id);
+      if (!item.id) return;
+      const key = mediaTypeOf(item) + '-' + item.id;
+      if (seen.has(key)) return;
+      seen.add(key);
       out.push(item);
     });
   });
   return out;
+}
+
+/*  Category-specific source assembly is separate from loadMovies' ownership,
+ *  paging, retry and rendering lifecycle. Keep source order and ranking here;
+ *  keep network generation checks in the caller. Modes and page are snapshots,
+ *  never globals that can change while the batch is in flight. */
+async function collectFeedMovies(cat, vals, pageNum, modes) {
+  let movies = [];
+  if (cat === 'all') {
+    /*  /discover/tv results carry no media_type, so tag them by position.
+     *  TV_SOURCE_FROM is an index into the ALL plan in _mzCatPlan and must move
+     *  with it, or series would be tagged as movies and vice versa. It moved
+     *  from 12 to 11 when the two unwindowed movie sources were swapped for one
+     *  movie window and one TV window — see the note in _mzCatPlan. */
+    const TV_SOURCE_FROM = 11;
+    const combinedMovies = [];
+    vals.forEach((v, idx) => {
+      if (!v.results) return;
+      v.results.forEach(item => {
+        if (!item) return;
+        if (idx >= TV_SOURCE_FROM && !item.media_type) item.media_type = 'tv';
+        combinedMovies.push(item);
+      });
+    });
+
+    // INTELLIGENT DEDUPLICATION: Keep the highest-popularity version.
+    // Keyed by type+id, not id alone: TMDB numbers movies and series in
+    // separate namespaces, so a movie and a series can share an id and one
+    // would silently replace the other.
+    const movieMap = new Map();
+    for (const movie of combinedMovies) {
+      if (!movie || !movie.id) continue;
+      const key = mediaTypeOf(movie) + '-' + movie.id;
+      const existing = movieMap.get(key);
+      if (!existing || (movie.popularity || 0) > (existing.popularity || 0)) {
+        movieMap.set(key, movie);
+      }
+    }
+    const uniqueMovies = Array.from(movieMap.values());
+
+    // STRICT PRIORITY RANKING: latest movie releases first, recent movie
+    // quality updates second, then the trending/latest web series and anime,
+    // and only then the remaining catalogue movies.
+    rankByFreshness(uniqueMovies);
+
+    // Balance languages only inside each priority group. A skipped movie is
+    // reinserted before the next group, so this pass cannot lift a series
+    // above a movie release or quality update.
+    const ranked = diversifyByLanguageWithinPriority(uniqueMovies);
+
+    // Finally, fill the slot pattern: movies keep the top and three quarters of
+    // the feed, while trending web series and anime reach the first screen
+    // instead of sitting sixty cards down. This is the only step that crosses a
+    // priority group, and it never reorders within a lane.
+    movies.push(...interleaveFeedByType(ranked));
+  } else if (cat === 'tv') {
+    const combinedShows = [];
+    vals.forEach(v => { if (v.results) combinedShows.push(...v.results); });
+
+    /*  Remove duplicates, keeping the first occurrence — and drop the rows a
+     *  web-series tab must not carry. The genre gate is here rather than in the
+     *  query because /trending/tv/week accepts no without_genres parameter, and
+     *  the network-gated windows rely on the streaming allow-list instead of a
+     *  genre exclusion; the regional windows exclude these genres server-side
+     *  already, so for them this is a no-op. See NON_DRAMA_TV_GENRE_IDS. */
+    const uniqueShows = [];
+    const seenIds = new Set();
+    for (const show of combinedShows) {
+      if (!show || !show.id || seenIds.has(show.id)) continue;
+      if (isNonDramaTvRow(show)) continue;
+      uniqueShows.push(show);
+      seenIds.add(show.id);
+    }
+
+    /*  No sort here on purpose. This used to be a plain first_air_date
+     *  descending sort, which put whichever obscure show aired most recently at
+     *  the top regardless of whether anyone was watching it. rankReleaseLadder()
+     *  below orders the pool instead: the fresh premieres the ALL feed would
+     *  lead with, then everything else by release month and demand. */
+    movies.push(...uniqueShows);
+  } else if (cat === 'kids') {
+    // POWERFUL CARTOON ENGINE: strictly animated content only, famous first.
+    // The batch above already primed every source this asks for, so its own
+    // tmdb() calls are memory hits rather than 4-9 gated requests.
+    movies = movies.concat(await fetchCartoonMovies(modes.cartoon, pageNum));
+  } else if (cat === 'anime') {
+    // POWERFUL ANIME ENGINE: mode ke hisaab se 4-9 sources — all primed above.
+    movies = movies.concat(await fetchAnimeMovies(modes.anime, pageNum));
+  } else if (cat === 'horror' || cat === 'dubbed') {
+    /*  Round-robin, so no single industry owns the top of the grid.
+     *  horror = global + Hindi + Tamil + Telugu.
+     *  dubbed = Hollywood (2 pages) + Tamil + Telugu + Japanese anime, because
+     *  those are the industries Hindi dubs actually come from. */
+    movies.push(...mzInterleave(vals));
+  } else if (cat === 'adult') {
+    mzInterleave(vals, (item, idx) => {
+      item.media_type = idx === 1 ? 'tv' : 'movie';
+
+      // Local Double-Check: Brutally eliminate normal family/action/comedy movies
+      const badGenres = [16, 10751, 28, 12, 878, 10762, 10759, 35]; // Animation, Family, Action, Adventure, SciFi, Kids, Action&Adventure, Comedy
+      let isBad = false;
+      if (item.genre_ids) isBad = item.genre_ids.some(gid => badGenres.includes(gid));
+
+      // Allow only if NOT bad genre OR if TMDB officially marked it as explicitly Adult
+      if (!isBad || item.adult === true) movies.push(item);
+    });
+  } else if (cat === 'trending') {
+    // 🔥 TRENDING NOW: Global trending movies + shows; source 2 is the TV one.
+    movies.push(...mzDedupeById(vals, (item, idx) => { if (idx === 2) item.media_type = 'tv'; }));
+  } else if (cat === 'uhd4k') {
+    /*  💎 4K ULTRA HD: in this app "quality" is inferred from release date, so
+     *  the round-robin is filtered rather than taken whole — 200+ days old and
+     *  rated >= 7 means no CAM/TS print can still be in circulation for it. */
+    const seen = new Set();
+    const nowMs = Date.now();
+    mzInterleave(vals, (m) => {
+      if (!m.id || seen.has(m.id) || !m.poster_path) return;
+      const rd = m.release_date;
+      if (!rd) return;
+      if ((nowMs - new Date(rd).getTime()) / 86400000 > 200 && (m.vote_average || 0) >= 7) {
+        seen.add(m.id);
+        m.media_type = 'movie';
+        m._force4K = true;   // genuinely 4K-era, so the badge is guaranteed
+        movies.push(m);
+      }
+    });
+  } else if (cat === 'toprated') {
+    // ⭐ TOP RATED: IMDb-style highest rated, min vote threshold ताकि reliable ho
+    movies.push(...mzDedupeById(vals, (item, idx) => { if (idx === 3) item.media_type = 'tv'; }));
+  } else if (cat === 'kdrama') {
+    /*  🇰🇷 K-DRAMA: Korean web series only — every source is /discover/tv, so
+     *  everything is tagged 'tv'. The old plan had a Korean MOVIE source at
+     *  index 2 and tagged that one 'movie', which is how Parasite ended up on a
+     *  drama tab. */
+    movies.push(...mzDedupeById(vals, (item) => { item.media_type = 'tv'; }));
+  } else if (OTT[cat]) {
+    // ── PLATFORM TABS: every entry in the OTT table ──
+    // Uses the OTT sub-filter mode (all / webseries / movies) to decide
+    // queries, so this one branch serves Netflix, Prime, JioHotstar, Zee5,
+    // Apple TV+, SonyLIV, MX Player, aha and Crunchyroll alike.
+    //
+    // fetchOttMovies ranks by platform relevance and drops titles that are
+    // not really on the service; ottRankLikeAllFeed then applies the SAME
+    // product priority as the ALL feed, so newest releases lead and movies
+    // and web series interleave the way they do everywhere else.
+    movies = movies.concat(
+      ottRankLikeAllFeed(await fetchOttMovies(cat, modes.ott, pageNum)));
+  } else {
+    // The movie ladder tabs (Hollywood, Bollywood, Tollywood) and every
+    // CAT_PARAMS genre tab: sources concatenated in plan order.
+    vals.forEach(v => { movies = movies.concat(v.results || []); });
+  }
+  return movies;
 }
 
 async function loadMovies(cat, isLoadMore = false) {
@@ -9278,7 +9438,11 @@ async function loadMovies(cat, isLoadMore = false) {
   if (isLoadMore && isLoadingMore) return;
   const loadGeneration = ++_mzFeedLoadGeneration;
   const loadPoolKey = _mzPoolKey(cat);
-  const requestedOttMode = OTT[cat] ? currentOttMode : null;
+  const requestedModes = {
+    ott: OTT[cat] ? currentOttMode : null,
+    cartoon: currentCartoonMode,
+    anime: currentAnimeMode
+  };
   
   if (isLoadMore) {
     isLoadingMore = true;
@@ -9361,149 +9525,12 @@ async function loadMovies(cat, isLoadMore = false) {
       ? (await tmdbBatch(plan)).map(r => (r.status === 'fulfilled' && r.value) ? r.value : { results: [] })
       : null;
 
-    if (cat === 'all') {
-      /*  /discover/tv results carry no media_type, so tag them by position.
-       *  TV_SOURCE_FROM is an index into the ALL plan in _mzCatPlan and must move
-       *  with it, or series would be tagged as movies and vice versa. It moved
-       *  from 12 to 11 when the two unwindowed movie sources were swapped for one
-       *  movie window and one TV window — see the note in _mzCatPlan. */
-      const TV_SOURCE_FROM = 11;
-      const combinedMovies = [];
-      vals.forEach((v, idx) => {
-        if (!v.results) return;
-        v.results.forEach(item => {
-          if (!item) return;
-          if (idx >= TV_SOURCE_FROM && !item.media_type) item.media_type = 'tv';
-          combinedMovies.push(item);
-        });
-      });
-
-      // INTELLIGENT DEDUPLICATION: Keep the highest-popularity version.
-      // Keyed by type+id, not id alone: TMDB numbers movies and series in
-      // separate namespaces, so a movie and a series can share an id and one
-      // would silently replace the other.
-      const movieMap = new Map();
-      for (const movie of combinedMovies) {
-        if (!movie || !movie.id) continue;
-        const key = mediaTypeOf(movie) + '-' + movie.id;
-        const existing = movieMap.get(key);
-        if (!existing || (movie.popularity || 0) > (existing.popularity || 0)) {
-          movieMap.set(key, movie);
-        }
-      }
-      const uniqueMovies = Array.from(movieMap.values());
-
-      // STRICT PRIORITY RANKING: latest movie releases first, recent movie
-      // quality updates second, then the trending/latest web series and anime,
-      // and only then the remaining catalogue movies.
-      rankByFreshness(uniqueMovies);
-
-      // Balance languages only inside each priority group. A skipped movie is
-      // reinserted before the next group, so this pass cannot lift a series
-      // above a movie release or quality update.
-      const ranked = diversifyByLanguageWithinPriority(uniqueMovies);
-
-      // Finally, fill the slot pattern: movies keep the top and three quarters of
-      // the feed, while trending web series and anime reach the first screen
-      // instead of sitting sixty cards down. This is the only step that crosses a
-      // priority group, and it never reorders within a lane.
-      movies.push(...interleaveFeedByType(ranked));
-    } else if (cat === 'tv') {
-      const combinedShows = [];
-      vals.forEach(v => { if (v.results) combinedShows.push(...v.results); });
-
-      /*  Remove duplicates, keeping the first occurrence — and drop the rows a
-       *  web-series tab must not carry. The genre gate is here rather than in the
-       *  query because /trending/tv/week accepts no without_genres parameter, and
-       *  the network-gated windows rely on the streaming allow-list instead of a
-       *  genre exclusion; the regional windows exclude these genres server-side
-       *  already, so for them this is a no-op. See NON_DRAMA_TV_GENRE_IDS. */
-      const uniqueShows = [];
-      const seenIds = new Set();
-      for (const show of combinedShows) {
-        if (!show || !show.id || seenIds.has(show.id)) continue;
-        if (isNonDramaTvRow(show)) continue;
-        uniqueShows.push(show);
-        seenIds.add(show.id);
-      }
-
-      /*  No sort here on purpose. This used to be a plain first_air_date
-       *  descending sort, which put whichever obscure show aired most recently at
-       *  the top regardless of whether anyone was watching it. rankReleaseLadder()
-       *  below orders the pool instead: the fresh premieres the ALL feed would
-       *  lead with, then everything else by release month and demand. */
-      movies.push(...uniqueShows);
-    } else if (cat === 'kids') {
-      // POWERFUL CARTOON ENGINE: strictly animated content only, famous first.
-      // The batch above already primed every source this asks for, so its own
-      // tmdb() calls are memory hits rather than 4-9 gated requests.
-      movies = movies.concat(await fetchCartoonMovies(currentCartoonMode, currentMoviePage));
-    } else if (cat === 'anime') {
-      // POWERFUL ANIME ENGINE: mode ke hisaab se 4-9 sources — all primed above.
-      movies = movies.concat(await fetchAnimeMovies(currentAnimeMode, currentMoviePage));
-    } else if (cat === 'horror' || cat === 'dubbed') {
-      /*  Round-robin, so no single industry owns the top of the grid.
-       *  horror = global + Hindi + Tamil + Telugu.
-       *  dubbed = Hollywood (2 pages) + Tamil + Telugu + Japanese anime, because
-       *  those are the industries Hindi dubs actually come from. */
-      movies.push(...mzInterleave(vals));
-    } else if (cat === 'adult') {
-      mzInterleave(vals, (item, idx) => {
-        item.media_type = idx === 1 ? 'tv' : 'movie';
-
-        // Local Double-Check: Brutally eliminate normal family/action/comedy movies
-        const badGenres = [16, 10751, 28, 12, 878, 10762, 10759, 35]; // Animation, Family, Action, Adventure, SciFi, Kids, Action&Adventure, Comedy
-        let isBad = false;
-        if (item.genre_ids) isBad = item.genre_ids.some(gid => badGenres.includes(gid));
-
-        // Allow only if NOT bad genre OR if TMDB officially marked it as explicitly Adult
-        if (!isBad || item.adult === true) movies.push(item);
-      });
-    } else if (cat === 'trending') {
-      // 🔥 TRENDING NOW: Global trending movies + shows; source 2 is the TV one.
-      movies.push(...mzDedupeById(vals, (item, idx) => { if (idx === 2) item.media_type = 'tv'; }));
-    } else if (cat === 'uhd4k') {
-      /*  💎 4K ULTRA HD: in this app "quality" is inferred from release date, so
-       *  the round-robin is filtered rather than taken whole — 200+ days old and
-       *  rated >= 7 means no CAM/TS print can still be in circulation for it. */
-      const seen = new Set();
-      const nowMs = Date.now();
-      mzInterleave(vals, (m) => {
-        if (!m.id || seen.has(m.id) || !m.poster_path) return;
-        const rd = m.release_date;
-        if (!rd) return;
-        if ((nowMs - new Date(rd).getTime()) / 86400000 > 200 && (m.vote_average || 0) >= 7) {
-          seen.add(m.id);
-          m.media_type = 'movie';
-          m._force4K = true;   // genuinely 4K-era, so the badge is guaranteed
-          movies.push(m);
-        }
-      });
-    } else if (cat === 'toprated') {
-      // ⭐ TOP RATED: IMDb-style highest rated, min vote threshold ताकि reliable ho
-      movies.push(...mzDedupeById(vals, (item, idx) => { if (idx === 3) item.media_type = 'tv'; }));
-    } else if (cat === 'kdrama') {
-      /*  🇰🇷 K-DRAMA: Korean web series only — every source is /discover/tv, so
-       *  everything is tagged 'tv'. The old plan had a Korean MOVIE source at
-       *  index 2 and tagged that one 'movie', which is how Parasite ended up on a
-       *  drama tab. */
-      movies.push(...mzDedupeById(vals, (item) => { item.media_type = 'tv'; }));
-    } else if (OTT[cat]) {
-      // ── PLATFORM TABS: every entry in the OTT table ──
-      // Uses the OTT sub-filter mode (all / webseries / movies) to decide
-      // queries, so this one branch serves Netflix, Prime, JioHotstar, Zee5,
-      // Apple TV+, SonyLIV, MX Player, aha and Crunchyroll alike.
-      //
-      // fetchOttMovies ranks by platform relevance and drops titles that are
-      // not really on the service; ottRankLikeAllFeed then applies the SAME
-      // product priority as the ALL feed, so newest releases lead and movies
-      // and web series interleave the way they do everywhere else.
-      movies = movies.concat(
-        ottRankLikeAllFeed(await fetchOttMovies(cat, requestedOttMode, requestedMoviePage)));
-    } else {
-      // The movie ladder tabs (Hollywood, Bollywood, Tollywood) and every
-      // CAT_PARAMS genre tab: sources concatenated in plan order.
-      vals.forEach(v => { movies = movies.concat(v.results || []); });
+    // A superseded gather may warm tmdb's cache, but it must not spend CPU
+    // ranking hundreds of unused rows or start a second cartoon/anime gather
+    // using the NEW tab's mode. The completion guard below still owns cleanup.
+    if (cat === mzFeedPagerCategory && loadPoolKey === _mzPoolKey(cat)
+        && loadGeneration === _mzFeedLoadGeneration) {
+      movies = await collectFeedMovies(cat, vals, requestedMoviePage, requestedModes);
     }
   } catch(e) { console.warn(e); }
 

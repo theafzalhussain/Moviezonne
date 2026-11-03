@@ -627,8 +627,12 @@ async function catalogueSize(platform, type) {
     assert.ok(!/\/trending\//.test(fn), 'global trending endpoint present in the query builder');
   });
   check('loadMovies routes OTT tabs through fetchOttMovies', () => {
-    assert.ok(/fetchOttMovies\(cat,\s*requestedOttMode,\s*requestedMoviePage\)/.test(src),
-      'loadMovies is not calling fetchOttMovies with its captured mode and page');
+    const loader = block('async function loadMovies(');
+    const collector = block('async function collectFeedMovies(');
+    assert.ok(/collectFeedMovies\(cat,\s*vals,\s*requestedMoviePage,\s*requestedModes\)/.test(loader)
+      && /ott:\s*OTT\[cat\]\s*\?\s*currentOttMode\s*:\s*null/.test(loader)
+      && /fetchOttMovies\(cat,\s*modes\.ott,\s*pageNum\)/.test(collector),
+      'loadMovies does not route the captured OTT mode and page through its collector');
   });
   check('a stale OTT mode request cannot poison the active mode pool', () => {
     const fn = block('async function loadMovies(');
@@ -767,8 +771,9 @@ async function catalogueSize(platform, type) {
    *  priority so newest releases lead. The ORDERING checks above therefore
    *  measure the fetcher, and this guards the step they cannot see. */
   check('platform tabs preserve provider signals through final ranking', () => {
-    assert.ok(/ottRankLikeAllFeed\(await fetchOttMovies\(cat,\s*requestedOttMode,\s*requestedMoviePage\)\)/.test(src),
-      'loadMovies does not pass the OTT result through ottRankLikeAllFeed');
+    const collector = block('async function collectFeedMovies(');
+    assert.ok(/ottRankLikeAllFeed\(await fetchOttMovies\(cat,\s*modes\.ott,\s*pageNum\)\)/.test(collector),
+      'the feed collector does not pass the OTT result through ottRankLikeAllFeed');
     const fn = block('function ottRankLikeAllFeed(');
     assert.ok(/rankByFreshness\(items\)/.test(fn),
       'ottRankLikeAllFeed does not use the shared freshness ranking');

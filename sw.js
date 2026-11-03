@@ -271,7 +271,11 @@
 // another server. /api/toon/ is still never cached here.
 // v179: moviezone.min.js 17.5 - chip renamed "Toon Hindi" -> "Anime/Toon Hindi"
 // (label only; the server's `toon` flag, routes and behaviour are unchanged).
-const CACHE_NAME = 'moviezone-v179';
+// v180: isolate current caches, bound runtime/image growth, and keep a ready
+// navigation response independent of slow Cache Storage reads.
+const CACHE_NAME = 'moviezone-v180';
+const RUNTIME_CACHE = 'moviezone-runtime-v180';
+const RUNTIME_CACHE_MAX_ENTRIES = 128;
 
 /*  v151: the server picker is one section instead of two. "HD Streams •
  *  Multi-Audio" is gone and its four servers — VidSrc HD, Turbo Stream, Pro Stream
@@ -384,7 +388,8 @@ const CACHE_NAME = 'moviezone-v179';
 // lets activate() delete it; entries now go in only as readable 200s.
 const IMAGE_CACHE = 'moviezone-tmdb-images-v2';
 
-// Hard ceiling on the image cache. Roughly 50 MB at TMDB w342/w780 sizes.
+// Image trim target. A burst may retain at most 31 additional writes between
+// trims (see IMAGE_TRIM_MAX_WRITES); roughly 50 MB at TMDB w342/w780 sizes.
 const IMAGE_CACHE_MAX_ENTRIES = 400;
 
 /*  How long a navigation waits for the network before the cached shell is
@@ -446,7 +451,7 @@ const STATIC_ASSETS = [
   '/moviezone.min.css?v=9.26',
   '/tv-mode.min.js?v=2.0',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=17.5',
+  '/moviezone.min.js?v=17.6',
   '/manifest.json',
   '/icon-192.png?v=2',
   '/favicon-32.png?v=2',
@@ -504,6 +509,9 @@ const OPTIONAL_ASSETS = [
   '/fonts/playfair-display-latin-ext-italic-400.woff2'
 ];
 
+// Runtime URLs must not accumulate in, or evict, the finite offline shell.
+const PRECACHE_URLS = new Set([...STATIC_ASSETS, ...OPTIONAL_ASSETS]);
+
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
@@ -532,9 +540,13 @@ self.addEventListener('activate', event => {
         keys
           // IMAGE_CACHE must survive a shell bump: those bytes are version-independent
           // and re-downloading them is exactly the cost this cache exists to avoid.
-          .filter(key => key !== CACHE_NAME && key !== IMAGE_CACHE)
+          .filter(key => key !== CACHE_NAME && key !== IMAGE_CACHE && key !== RUNTIME_CACHE
+            && /^moviezone-(?:v\d+|runtime-v\d+|tmdb-images-v\d+)$/.test(key))
           .map(key => caches.delete(key))
       );
+      // The image namespace survives upgrades. Repair an oversized cache left
+      // by the old time-only trim even if every subsequent image is a cache hit.
+      await trimImageCache().catch(() => {});
 
       /*  ── NAVIGATION PRELOAD ──────────────────────────────────────────────
        *  Without this, every single navigation paid service-worker start-up
@@ -566,10 +578,8 @@ self.addEventListener('activate', event => {
   );
 });
 
-/*  Trim the image cache back under its ceiling. Cache Storage keys are returned
- *  in insertion order, so slicing from the front is a usable FIFO eviction —
- *  good enough here, because what we want to keep is "recently added", and a
- *  re-request re-inserts the entry at the back via the revalidation path.
+/*  Cache Storage keys are in insertion order: evict the oldest inserted images
+ *  first. Cache hits remain immutable and do not reinsert or revalidate them.
  */
 async function trimImageCache() {
   const cache = await caches.open(IMAGE_CACHE);
@@ -578,19 +588,24 @@ async function trimImageCache() {
   if (excess > 0) await Promise.all(keys.slice(0, excess).map(k => cache.delete(k)));
 }
 
-/*  Trimming enumerates the WHOLE image cache (cache.keys() over up to
- *  IMAGE_CACHE_MAX_ENTRIES records) and it used to run after EVERY image put -
- *  ~30 full enumerations while the first page of posters streamed in, competing
- *  for the same device I/O the page was decoding those posters from. Once per
- *  TRIM_EVERY_MS is plenty: the ceiling is a soft bound, and overshooting it by a
- *  few dozen entries for a few seconds costs nothing. */
+/*  Do not enumerate storage on every poster write. The time throttle alone
+ *  could admit an arbitrarily large burst and never trim it if no later image
+ *  was fetched. Also trim after 32 successful writes, so even a burst followed
+ *  by idle has a finite allowance. No background timer keeps the worker alive. */
 const TRIM_EVERY_MS = 20000;
+const IMAGE_TRIM_MAX_WRITES = 32;
 let lastImageTrimAt = 0;
+let imageWritesSinceTrim = 0;
+let imageTrimQueue = Promise.resolve();
 function trimImageCacheSoon() {
   const now = Date.now();
-  if (now - lastImageTrimAt < TRIM_EVERY_MS) return Promise.resolve();
+  if (++imageWritesSinceTrim < IMAGE_TRIM_MAX_WRITES
+      && now - lastImageTrimAt < TRIM_EVERY_MS) return imageTrimQueue;
+  imageWritesSinceTrim = 0;
   lastImageTrimAt = now;
-  return trimImageCache();
+  // Serialize trims so overlapping snapshots cannot race their FIFO deletions.
+  imageTrimQueue = imageTrimQueue.catch(() => {}).then(trimImageCache);
+  return imageTrimQueue;
 }
 
 const isTmdbImage = url =>
@@ -660,17 +675,46 @@ function navigable(response) {
   });
 }
 
+// CacheStorage.match() searches every cache in creation order. During an
+// update that can mean an old worker's shell, or another app's cached response.
+// Reads must be restricted to this worker's two current namespaces.
+async function matchCurrentCache(request) {
+  const shell = await caches.open(CACHE_NAME);
+  const cached = await shell.match(request);
+  if (cached) return cached;
+  const runtime = await caches.open(RUNTIME_CACHE);
+  return runtime.match(request);
+}
+
 /** The offline / slow-network shell: the home document, never a redirect. */
 async function cachedShell() {
-  const shell = (await caches.match('/')) || (await caches.match('/index.html'));
+  const cache = await caches.open(CACHE_NAME);
+  const shell = (await cache.match('/')) || (await cache.match('/index.html'));
   return navigable(shell || null);
+}
+
+// Serialize runtime write + trim, including concurrent fetches. The much larger
+// image cache keeps its separate batched trim policy; the precache is never trimmed.
+let runtimeWriteQueue = Promise.resolve();
+function putRuntime(key, response) {
+  runtimeWriteQueue = runtimeWriteQueue.catch(() => {}).then(async () => {
+    const cache = await caches.open(RUNTIME_CACHE);
+    await cache.put(key, response);
+    const keys = await cache.keys();
+    const excess = keys.length - RUNTIME_CACHE_MAX_ENTRIES;
+    if (excess > 0) await Promise.all(keys.slice(0, excess).map(k => cache.delete(k)));
+  });
+  return runtimeWriteQueue;
 }
 
 /** Stores a copy without ever letting a quota or storage fault reject anything. */
 function putQuietly(event, key, response) {
+  const url = new URL(typeof key === 'string' ? key : key.url, self.location.origin);
+  const isPrecached = PRECACHE_URLS.has(url.pathname + url.search);
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.put(key, response))
+    (isPrecached
+      ? caches.open(CACHE_NAME).then(cache => cache.put(key, response))
+      : putRuntime(key, response))
       .catch(() => {})
   );
 }
@@ -806,7 +850,7 @@ self.addEventListener('fetch', event => {
       // If Cache Storage itself fails, the bundle must still load from the
       // network - a rejected respondWith() here would take the whole app down.
       try {
-        const cached = await caches.match(request);
+        const cached = await matchCurrentCache(request);
         if (cached) return cached;
       } catch (e) { /* storage unavailable: fall through to the network */ }
       const response = await fetch(request);
@@ -854,6 +898,8 @@ self.addEventListener('fetch', event => {
           }
           return response;
         })();
+        // Observe rejection immediately, before any asynchronous storage lookup.
+        const networkForRace = fromNetwork.catch(() => NETWORK_TOO_SLOW);
 
         /*  ── BOUNDED, NOT UNBOUNDED ──────────────────────────────────────────
          *  Pure network-first meant a stalled mobile connection left the user
@@ -868,24 +914,28 @@ self.addEventListener('fetch', event => {
          *  cache for the next navigation — the request is deferred, never
          *  abandoned.
          *
-         *  There is no stale-version hazard: activate() deletes every cache but
-         *  CACHE_NAME and install() refills it, so the cached shell references the
-         *  ?v= bundles this worker precached. */
-        const shell = isHomeNavigation ? await cachedShell().catch(() => null) : null;
+         *  Only this worker's shell is eligible; another installing worker or
+         *  unrelated cache must not supply the fallback document. */
+        const shell = isHomeNavigation ? cachedShell().catch(() => null) : null;
 
-        if (shell) {
+        if (isHomeNavigation) {
           let timer = null;
           const timeout = new Promise(resolve => {
             timer = setTimeout(() => resolve(NETWORK_TOO_SLOW), NAV_NETWORK_BUDGET_MS);
           });
           try {
             const winner = await Promise.race([
-              fromNetwork.catch(() => NETWORK_TOO_SLOW),
+              networkForRace,
               timeout
             ]);
             if (winner !== NETWORK_TOO_SLOW) return winner;
-            event.waitUntil(fromNetwork.catch(() => {}));
-            return shell;
+            // A slow Cache Storage read must not hold up a network response,
+            // even when that response arrives after the navigation budget.
+            const fallback = await Promise.race([shell, fromNetwork.catch(() => shell)]);
+            if (fallback) {
+              event.waitUntil(fromNetwork.catch(() => {}));
+              return fallback;
+            }
           } finally {
             if (timer !== null) clearTimeout(timer);
           }
@@ -894,13 +944,13 @@ self.addEventListener('fetch', event => {
         try {
           return await fromNetwork;
         } catch (e) {
-          // Try exact match first, then try stripping query string for pre-cached assets
+          // Only unversioned URLs may use the legacy queryless fallback.
+          // A versioned URL is a different representation, including JSON data.
           let cached = null;
           try {
-            cached = await caches.match(request);
-            if (!cached && url.search) {
-              cached = await caches.match(url.pathname + url.search, { ignoreSearch: false });
-              if (!cached) cached = await caches.match(url.pathname);
+            cached = await matchCurrentCache(request);
+            if (!cached && url.search && !url.searchParams.has('v')) {
+              cached = await matchCurrentCache(url.pathname);
             }
           } catch (err) {
             cached = null;
@@ -920,9 +970,9 @@ self.addEventListener('fetch', event => {
 
   event.respondWith((async () => {
     try {
-      const cached = (await caches.match(request))
+      const cached = (await matchCurrentCache(request))
         // Fallback: try ignoring search params for pre-cached assets
-        || (url.search ? await caches.match(url.pathname) : null);
+        || (url.search && !url.searchParams.has('v') ? await matchCurrentCache(url.pathname) : null);
       if (cached) return cached;
     } catch (e) { /* storage unavailable: fall through to the network */ }
     const response = await fetch(request);
