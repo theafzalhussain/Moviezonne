@@ -2006,10 +2006,23 @@ function slimChartCard(detail, mediaType) {
  *  no poster, is DROPPED rather than rendered blank: loadMovies filters
  *  posterless titles on the client anyway, so passing one would waste a rank. */
 async function hydrateOttChart(order, env, ctx, budget) {
-  const settled = await Promise.allSettled(
-    order.map((entry) => fetchTmdbJson(
-      '/' + entry.media_type + '/' + entry.id + '?language=en-US', env, ctx, { budget }))
-  );
+  const CONCURRENCY = 6;
+  const settled = new Array(order.length);
+  let next = 0;
+  async function worker() {
+    while (next < order.length) {
+      const i = next++;
+      const entry = order[i];
+      try {
+        const value = await fetchTmdbJson(
+          '/' + entry.media_type + '/' + entry.id + '?language=en-US', env, ctx, { budget });
+        settled[i] = { status: 'fulfilled', value };
+      } catch (reason) {
+        settled[i] = { status: 'rejected', reason };
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, order.length) || 0 }, () => worker()));
 
   const cards = [];
   settled.forEach((result, i) => {

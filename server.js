@@ -60,7 +60,7 @@ const keepAliveAgent = new https.Agent({
 // Create dedicated axios instance for TMDB
 const tmdbClient = axios.create({
   baseURL: buildBaseUrl(activeHost),
-  timeout: 15000,
+  timeout: 5000,
   httpsAgent: keepAliveAgent,
   headers: {
     'User-Agent': 'MovieZone/1.0 (Premium Cinema App)',
@@ -119,8 +119,8 @@ tmdbClient.interceptors.response.use(
 
 // Axios Retry Interceptor — fast first retries, host flip on connection errors
 axiosRetry(tmdbClient, {
-  retries: 6,
-  shouldResetTimeout: true, // every attempt gets a full 15s, not a shared budget
+  retries: 2,
+  shouldResetTimeout: false,
   retryDelay: (retryCount, error) => {
     const retryAfter = Number(error?.response?.headers?.['retry-after']);
     if (error?.response?.status === 429 && Number.isFinite(retryAfter)) {
@@ -142,8 +142,8 @@ axiosRetry(tmdbClient, {
       const alternate = pickAlternateHost(usedHost);
       if (alternate !== usedHost) requestConfig.baseURL = buildBaseUrl(alternate);
     }
-    if (retryCount >= 4) {
-      console.warn(`⚠️ TMDB retry ${retryCount}/6 via ${hostOfConfig(requestConfig)} (${error.code || error.message})`);
+    if (retryCount >= 2) {
+      console.warn(`⚠️ TMDB retry ${retryCount}/2 via ${hostOfConfig(requestConfig)} (${error.code || error.message})`);
     }
   }
 });
@@ -775,11 +775,11 @@ app.get('/api/push/stats', async (req, res) => {
 });
 
 /*  */// Backend Advanced Cache: Initialize NodeCache with a standard TTL of 2 hours (7200 seconds) for faster loads
-const apiCache = new NodeCache({ stdTTL: 7200 });
+const apiCache = new NodeCache({ stdTTL: 7200, maxKeys: 2000, useClones: false });
 
 // Stale-fallback cache: keeps the last known-good payload for 24h so a network
 // hiccup (ISP resets, TMDB outage) degrades into slightly old data instead of a 503.
-const staleCache = new NodeCache({ stdTTL: 86400 });
+const staleCache = new NodeCache({ stdTTL: 86400, maxKeys: 2000, useClones: false });
 
 // In-flight request map: collapses duplicate concurrent requests for the same URL
 // into a single upstream call. Fewer parallel TLS handshakes = fewer resets.
@@ -934,9 +934,22 @@ function slimChartTitle(detail, mediaType) {
  * whole point of the endpoint.
  */
 async function hydrateChart(order) {
-  const settled = await Promise.allSettled(
-    order.map(entry => tmdbForSsr('/' + entry.media_type + '/' + entry.id, { language: 'en-US' }))
-  );
+  const CONCURRENCY = 6;
+  const settled = new Array(order.length);
+  let next = 0;
+  async function worker() {
+    while (next < order.length) {
+      const i = next++;
+      const entry = order[i];
+      try {
+        const value = await tmdbForSsr('/' + entry.media_type + '/' + entry.id, { language: 'en-US' });
+        settled[i] = { status: 'fulfilled', value };
+      } catch (reason) {
+        settled[i] = { status: 'rejected', reason };
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, order.length) || 0 }, () => worker()));
   const cards = [];
   settled.forEach((result, i) => {
     if (result.status !== 'fulfilled') return;

@@ -6,9 +6,8 @@
 
   /*  head_sampling_rate, not "sampling" — that is the key the runtime reads, and
    *  an unknown field here is silently ignored, so a typo looks like it worked.
-   *  1 = keep every invocation, which is also the default; stated explicitly so
-   *  nobody has to guess whether logs are being dropped while debugging. */
-  "observability": { "enabled": true, "head_sampling_rate": 1 },
+   *  0.05 in production so every request is not a log write on the hot path. */
+  "observability": { "enabled": true, "head_sampling_rate": 0.05 },
 
   /*  ── TUNABLES, READABLE WITHOUT A DEPLOY ──
    *  worker.js reads each of these through envInt(), which clamps the value and
