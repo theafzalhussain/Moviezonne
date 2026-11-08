@@ -50,7 +50,10 @@ const ASSETS = ['moviezone.min.js', 'moviezone.min.css', 'tv-mode.min.js', 'tv-m
   /*  Typo recall + franchise results, injected by moviezone.js as ?v= on first
    *  search focus. search-vocab.json is deliberately NOT here: the workflow
    *  rebuilds it daily and it is served with a one-day max-age instead. */
-  'search-plus.js'];
+  'search-plus.js',
+  /*  TV runtime performance, extracted from moviezone.js. Loaded deferred after
+   *  the main bundle so pauseAutoSlide is already defined. */
+  'tv-perf.js'];
 
 const html = fs.readFileSync('index.html', 'utf8');
 const sw = fs.readFileSync('sw.js', 'utf8');

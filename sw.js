@@ -273,7 +273,7 @@
 // (label only; the server's `toon` flag, routes and behaviour are unchanged).
 // v180: isolate current caches, bound runtime/image growth, and keep a ready
 // navigation response independent of slow Cache Storage reads.
-const CACHE_NAME = 'moviezone-v181';
+const CACHE_NAME = 'moviezone-v182';
 const RUNTIME_CACHE = 'moviezone-runtime-v180';
 const RUNTIME_CACHE_MAX_ENTRIES = 128;
 
@@ -451,7 +451,8 @@ const STATIC_ASSETS = [
   '/moviezone.min.css?v=9.27',
   '/tv-mode.min.js?v=2.0',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=17.7',
+  '/moviezone.min.js?v=17.8',
+  '/tv-perf.js?v=1',
   '/manifest.json',
   '/icon-192.png?v=2',
   '/favicon-32.png?v=2',
@@ -719,6 +720,131 @@ function putQuietly(event, key, response) {
   );
 }
 
+
+async function handleTmdbImage(event, request, url) {
+  let cache = null;
+  try {
+    cache = await caches.open(IMAGE_CACHE);
+    const cached = await cache.match(request);
+    if (cached) return cached;
+  } catch (e) {
+    cache = null;
+  }
+
+  const store = (response) => {
+    if (!cache) return;
+    event.waitUntil(cache.put(request, response).then(trimImageCacheSoon).catch(() => {}));
+  };
+
+  if (url.hostname !== 'image.tmdb.org') {
+    const response = await fetch(request);
+    if (response.ok) store(response.clone());
+    return response;
+  }
+
+  const fallback = tmdbFallbackUrl(url);
+  if (!fallback || Date.now() >= tmdbDirectSkipUntil) {
+    try {
+      const response = await fetchTmdbDirect(request);
+      if (response.ok || response.status === 404 || !fallback) {
+        if (fallback) noteTmdbDirect(true);
+        if (response.ok) store(response.clone());
+        return response;
+      }
+    } catch (e) {
+      if (!fallback) return fetch(request);
+    }
+    noteTmdbDirect(false);
+  }
+
+  try {
+    const proxied = await fetch(fallback, { credentials: 'omit' });
+    if (proxied.ok) store(proxied.clone());
+    return proxied;
+  } catch (e) {
+    return fetch(request);
+  }
+}
+
+async function handleVersionedOrFont(event, request) {
+  try {
+    const cached = await matchCurrentCache(request);
+    if (cached) return cached;
+  } catch (e) { /* storage unavailable */ }
+  const response = await fetch(request);
+  if (response.ok && response.type === 'basic') putQuietly(event, request, response.clone());
+  return response;
+}
+
+async function handleNetworkFirst(event, request, url) {
+  const isNavigation = request.mode === 'navigate';
+  const isHomeNavigation = isNavigation && url.pathname === '/';
+
+  const fromNetwork = (async () => {
+    let response = null;
+    if (event.preloadResponse) {
+      try { response = await event.preloadResponse; } catch (e) { response = null; }
+    }
+    if (!response) response = await fetch(request);
+    if (response.ok && response.type === 'basic' && !response.redirected
+        && (!isNavigation || isHomeNavigation)) {
+      putQuietly(event, isHomeNavigation ? '/' : request, response.clone());
+    }
+    return response;
+  })();
+  const networkForRace = fromNetwork.catch(() => NETWORK_TOO_SLOW);
+  const shell = isHomeNavigation ? cachedShell().catch(() => null) : null;
+
+  if (isHomeNavigation) {
+    let timer = null;
+    const timeout = new Promise(resolve => {
+      timer = setTimeout(() => resolve(NETWORK_TOO_SLOW), NAV_NETWORK_BUDGET_MS);
+    });
+    try {
+      const winner = await Promise.race([networkForRace, timeout]);
+      if (winner !== NETWORK_TOO_SLOW) return winner;
+      const fallback = await Promise.race([shell, fromNetwork.catch(() => shell)]);
+      if (fallback) {
+        event.waitUntil(fromNetwork.catch(() => {}));
+        return fallback;
+      }
+    } finally {
+      if (timer !== null) clearTimeout(timer);
+    }
+  }
+
+  try {
+    return await fromNetwork;
+  } catch (e) {
+    let cached = null;
+    try {
+      cached = await matchCurrentCache(request);
+      if (!cached && url.search && !url.searchParams.has('v')) {
+        cached = await matchCurrentCache(url.pathname);
+      }
+    } catch (err) {
+      cached = null;
+    }
+    if (cached) return isNavigation ? navigable(cached) : cached;
+    if (isNavigation) {
+      const offlineShell = await cachedShell().catch(() => null);
+      if (offlineShell) return offlineShell;
+    }
+    return Response.error();
+  }
+}
+
+async function handleDefaultSameOrigin(event, request, url) {
+  try {
+    const cached = (await matchCurrentCache(request))
+      || (url.search && !url.searchParams.has('v') ? await matchCurrentCache(url.pathname) : null);
+    if (cached) return cached;
+  } catch (e) { /* storage unavailable */ }
+  const response = await fetch(request);
+  if (response.ok && response.type === 'basic') putQuietly(event, request, response.clone());
+  return response;
+}
+
 self.addEventListener('fetch', event => {
   const request = event.request;
   if (request.method !== 'GET') return;
@@ -726,119 +852,15 @@ self.addEventListener('fetch', event => {
   let url;
   try { url = new URL(request.url); } catch (e) { return; }
 
-  // TMDB data proxy — never cached here. Freshness is owned by the in-page SWR
-  // layer in moviezone.js, which has the domain knowledge to decide TTLs.
-  // (/api/img/ is the exception: content-addressed images, handled just below.)
   if (url.pathname.startsWith('/api/') && !url.pathname.startsWith('/api/img/')) return;
 
-  /*  ── TMDB IMAGES: cache-first, immutable ────────────────────────────────
-   *  These were previously not cached at all. The generic branch below only
-   *  stored `response.type === 'basic'` (same-origin) responses, and a TMDB
-   *  image is a cross-origin `cors`/`opaque` response, so every repeat visit
-   *  re-downloaded every poster and — critically — the hero backdrop, which is
-   *  the LCP element.
-   *
-   *  WHY THIS IS NO LONGER STALE-WHILE-REVALIDATE
-   *  It used to fire the revalidation fetch unconditionally, before even looking
-   *  at the cached entry, and only the *response* was discarded on a hit. So a
-   *  returning visitor with a warm cache re-downloaded every poster on screen in
-   *  the background anyway — up to IMAGE_CACHE_MAX_ENTRIES of them — while the
-   *  first screen was still loading. On a mobile link that is bandwidth taken
-   *  directly from the LCP backdrop and the two render-blocking bundles, to
-   *  refresh bytes that cannot have changed.
-   *
-   *  A TMDB image path is content-addressed: /t/p/w342/<hash>.jpg names the
-   *  bytes, so a different image is always a different URL. There is nothing for
-   *  a revalidation to discover. Cache-first is not a staleness trade here — it
-   *  is the correct strategy for the URL shape, and it is what makes a returning
-   *  visitor's LCP a local cache read instead of a cross-origin round trip.
-   *  ──────────────────────────────────────────────────────────────────────── */
   if (isTmdbImage(url)) {
-    event.respondWith((async () => {
-      // A storage fault (quota, a corrupted profile on a TV) must degrade to the
-      // network, never to a broken image: respondWith() rejecting IS a failure.
-      let cache = null;
-      try {
-        cache = await caches.open(IMAGE_CACHE);
-        const cached = await cache.match(request);
-        if (cached) return cached;
-      } catch (e) {
-        cache = null;
-      }
-
-      const store = (response) => {
-        if (!cache) return;
-        event.waitUntil(cache.put(request, response).then(trimImageCacheSoon).catch(() => {}));
-      };
-
-      // Same-origin image routes (/api/img/, Netlify's /tmdb-image/): readable
-      // responses, so only a real 200 is ever stored.
-      if (url.hostname !== 'image.tmdb.org') {
-        const response = await fetch(request);
-        if (response.ok) store(response.clone());
-        return response;
-      }
-
-      const fallback = tmdbFallbackUrl(url);
-      if (!fallback || Date.now() >= tmdbDirectSkipUntil) {
-        try {
-          const response = await fetchTmdbDirect(request);
-          /*  A 404 is a real answer about one file (no such poster), not a sign
-           *  that the host is blocked — returned as-is, no detour, no penalty. */
-          if (response.ok || response.status === 404 || !fallback) {
-            if (fallback) noteTmdbDirect(true);
-            if (response.ok) store(response.clone());
-            return response;
-          }
-        } catch (e) {
-          // Not a shape /api/img can carry: let the browser make (and report)
-          // the original request itself.
-          if (!fallback) return fetch(request);
-        }
-        noteTmdbDirect(false);
-      }
-
-      try {
-        const proxied = await fetch(fallback, { credentials: 'omit' });
-        if (proxied.ok) store(proxied.clone());
-        return proxied;
-      } catch (e) {
-        // Last resort: let the browser make (and report) the original request.
-        return fetch(request);
-      }
-    })());
+    event.respondWith(handleTmdbImage(event, request, url));
     return;
   }
 
-  /*  ── EVERYTHING ELSE CROSS-ORIGIN: straight to the network ──────────────
-   *  Deliberately placed AFTER the TMDB image branch above, which is the one
-   *  cross-origin thing worth caching — putting this first silently disabled the
-   *  poster cache and the LCP backdrop, so ad-gate-check.js asserts the order.
-   *
-   *  This began as a named allowlist of ad hosts, which was the wrong shape: an
-   *  ad script immediately pulls from further domains of its own
-   *  (spendsdetachment.com and friends), so a list could never be complete. The
-   *  general rule is also just the correct one — every caching branch below stores
-   *  `response.type === 'basic'`, i.e. same-origin only, so for anything
-   *  cross-origin this service worker can add nothing but latency and a failure
-   *  path: when such a request is blocked or answered 403, the network-first catch
-   *  runs three cache lookups that can never match and then throws, on every
-   *  navigation.
-   *  ──────────────────────────────────────────────────────────────────────── */
   if (url.origin !== self.location.origin) return;
 
-  /*  ── VERSIONED SAME-ORIGIN ASSETS: cache-first ──────────────────────────
-   *  Scripts and styles used to be network-first. That meant every repeat visit
-   *  paid a full round trip for moviezone.min.js + moviezone.min.css before the
-   *  page could render, even though both are render-blocking and both had a
-   *  perfectly good copy sitting in the cache.
-   *
-   *  Cache-first is safe here precisely because these URLs carry ?v= and the
-   *  version is bumped whenever the file changes: a given URL is immutable. The
-   *  HTML document itself stays network-first (below), so a new deployment is
-   *  picked up on the very next navigation — the fresh HTML simply asks for a
-   *  new ?v=, which misses the cache and is fetched.
-   *  ──────────────────────────────────────────────────────────────────────── */
   const sameOrigin = url.origin === self.location.origin;
   const isVersionedAsset = sameOrigin &&
     url.searchParams.has('v') &&
@@ -846,139 +868,20 @@ self.addEventListener('fetch', event => {
   const isFont = sameOrigin && url.pathname.startsWith('/fonts/');
 
   if (isVersionedAsset || isFont) {
-    event.respondWith((async () => {
-      // If Cache Storage itself fails, the bundle must still load from the
-      // network - a rejected respondWith() here would take the whole app down.
-      try {
-        const cached = await matchCurrentCache(request);
-        if (cached) return cached;
-      } catch (e) { /* storage unavailable: fall through to the network */ }
-      const response = await fetch(request);
-      if (response.ok && response.type === 'basic') putQuietly(event, request, response.clone());
-      return response;
-    })());
+    event.respondWith(handleVersionedOrFont(event, request));
     return;
   }
 
-  // Navigations and unversioned scripts/styles stay network-first so a deploy is
-  // visible immediately.
   const networkFirst = request.mode === 'navigate' ||
     request.destination === 'script' ||
     request.destination === 'style';
 
   if (networkFirst) {
-    const isNavigation = request.mode === 'navigate';
-    /*  Only the HOME document is raced against, and stored as, the shell. The
-     *  shell IS the homepage; painting it for /movie/<id> or a watch URL showed
-     *  the wrong page under the right URL. Every other navigation simply waits
-     *  for the network (with navigation preload), like a browser with no service
-     *  worker would, and falls back to the shell only when the network FAILS.
-     *  Storing every navigation also grew this cache without bound (one entry per
-     *  detail page, per ?utm variant). */
-    const isHomeNavigation = isNavigation && url.pathname === '/';
-
-    event.respondWith(
-      (async () => {
-        /*  One promise, consumed at most once. event.preloadResponse is the
-         *  request the browser started while this worker was still booting (see
-         *  navigationPreload in activate); awaiting it is strictly cheaper than
-         *  issuing a second identical one. It resolves to undefined when preload
-         *  did not apply — every non-navigation, and every browser without the
-         *  feature — so the plain fetch stays the fallback, not the exception. */
-        const fromNetwork = (async () => {
-          let response = null;
-          if (event.preloadResponse) {
-            try { response = await event.preloadResponse; } catch (e) { response = null; }
-          }
-          if (!response) response = await fetch(request);
-          if (response.ok && response.type === 'basic' && !response.redirected
-              && (!isNavigation || isHomeNavigation)) {
-            // One key for the home document, whatever ?utm_* it arrived with.
-            putQuietly(event, isHomeNavigation ? '/' : request, response.clone());
-          }
-          return response;
-        })();
-        // Observe rejection immediately, before any asynchronous storage lookup.
-        const networkForRace = fromNetwork.catch(() => NETWORK_TOO_SLOW);
-
-        /*  ── BOUNDED, NOT UNBOUNDED ──────────────────────────────────────────
-         *  Pure network-first meant a stalled mobile connection left the user
-         *  looking at a blank document until the browser's own timeout fired,
-         *  tens of seconds later. That is the "hang" users report, and it scores
-         *  as a p95 latency outlier rather than as an error, which is why it is
-         *  invisible in error rates but very visible in the percentiles.
-         *
-         *  So: race the network against the cached shell. If the network wins,
-         *  nothing changes. If it does not answer within the budget, paint the
-         *  shell and let the network keep running under waitUntil to refresh the
-         *  cache for the next navigation — the request is deferred, never
-         *  abandoned.
-         *
-         *  Only this worker's shell is eligible; another installing worker or
-         *  unrelated cache must not supply the fallback document. */
-        const shell = isHomeNavigation ? cachedShell().catch(() => null) : null;
-
-        if (isHomeNavigation) {
-          let timer = null;
-          const timeout = new Promise(resolve => {
-            timer = setTimeout(() => resolve(NETWORK_TOO_SLOW), NAV_NETWORK_BUDGET_MS);
-          });
-          try {
-            const winner = await Promise.race([
-              networkForRace,
-              timeout
-            ]);
-            if (winner !== NETWORK_TOO_SLOW) return winner;
-            // A slow Cache Storage read must not hold up a network response,
-            // even when that response arrives after the navigation budget.
-            const fallback = await Promise.race([shell, fromNetwork.catch(() => shell)]);
-            if (fallback) {
-              event.waitUntil(fromNetwork.catch(() => {}));
-              return fallback;
-            }
-          } finally {
-            if (timer !== null) clearTimeout(timer);
-          }
-        }
-
-        try {
-          return await fromNetwork;
-        } catch (e) {
-          // Only unversioned URLs may use the legacy queryless fallback.
-          // A versioned URL is a different representation, including JSON data.
-          let cached = null;
-          try {
-            cached = await matchCurrentCache(request);
-            if (!cached && url.search && !url.searchParams.has('v')) {
-              cached = await matchCurrentCache(url.pathname);
-            }
-          } catch (err) {
-            cached = null;
-          }
-          if (cached) return isNavigation ? navigable(cached) : cached;
-          if (isNavigation) {
-            const offlineShell = await cachedShell().catch(() => null);
-            if (offlineShell) return offlineShell;
-          }
-          // A clean network error rather than a rejected promise.
-          return Response.error();
-        }
-      })()
-    );
+    event.respondWith(handleNetworkFirst(event, request, url));
     return;
   }
 
-  event.respondWith((async () => {
-    try {
-      const cached = (await matchCurrentCache(request))
-        // Fallback: try ignoring search params for pre-cached assets
-        || (url.search && !url.searchParams.has('v') ? await matchCurrentCache(url.pathname) : null);
-      if (cached) return cached;
-    } catch (e) { /* storage unavailable: fall through to the network */ }
-    const response = await fetch(request);
-    if (response.ok && response.type === 'basic') putQuietly(event, request, response.clone());
-    return response;
-  })());
+  event.respondWith(handleDefaultSameOrigin(event, request, url));
 });
 
 self.addEventListener('push', event => {
