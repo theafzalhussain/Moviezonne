@@ -39,6 +39,10 @@ const BROWSER_NEEDS = [
    *  approach to the Download button. Excluding it leaves that button showing a
    *  "could not load" toast instead of the server list. */
   'downloads.js',
+  'tv-perf.js',
+  'mz-pwa.js',
+  'collections-hub.js',
+  'mz-extras.js',
   'robots.txt', 'sitemap.xml', 'llms.txt',
   'moviezone-logo.webp', 'moviezone-logo.png',
   'icon-192.png', 'icon-512.png', 'icon-192.webp', 'icon-512.webp',

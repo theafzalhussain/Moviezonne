@@ -19,3 +19,6 @@ moviezone-worker-504-fix/
 cp*.tmp/
 shots.tmp/
 *.tmp.png
+tmp-*
+*.tmp.html
+*.tmp.jpg
