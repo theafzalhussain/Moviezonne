@@ -273,7 +273,7 @@
 // (label only; the server's `toon` flag, routes and behaviour are unchanged).
 // v180: isolate current caches, bound runtime/image growth, and keep a ready
 // navigation response independent of slow Cache Storage reads.
-const CACHE_NAME = 'moviezone-v180';
+const CACHE_NAME = 'moviezone-v181';
 const RUNTIME_CACHE = 'moviezone-runtime-v180';
 const RUNTIME_CACHE_MAX_ENTRIES = 128;
 
@@ -448,10 +448,10 @@ const STATIC_ASSETS = [
    *  instead of the shell. '/' is the same document, answered 200 directly. */
   '/',
   '/tv-mode.min.css?v=1.6',
-  '/moviezone.min.css?v=9.26',
+  '/moviezone.min.css?v=9.27',
   '/tv-mode.min.js?v=2.0',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=17.6',
+  '/moviezone.min.js?v=17.7',
   '/manifest.json',
   '/icon-192.png?v=2',
   '/favicon-32.png?v=2',

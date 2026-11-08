@@ -11374,8 +11374,11 @@ html[data-mz-tv="true"] .cat-group-menu {
 @media (max-width: 768px) {
   .low-end-mode .movie-card, .low-end-mode .upcoming-card { content-visibility: visible; }
 }
-.carousel-slide { will-change: transform, opacity; }
-img { content-visibility: auto; }
+/*  Only the visible hero slide is compositing. will-change on every slide (and
+ *  content-visibility on every img) pinned extra layers and skipped layout for
+ *  in-viewport posters, which showed up as CLS and extra GPU memory. Inactive
+ *  slides stay cheap; the active one still gets the hint for the fade. */
+.carousel-slide.active { will-change: transform, opacity; }
 
 /*  #movies-section deliberately does NOT get content-visibility here. It was the
  *  single largest CLS source on the page — 0.209, measured by cwv-check.js.

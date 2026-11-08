@@ -5,8 +5,7 @@ perfStyle.textContent = `
   
   /* GPU-accelerated cards for all devices */
   .movie-card, .upcoming-card { content-visibility: auto; contain-intrinsic-size: 180px 320px; contain: layout style paint; }
-  .carousel-slide { will-change: transform, opacity; }
-  img { content-visibility: auto; }
+  .carousel-slide.active { will-change: transform, opacity; }
   /*  #movies-section was in this rule and it was the single largest CLS source on
    *  the page: 0.209, measured (cwv-check.js).
    *

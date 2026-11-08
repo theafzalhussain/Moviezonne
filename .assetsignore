@@ -108,6 +108,9 @@ shots.tmp/
 # banner-desktop.tmp.png alone is 536 KB of deploy weight.
 *.tmp.png
 *.tmp.js
+*.tmp.html
+*.tmp.jpg
+tmp-*
 
 # Unminified sources. `npm run build` produces the .min siblings and index.html
 # references only those (asset-perf-check.js asserts the bare forms are absent),

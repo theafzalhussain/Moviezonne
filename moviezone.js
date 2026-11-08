@@ -544,7 +544,7 @@ function getResponsiveBackdrop(path) {
 if (!isMzTV() && !isTouchOnly && !isMobile) {
   // -- CLICK SPARKS (3D Particles) --
   window.addEventListener('click', (e) => {
-    const numSparks = 12; // Ek baar me kitne sparks nikalne hain
+    const numSparks = 6; // Fewer DOM nodes per click; 12 was a main-thread spike
     for (let i = 0; i < numSparks; i++) {
       const spark = document.createElement('div');
       spark.className = 'click-spark';
