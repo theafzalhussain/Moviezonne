@@ -40,6 +40,8 @@ const BROWSER_NEEDS = [
    *  "could not load" toast instead of the server list. */
   'downloads.js',
   'tv-perf.js',
+  'mz-pwa.js',
+  'collections-hub.js',
   'mz-extras.js',
   'robots.txt', 'sitemap.xml', 'llms.txt',
   'moviezone-logo.webp', 'moviezone-logo.png',

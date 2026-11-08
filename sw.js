@@ -273,7 +273,7 @@
 // (label only; the server's `toon` flag, routes and behaviour are unchanged).
 // v180: isolate current caches, bound runtime/image growth, and keep a ready
 // navigation response independent of slow Cache Storage reads.
-const CACHE_NAME = 'moviezone-v182';
+const CACHE_NAME = 'moviezone-v183';
 const RUNTIME_CACHE = 'moviezone-runtime-v180';
 const RUNTIME_CACHE_MAX_ENTRIES = 128;
 
@@ -451,7 +451,7 @@ const STATIC_ASSETS = [
   '/moviezone.min.css?v=9.27',
   '/tv-mode.min.js?v=2.0',
   '/search-engine.min.js?v=2.1',
-  '/moviezone.min.js?v=17.8',
+  '/moviezone.min.js?v=17.9',
   '/tv-perf.js?v=1',
   '/manifest.json',
   '/icon-192.png?v=2',
@@ -502,6 +502,8 @@ const OPTIONAL_ASSETS = [
   // offline so the install popup works, but it must not be able to fail a
   // service-worker install the way a core-shell entry can.
   '/pwa-install.min.js?v=1.9',
+  '/mz-pwa.js?v=1',
+  '/collections-hub.js?v=1',
   '/fonts/outfit-latin-ext-var.woff2',
   '/fonts/bebas-neue-latin-ext-400.woff2',
   '/fonts/playfair-display-latin-700.woff2',

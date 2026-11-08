@@ -53,11 +53,16 @@ const ASSETS = ['moviezone.min.js', 'moviezone.min.css', 'tv-mode.min.js', 'tv-m
   'search-plus.js',
   /*  TV runtime performance, extracted from moviezone.js. Loaded deferred after
    *  the main bundle so pauseAutoSlide is already defined. */
-  'tv-perf.js'];
+  'tv-perf.js',
+  'mz-pwa.js',
+  'collections-hub.js'];
 
 const html = fs.readFileSync('index.html', 'utf8');
 const sw = fs.readFileSync('sw.js', 'utf8');
-const appJs = fs.readFileSync('moviezone.js', 'utf8');
+const appJs = fs.readFileSync('moviezone.js', 'utf8')
+  + fs.readFileSync('collections-hub.js', 'utf8')
+  + fs.readFileSync('mz-pwa.js', 'utf8')
+  + fs.readFileSync('tv-perf.js', 'utf8');
 
 function sha(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex').slice(0, 16);

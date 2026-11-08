@@ -1,7 +1,7 @@
 {
   "moviezone.min.js": {
-    "version": "17.8",
-    "sha256": "1e75f2b70f5acc3a"
+    "version": "17.9",
+    "sha256": "079a714e344360a5"
   },
   "moviezone.min.css": {
     "version": "9.27",
@@ -54,5 +54,13 @@
   "tv-perf.js": {
     "version": "1",
     "sha256": "bb8551e8654fa2ea"
+  },
+  "mz-pwa.js": {
+    "version": "1",
+    "sha256": "31283987da20c5ad"
+  },
+  "collections-hub.js": {
+    "version": "1",
+    "sha256": "0f9b5c2f77ccc0cc"
   }
 }
