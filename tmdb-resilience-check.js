@@ -69,7 +69,7 @@ function check(label, fn) {
 }
 
 // ── static guards ──────────────────────────────────────────────────────────
-const js = fs.readFileSync('moviezone.js', 'utf8');
+const js = require('./scripts/app-source.cjs').readAppSource();
 const sw = fs.readFileSync('sw.js', 'utf8');
 const jsCode = js.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
 

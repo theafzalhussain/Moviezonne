@@ -5,7 +5,7 @@ const fs = require('fs');
 const vm = require('vm');
 const assert = require('assert/strict');
 const acorn = require('acorn'); // pinned transitively by the existing terser build
-const source = fs.readFileSync(process.env.MZ_CLIENT_SOURCE || 'moviezone.js', 'utf8');
+const source = (process.env.MZ_CLIENT_SOURCE ? fs.readFileSync(process.env.MZ_CLIENT_SOURCE, 'utf8') : require('./scripts/app-source.cjs').readAppSource());
 const functions = new Map(acorn.parse(source, { ecmaVersion: 'latest' }).body
   .filter(n => n.type === 'FunctionDeclaration').map(n => [n.id.name, source.slice(n.start, n.end)]));
 function load(names, ctx) {

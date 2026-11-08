@@ -62,7 +62,8 @@ const MUST_NOT_SHIP = [
   '.env', '.env.example',
   'server.js', 'seo-ssr.js', 'worker.js', 'worker-push.mjs', 'instrument.js', 'datadogRUM-init.js',
   'package.json', 'package-lock.json', 'wrangler.jsonc',
-  'scripts/build-sitemap-cache.js'
+  'scripts/build-sitemap-cache.js', 'scripts/app-source.cjs', 'scripts/build-app.cjs',
+  'moviezone-player.js'
 ];
 
 // ── gitignore-style matcher ───────────────────────────────────────────────────

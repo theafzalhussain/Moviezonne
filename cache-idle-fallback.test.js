@@ -2,7 +2,7 @@
 const fs = require('fs');
 const vm = require('vm');
 const assert = require('assert/strict');
-const src = fs.readFileSync('moviezone.js', 'utf8');
+const src = require('./scripts/app-source.cjs').readAppSource();
 const start = src.indexOf('const _mzCacheWriteQueue = new Map();');
 const end = src.indexOf('// Leaving the page', start);
 assert(start >= 0 && end > start);

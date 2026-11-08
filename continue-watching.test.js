@@ -29,7 +29,7 @@ const fs = require('fs');
 const vm = require('vm');
 const assert = require('assert');
 
-const src = fs.readFileSync('moviezone.js', 'utf8');
+const src = require('./scripts/app-source.cjs').readAppSource();
 const MARKER = '(function initContinueWatching() {';
 
 function moduleSource() {

@@ -31,7 +31,7 @@ const path = require('path');
 
 const seo = require(path.join(__dirname, 'seo-ssr.js'));
 const ssrSrc = fs.readFileSync(path.join(__dirname, 'seo-ssr.js'), 'utf8');
-const appSrc = fs.readFileSync(path.join(__dirname, 'moviezone.js'), 'utf8');
+const appSrc = require('./scripts/app-source.cjs').readAppSource();
 
 let pass = 0;
 let fail = 0;

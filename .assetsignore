@@ -122,6 +122,8 @@ tmp-*
 # excluding it 404s the Cinematic Universe rail's styling. assetsignore-check.js
 # caught exactly that.
 moviezone.js
+# Build-time fragment assembled into moviezone.min.js, never a browser script.
+moviezone-player.js
 moviezone.css
 tv-mode.js
 tv-mode.css

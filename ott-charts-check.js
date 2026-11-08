@@ -44,7 +44,7 @@ const assert = require('assert');
 const app = require('./server');
 const charts = require('./ott-charts');
 
-const src = fs.readFileSync('moviezone.js', 'utf8');
+const src = require('./scripts/app-source.cjs').readAppSource();
 const workerSrc = fs.readFileSync('worker.js', 'utf8');
 
 /*  The shipped OTT table, read out of moviezone.js rather than duplicated, so

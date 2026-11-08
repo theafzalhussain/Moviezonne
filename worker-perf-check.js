@@ -746,7 +746,7 @@ const isPathKey = (k) => k.includes('/api/tmdb/') && !isBatchKey(k);
    *  to stay within the cap. Read out of the source rather than imported, because
    *  moviezone.js is a browser script with no module boundary.
    */
-  const clientSrc = fs.readFileSync(path.join(__dirname, 'moviezone.js'), 'utf8');
+  const clientSrc = require('./scripts/app-source.cjs').readAppSource();
   const chunk = Number((clientSrc.match(/const MZ_BATCH_CHUNK\s*=\s*(\d+)/) || [])[1]);
   /*  Through pushLimits(), not a named export: the runtime refuses to load a
    *  Worker module whose named exports are plain numbers - see the note on

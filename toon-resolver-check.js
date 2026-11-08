@@ -387,7 +387,7 @@ const ABYSS = 'https://abyssplayer.com/29pJ-4F4A';
   // ── 4. wiring ───────────────────────────────────────────────────────────
   const server = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
   const worker = fs.readFileSync(path.join(__dirname, 'worker.js'), 'utf8');
-  const client = fs.readFileSync(path.join(__dirname, 'moviezone.js'), 'utf8');
+  const client = require('./scripts/app-source.cjs').readAppSource();
   await check('both runtimes serve /api/toon/resolve and /api/toon/embed from the shared module', () => {
     assert.ok(/require\('\.\/toon-resolver'\)/.test(server) && /app\.get\('\/api\/toon\/embed', apiLimiter/.test(server)
       && /app\.get\('\/api\/toon\/resolve', apiLimiter/.test(server), 'server.js');

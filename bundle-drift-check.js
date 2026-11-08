@@ -59,9 +59,10 @@ try {
     const args = step.split(/\s+/);
     const tool = args.shift();
     const outAt = args.indexOf('-o');
-    if (!TOOLS[tool] || outAt === -1 || !args[outAt + 1]) {
+    const isAppBuild = tool === 'node' && args[0] === 'scripts/build-app.cjs';
+    if ((!TOOLS[tool] && !isAppBuild) || outAt === -1 || !args[outAt + 1]) {
       check('build step is one this check understands: ' + step, false,
-        'expected "terser|cleancss ... -o <out> ...". Teach bundle-drift-check.js the new step.');
+        'expected "terser|cleancss ... -o <out> ..." or "node scripts/build-app.cjs -o <out>". Teach this check any other step.');
       return;
     }
     const out = args[outAt + 1];
@@ -69,7 +70,9 @@ try {
     args[outAt + 1] = built;
 
     let bin;
-    try { bin = binOf(TOOLS[tool][0], TOOLS[tool][1]); } catch (e) {
+    try {
+      bin = isAppBuild ? path.join(ROOT, args.shift()) : binOf(TOOLS[tool][0], TOOLS[tool][1]);
+    } catch (e) {
       check(out + ': ' + tool + ' is installed', false, 'run npm install (' + e.message + ')');
       return;
     }
@@ -84,7 +87,8 @@ try {
     }
     const a = fs.readFileSync(built);
     const b = fs.readFileSync(path.join(ROOT, out));
-    const source = args.filter((x, i) => i !== outAt && i !== outAt + 1 && !x.startsWith('-')).join(' ');
+    const source = isAppBuild ? 'moviezone.js + moviezone-player.js'
+      : args.filter((x, i) => i !== outAt && i !== outAt + 1 && !x.startsWith('-')).join(' ');
     check(out + ' matches a fresh build of ' + source, a.equals(b),
       'shipped ' + b.length + ' B, fresh build ' + a.length + ' B. The source changed without a rebuild:'
       + ' run npm run build, bump its ?v= in index.html and sw.js, bump CACHE_NAME, then npm run assets:seal.');
