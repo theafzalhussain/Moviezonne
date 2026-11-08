@@ -59,7 +59,7 @@ const ASSETS = ['moviezone.min.js', 'moviezone.min.css', 'tv-mode.min.js', 'tv-m
 
 const html = fs.readFileSync('index.html', 'utf8');
 const sw = fs.readFileSync('sw.js', 'utf8');
-const appJs = fs.readFileSync('moviezone.js', 'utf8')
+const appJs = require('./scripts/app-source.cjs').readAppSource()
   + fs.readFileSync('collections-hub.js', 'utf8')
   + fs.readFileSync('mz-pwa.js', 'utf8')
   + fs.readFileSync('tv-perf.js', 'utf8');

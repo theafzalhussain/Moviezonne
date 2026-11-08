@@ -34,7 +34,7 @@ const assert = require('assert');
 // ── slice the fetch layer out of moviezone.js ───────────────────────────────
 // From the request-budget constants through the end of tmdb(). Everything in
 // that span is self-contained apart from the handful of globals injected below.
-const SRC = fs.readFileSync('moviezone.js', 'utf8');
+const SRC = require('./scripts/app-source.cjs').readAppSource();
 const START = 'const MZ_FETCH_TIMEOUT_MS';
 const END = '// -- INIT -- Priority-based staggered loading';
 

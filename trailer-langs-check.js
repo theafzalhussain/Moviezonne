@@ -30,7 +30,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const js = fs.readFileSync(path.join(__dirname, 'moviezone.js'), 'utf8');
+const js = require('./scripts/app-source.cjs').readAppSource();
 const min = fs.readFileSync(path.join(__dirname, 'moviezone.min.js'), 'utf8');
 const ssr = fs.readFileSync(path.join(__dirname, 'seo-ssr.js'), 'utf8');
 

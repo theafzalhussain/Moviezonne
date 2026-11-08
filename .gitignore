@@ -1,4 +1,6 @@
 node_modules/
+# Atomic-build temporary directories left after forced termination.
+.mz-app-build-*/
 .env
 .DS_Store
 

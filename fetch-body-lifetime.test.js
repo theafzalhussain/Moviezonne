@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const { test } = require('node:test');
-const source = fs.readFileSync(require('node:path').join(__dirname, 'moviezone.js'), 'utf8');
+const source = require('./scripts/app-source.cjs').readAppSource();
 function section(start, end) {
   const a = source.indexOf(start), b = source.indexOf(end, a);
   assert(a >= 0 && b > a);

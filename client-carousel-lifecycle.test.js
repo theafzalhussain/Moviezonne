@@ -5,7 +5,7 @@ const fs = require('fs');
 const vm = require('vm');
 const assert = require('assert/strict');
 const acorn = require('acorn');
-const src = fs.readFileSync(process.env.MZ_CLIENT_SOURCE || 'moviezone.js', 'utf8');
+const src = (process.env.MZ_CLIENT_SOURCE ? fs.readFileSync(process.env.MZ_CLIENT_SOURCE, 'utf8') : require('./scripts/app-source.cjs').readAppSource());
 const node = acorn.parse(src, {ecmaVersion: 'latest'}).body.find(n => n.type === 'FunctionDeclaration' && n.id.name === 'buildCarousel');
 assert(node, 'buildCarousel declaration exists');
 function setup(nativeIdle = true) {

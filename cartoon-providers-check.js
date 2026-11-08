@@ -39,7 +39,7 @@ const vm = require('vm');
 const ONLINE = process.argv.includes('--online');
 const PROXY = process.env.MZ_TMDB_PROXY || 'https://moviezone.dev/api/tmdb';
 
-const src = fs.readFileSync('moviezone.js', 'utf8');
+const src = require('./scripts/app-source.cjs').readAppSource();
 const html = fs.readFileSync('index.html', 'utf8');
 const css = fs.readFileSync('providers.css', 'utf8');
 const sw = fs.readFileSync('sw.js', 'utf8');

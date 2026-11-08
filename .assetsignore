@@ -20,6 +20,8 @@
 # The slash is what makes wrangler prune the directory instead of walking into it.
 # Both forms are listed because the root-level one is the case that matters here
 # and the `**/` one covers nested copies.
+# Never publish temporary bundle output left by an interrupted build.
+.mz-app-build-*/
 node_modules/
 **/node_modules/
 .git/
@@ -122,6 +124,8 @@ tmp-*
 # excluding it 404s the Cinematic Universe rail's styling. assetsignore-check.js
 # caught exactly that.
 moviezone.js
+# Build-time fragment assembled into moviezone.min.js, never a browser script.
+moviezone-player.js
 moviezone.css
 tv-mode.js
 tv-mode.css

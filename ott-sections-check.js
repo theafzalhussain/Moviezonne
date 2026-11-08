@@ -33,7 +33,7 @@ const vm = require('vm');
 const app = require('./server');
 
 // ── extract the real implementation out of moviezone.js ────────────────────
-const src = fs.readFileSync('moviezone.js', 'utf8');
+const src = require('./scripts/app-source.cjs').readAppSource();
 
 /** Slice a `{...}` block starting at the first brace after `marker`. */
 function block(marker) {

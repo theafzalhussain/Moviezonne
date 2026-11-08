@@ -32,7 +32,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const js = fs.readFileSync(path.join(__dirname, 'moviezone.js'), 'utf8');
+const js = require('./scripts/app-source.cjs').readAppSource();
 const css = fs.readFileSync(path.join(__dirname, 'moviezone.css'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 const ssr = fs.readFileSync(path.join(__dirname, 'seo-ssr.js'), 'utf8');

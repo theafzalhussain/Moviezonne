@@ -27,7 +27,7 @@ const assert = require('assert');
 
 const html = fs.readFileSync('index.html', 'utf8');
 const sw = fs.readFileSync('sw.js', 'utf8');
-const js = fs.readFileSync('moviezone.js', 'utf8');
+const js = require('./scripts/app-source.cjs').readAppSource();
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 
 /*  Several checks below scan for markup patterns. Both files document their own
@@ -778,7 +778,11 @@ for (const name of LAZY_SCRIPTS) {
     assert.ok(!tag.test(html), name + '.min.js is back as a blocking <script defer> tag');
     assert.ok(new RegExp("s\\.src = '/?" + name + "\\.min\\.js\\?v=[\\d.]+'").test(html),
       'no runtime loader for ' + name + '.min.js — it would never load at all');
-    assert.ok(/__mzLoadPwaInstall/.test(js),
+    // Install wiring lives in mz-pwa.js after the earlier source extraction.
+    // Check that it is actually shipped before inspecting its on-demand hook.
+    assert.ok(/<script src="\/mz-pwa\.js\?v=[\d.]+" defer><\/script>/.test(html),
+      'PWA wiring module is not loaded');
+    assert.ok(/__mzLoadPwaInstall/.test(fs.readFileSync(path.join(__dirname, 'mz-pwa.js'), 'utf8')),
       'installPWA() cannot pull the controller in on demand, so an early click is dropped');
     assert.ok(fs.existsSync(path.join(__dirname, name + '.min.js')), name + '.min.js missing on disk');
   });

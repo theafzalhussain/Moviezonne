@@ -104,7 +104,7 @@ function makeSandbox() {
 }
 
 function loadClient() {
-  const src = fs.readFileSync(path.join(__dirname, 'moviezone.js'), 'utf8');
+  const src = require('./scripts/app-source.cjs').readAppSource();
   const sandbox = makeSandbox();
   const context = vm.createContext(sandbox);
   // Not `new vm.Script(...).runInContext` with a throw-on-error wrapper: a parse
@@ -229,7 +229,7 @@ const clone = (o) => JSON.parse(JSON.stringify(o));
     /*  titleQualityState moves on DAY boundaries (upgradedDaysAgo against
      *  25/55/85). Any window under a day is equivalent to recomputing; a window
      *  over one is a stale badge. */
-    const src = fs.readFileSync(path.join(__dirname, 'moviezone.js'), 'utf8');
+    const src = require('./scripts/app-source.cjs').readAppSource();
     const ms = Number((src.match(/const MZ_QUALITY_REUSE_MS\s*=\s*([^;]+);/) || [])[1]
       ? eval((src.match(/const MZ_QUALITY_REUSE_MS\s*=\s*([^;]+);/) || [])[1])
       : NaN);
@@ -241,7 +241,7 @@ const clone = (o) => JSON.parse(JSON.stringify(o));
   });
 
   check('renderMovies guards the reuse on that stamp, not on presence alone', () => {
-    const src = fs.readFileSync(path.join(__dirname, 'moviezone.js'), 'utf8');
+    const src = require('./scripts/app-source.cjs').readAppSource();
     assert.ok(/_qualityAt\s*&&\s*mzNow\s*-\s*m\._qualityAt\s*<\s*MZ_QUALITY_REUSE_MS/.test(src),
       'the badge reuse is not age-checked. _qualityState reaches localStorage via '
         + 'the idle cache flush and the self-ranked feeds (toprated/kids/anime) never '

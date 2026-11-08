@@ -98,7 +98,7 @@ function makeSandbox() {
   return win;
 }
 
-const src = fs.readFileSync(path.join(__dirname, 'moviezone.js'), 'utf8');
+const src = require('./scripts/app-source.cjs').readAppSource();
 const context = vm.createContext(makeSandbox());
 vm.runInContext(src, context, { filename: 'moviezone.js' });
 // Top-level const/let live in the context's lexical scope, not on its global

@@ -17,7 +17,7 @@ const app = require('./server');
 // flatrate gate and no per-platform language scope, so this suite was passing
 // against a query plan the app no longer ships.
 const vm = require('vm');
-const _src = require('fs').readFileSync('moviezone.js', 'utf8');
+const _src = require('./scripts/app-source.cjs').readAppSource();
 
 function _block(marker) {
   const at = _src.indexOf(marker);
@@ -159,7 +159,7 @@ function check(label, fn) {
 
   // Regression: the retired ids must no longer be referenced anywhere.
   console.log('\n=== regression: retired/bogus ids removed from moviezone.js ===');
-  const src = require('fs').readFileSync('moviezone.js', 'utf8');
+  const src = require('./scripts/app-source.cjs').readAppSource();
   check('provider/network 122 no longer used', () => {
     assert.ok(!/with_watch_providers:\s*'122'/.test(src), "with_watch_providers '122' still present");
     assert.ok(!/with_networks:\s*'122'/.test(src), "with_networks '122' still present");
