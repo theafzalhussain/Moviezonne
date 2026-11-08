@@ -90,8 +90,9 @@ try {
     const source = isAppBuild ? 'moviezone.js + moviezone-player.js'
       : args.filter((x, i) => i !== outAt && i !== outAt + 1 && !x.startsWith('-')).join(' ');
     check(out + ' matches a fresh build of ' + source, a.equals(b),
-      'shipped ' + b.length + ' B, fresh build ' + a.length + ' B. The source changed without a rebuild:'
-      + ' run npm run build, bump its ?v= in index.html and sw.js, bump CACHE_NAME, then npm run assets:seal.');
+      'shipped ' + b.length + ' B, fresh build ' + a.length + ' B. Verify the source and rebuild.'
+      + ' For a source-only refactor, a byte difference is a regression: do not reseal it away.'
+      + ' Only intentional runtime changes require a reviewed version/cache bump and assets:seal.');
   });
 } finally {
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { /* temp dir */ }

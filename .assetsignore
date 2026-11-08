@@ -20,6 +20,8 @@
 # The slash is what makes wrangler prune the directory instead of walking into it.
 # Both forms are listed because the root-level one is the case that matters here
 # and the `**/` one covers nested copies.
+# Never publish temporary bundle output left by an interrupted build.
+.mz-app-build-*/
 node_modules/
 **/node_modules/
 .git/
